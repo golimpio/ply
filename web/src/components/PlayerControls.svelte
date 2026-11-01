@@ -214,12 +214,15 @@
 
   // ---- auto-hide --------------------------------------------------------------
 
+  let root = $state<HTMLDivElement>();
   let hideTimer: ReturnType<typeof setTimeout> | undefined;
   function poke() {
     visible = true;
     clearTimeout(hideTimer);
     hideTimer = setTimeout(() => {
-      if (!video.paused && !menu && scrub === null) visible = false;
+      // Never hide controls a keyboard user is working in (focus must stay visible).
+      const keyboardFocus = root?.querySelector(':focus-visible');
+      if (!video.paused && !menu && scrub === null && !keyboardFocus) visible = false;
     }, 2600);
   }
   $effect(() => {
@@ -259,12 +262,21 @@
     }
   }
 
+  /** Keys toggling a state: a held key must not flip it back and forth. */
+  const TOGGLES = new Set([' ', 'k', 'f', 'm', 'c']);
+
   function onKey(e: KeyboardEvent) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return; // browser and system shortcuts (Find, address bar, ...)
     const t = e.target as HTMLElement;
-    if (e.metaKey || e.ctrlKey || e.altKey || t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) {
-      if (!(t instanceof HTMLInputElement && t.type === 'range')) return;
-    }
+    const scrubber = t instanceof HTMLInputElement && t.type === 'range';
+    if (!scrubber && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
     if (document.querySelector('dialog[open]')) return;
+    // Space and Enter activate the focused button, link or menu item.
+    if ((e.key === ' ' || e.key === 'Enter') && t.closest('button, a, summary, [role="menuitemradio"]')) return;
+    if (e.repeat && TOGGLES.has(e.key)) {
+      e.preventDefault();
+      return;
+    }
     const keys: Record<string, () => void> = {
       ' ': toggle,
       k: toggle,
@@ -302,8 +314,10 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
+  bind:this={root}
   class="controls"
   class:hidden={!visible}
+  onfocusin={poke}
   onpointermove={(e) => e.pointerType === 'mouse' && poke()}
   onpointerup={onSurface}
   ondblclick={(e) => e.target === e.currentTarget && toggleFullscreen()}
@@ -351,8 +365,8 @@
       <button class="ctl big" onclick={toggle} aria-label={paused ? 'Play' : 'Pause'}>
         <Icon name={paused ? 'play' : 'pause'} />
       </button>
-      <button class="ctl" onclick={() => skip(-10)} aria-label="Back 10 seconds"><Icon name="back10" /></button>
-      <button class="ctl" onclick={() => skip(10)} aria-label="Forward 10 seconds"><Icon name="fwd10" /></button>
+      <button class="ctl skip" onclick={() => skip(-10)} aria-label="Back 10 seconds"><Icon name="back10" /></button>
+      <button class="ctl skip" onclick={() => skip(10)} aria-label="Forward 10 seconds"><Icon name="fwd10" /></button>
       <div class="volume">
         <button class="ctl" onclick={() => (video.muted = !video.muted)} aria-label={muted ? 'Unmute' : 'Mute'}>
           <Icon name={muted || volume === 0 ? 'mute' : 'volume'} />
@@ -414,7 +428,7 @@
         <button class="ctl" onclick={showAirPlay} aria-label="AirPlay"><Icon name="airplay" /></button>
       {/if}
       {#if pipSupported}
-        <button class="ctl" onclick={togglePip} aria-label="Picture in picture"><Icon name="pip" /></button>
+        <button class="ctl pip" onclick={togglePip} aria-label="Picture in picture"><Icon name="pip" /></button>
       {/if}
       <button class="ctl" onclick={toggleFullscreen} aria-label={fullscreen ? 'Exit full screen' : 'Full screen'}>
         <Icon name={fullscreen ? 'exitfs' : 'fullscreen'} />
@@ -429,6 +443,7 @@
     inset: 0;
     display: grid;
     grid-template-rows: auto 1fr auto;
+    grid-template-columns: minmax(0, 1fr); /* never wider than the frame */
     color: var(--text);
     transition: opacity 0.3s var(--ease);
     user-select: none;
@@ -441,6 +456,14 @@
   }
   .controls.hidden * {
     pointer-events: none;
+  }
+  /* A keyboard user tabbing into hidden controls sees them at once. */
+  .controls.hidden:has(:focus-visible) {
+    opacity: 1;
+    cursor: auto;
+  }
+  .controls.hidden:has(:focus-visible) * {
+    pointer-events: auto;
   }
   .top,
   .bottom {
@@ -546,6 +569,8 @@
   }
   .row {
     display: flex;
+    flex-wrap: wrap;
+    min-width: 0;
     align-items: center;
     gap: 0.25rem;
     margin-top: 0.35rem;
@@ -646,6 +671,14 @@
     background: var(--tint);
   }
   @media (max-width: 600px) {
+    /* Phones: double-tap skips 10 s and PiP is a system gesture; Full screen,
+       subtitles and audio always stay. */
+    .ctl {
+      width: 2.5rem;
+      height: 2.5rem;
+    }
+    .ctl.skip,
+    .ctl.pip,
     .volume,
     .time .muted {
       display: none;

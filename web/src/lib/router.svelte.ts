@@ -40,8 +40,9 @@ export function parseRoute(hash: string): Route {
         return { name: 'movies', ...libraryView(q, 'title') };
       case 'shows': {
         if (!arg) return { name: 'shows', ...libraryView(q, 'title') };
-        const season = Number(q.get('s'));
-        return { name: 'show', show: decodeURIComponent(arg), season: q.has('s') && Number.isInteger(season) ? season : undefined };
+        const s = q.get('s') ?? '';
+        const season = s.trim() === '' ? NaN : Number(s); // Number('') would be 0, i.e. Specials
+        return { name: 'show', show: decodeURIComponent(arg), season: Number.isInteger(season) ? season : undefined };
       }
       case 'item':
       case 'play': {
@@ -88,5 +89,8 @@ export const href = {
   show: (name: string, season?: number) =>
     `#/shows/${encodeURIComponent(name)}${season === undefined ? '' : `?s=${season}`}`,
   item: (id: number) => `#/item/${id}`,
-  play: (id: number, startSec = 0) => `#/play/${id}${startSec > 0 ? `?t=${Math.floor(startSec)}` : ''}`,
+  play: (id: number, startSec = 0) => {
+    const t = Math.floor(startSec);
+    return `#/play/${id}${t > 0 ? `?t=${t}` : ''}`;
+  },
 };

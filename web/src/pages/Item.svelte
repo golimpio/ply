@@ -12,7 +12,6 @@
     methodLabel,
   } from '../lib/format';
   import { ensureLibrary, findItem, library } from '../lib/library.svelte';
-  import { browserProfile } from '../lib/profile';
   import { href } from '../lib/router.svelte';
   import { resource } from '../lib/resource.svelte';
   import { app } from '../lib/state.svelte';
@@ -28,19 +27,14 @@
     void ensureLibrary();
   });
 
+  // The item request carries the playback decision for the built-in browser
+  // profile. The server describes it without starting a session: no ffmpeg runs
+  // until Play (the player then POSTs this browser's measured profile).
   const detail = resource(() => {
     void app.libraryVersion;
-    return api.item(id);
+    return api.item(id, 'browser');
   });
-
-  // The decision for THIS browser: POST the measured profile.
-  const decision = resource(async () => {
-    void app.libraryVersion;
-    const p = await api.playback(id, { custom: browserProfile() });
-    // We only want the decision; do not leave a server-side session behind.
-    if (p.sessionId) void api.deleteSession(p.sessionId);
-    return p;
-  });
+  const decision = $derived({ data: detail.data?.playback, error: detail.error });
 
   // The cached summary paints the hero at once (and lands the card morph);
   // the full detail fills in the technical section when it arrives.
@@ -135,11 +129,11 @@
     {/if}
 
     <section class="playback">
-      <h2>In this browser</h2>
+      <h2>In a web browser</h2>
       {#if decision.error}
         <p class="error">{decision.error}</p>
       {:else if !decision.data}
-        <p class="muted">Checking what this browser can play…</p>
+        <p class="muted">Checking how this plays…</p>
       {:else}
         {@const d = decision.data}
         <p class="decision">

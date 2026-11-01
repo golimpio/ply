@@ -2,9 +2,14 @@
 // appear in order; matches at word starts and in runs score higher.
 import type { ItemSummary } from './api';
 
+/** Lower-case and strip accents, so "amelie" finds "Amélie" and "pokemon" "Pokémon". */
+export function fold(s: string): string {
+  return s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+}
+
 function score(query: string, text: string): number {
   if (!query) return 1;
-  const t = text.toLowerCase();
+  const t = fold(text);
   const exact = t.indexOf(query);
   if (exact >= 0) return 1000 - exact + (exact === 0 || /\W/.test(t[exact - 1]) ? 200 : 0);
   let s = 0;
@@ -25,7 +30,7 @@ export function haystack(it: ItemSummary): string {
 }
 
 export function search<T extends ItemSummary>(items: T[], query: string, limit = 30): T[] {
-  const q = query.trim().toLowerCase().replace(/\s+/g, ' ');
+  const q = fold(query.trim()).replace(/\s+/g, ' ');
   if (!q) return [];
   return items
     .map((it) => ({ it, s: score(q, haystack(it)) }))

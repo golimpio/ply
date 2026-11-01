@@ -21,9 +21,12 @@ import (
 // stub replaces ffmpeg: it writes a fake image to the -f mjpeg output path and
 // returns an RGB sample filled with fill.
 type stub struct {
-	fill  [3]byte
-	fail  func(args []string) bool // when true, behave like ffmpeg failing
-	block chan struct{}            // when non-nil, every run waits on it
+	fill     [3]byte
+	fail     func(args []string) bool // when true, behave like ffmpeg failing
+	failErr  error                    // the failure to return; default: a "no video" ErrNoFrame
+	partial  bool                     // write the image file before failing
+	block    chan struct{}            // when non-nil, every run waits on it
+	slowStop time.Duration            // how long a cancelled run takes to exit
 
 	mu        sync.Mutex
 	active    int
@@ -46,13 +49,20 @@ func (s *stub) run(ctx context.Context, args []string) ([]byte, error) {
 		select {
 		case <-s.block:
 		case <-ctx.Done():
+			time.Sleep(s.slowStop)
 			return nil, ctx.Err()
 		}
 	}
+	out := args[slices.IndexFunc(args, func(a string) bool { return strings.HasSuffix(a, ".tmp") })]
 	if s.fail != nil && s.fail(args) {
+		if s.partial {
+			os.WriteFile(out, []byte("\xff\xd8half"), 0o644)
+		}
+		if s.failErr != nil {
+			return nil, s.failErr
+		}
 		return nil, fmt.Errorf("%w: exit status 1: no video", ErrNoFrame)
 	}
-	out := args[slices.IndexFunc(args, func(a string) bool { return strings.HasSuffix(a, ".tmp") })]
 	if err := os.WriteFile(out, []byte("\xff\xd8fake"), 0o644); err != nil {
 		return nil, err
 	}
@@ -72,11 +82,28 @@ func newTestGenerator(t *testing.T, dir string, s *stub) *Generator {
 		t.Fatal(err)
 	}
 	g.run = s.run
+	t.Cleanup(g.Close)
 	return g
 }
 
+// fixtureMedia is an existing file standing in for a media file: generate
+// checks that its input exists before running ffmpeg.
+var fixtureMedia string
+
+func TestMain(m *testing.M) {
+	f, err := os.CreateTemp("", "art-media-*.mkv")
+	if err != nil {
+		panic(err)
+	}
+	f.Close()
+	fixtureMedia = f.Name()
+	code := m.Run()
+	os.Remove(fixtureMedia)
+	os.Exit(code)
+}
+
 func src(id, mtime int64) Source {
-	return Source{ID: id, Path: "/media/movie.mkv", MTime: mtime, DurationSec: 0}
+	return Source{ID: id, Path: fixtureMedia, MTime: mtime, DurationSec: 0}
 }
 
 func TestPathGeneratesOnceThenServesFromCache(t *testing.T) {

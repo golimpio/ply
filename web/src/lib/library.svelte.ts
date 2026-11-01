@@ -20,28 +20,34 @@ export const library = $state({
 });
 
 let fetchedVersion = -1;
-let inflight: Promise<void> | null = null;
+let inflight: { version: number; promise: Promise<void> } | null = null;
 
-/** Load (or refresh after a scan) the full item list. Safe to call often. */
+/**
+ * Load (or refresh after a scan) the full item list. Safe to call often. A
+ * fetch started before a scan finished is not reused for the newer library
+ * version, and an older response landing late never overwrites a newer one.
+ */
 export function ensureLibrary(): Promise<void> {
-  if (fetchedVersion === app.libraryVersion && library.loaded) return Promise.resolve();
-  if (inflight) return inflight;
   const version = app.libraryVersion;
-  inflight = api
+  if (fetchedVersion === version && library.loaded) return Promise.resolve();
+  if (inflight?.version === version) return inflight.promise;
+  const promise: Promise<void> = api
     .items()
     .then((items) => {
+      if (version < fetchedVersion) return; // a newer fetch already landed
       library.items = items;
       library.error = '';
       library.loaded = true;
       fetchedVersion = version;
     })
     .catch((e: unknown) => {
-      library.error = e instanceof Error ? e.message : String(e);
+      if (version >= fetchedVersion) library.error = e instanceof Error ? e.message : String(e);
     })
     .finally(() => {
-      inflight = null;
+      if (inflight?.promise === promise) inflight = null;
     });
-  return inflight;
+  inflight = { version, promise };
+  return promise;
 }
 
 export function findItem(id: number): ItemSummary | undefined {

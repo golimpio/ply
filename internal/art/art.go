@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"image"
 	"image/jpeg"
+	"io/fs"
 	"math"
 	"os"
 	"os/exec"
@@ -36,9 +37,22 @@ const (
 // ContentType is the media type of every generated image.
 const ContentType = "image/jpeg"
 
-// ErrNoFrame reports that no image could be made from the file: it has no
-// video stream, it is unreadable, or ffmpeg failed on it.
-var ErrNoFrame = errors.New("art: no frame")
+var (
+	// ErrNoFrame reports that the file itself yields no image: it has no video
+	// stream or is not decodable. It is remembered until the file changes.
+	ErrNoFrame = errors.New("art: no frame")
+	// ErrUnavailable reports a failure that may pass: the file is missing (an
+	// unmounted share), ffmpeg timed out, or it failed for a reason that is not
+	// about the content. Missing files are retried on every request (no ffmpeg
+	// runs for them); the others after failureTTL.
+	ErrUnavailable = errors.New("art: temporarily unavailable")
+	// ErrClosed is returned after Close.
+	ErrClosed = errors.New("art: generator closed")
+)
+
+// failureTTL is how long a transient failure is remembered, so a grid of tiles
+// on a slow or sleeping share does not queue one 30 s ffmpeg run per request.
+const failureTTL = 10 * time.Minute
 
 // ParseKind returns the Kind named s.
 func ParseKind(s string) (Kind, bool) {
@@ -83,11 +97,17 @@ type Generator struct {
 	sem      chan struct{}
 	toneMap  string // filter chain applied to HDR sources; "" when ffmpeg lacks zscale
 
+	base   context.Context // parent of every generation; cancelled by Close
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+
 	mu       sync.Mutex
+	closed   bool
 	inflight map[string]*call
-	failed   map[string]error // cache keys that could not be generated
+	failed   map[string]failure // cache keys that could not be generated
 	colors   map[int64]colour
 
+	now  func() time.Time // replaced in tests
 	runs atomic.Int64
 	// run executes ffmpeg with args and returns its stdout. Tests replace it.
 	run func(ctx context.Context, args []string) ([]byte, error)
@@ -103,6 +123,13 @@ type colour struct {
 type call struct {
 	done chan struct{}
 	err  error
+}
+
+// failure is a remembered generation error; a zero until never expires (it
+// is dropped when the file changes or the item is pruned).
+type failure struct {
+	err   error
+	until time.Time
 }
 
 // New returns a Generator caching under o.Dir.
@@ -132,9 +159,11 @@ func New(ctx context.Context, o Options) (*Generator, error) {
 		timeout:  o.Timeout,
 		sem:      make(chan struct{}, o.Concurrency),
 		inflight: map[string]*call{},
-		failed:   map[string]error{},
+		failed:   map[string]failure{},
 		colors:   map[int64]colour{},
+		now:      time.Now,
 	}
+	g.base, g.cancel = context.WithCancel(context.Background())
 	g.run = g.exec
 	g.toneMap = g.detectToneMap(ctx)
 	if err := g.loadColours(); err != nil {
@@ -146,9 +175,20 @@ func New(ctx context.Context, o Options) (*Generator, error) {
 // Runs reports how many ffmpeg runs the generator has started.
 func (g *Generator) Runs() int64 { return g.runs.Load() }
 
+// Close cancels every generation in flight (killing its ffmpeg process group)
+// and waits for them to finish. Path returns ErrClosed afterwards.
+func (g *Generator) Close() {
+	g.mu.Lock()
+	g.closed = true
+	g.mu.Unlock()
+	g.cancel()
+	g.wg.Wait()
+}
+
 // Path returns the cached image of kind k for src, generating it first if
-// needed. Concurrent requests for the same image share one ffmpeg run, and a
-// file that failed once is not retried until its mtime changes.
+// needed. Concurrent requests for the same image share one ffmpeg run. A file
+// without usable video is not retried until its mtime changes; transient
+// failures are retried after failureTTL.
 func (g *Generator) Path(ctx context.Context, src Source, k Kind) (string, error) {
 	name := filepath.Join(g.dir, imageName(src.ID, k, src.MTime))
 	if _, err := os.Stat(name); err == nil {
@@ -161,17 +201,25 @@ func (g *Generator) Path(ctx context.Context, src Source, k Kind) (string, error
 	key := filepath.Base(name)
 
 	g.mu.Lock()
-	if err, ok := g.failed[key]; ok {
+	if g.closed {
 		g.mu.Unlock()
-		return "", err
+		return "", ErrClosed
+	}
+	if f, ok := g.failed[key]; ok {
+		if f.until.IsZero() || g.now().Before(f.until) {
+			g.mu.Unlock()
+			return "", f.err
+		}
+		delete(g.failed, key)
 	}
 	c, ok := g.inflight[key]
 	if !ok {
 		c = &call{done: make(chan struct{})}
 		g.inflight[key] = c
-		// The work outlives the first request: a client navigating away must not
-		// throw away an image the next request will want.
-		go g.fill(context.WithoutCancel(ctx), c, key, src, k, name)
+		g.wg.Add(1)
+		// The work outlives the first request (a client navigating away must not
+		// throw away an image the next request will want) but not the generator.
+		go g.fill(c, key, src, k, name)
 	}
 	g.mu.Unlock()
 
@@ -186,12 +234,18 @@ func (g *Generator) Path(ctx context.Context, src Source, k Kind) (string, error
 	return name, nil
 }
 
-func (g *Generator) fill(ctx context.Context, c *call, key string, src Source, k Kind, name string) {
-	c.err = g.generate(ctx, src, k, name)
+func (g *Generator) fill(c *call, key string, src Source, k Kind, name string) {
+	defer g.wg.Done()
+	c.err = g.generate(g.base, src, k, name)
 	g.mu.Lock()
 	delete(g.inflight, key)
-	if errors.Is(c.err, ErrNoFrame) {
-		g.failed[key] = c.err
+	switch {
+	case c.err == nil, g.base.Err() != nil, errors.Is(c.err, fs.ErrNotExist):
+		// Success, shutdown, or a missing file (cheap to re-check: no ffmpeg runs).
+	case errors.Is(c.err, ErrNoFrame):
+		g.failed[key] = failure{err: c.err}
+	default:
+		g.failed[key] = failure{err: c.err, until: g.now().Add(failureTTL)}
 	}
 	g.mu.Unlock()
 	close(c.done)
@@ -238,7 +292,7 @@ func (g *Generator) Prune(live map[int64]int64) (int, error) {
 	}
 	for key := range g.failed {
 		if id, mtime, ok := parseName(key); !ok || live[id] != mtime {
-			delete(g.failed, key)
+			delete(g.failed, key) // the item is gone or has changed: try again
 		}
 	}
 	g.mu.Unlock()
@@ -246,6 +300,10 @@ func (g *Generator) Prune(live map[int64]int64) (int, error) {
 }
 
 func (g *Generator) generate(ctx context.Context, src Source, k Kind, dst string) error {
+	if _, err := os.Stat(src.Path); err != nil {
+		// Typically an unmounted share; ffmpeg would only report the same thing.
+		return fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
 	select {
 	case g.sem <- struct{}{}:
 	case <-ctx.Done():
@@ -296,6 +354,9 @@ func (g *Generator) grab(ctx context.Context, src Source, k Kind, dst string, ss
 	)
 	g.runs.Add(1)
 	out, err := g.run(ctx, args)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return nil, fmt.Errorf("%w: ffmpeg took longer than %s on %s", ErrUnavailable, g.timeout, filepath.Base(src.Path))
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -325,9 +386,29 @@ func (g *Generator) exec(ctx context.Context, args []string) ([]byte, error) {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, fmt.Errorf("%w: %v: %s", ErrNoFrame, err, firstLine(stderr.String()))
+		msg := firstLine(stderr.String())
+		if contentFailure(stderr.String()) {
+			return nil, fmt.Errorf("%w: %v: %s", ErrNoFrame, err, msg)
+		}
+		return nil, fmt.Errorf("%w: %v: %s", ErrUnavailable, err, msg)
 	}
 	return stdout.Bytes(), nil
+}
+
+// contentFailure reports ffmpeg errors that are about the file itself (no
+// video stream, undecodable data) rather than the machine or the mount; only
+// those are remembered until the file changes.
+func contentFailure(stderr string) bool {
+	for _, s := range []string{
+		"matches no streams",
+		"does not contain any stream",
+		"Invalid data found when processing input",
+	} {
+		if strings.Contains(stderr, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // detectToneMap returns an HDR→SDR filter chain if this ffmpeg has the zscale
