@@ -1,0 +1,63 @@
+[[command]]
+allow_writes = true
+deny_network = false
+exec = ['go', 'mod', 'tidy']
+name = 'go-tidy'
+timeout = '5m0s'
+working_dir = ''
+
+[[command]]
+allow_writes = false
+deny_network = false
+exec = ['go', 'vet', './...']
+name = 'go-vet'
+timeout = '5m0s'
+working_dir = ''
+
+[[command]]
+allow_writes = true
+deny_network = false
+exec = ['go', 'test', '-race', '-count=1', './...']
+name = 'go-test-race'
+timeout = '15m0s'
+working_dir = ''
+
+[[command]]
+allow_writes = true
+deny_network = false
+exec = ['go', 'test', '-tags=integration', '-count=1', './...']
+name = 'go-test-integration'
+timeout = '15m0s'
+working_dir = ''
+
+[[command]]
+allow_writes = true
+deny_network = false
+exec = ['npm', 'install']
+name = 'web-install'
+timeout = '10m0s'
+working_dir = 'web'
+
+[[command]]
+allow_writes = true
+deny_network = false
+exec = ['npm', 'run', 'build']
+name = 'web-build'
+timeout = '10m0s'
+working_dir = 'web'
+
+[[command]]
+allow_writes = true
+deny_network = false
+exec = ['npm', 'run', 'check']
+name = 'web-check'
+timeout = '10m0s'
+working_dir = 'web'
+
+[[command]]
+allow_writes = true
+deny_network = false
+exec = ['go', 'build', '-o', 'bin/ply', './cmd/ply']
+name = 'ply-build'
+timeout = '10m0s'
+working_dir = ''

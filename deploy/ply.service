@@ -1,0 +1,27 @@
+# systemd user unit for ply on Linux.
+#
+# Install:
+#   1. Copy the binary to /usr/local/bin/ply (or edit ExecStart).
+#   2. Edit the -media path(s) below.
+#   3. mkdir -p ~/.config/systemd/user && cp deploy/ply.service ~/.config/systemd/user/
+#      systemctl --user daemon-reload
+#      systemctl --user enable --now ply
+#   4. Optional, to keep it running while logged out: loginctl enable-linger $USER
+#
+# ffprobe/ffmpeg are found through PATH.
+
+[Unit]
+Description=ply local media server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/ply -addr :8420 -media %h/Videos
+# ExecStart=/usr/local/bin/ply -addr :8420 -media %h/Videos -token CHANGE_ME
+Restart=on-failure
+RestartSec=3
+# The scanner and ffprobe should not starve interactive work.
+Nice=5
+
+[Install]
+WantedBy=default.target

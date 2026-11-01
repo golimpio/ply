@@ -1,0 +1,8 @@
+# plumb topology index (rebuildable; do not commit)
+topology.db
+topology.db-wal
+topology.db-shm
+# plumb cross-agent sharing (ephemeral; do not commit)
+collab.db
+collab.db-wal
+collab.db-shm

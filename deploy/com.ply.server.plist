@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd agent for ply on macOS.
+
+  Install:
+    1. Copy the binary to /usr/local/bin/ply (or edit the path below).
+    2. Replace YOUR_USER and the -media path(s) below.
+    3. cp deploy/com.ply.server.plist ~/Library/LaunchAgents/
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.ply.server.plist
+  Stop / remove:
+       launchctl bootout gui/$(id -u)/com.ply.server
+
+  launchd starts jobs with a minimal PATH, so the Homebrew bin directory is
+  added for ffprobe/ffmpeg.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.ply.server</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/ply</string>
+        <string>-addr</string>
+        <string>:8420</string>
+        <string>-media</string>
+        <string>/Users/YOUR_USER/Movies</string>
+        <!-- <string>-token</string><string>CHANGE_ME</string> -->
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>StandardOutPath</key>
+    <string>/Users/YOUR_USER/Library/Logs/ply.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/YOUR_USER/Library/Logs/ply.log</string>
+</dict>
+</plist>
