@@ -35,6 +35,7 @@ type ItemSummary struct {
 	HDR          string    `json:"hdr,omitempty"`
 	AddedAt      int64     `json:"addedAt"`
 	Progress     *Progress `json:"progress,omitempty"`
+	Art          *ArtURLs  `json:"art"` // null when there is no artwork
 }
 
 // Subtitle describes a selectable subtitle track.

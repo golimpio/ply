@@ -382,3 +382,63 @@ func TestDSNEscapesPath(t *testing.T) {
 		}
 	}
 }
+
+func TestKeyframesRoundTrip(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	id, _ := s.UpsertItem(ctx, movie("/media/kf.mkv", "KF"), videoAudio)
+
+	// Positive control for the miss: nothing cached yet.
+	if _, ok, err := s.Keyframes(ctx, id); err != nil || ok {
+		t.Fatalf("Keyframes before Set = ok %v, err %v; want a clean miss", ok, err)
+	}
+
+	want := []float64{0, 2.002, 4.004, 6.5, 1234.567891}
+	if err := s.SetKeyframes(ctx, id, want); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := s.Keyframes(ctx, id)
+	if err != nil || !ok {
+		t.Fatalf("Keyframes = ok %v, err %v", ok, err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("times[%d] = %v, want %v", i, got[i], want[i])
+		}
+	}
+
+	// Replace.
+	if err := s.SetKeyframes(ctx, id, []float64{0, 9}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, _ := s.Keyframes(ctx, id); len(got) != 2 || got[1] != 9 {
+		t.Errorf("after replace: %v", got)
+	}
+
+	if err := s.SetKeyframes(ctx, 9999, want); !errors.Is(err, ErrNotFound) {
+		t.Errorf("SetKeyframes for a missing item = %v, want ErrNotFound", err)
+	}
+}
+
+func TestUpsertInvalidatesKeyframes(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	it := movie("/media/kf2.mkv", "KF2")
+	id, _ := s.UpsertItem(ctx, it, videoAudio)
+	if err := s.SetKeyframes(ctx, id, []float64{0, 2}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := s.Keyframes(ctx, id); !ok {
+		t.Fatal("setup: keyframes not cached")
+	}
+	// The scanner upserts an item when its file changed.
+	if _, err := s.UpsertItem(ctx, it, videoAudio); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := s.Keyframes(ctx, id); ok {
+		t.Error("keyframes survived an upsert of the item")
+	}
+}

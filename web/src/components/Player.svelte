@@ -69,10 +69,12 @@
     playback = pb;
 
     if (!pb.url) {
+      // Why it cannot be streamed is the last reason the server gave ("transcoding is not available yet").
+      const why = pb.reasons[pb.reasons.length - 1];
       fail(
         pb.method === 'direct'
           ? 'The server returned no stream URL for this item.'
-          : `The server cannot stream this yet: playing this file here needs ${pb.method}, but the server returned no stream URL.`,
+          : `This file needs ${pb.method} to play in this browser, which the server cannot do yet${why ? ` (${why})` : ''}.`,
       );
       return;
     }
@@ -88,7 +90,13 @@
         fail('This browser cannot play HLS streams.');
         return;
       }
-      const h = new Hls({ startPosition: pb.startSec > 0 ? pb.startSec : -1 });
+      // The playlist is the whole file, so a resume is just a start position: the server cuts in
+      // at that segment, and later seeks anywhere are plain segment requests it answers by itself.
+      const h = new Hls({
+        startPosition: pb.startSec > 0 ? pb.startSec : -1,
+        backBufferLength: 60,
+        maxBufferLength: 40,
+      });
       let networkRetries = 0;
       let mediaRetries = 0;
       h.on(Hls.Events.ERROR, (_evt, data) => {

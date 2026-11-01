@@ -119,6 +119,11 @@ func (s *Store) UpsertItem(ctx context.Context, it *Item, streams []probe.Stream
 	if _, err := tx.ExecContext(ctx, `DELETE FROM streams WHERE item_id = ?`, id); err != nil {
 		return 0, err
 	}
+	// The file changed (the scanner only upserts changed files), so the
+	// cached keyframe index may no longer describe it.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM keyframes WHERE item_id = ?`, id); err != nil {
+		return 0, err
+	}
 	for _, st := range streams {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO streams (item_id, `+streamCols+`)

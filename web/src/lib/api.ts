@@ -16,6 +16,13 @@ export interface Progress {
   watched: boolean;
 }
 
+export interface ArtUrls {
+  backdrop: string;
+  thumb: string;
+  /** Dominant colour as "#rrggbb", once the artwork exists. */
+  color?: string;
+}
+
 export interface ItemSummary {
   id: number;
   kind: Kind;
@@ -35,6 +42,8 @@ export interface ItemSummary {
   hdr?: boolean | string | null;
   addedAt: number;
   progress?: Progress;
+  /** Artwork links; null/absent when the server has none for this item. */
+  art?: ArtUrls | null;
 }
 
 export interface Stream {
@@ -69,9 +78,15 @@ export interface Playback {
   audioAction: Action;
   audioIndex: number;
   reasons: string[];
-  /** Relative server URL; empty when the server cannot stream this method yet. */
+  /**
+   * Relative server URL: the file for direct play, an HLS playlist for remux. Empty when there is
+   * none: GET /api/items/{id} only describes a remux, POST /playback starts it; transcoding is not
+   * available yet.
+   */
   url: string;
+  /** Set when the server opened an HLS session; DELETE /api/sessions/{id} ends it. */
   sessionId?: string;
+  /** The requested resume position; the HLS timeline is the file's, so seek the player there. */
   startSec: number;
 }
 

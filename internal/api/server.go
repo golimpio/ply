@@ -12,8 +12,10 @@ import (
 	"net/url"
 	"strings"
 
+	"ply/internal/art"
 	"ply/internal/library"
 	"ply/internal/store"
+	"ply/internal/stream"
 )
 
 // ScanController is the scanner as the API sees it.
@@ -33,6 +35,10 @@ type Options struct {
 	Version string
 	Token   string // empty disables authentication
 	Logger  *slog.Logger
+	// Streams runs HLS sessions for remux playback; nil disables them.
+	Streams *stream.Manager
+	// Art generates artwork on demand; nil disables it.
+	Art *art.Generator
 }
 
 // Server is the HTTP handler for the whole application.
@@ -55,6 +61,10 @@ func New(o Options) *Server {
 	mux.HandleFunc("GET /api/items/{id}", s.handleItem)
 	mux.HandleFunc("POST /api/items/{id}/playback", s.handlePlayback)
 	mux.HandleFunc("GET /api/items/{id}/file", s.handleFile)
+	mux.HandleFunc("GET /api/items/{id}/art/{kind}", s.handleArt)
+	mux.HandleFunc("GET /api/sessions/{sid}/index.m3u8", s.handleSessionPlaylist)
+	mux.HandleFunc("GET /api/sessions/{sid}/{file}", s.handleSessionFile)
+	mux.HandleFunc("DELETE /api/sessions/{sid}", s.handleSessionDelete)
 	mux.HandleFunc("POST /api/scan", s.handleScanStart)
 	mux.HandleFunc("GET /api/scan", s.handleScanStatus)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
@@ -127,12 +137,17 @@ func validToken(r *http.Request, want string) bool {
 	return ok == 1
 }
 
-// withToken appends ?token= to a relative URL when a token is configured.
+// withToken adds the token to a relative URL when one is configured: as the
+// first query parameter, or after the existing ones ("...?v=1&token=...").
 func (s *Server) withToken(u string) string {
 	if s.Token == "" {
 		return u
 	}
-	return u + "?token=" + url.QueryEscape(s.Token)
+	sep := "?"
+	if strings.Contains(u, "?") {
+		sep = "&"
+	}
+	return u + sep + "token=" + url.QueryEscape(s.Token)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

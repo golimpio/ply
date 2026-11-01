@@ -41,6 +41,7 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 	out := make([]ItemSummary, len(entries))
 	for i, e := range entries {
 		out[i] = summarize(e)
+		out[i].Art = s.artOf(e)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -93,7 +94,9 @@ func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pb := s.playbackFor(e, profile, playback.NoOptions, 0)
-	writeJSON(w, http.StatusOK, detail(e, pb))
+	d := detail(e, pb)
+	d.Art = s.artOf(e)
+	writeJSON(w, http.StatusOK, d)
 }
 
 type playbackRequest struct {
@@ -154,7 +157,17 @@ func (s *Server) handlePlayback(w http.ResponseWriter, r *http.Request) {
 		}
 		opts.SubtitleIndex = *req.SubtitleIndex
 	}
-	writeJSON(w, http.StatusOK, s.playbackFor(e, profile, opts, req.StartSec))
+	d := decide(e, profile, opts)
+	pb := s.playbackFrom(e, d, req.StartSec)
+	switch d.Method {
+	case playback.MethodRemux:
+		if !s.attachSession(w, r, e, d, req.StartSec, &pb) {
+			return
+		}
+	case playback.MethodTranscode:
+		pb.Reasons = append(pb.Reasons, "transcoding is not available yet")
+	}
+	writeJSON(w, http.StatusOK, pb)
 }
 
 func hasStream(e store.Entry, typ string, index int) bool {
@@ -166,10 +179,17 @@ func hasStream(e store.Entry, typ string, index int) bool {
 	return false
 }
 
-// playbackFor turns a decision into the API's Playback. Only direct play has
-// a URL until HLS sessions exist (M3).
+func decide(e store.Entry, p playback.Profile, opts playback.Options) playback.Decision {
+	return playback.Decide(playback.Item{Container: e.Container}, e.Streams, p, opts)
+}
+
+// playbackFor describes how e would be delivered to p. Only direct play has a
+// URL: a remux needs a session, which only POST /playback creates.
 func (s *Server) playbackFor(e store.Entry, p playback.Profile, opts playback.Options, startSec float64) Playback {
-	d := playback.Decide(playback.Item{Container: e.Container}, e.Streams, p, opts)
+	return s.playbackFrom(e, decide(e, p, opts), startSec)
+}
+
+func (s *Server) playbackFrom(e store.Entry, d playback.Decision, startSec float64) Playback {
 	pb := Playback{
 		Method:      d.Method,
 		VideoAction: d.VideoAction,
