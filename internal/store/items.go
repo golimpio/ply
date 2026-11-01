@@ -147,9 +147,19 @@ func (s *Store) UpsertItem(ctx context.Context, it *Item, streams []probe.Stream
 	return id, nil
 }
 
-// GetEntry returns the item and its streams, or ErrNotFound.
-func (s *Store) GetEntry(ctx context.Context, id int64) (Entry, error) {
-	it, err := scanItem(s.db.QueryRowContext(ctx, `SELECT `+itemCols+` FROM items WHERE id = ?`, id))
+// GetEntry returns the item with its streams, sidecar subtitles and progress,
+// or ErrNotFound. The parts come from one snapshot: an item deleted while it is
+// being read is not found, never half there.
+func (s *Store) GetEntry(ctx context.Context, id int64) (e Entry, err error) {
+	err = s.snapshot(ctx, func(q queryer) (err error) {
+		e, err = getEntry(ctx, q, id)
+		return err
+	})
+	return e, err
+}
+
+func getEntry(ctx context.Context, q queryer, id int64) (Entry, error) {
+	it, err := scanItem(q.QueryRowContext(ctx, `SELECT `+itemCols+` FROM items WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Entry{}, ErrNotFound
 	}
@@ -157,20 +167,20 @@ func (s *Store) GetEntry(ctx context.Context, id int64) (Entry, error) {
 		return Entry{}, err
 	}
 	e := Entry{Item: it}
-	if e.Streams, err = s.itemStreams(ctx, id); err != nil {
+	if e.Streams, err = itemStreams(ctx, q, id); err != nil {
 		return Entry{}, err
 	}
-	if e.External, err = s.externalSubtitles(ctx, id); err != nil {
+	if e.External, err = externalSubtitles(ctx, q, id); err != nil {
 		return Entry{}, err
 	}
-	if e.Progress, err = s.getProgress(ctx, id); err != nil {
+	if e.Progress, err = getProgress(ctx, q, id); err != nil {
 		return Entry{}, err
 	}
 	return e, nil
 }
 
-func (s *Store) itemStreams(ctx context.Context, id int64) ([]probe.Stream, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+streamCols+` FROM streams WHERE item_id = ? ORDER BY idx`, id)
+func itemStreams(ctx context.Context, q queryer, id int64) ([]probe.Stream, error) {
+	rows, err := q.QueryContext(ctx, `SELECT `+streamCols+` FROM streams WHERE item_id = ? ORDER BY idx`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +198,18 @@ func (s *Store) itemStreams(ctx context.Context, id int64) ([]probe.Stream, erro
 
 // ListItems returns matching items with their streams. Movies come first,
 // ordered by title; then episodes ordered by show, season, episode.
-func (s *Store) ListItems(ctx context.Context, f ListFilter) ([]Entry, error) {
+func (s *Store) ListItems(ctx context.Context, f ListFilter) (entries []Entry, err error) {
+	err = s.snapshot(ctx, func(q queryer) (err error) {
+		entries, err = listItems(ctx, q, f)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func listItems(ctx context.Context, q queryer, f ListFilter) ([]Entry, error) {
 	var (
 		where []string
 		args  []any
@@ -208,7 +229,7 @@ func (s *Store) ListItems(ctx context.Context, f ListFilter) ([]Entry, error) {
 
 	// The pool has one connection: finish reading each result set before
 	// starting the next query.
-	items, err := s.queryItems(ctx, `SELECT i.id, i.kind, i.title, i.year, i.show, i.season, i.episode,
+	items, err := queryItems(ctx, q, `SELECT i.id, i.kind, i.title, i.year, i.show, i.season, i.episode,
 			i.path, i.root, i.size, i.mtime, i.container, i.duration_sec, i.bitrate, i.added_at, i.updated_at
 		FROM items i`+clause+`
 		ORDER BY i.kind DESC,
@@ -225,7 +246,7 @@ func (s *Store) ListItems(ctx context.Context, f ListFilter) ([]Entry, error) {
 		byID[it.ID] = &entries[i]
 	}
 
-	rows, err := s.db.QueryContext(ctx, `SELECT s.item_id, `+prefixed("s.", streamCols)+`
+	rows, err := q.QueryContext(ctx, `SELECT s.item_id, `+prefixed("s.", streamCols)+`
 		FROM streams s JOIN items i ON i.id = s.item_id`+clause+`
 		ORDER BY s.item_id, s.idx`, args...)
 	if err != nil {
@@ -252,7 +273,7 @@ func (s *Store) ListItems(ctx context.Context, f ListFilter) ([]Entry, error) {
 		return nil, err
 	}
 
-	progress, err := s.allProgress(ctx)
+	progress, err := allProgress(ctx, q)
 	if err != nil {
 		return nil, err
 	}
@@ -262,8 +283,8 @@ func (s *Store) ListItems(ctx context.Context, f ListFilter) ([]Entry, error) {
 	return entries, nil
 }
 
-func (s *Store) queryItems(ctx context.Context, query string, args []any) ([]Item, error) {
-	rows, err := s.db.QueryContext(ctx, query, args...)
+func queryItems(ctx context.Context, q queryer, query string, args []any) ([]Item, error) {
+	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

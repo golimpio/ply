@@ -1,0 +1,4 @@
+go test fuzz v1
+[]byte("\x00\x00\x00\x00\x00\x00\x00\x00")
+float64(0.0004)
+float64(6)

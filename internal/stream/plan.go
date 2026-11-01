@@ -47,8 +47,10 @@ func NewPlan(keyframes []float64, duration, minSeg float64) (Plan, error) {
 	if len(kf) == 0 {
 		return Plan{}, fmt.Errorf("no keyframes")
 	}
-	if last := kf[len(kf)-1]; duration <= last {
-		duration = last + 0.04 // container duration missing or too short
+	// A container duration that is missing or ends within a millisecond of the
+	// last keyframe would make the last segment zero-length (EXTINF:0.000).
+	if last := kf[len(kf)-1]; duration < last+0.001 {
+		duration = last + 0.04
 	}
 	p := Plan{Keyframes: kf, Duration: duration}
 	for i := 0; i < len(kf); {

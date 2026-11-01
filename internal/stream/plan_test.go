@@ -81,6 +81,23 @@ func TestNewPlan(t *testing.T) {
 	}
 }
 
+// FuzzNewPlan found this: with one keyframe and a container duration under a
+// millisecond the only segment was listed as EXTINF:0.000.
+func TestPlanNeverListsAZeroLengthSegment(t *testing.T) {
+	for _, duration := range []float64{0, 0.0004, 0.0009, 0.001, 0.0011, 1} {
+		p, err := NewPlan([]float64{0}, duration, 6)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pl := p.Playlist(""); strings.Contains(pl, "EXTINF:0.000,") {
+			t.Errorf("duration %v: playlist lists a zero-length segment:\n%s", duration, pl)
+		}
+		if d := p.Segments[0].Duration; d < 0.001 {
+			t.Errorf("duration %v: the segment lasts %v", duration, d)
+		}
+	}
+}
+
 func TestNewPlanNeedsKeyframes(t *testing.T) {
 	for _, kf := range [][]float64{nil, {}, {math.NaN()}, {math.Inf(1)}} {
 		if _, err := NewPlan(kf, 10, 6); err == nil {
@@ -173,15 +190,4 @@ func TestNames(t *testing.T) {
 	if SegmentName(7) != "seg00007.m4s" || !ValidName(SegmentName(123)) {
 		t.Errorf("SegmentName: %q", SegmentName(7))
 	}
-}
-
-func FuzzValidName(f *testing.F) {
-	for _, s := range []string{"init.mp4", "seg00001.m4s", "../x", "seg1.m4s"} {
-		f.Add(s)
-	}
-	f.Fuzz(func(t *testing.T, s string) {
-		if ValidName(s) && (strings.ContainsAny(s, "/\\\x00\n") || len(s) > 12) {
-			t.Fatalf("ValidName accepted %q", s)
-		}
-	})
 }

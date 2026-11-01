@@ -66,47 +66,51 @@ func (s *Store) SetProgress(ctx context.Context, itemID int64, positionSec, dura
 }
 
 // Continue returns the started, unfinished items, most recently played first,
-// with their streams and progress.
-func (s *Store) Continue(ctx context.Context, limit int) ([]Entry, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT item_id FROM progress WHERE watched = 0
-		ORDER BY updated_at DESC, item_id DESC LIMIT ?`, limit)
+// with their streams and progress. It reads one snapshot: an item is never
+// returned without the progress that put it on the list.
+func (s *Store) Continue(ctx context.Context, limit int) (entries []Entry, err error) {
+	err = s.snapshot(ctx, func(q queryer) error {
+		rows, err := q.QueryContext(ctx, `
+			SELECT item_id FROM progress WHERE watched = 0
+			ORDER BY updated_at DESC, item_id DESC LIMIT ?`, limit)
+		if err != nil {
+			return err
+		}
+		var ids []int64
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			ids = append(ids, id)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close() // the pool has one connection: finish before the next query
+
+		entries = make([]Entry, 0, len(ids))
+		for _, id := range ids {
+			e, err := getEntry(ctx, q, id)
+			if err != nil {
+				return err // progress rows cascade with their item: not ErrNotFound
+			}
+			entries = append(entries, e)
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
-	}
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, err
-	}
-	rows.Close() // the pool has one connection: finish before the next query
-
-	entries := make([]Entry, 0, len(ids))
-	for _, id := range ids {
-		e, err := s.GetEntry(ctx, id)
-		if errors.Is(err, ErrNotFound) {
-			continue // removed since the first query
-		}
-		if err != nil {
-			return nil, err
-		}
-		entries = append(entries, e)
 	}
 	return entries, nil
 }
 
 // getProgress returns the progress of one item, or nil.
-func (s *Store) getProgress(ctx context.Context, itemID int64) (*Progress, error) {
+func getProgress(ctx context.Context, q queryer, itemID int64) (*Progress, error) {
 	var p Progress
-	err := s.db.QueryRowContext(ctx, `
+	err := q.QueryRowContext(ctx, `
 		SELECT position_sec, duration_sec, watched, updated_at FROM progress WHERE item_id = ?`, itemID).
 		Scan(&p.PositionSec, &p.DurationSec, &p.Watched, &p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -119,8 +123,8 @@ func (s *Store) getProgress(ctx context.Context, itemID int64) (*Progress, error
 }
 
 // allProgress returns every progress row keyed by item id.
-func (s *Store) allProgress(ctx context.Context) (map[int64]*Progress, error) {
-	rows, err := s.db.QueryContext(ctx, `
+func allProgress(ctx context.Context, q queryer) (map[int64]*Progress, error) {
+	rows, err := q.QueryContext(ctx, `
 		SELECT item_id, position_sec, duration_sec, watched, updated_at FROM progress`)
 	if err != nil {
 		return nil, err

@@ -82,6 +82,18 @@ func TestSidecars(t *testing.T) {
 				".srt",
 			},
 		},
+		{
+			// Found by FuzzSidecars: the base runs into the extension of a file
+			// name that starts with it. This used to panic (slice bounds), which
+			// would have taken the whole scanner down. a.sr.srt is the control.
+			name:  "base overlapping the extension",
+			video: "/media/a.sr.mkv",
+			files: []string{"a.srt", "a.sr.srt", "a.sr.en.srt"},
+			want: []sub{
+				{Path: dir + "a.sr.en.srt", Language: "en", Format: "srt"},
+				{Path: dir + "a.sr.srt", Format: "srt"},
+			},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			v := tc.video

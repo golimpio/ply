@@ -60,6 +60,25 @@ func Open(path string) (*Store, error) {
 	return s, nil
 }
 
+// queryer is the read side that *sql.DB and *sql.Tx share.
+type queryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// snapshot runs a multi-query read in one transaction, so that it sees one
+// committed state. Without it a row deleted between two of the queries comes
+// back with its streams, sidecars or progress missing. The pool has a single
+// connection: fn must use q, never s.db.
+func (s *Store) snapshot(ctx context.Context, fn func(q queryer) error) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	return fn(tx)
+}
+
 // Close closes the database.
 func (s *Store) Close() error { return s.db.Close() }
 

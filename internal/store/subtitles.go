@@ -16,7 +16,7 @@ type ExternalSubtitle struct {
 // SetExternalSubtitles replaces the item's sidecar subtitles. Unchanged lists
 // are not written, so a rescan of an untouched library does not write at all.
 func (s *Store) SetExternalSubtitles(ctx context.Context, itemID int64, subs []ExternalSubtitle) error {
-	current, err := s.externalSubtitles(ctx, itemID)
+	current, err := externalSubtitles(ctx, s.db, itemID)
 	if err != nil {
 		return err
 	}
@@ -80,8 +80,8 @@ func (s *Store) allExternalSubtitles(ctx context.Context) (map[int64][]ExternalS
 
 // externalSubtitles returns the item's sidecars ordered by path, which is the
 // order of their ext<N> keys.
-func (s *Store) externalSubtitles(ctx context.Context, itemID int64) ([]ExternalSubtitle, error) {
-	rows, err := s.db.QueryContext(ctx, `
+func externalSubtitles(ctx context.Context, q queryer, itemID int64) ([]ExternalSubtitle, error) {
+	rows, err := q.QueryContext(ctx, `
 		SELECT path, language, format, forced FROM subtitles_external
 		WHERE item_id = ? ORDER BY path`, itemID)
 	if err != nil {

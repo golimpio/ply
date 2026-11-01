@@ -29,12 +29,15 @@ func sidecars(videoPath string, names []string) []store.ExternalSubtitle {
 	base := strings.TrimSuffix(filepath.Base(videoPath), filepath.Ext(videoPath))
 	var out []store.ExternalSubtitle
 	for _, name := range names {
-		format, ok := subtitleExts[strings.ToLower(filepath.Ext(name))]
-		if !ok || len(name) <= len(base) || !strings.EqualFold(name[:len(base)], base) {
+		ext := filepath.Ext(name)
+		format, ok := subtitleExts[strings.ToLower(ext)]
+		// The extension must start at or after the end of the base: for "a.sr.mkv" and
+		// "a.srt" the base "a.sr" overlaps the extension, so there is no sidecar.
+		if !ok || len(name)-len(ext) < len(base) || !strings.EqualFold(name[:len(base)], base) {
 			continue
 		}
 		// What sits between "<base>." and ".<ext>" (possibly nothing).
-		mid := name[len(base) : len(name)-len(filepath.Ext(name))]
+		mid := name[len(base) : len(name)-len(ext)]
 		if mid != "" && mid[0] != '.' {
 			continue // "Movie 2.srt" is not a sidecar of "Movie.mkv"
 		}

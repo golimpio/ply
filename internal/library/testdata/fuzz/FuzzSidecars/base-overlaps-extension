@@ -1,0 +1,4 @@
+go test fuzz v1
+string("/media/a.sr.mkv")
+string("a.srt")
+string("a.sr.srt")
