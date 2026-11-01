@@ -114,9 +114,16 @@ type Request struct {
 	AudioCodec  string
 	AudioCopy   bool
 	StartSec    float64
-	// Video overrides the default stream copy (M4: transcode).
+	// Video overrides the default stream copy: a transcode. Its segments are
+	// equal, SegmentSec each, and need no keyframe index.
 	Video *VideoSpec
+	// Fallback replaces Video, once, if the first ffmpeg run fails before
+	// the init segment has been served (a GPU path that does not work for
+	// this file).
+	Fallback *VideoSpec
 }
+
+func (r Request) transcode() bool { return r.Video != nil && !r.Video.copy() }
 
 // Manager owns all streaming sessions.
 type Manager struct {
@@ -247,7 +254,13 @@ func (m *Manager) Create(ctx context.Context, r Request) (*Session, error) {
 	m.mu.Unlock()
 	release := func() { m.mu.Lock(); m.reserved--; m.mu.Unlock() }
 
-	kf, err := m.keyframes(ctx, r)
+	var kf []float64
+	var err error
+	if r.transcode() {
+		kf, err = uniformKeyframes(r.DurationSec, m.o.SegmentSec)
+	} else {
+		kf, err = m.keyframes(ctx, r)
+	}
 	if err != nil {
 		release()
 		return nil, err
@@ -293,6 +306,19 @@ func (m *Manager) Create(ctx context.Context, r Request) (*Session, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// uniformKeyframes are the keyframes a transcode is forced to produce: one
+// every sec seconds from 0.
+func uniformKeyframes(duration, sec float64) ([]float64, error) {
+	if duration <= 0 {
+		return nil, errors.New("cannot transcode a file of unknown duration")
+	}
+	kf := make([]float64, 0, int(duration/sec)+1)
+	for i := 0; float64(i)*sec < duration; i++ {
+		kf = append(kf, float64(i)*sec)
+	}
+	return kf, nil
 }
 
 // keyframes returns the keyframe index of the requested file, scanning it at

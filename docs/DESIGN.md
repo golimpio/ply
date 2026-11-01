@@ -156,39 +156,37 @@ Listen first (supports `:0`), then advertise `_ply._tcp` with the real port, TXT
 `name=<name>`. Log LAN IPv4 URLs at startup (never only localhost). Shutdown un-registers.
 
 ## Streaming (M3/M4)
-- `POST /playback` with method remux/transcode creates a session: temp dir under `os.TempDir()/ply-sessions/<sid>`.
-- **Server-generated complete VOD playlist** (`#EXT-X-PLAYLIST-TYPE:VOD`, `#EXT-X-ENDLIST`, exact EXTINF per
-  segment) is returned immediately so players can seek anywhere:
-  - remux (`-c:v copy`): segment boundaries = keyframes. Keyframe times extracted once via
-    `ffprobe -v error -select_streams v:0 -skip_frame nokey -show_entries packet=pts_time,flags -of csv=p=0`
-    (nice'd) and cached in DB table `keyframes(item_id PK FK CASCADE, times BLOB /*little-endian float64*/)`;
-    group keyframes into segments of ≥ 6 s (target 6 s).
-  - transcode: equal 6 s segments, `-force_key_frames expr:gte(t,n_forced*6)`.
-- ffmpeg writes fMP4 segments: `-ss <segStart> -i <abs> -map 0:v:0 -map 0:<audioIdx> -c:v copy|<enc>
-  -c:a copy|aac -b:a 192k -ac 2(if transcoding audio) -copyts`(as needed) `-f hls -hls_segment_type fmp4
-  -hls_fmp4_init_filename init.mp4 -start_number <segIdx> -hls_segment_filename seg%05d.m4s
-  -hls_flags temp_file` with `-hls_time`/segment times matching the playlist; ffmpeg's own playlist is written to
-  `ffmpeg.m3u8` and used only to know which segments are complete. hevc copy → `-tag:v hvc1`.
-  Output timestamps must line up with the server playlist (verify with ffprobe on two consecutive segments).
-- **Seek** = a segment request outside [current encode start, encoded + ~3 segments] → kill ffmpeg and restart with
-  `-ss` BEFORE `-i` at that segment's start, `-start_number <idx>`. A segment is served only when complete
-  (listed in `ffmpeg.m3u8` or the next one has started), never just because the file exists.
-- **Throttle**: when ffmpeg is > 20 segments (~120 s) ahead of the last requested segment, SIGSTOP it; SIGCONT
-  when the client catches up to < 10 ahead.
-- Playlist URL `/api/sessions/<sid>/index.m3u8?token=…`; when a token is configured, rewrite segment/init URIs
-  in the playlist with `?token=`. Playlist `Cache-Control: no-cache`.
-- `Playback.startSec` echoes the requested resume position (client seeks there); stream time 0 = file time 0.
-- ffmpeg binary: prefer jellyfin-ffmpeg if found (`/usr/lib/jellyfin-ffmpeg/ffmpeg`,
-  `/opt/homebrew/opt/jellyfin-ffmpeg/bin/ffmpeg`, `/usr/local/opt/jellyfin-ffmpeg/bin/ffmpeg`), else PATH;
-  `-ffmpeg`/`-ffprobe` override. FFmpeg is always a subprocess, never cgo.
-- Manager: max N concurrent sessions (4), idle timeout 60s since last request, kill process group, remove temp dir on
-  stop and on server shutdown; startup removes stale `ply-sessions` dirs. **No orphan ffmpeg** — use
-  `exec.CommandContext` + `cmd.Cancel` killing the process group (`Setpgid`) and `WaitDelay`. Test it.
-- Transcode (M4): `internal/hwaccel` probes at startup by actually encoding 1 frame of `-f lavfi testsrc`:
-  macOS `h264_videotoolbox`; Linux `h264_vaapi` (`/dev/dri/renderD128`), `h264_qsv`, `h264_nvenc`; fallback
-  `libx264 -preset veryfast -crf 21`. Scale down to profile MaxHeight. `-force_key_frames expr:gte(t,n_forced*6)`.
-  Burn-in subtitles via `-filter_complex [0:v][0:<subidx>]overlay`. 10-bit/HDR → `format=yuv420p` (tone mapping
-  out of scope; note it in reasons).
+- `POST /playback` with method remux or transcode creates a session: temp dir under `os.TempDir()/ply-sessions/<pid>/<sid>`.
+- **Server-generated complete VOD playlist** (`#EXT-X-PLAYLIST-TYPE:VOD`, `#EXT-X-ENDLIST`, exact EXTINF) is returned
+  immediately so players can seek anywhere. Segment boundaries come from a keyframe list, never from ffmpeg's own
+  segmenter (which cuts differently after a restart):
+  - remux (`-c:v copy`): the source's keyframes, extracted once with a nice'd ffprobe packet scan and cached in the
+    `keyframes` table; keyframes are grouped into segments of at least 6 s.
+  - transcode: a synthetic keyframe every 6 s (`-force_key_frames`, no scan); each segment is exactly one GOP.
+- ffmpeg runs the hls muxer with `-hls_time 0.001`, so it writes **one fMP4 fragment per keyframe** (`gopNNNNN.m4s`,
+  `-start_number` = keyframe index). A playlist segment is served as the concatenation of its fragments (later
+  `styp` boxes dropped), and only when each fragment is complete (`temp_file` plus a box-tiling check).
+  Timestamps: `-copyts -start_at_zero -output_ts_offset 2` plus `movflags=frag_discont` give every fragment its true
+  decode time on the file's timeline (+2 s), whichever run produced it, so runs from different seeks line up and the
+  init segment is the same bytes across runs. See `docs/NOTES.md` for the ffmpeg details.
+- **Seek** = a request outside [current run start, encoded + ~18 s] kills ffmpeg and restarts it at that fragment with
+  fast input seek (`-ss` before `-i`; a keyframe-aware bias for copy, exact for a transcode).
+  **Throttle**: more than 20 segments ahead of the player, SIGSTOP; SIGCONT below 10. Idle 60 s (`-stream-idle`) kills
+  the session; shutdown kills every process group and removes the temp dirs.
+- Playlist URL `/api/sessions/<sid>/index.m3u8`; with a token configured every URI in the playlist carries `?token=`.
+  `Playback.startSec` echoes the requested resume position; stream time 0 = file time 0.
+- ffmpeg binary: jellyfin-ffmpeg if installed, else PATH; `-ffmpeg`/`-ffprobe` override. Always a subprocess.
+- **Transcode (M4)** (`internal/hwaccel`). At startup (in the background) ply lists `-encoders`, `-hwaccels`,
+  `-filters` and runs a real 1-frame lavfi test encode (10 s timeout) per candidate: macOS `h264_videotoolbox`;
+  Linux `h264_vaapi` (`/dev/dri/renderD128`), `h264_qsv`, `h264_nvenc`; else `libx264 -preset veryfast -crf 21`.
+  `-hwaccel auto|none|videotoolbox|vaapi|qsv|nvenc`. Output is H.264 High, yuv420p, scaled down to the profile's
+  MaxHeight, bitrate capped by output height (<=720p 4 Mbps, <=1080p 8, <=1440p 12, above 20), audio AAC 192k
+  stereo when it cannot be copied. The GPU path is end to end with no hwdownload (VideoToolbox decode + `scale_vt` +
+  encoder; VAAPI `scale_vaapi`); decode and scale fall back to software only when the chain needs it (burn-in,
+  HDR tone mapping, a codec the GPU decoder is not trusted with) and the reasons say so. HDR is tone-mapped
+  (`zscale` + `tonemap`) when this ffmpeg has both, else plainly converted with a "washed-out colours" reason.
+  An image subtitle (`Decision.BurnSubtitle`) forces a transcode with `-filter_complex` overlay. If a GPU ffmpeg
+  fails before its first segment, the session retries once with libx264.
 
 ## Efficiency rules (hard requirement — build in and test)
 1. Decision order: direct > remux (copy all) > audio-only transcode (copy video) > full transcode; reasons say why.

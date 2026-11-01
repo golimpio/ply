@@ -14,11 +14,14 @@ const TimelineOffset = 2.0
 const gopPattern = "gop%05d.m4s"
 
 // VideoSpec says how the video stream is produced. The zero value copies it.
-// M4 fills Encode (and Pre for hardware decode flags) for transcodes.
 type VideoSpec struct {
 	Codec  string   // source codec; hevc copies are tagged hvc1
 	Encode []string // output arguments replacing "-c:v copy" for a transcode
 	Pre    []string // input-side arguments (hwaccel flags), placed before -i
+	Filter string   // -vf chain for a transcode
+	// Complex is a -filter_complex graph producing the video as [v] (burn-in
+	// of a subtitle stream); it replaces the plain video mapping and Filter.
+	Complex string
 }
 
 func (v VideoSpec) copy() bool { return len(v.Encode) == 0 }
@@ -41,6 +44,9 @@ type RunSpec struct {
 	StartGOP   int
 	InitName   string // per-run init file, so a restart never rewrites the served one
 	Offset     float64
+	// SegmentSec is the playlist segment length; a transcode forces a
+	// keyframe every SegmentSec seconds so segments are equal.
+	SegmentSec float64
 }
 
 // BuildArgs returns the ffmpeg arguments for r. Output goes to the working
@@ -59,7 +65,12 @@ func BuildArgs(r RunSpec) []string {
 	if r.SeekSec > 0 {
 		a = append(a, "-ss", seconds(r.SeekSec))
 	}
-	a = append(a, "-i", r.Input, "-map", "0:"+strconv.Itoa(r.VideoIndex))
+	a = append(a, "-i", r.Input)
+	if r.Video.Complex != "" && !r.Video.copy() {
+		a = append(a, "-filter_complex", r.Video.Complex, "-map", "[v]")
+	} else {
+		a = append(a, "-map", "0:"+strconv.Itoa(r.VideoIndex))
+	}
 	if r.AudioIndex >= 0 {
 		a = append(a, "-map", "0:"+strconv.Itoa(r.AudioIndex))
 	}
@@ -70,7 +81,11 @@ func BuildArgs(r RunSpec) []string {
 			a = append(a, "-tag:v", "hvc1")
 		}
 	} else {
+		if r.Video.Filter != "" && r.Video.Complex == "" {
+			a = append(a, "-vf", r.Video.Filter)
+		}
 		a = append(a, r.Video.Encode...)
+		a = append(a, "-force_key_frames", KeyFrameExpr(r.SegmentSec), "-fps_mode", "passthrough")
 	}
 	switch {
 	case r.AudioIndex < 0:
@@ -98,10 +113,22 @@ func BuildArgs(r RunSpec) []string {
 	return a
 }
 
+// KeyFrameExpr is the -force_key_frames expression that forces a keyframe on
+// the first frame and then on the first frame at or after every multiple of
+// sec. It is written in terms of the time of the previous forced keyframe
+// rather than a count, because a run that starts mid-file (a seek) has
+// timestamps of the source, not counted from zero.
+func KeyFrameExpr(sec float64) string {
+	n := strconv.FormatFloat(sec, 'f', -1, 64)
+	return "expr:if(isnan(prev_forced_t),1,gte(t,floor(prev_forced_t/" + n + "+1)*" + n + "))"
+}
+
 func seconds(v float64) string { return strconv.FormatFloat(v, 'f', 3, 64) }
 
 // SeekTarget returns the -ss position that makes ffmpeg start at keyframe g
 // of kf (seconds from the start of the file); 0 means "from the beginning".
+// A transcode seeks exactly: ffmpeg decodes from the source keyframe before
+// the target and drops frames up to it, so no bias is needed.
 //
 // Seekable containers land on the last keyframe at or before the target, but
 // ffmpeg first moves the target back by 3/23 s when the video has frame

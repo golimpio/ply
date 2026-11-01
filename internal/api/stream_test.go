@@ -252,7 +252,7 @@ func TestFFmpegFailureIsAServerError(t *testing.T) {
 	}
 }
 
-func TestRemuxWithoutStreamingAndTranscode(t *testing.T) {
+func TestPlaybackWithoutStreaming(t *testing.T) {
 	e := newEnv(t, "") // no stream manager
 	pb := e.startSession("", `{}`)
 	if pb.Method != "remux" || pb.URL != "" || pb.SessionID != "" {
@@ -261,21 +261,144 @@ func TestRemuxWithoutStreamingAndTranscode(t *testing.T) {
 	if last := pb.Reasons[len(pb.Reasons)-1]; !strings.Contains(last, "streaming is not enabled") {
 		t.Errorf("reasons = %q", pb.Reasons)
 	}
-	wantJSONError(t, e.get("/api/sessions/x/index.m3u8"), 404)
-	wantJSONError(t, e.do("DELETE", "/api/sessions/x", nil, ""), 404)
-
-	e.withStreams(fakeFFmpeg(t, "exec sleep 60"), nil)
 	rec := e.do("POST", fmt.Sprintf("/api/items/%d/playback", e.mp4), nil, `{"custom": {"containers": ["webm"]}}`)
 	tc := decode[Playback](t, rec)
 	if tc.Method != "transcode" || tc.URL != "" || tc.SessionID != "" {
 		t.Errorf("transcode playback = %+v", tc)
 	}
-	if last := tc.Reasons[len(tc.Reasons)-1]; !strings.Contains(last, "not available yet") {
-		t.Errorf("reasons = %q", tc.Reasons)
+	wantJSONError(t, e.get("/api/sessions/x/index.m3u8"), 404)
+	wantJSONError(t, e.do("DELETE", "/api/sessions/x", nil, ""), 404)
+}
+
+// recordingFFmpeg is a fake ffmpeg that writes its arguments, one per line,
+// to the returned file and then idles.
+func recordingFFmpeg(t *testing.T) (bin, argsFile string) {
+	t.Helper()
+	argsFile = filepath.Join(t.TempDir(), "argv")
+	return fakeFFmpeg(t, fmt.Sprintf(`printf '%%s\n' "$@" > %q; exec sleep 60`, argsFile)), argsFile
+}
+
+func argsOf(t *testing.T, file string) []string {
+	t.Helper()
+	var b []byte
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		var err error
+		if b, err = os.ReadFile(file); err == nil && len(b) > 0 {
+			break
+		}
 	}
-	if e.srv.Streams.Count() != 0 {
-		t.Error("a transcode created a session")
+	return strings.Split(strings.TrimSpace(string(b)), "\n")
+}
+
+func hasArgs(args []string, want ...string) bool {
+	for i := range args {
+		if i+len(want) <= len(args) && strings.Join(args[i:i+len(want)], "\x00") == strings.Join(want, "\x00") {
+			return true
+		}
 	}
+	return false
+}
+
+func TestTranscodeCreatesSession(t *testing.T) {
+	e := newEnv(t, "")
+	bin, argsFile := recordingFFmpeg(t)
+	mgr := e.withStreams(bin, nil)
+
+	// 4K HDR10 hevc to a 720p-limited client: video and audio are transcoded.
+	rec := e.do("POST", fmt.Sprintf("/api/items/%d/playback", e.mkv), nil,
+		`{"custom": {"name": "tv", "containers": ["mp4"], "videoCodecs": ["h264"], "audioCodecs": ["aac"], "maxHeight": 720}}`)
+	wantStatus(t, rec, 200)
+	pb := decode[Playback](t, rec)
+	if pb.Method != "transcode" || pb.VideoAction != "transcode" || pb.AudioAction != "transcode" ||
+		pb.SessionID == "" || !strings.HasSuffix(pb.URL, "/index.m3u8") {
+		t.Fatalf("playback = %+v", pb)
+	}
+	joined := strings.Join(pb.Reasons, "|")
+	for _, want := range []string{"video transcoded to h264 with libx264", "scaled from 2160p to 720p", "capped at 4 Mbps", "HDR"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("reasons lack %q: %q", want, pb.Reasons)
+		}
+	}
+	sess, ok := mgr.Get(pb.SessionID)
+	if !ok {
+		t.Fatal("no session")
+	}
+	// Equal 6 s segments, no keyframe index needed: 2400 s is 400 segments.
+	if n := len(sess.Plan().Segments); n != 400 {
+		t.Errorf("%d segments, want 400", n)
+	}
+
+	// The playlist is served at once; the first segment request starts ffmpeg.
+	args := argsOf(t, argsFile)
+	for _, want := range [][]string{
+		{"-c:v", "libx264"}, {"-vf"}, {"-force_key_frames"}, {"-c:a", "aac", "-b:a", "192k", "-ac", "2"}, {"-profile:v", "high"},
+	} {
+		if !hasArgs(args, want...) {
+			t.Errorf("ffmpeg args lack %v:\n%s", want, strings.Join(args, " "))
+		}
+	}
+	for i, a := range args {
+		if a == "-vf" && !strings.HasPrefix(args[i+1], "scale=-2:720,") {
+			t.Errorf("-vf %q", args[i+1])
+		}
+	}
+}
+
+// Selecting an image subtitle forces a transcode whose filter graph overlays
+// that stream.
+func TestBurnInSession(t *testing.T) {
+	e := newEnv(t, "")
+	bin, argsFile := recordingFFmpeg(t)
+	e.withStreams(bin, nil)
+	rec := e.do("POST", fmt.Sprintf("/api/items/%d/playback", e.multi), nil, `{"profile": "browser", "subtitleIndex": 3}`)
+	wantStatus(t, rec, 200)
+	pb := decode[Playback](t, rec)
+	if pb.Method != "transcode" || pb.VideoAction != "transcode" || pb.AudioAction != "copy" || pb.SessionID == "" {
+		t.Fatalf("playback = %+v", pb)
+	}
+	if !strings.Contains(strings.Join(pb.Reasons, "|"), "must be burned into the video") {
+		t.Errorf("reasons = %q", pb.Reasons)
+	}
+	args := argsOf(t, argsFile)
+	var graph string
+	for i, a := range args {
+		if a == "-filter_complex" {
+			graph = args[i+1]
+		}
+		if a == "-vf" {
+			t.Errorf("burn-in must use -filter_complex, found -vf %q", args[i+1])
+		}
+	}
+	if !strings.Contains(graph, "[0:3]") || !strings.Contains(graph, "overlay") || !strings.HasSuffix(graph, "[v]") {
+		t.Errorf("filter graph %q", graph)
+	}
+	if !hasArgs(args, "-map", "[v]") || hasArgs(args, "-map", "0:0") || !hasArgs(args, "-c:a", "copy") {
+		t.Errorf("mapping: %s", strings.Join(args, " "))
+	}
+
+	// The same file without the subtitle plays directly: the burn-in is what
+	// forced the transcode.
+	rec = e.do("POST", fmt.Sprintf("/api/items/%d/playback", e.multi), nil, `{"profile": "browser", "subtitleIndex": 4}`)
+	if pb := decode[Playback](t, rec); pb.Method != "direct" {
+		t.Errorf("text subtitle: %+v", pb)
+	}
+}
+
+// The GET description of a transcode carries the same reasons as the POST.
+func TestItemDetailDescribesTranscode(t *testing.T) {
+	e := newEnv(t, "")
+	for target, wantMethod := range map[string]string{"chromecast": "transcode", "browser": "transcode", "avplayer": "remux"} {
+		rec := e.get(fmt.Sprintf("/api/items/%d?target=%s", e.mkv, target))
+		wantStatus(t, rec, 200)
+		pb := decode[ItemDetail](t, rec).Playback
+		if pb.Method != wantMethod || pb.URL != "" {
+			t.Errorf("%s: %+v", target, pb)
+		}
+		if wantMethod == "transcode" && !strings.Contains(strings.Join(pb.Reasons, "|"), "libx264") {
+			t.Errorf("%s: reasons = %q", target, pb.Reasons)
+		}
+	}
+	wantJSONError(t, e.get(fmt.Sprintf("/api/items/%d?target=nope", e.mkv)), 400)
 }
 
 func TestWithToken(t *testing.T) {

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"ply/internal/art"
+	"ply/internal/hwaccel"
 	"ply/internal/library"
 	"ply/internal/store"
 	"ply/internal/stream"
@@ -35,8 +36,11 @@ type Options struct {
 	Version string
 	Token   string // empty disables authentication
 	Logger  *slog.Logger
-	// Streams runs HLS sessions for remux playback; nil disables them.
+	// Streams runs HLS sessions for remux and transcode playback; nil
+	// disables them.
 	Streams *stream.Manager
+	// HW says which encoder transcodes use; nil means libx264 only.
+	HW *hwaccel.Detector
 	// Art generates artwork on demand; nil disables it.
 	Art *art.Generator
 }

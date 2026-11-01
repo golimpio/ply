@@ -21,6 +21,9 @@ func TestParseDefaults(t *testing.T) {
 	if c.Name == "" {
 		t.Error("name should default to the hostname")
 	}
+	if c.StreamIdle != DefaultStreamIdle || c.HWAccel != "auto" {
+		t.Errorf("stream-idle = %v, hwaccel = %q", c.StreamIdle, c.HWAccel)
+	}
 	if len(c.Media) != 0 {
 		t.Errorf("media = %v, want none", c.Media)
 	}
@@ -45,6 +48,9 @@ func TestParseErrors(t *testing.T) {
 		"stray argument":    {"oops"},
 		"unknown flag":      {"-nope"},
 		"empty media":       {"-media", ""},
+		"zero idle":         {"-stream-idle", "0s"},
+		"bad idle":          {"-stream-idle", "soon"},
+		"bad hwaccel":       {"-hwaccel", "gpu"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := Parse(args, &bytes.Buffer{}); err == nil {
@@ -118,5 +124,31 @@ func TestServerID(t *testing.T) {
 	fixed, err := ServerID(dir)
 	if err != nil || !validID(fixed) || fixed == "garbage" {
 		t.Errorf("after corruption = %q, %v", fixed, err)
+	}
+}
+
+func TestParseStreamIdleAndHWAccel(t *testing.T) {
+	dir := t.TempDir()
+	c, err := Parse([]string{"-data", dir, "-stream-idle", "5m", "-hwaccel", "none"}, &bytes.Buffer{})
+	if err != nil || c.StreamIdle != 5*time.Minute || c.HWAccel != "none" {
+		t.Fatalf("%+v, %v", c, err)
+	}
+	for _, mode := range []string{"auto", "videotoolbox", "vaapi", "qsv", "nvenc"} {
+		if _, err := Parse([]string{"-data", dir, "-hwaccel", mode}, &bytes.Buffer{}); err != nil {
+			t.Errorf("-hwaccel %s: %v", mode, err)
+		}
+	}
+
+	// The environment variable only changes the default; the flag wins.
+	t.Setenv(StreamIdleEnv, "3s")
+	if c, err := Parse([]string{"-data", dir}, &bytes.Buffer{}); err != nil || c.StreamIdle != 3*time.Second {
+		t.Errorf("env default: %v, %v", c.StreamIdle, err)
+	}
+	if c, err := Parse([]string{"-data", dir, "-stream-idle", "9s"}, &bytes.Buffer{}); err != nil || c.StreamIdle != 9*time.Second {
+		t.Errorf("flag over env: %v, %v", c.StreamIdle, err)
+	}
+	t.Setenv(StreamIdleEnv, "garbage")
+	if c, _ := Parse([]string{"-data", dir}, &bytes.Buffer{}); c.StreamIdle != DefaultStreamIdle {
+		t.Errorf("invalid env should be ignored: %v", c.StreamIdle)
 	}
 }

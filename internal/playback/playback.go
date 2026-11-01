@@ -64,13 +64,48 @@ type Decision struct {
 	Reasons      []string
 }
 
+// BuiltinNames lists the built-in profiles.
+var BuiltinNames = []string{"avplayer", "browser", "chromecast"}
+
 // Builtin returns a built-in profile by name.
 func Builtin(name string) (Profile, bool) {
 	switch strings.ToLower(name) {
 	case "avplayer":
 		return AVPlayer(), true
+	case "browser":
+		return Browser(), true
+	case "chromecast":
+		return Chromecast(), true
 	}
 	return Profile{}, false
+}
+
+// Browser is a generic modern browser. The web client normally POSTs a
+// profile it measured itself (MediaSource.isTypeSupported); this is the
+// default for other callers.
+func Browser() Profile {
+	return Profile{
+		Name:        "browser",
+		Containers:  []string{"mp4", "webm"},
+		VideoCodecs: []string{"h264", "vp9", "av1"},
+		AudioCodecs: []string{"aac", "mp3", "opus", "flac"},
+		HLS:         true,
+		TextSubs:    []string{"vtt"},
+	}
+}
+
+// Chromecast is a Google Cast receiver. VP9 is left out on purpose: only some
+// models decode it, and a transcode is always safe.
+func Chromecast() Profile {
+	return Profile{
+		Name:        "chromecast",
+		Containers:  []string{"mp4", "webm"},
+		VideoCodecs: []string{"h264"},
+		AudioCodecs: []string{"aac", "mp3", "opus", "flac"},
+		MaxHeight:   1080,
+		HLS:         true,
+		TextSubs:    []string{"vtt"},
+	}
 }
 
 // AVPlayer is the profile for Apple's AVPlayer (iOS/macOS/tvOS, AirPlay).
@@ -186,6 +221,10 @@ func Decide(item Item, streams []Stream, p Profile, opts Options) Decision {
 	case p.MaxHeight > 0 && video.Height > p.MaxHeight:
 		videoCopyable = false
 		reason("video height %d exceeds %s maximum %d", video.Height, name, p.MaxHeight)
+	case video.Codec == "h264" && video.BitDepth() > 8:
+		// No browser, AVPlayer or Cast receiver decodes High 10 profile.
+		videoCopyable = false
+		reason("h264 %d-bit (High 10) is not decodable by %s", video.BitDepth(), name)
 	}
 
 	// Audio: the chosen stream must be playable as is.

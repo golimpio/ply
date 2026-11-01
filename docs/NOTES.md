@@ -38,7 +38,33 @@ covered by tests but not exercised here. The remux cost is dominated by disk/net
 network share or a spinning disk will make the first segment and every seek proportionally slower, and the first
 keyframe scan of a large file reads the whole file once (niced; cached afterwards).
 
-Transcode numbers arrive with M4.
+Transcode numbers are in "M4 measurements" below.
+
+## M4 measurements (DESIGN.md efficiency rule 9)
+
+Same machine, server and fixture as M3 (the 60 s 4K HEVC Main10 mkv with E-AC-3 5.1, 98.7 MB), driven by a script
+that fetches like a player that never waits: POST /playback, playlist, init, then segments 0..9 one after the
+other. The profile is custom (`containers [mp4]`, `videoCodecs [h264]`, `audioCodecs [aac]`, `maxHeight 1080`), so
+the server transcodes 4K HEVC 10-bit to 1080p H.264 High yuv420p capped at 8 Mbps, and E-AC-3 5.1 to AAC stereo
+192k. Cold start, fresh data dir; one run each (the numbers are stable to a few percent).
+
+| | h264_videotoolbox (`-hwaccel auto`) | libx264 (`-hwaccel none`, veryfast, crf 21) |
+|---|---|---|
+| Pipeline | VideoToolbox decode, `scale_vt`, VideoToolbox encode, no hwdownload | software decode, `scale`, `format=yuv420p`, x264 |
+| Time to first segment (POST to segment 0 fully read) | 1.01 s | 1.12 s |
+| All 10 segments | 6.99 s, **8.6x realtime** | 8.85 s, **6.8x realtime** |
+| ffmpeg CPU | 2.3 s CPU in 6.9 s wall, **33 % of one core** | 78.8 s CPU in 8.7 s wall, **about 9 cores (908 %)** |
+| ffmpeg peak RSS | 252 MB | 1172 MB |
+| ply server CPU / RSS | 0.6 % of a core / 22 MB | 1.0 % of a core / 22 MB |
+
+Notes: the first segment needs no keyframe scan (a transcode's segment boundaries are the forced keyframes, so the
+M3 42 ms scan and the SQLite cache are not involved); the 1.0 s is ffmpeg start plus encoding the first 6 s of 4K.
+ffmpeg figures: `ps` samples every 100 ms for CPU% and RSS, cross-checked with the rusage the server logs when
+ffmpeg stops (`cpu=2.284s max_rss_mb=252` and `cpu=1m19.073s max_rss_mb=1172`). Throttling (SIGSTOP above 20
+segments ahead) did not engage: the clip is only 10 segments. On this machine x264 is not far behind the GPU
+path in wall time because 12 cores decode and encode in parallel; the difference is the cost: the same work uses
+about 1/35 of the CPU time and 1/5 of the memory on VideoToolbox, which is what matters when a transcode runs
+next to other work or on a machine with fewer cores. Both runs left no ffmpeg process behind.
 
 ## M3 implementation notes (ffmpeg behaviour that shaped the design)
 
@@ -62,3 +88,48 @@ stop being true.
 - **TS/ADTS AAC** needs `-bsf:a aac_adtstoasc` for the mp4 muxer.
 - **Completeness.** With `-hls_flags temp_file` a GOP file only gets its final name when finished; ply additionally
   checks that the top-level boxes tile the file exactly before serving a byte.
+
+## M4 implementation notes (transcode)
+
+- **Segments are the forced keyframes.** A transcode has no keyframe index: the plan is a synthetic one with a
+  keyframe every 6 s (`uniformKeyframes`), so each playlist segment is exactly one GOP fragment and the M3 machinery
+  (one fragment per keyframe, concatenation, `-start_number`, `-output_ts_offset`) is reused unchanged. A tail
+  shorter than 3 s is merged into the last segment (so the last one can be up to 9 s).
+- **`-force_key_frames expr:gte(t,n_forced*6)` is wrong here.** `n_forced` counts from the first frame of the run
+  and `-copyts` leaves source timestamps, so a run restarted at segment 100 (`t` = 600) would force a keyframe on
+  every frame until `n_forced*6` caught up. ply uses `if(isnan(prev_forced_t),1,gte(t,floor(prev_forced_t/6+1)*6))`,
+  which is relative to the previous forced keyframe and so works from any start.
+- **The encoder must not add keyframes of its own**, or fragments and playlist drift apart for the rest of the
+  session: libx264 gets `-g 100000 -sc_threshold 0 -forced-idr 1`, the others `-g 100000` (and `-forced_idr`/
+  `-no-scenecut` where they have them). The integration tests assert exactly one keyframe per segment on both
+  libx264 and VideoToolbox.
+- **Seeks are exact for a transcode** (`-ss` = segment start, no keyframe bias): ffmpeg decodes from the source
+  keyframe before the target and drops frames up to it, and the first frame at or after the target gets the forced
+  keyframe, which is also what the continuous run does. `-fps_mode passthrough` keeps ffmpeg from duplicating or
+  dropping frames to a constant rate after the seek. Measured alignment: segment N starts at exactly `6N + 2` s
+  (the 2 s `TimelineOffset`) and ends 6 s later, to the millisecond, after a cold start, a far seek (segment 3 after
+  0), the last segment and a seek back, for libx264 and VideoToolbox.
+- **VideoToolbox end to end works** on this ffmpeg (9.0.2): `-hwaccel videotoolbox -hwaccel_output_format
+  videotoolbox_vld`, `scale_vt=w:h` (no `format` option in this build, and none needed: the encoder takes the
+  10-bit surface and writes High/yuv420p), `h264_videotoolbox`. Mean Y/U/V of the result match a software
+  `format=yuv420p` conversion to within 0.1, so 10-bit SDR is not washed out. Without a resize there is no filter
+  at all. VP9 and AV1 are not decoded on the GPU (support varies by generation): they decode and scale in
+  software and still get a GPU encode; the reason says so.
+- **HDR.** This ffmpeg has `tonemap` but not `zscale`, so HDR sources are converted by plain format conversion and
+  the reasons say "colours will look washed out". The `zscale + tonemap` chain (hable) is only used when both
+  filters exist; it is unit-tested for its text but could not be run here. Dolby Vision profile 5 would need
+  libplacebo and is not handled.
+- **Burn-in** (`-filter_complex`: scale the video, scale the subtitle canvas to it with `scale2ref`, overlay, then
+  the colour chain) is driven by `Decision.BurnSubtitle`. No tool here can author a bitmap (PGS/VobSub) subtitle,
+  so the integration test uses a text subtitle stream as a stand-in: that proves the mapping, graph syntax and
+  encoder plumbing but not that bitmaps render. Verify with a real PGS file when one is at hand.
+- **GPU failure fallback.** `Request.Fallback` holds the libx264 spec; if the GPU ffmpeg dies by itself before
+  the init segment was served, the session switches to it once (logged as a warning). After the init segment is
+  out the encoder cannot change (the headers differ).
+- **Not exercised on hardware:** VAAPI, QSV and NVENC. Their arguments are unit-tested as text and the probe logic
+  is tested with a fake ffmpeg, but this host is a Mac. The chains follow the usual ffmpeg recipes
+  (`scale_vaapi=format=nv12`, `vpp_qsv`, `scale_cuda`), and any failure falls back to software at runtime.
+- `-hwaccel auto|none|videotoolbox|vaapi|qsv|nvenc`; a forced encoder still has to pass the 1-frame test encode.
+  `-stream-idle` (default 60 s) replaces the old `PLY_STREAM_IDLE`; the variable now only changes the flag's
+  default (tests and scripts), the flag wins.
+- Also decided: an H.264 stream with more than 8 bits (High 10) is never copied, on any built-in profile.

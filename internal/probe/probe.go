@@ -43,6 +43,29 @@ func (s Stream) HDR() string {
 	return ""
 }
 
+// BitDepth is the bits per colour component implied by the pixel format
+// (yuv420p10le is 10, nv12 is 8); 0 when the format is unknown.
+func (s Stream) BitDepth() int {
+	pf := s.PixFmt
+	switch {
+	case pf == "":
+		return 0
+	case strings.HasPrefix(pf, "p010"):
+		return 10
+	case strings.HasPrefix(pf, "p012"):
+		return 12
+	case strings.HasPrefix(pf, "p016"):
+		return 16
+	}
+	for _, d := range []int{16, 14, 12, 10, 9} {
+		n := strconv.Itoa(d)
+		if strings.HasSuffix(pf, n+"le") || strings.HasSuffix(pf, n+"be") {
+			return d
+		}
+	}
+	return 8
+}
+
 // Result is the normalised ffprobe output for one file.
 type Result struct {
 	Container   string // mp4 mov m4v mkv webm ts avi, or ffprobe's first format name

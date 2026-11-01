@@ -92,22 +92,59 @@ func TestBuildArgsVariants(t *testing.T) {
 			t.Errorf("args = %v", a)
 		}
 	})
-	t.Run("video encoder plugs in (M4)", func(t *testing.T) {
+	t.Run("video transcode", func(t *testing.T) {
 		s := baseSpec()
+		s.SegmentSec = 6
 		s.Video = VideoSpec{
 			Codec:  "hevc",
-			Encode: []string{"-c:v", "h264_videotoolbox", "-force_key_frames", "expr:gte(t,n_forced*6)"},
+			Encode: []string{"-c:v", "h264_videotoolbox", "-b:v", "8000000"},
 			Pre:    []string{"-hwaccel", "videotoolbox"},
+			Filter: "scale_vt=w=1920:h=1080",
 		}
 		a := BuildArgs(s)
 		if has(a, "-c:v", "copy") || slices.Contains(a, "-tag:v") {
 			t.Errorf("copy args survived a transcode: %v", a)
 		}
-		if !has(a, "-c:v", "h264_videotoolbox") || !has(a, "-force_key_frames", "expr:gte(t,n_forced*6)") {
-			t.Errorf("encoder args missing: %v", a)
+		for _, want := range [][]string{
+			{"-c:v", "h264_videotoolbox"}, {"-vf", "scale_vt=w=1920:h=1080"}, {"-map", "0:0"},
+			{"-force_key_frames", "expr:if(isnan(prev_forced_t),1,gte(t,floor(prev_forced_t/6+1)*6))"},
+			{"-fps_mode", "passthrough"},
+		} {
+			if !has(a, want...) {
+				t.Errorf("args lack %v:\n%s", want, strings.Join(a, " "))
+			}
 		}
 		if hw, i := slices.Index(a, "-hwaccel"), slices.Index(a, "-i"); hw < 0 || hw > i {
 			t.Errorf("-hwaccel must come before -i: %v", a)
+		}
+		// Output timestamps are handled exactly as for a remux.
+		if !has(a, "-copyts") || !has(a, "-output_ts_offset", "2.000") || !has(a, "-start_number", "90") {
+			t.Errorf("timestamp args missing: %v", a)
+		}
+	})
+	t.Run("burn-in replaces the video mapping", func(t *testing.T) {
+		s := baseSpec()
+		s.SegmentSec = 6
+		s.Video = VideoSpec{
+			Codec:   "hevc",
+			Encode:  []string{"-c:v", "libx264"},
+			Filter:  "must be ignored",
+			Complex: "[0:0][0:3]overlay[v]",
+		}
+		a := BuildArgs(s)
+		if !has(a, "-filter_complex", "[0:0][0:3]overlay[v]", "-map", "[v]", "-map", "0:1") || has(a, "-map", "0:0") || slices.Contains(a, "-vf") {
+			t.Errorf("args = %v", a)
+		}
+		if fc, i := slices.Index(a, "-filter_complex"), slices.Index(a, "-i"); fc < i {
+			t.Errorf("-filter_complex must follow -i: %v", a)
+		}
+	})
+	t.Run("a copy ignores filters", func(t *testing.T) {
+		s := baseSpec()
+		s.Video = VideoSpec{Codec: "hevc", Complex: "[0:0]null[v]", Filter: "scale=1:1"}
+		a := BuildArgs(s)
+		if slices.Contains(a, "-filter_complex") || slices.Contains(a, "-vf") || slices.Contains(a, "-force_key_frames") || !has(a, "-c:v", "copy") {
+			t.Errorf("args = %v", a)
 		}
 	})
 	t.Run("input path is one argument", func(t *testing.T) {
@@ -180,5 +217,51 @@ func TestResolveFFmpeg(t *testing.T) {
 	}
 	if got := resolveFFmpeg("ffmpeg", []string{dir}); got != "ffmpeg" {
 		t.Errorf("a directory is not a binary: %q", got)
+	}
+}
+
+func TestKeyFrameExpr(t *testing.T) {
+	for sec, want := range map[float64]string{
+		6:   "expr:if(isnan(prev_forced_t),1,gte(t,floor(prev_forced_t/6+1)*6))",
+		2.5: "expr:if(isnan(prev_forced_t),1,gte(t,floor(prev_forced_t/2.5+1)*2.5))",
+	} {
+		if got := KeyFrameExpr(sec); got != want {
+			t.Errorf("KeyFrameExpr(%v) = %q, want %q", sec, got, want)
+		}
+	}
+}
+
+func TestUniformKeyframesAndPlan(t *testing.T) {
+	kf, err := uniformKeyframes(30, 6)
+	if err != nil || len(kf) != 5 || kf[0] != 0 || kf[4] != 24 {
+		t.Fatalf("kf = %v, %v", kf, err)
+	}
+	// Equal segments: one keyframe each, every one 6 s.
+	p, err := NewPlan(kf, 30, 6)
+	if err != nil || len(p.Segments) != 5 {
+		t.Fatalf("plan = %+v, %v", p, err)
+	}
+	for i, s := range p.Segments {
+		if s.Duration != 6 || s.End-s.First != 1 || s.Start != float64(i)*6 {
+			t.Errorf("segment %d = %+v", i, s)
+		}
+	}
+	// A sliver at the end is merged into the previous segment, which then
+	// spans two keyframes.
+	kf, _ = uniformKeyframes(62, 6)
+	if p, _ = NewPlan(kf, 62, 6); len(p.Segments) != 10 || p.Segments[9].Duration != 8 || p.Segments[9].End-p.Segments[9].First != 2 {
+		t.Errorf("62 s plan = %+v", p.Segments[len(p.Segments)-1])
+	}
+	// An exact multiple has no sliver.
+	kf, _ = uniformKeyframes(60, 6)
+	if p, _ = NewPlan(kf, 60, 6); len(p.Segments) != 10 || p.Segments[9].Duration != 6 {
+		t.Errorf("60 s plan = %+v", p.Segments[len(p.Segments)-1])
+	}
+	if _, err := uniformKeyframes(0, 6); err == nil {
+		t.Error("unknown duration should be an error")
+	}
+	// A feature film: 3 hours is 1800 segments, no scan needed.
+	if kf, _ = uniformKeyframes(3*3600, 6); len(kf) != 1800 {
+		t.Errorf("3 h = %d keyframes", len(kf))
 	}
 }

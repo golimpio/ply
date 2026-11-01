@@ -124,3 +124,14 @@ func TestParseMissingDuration(t *testing.T) {
 		t.Errorf("result = %+v", res)
 	}
 }
+
+func TestStreamBitDepth(t *testing.T) {
+	for pf, want := range map[string]int{
+		"": 0, "yuv420p": 8, "nv12": 8, "yuvj420p": 8, "rgb24": 8,
+		"yuv420p10le": 10, "yuv422p10le": 10, "p010le": 10, "gbrp12le": 12, "yuv420p12be": 12, "p016le": 16, "yuv420p9le": 9,
+	} {
+		if got := (Stream{PixFmt: pf}).BitDepth(); got != want {
+			t.Errorf("BitDepth(%q) = %d, want %d", pf, got, want)
+		}
+	}
+}

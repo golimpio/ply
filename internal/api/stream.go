@@ -10,15 +10,17 @@ import (
 	"os"
 	"time"
 
+	"ply/internal/hwaccel"
 	"ply/internal/playback"
+	"ply/internal/probe"
 	"ply/internal/store"
 	"ply/internal/stream"
 )
 
-// attachSession starts an HLS session for a remux decision and fills in pb.
-// It reports false after writing an error response.
+// attachSession starts an HLS session for a remux or transcode decision and
+// fills in pb. It reports false after writing an error response.
 func (s *Server) attachSession(w http.ResponseWriter, r *http.Request, e store.Entry, d playback.Decision,
-	startSec float64, pb *Playback) bool {
+	profile playback.Profile, startSec float64, pb *Playback) bool {
 	if s.Streams == nil {
 		pb.Reasons = append(pb.Reasons, "HLS streaming is not enabled on this server")
 		return true
@@ -30,6 +32,10 @@ func (s *Server) attachSession(w http.ResponseWriter, r *http.Request, e store.E
 	video, ok := playback.VideoStream(e.Streams)
 	if !ok {
 		writeError(w, http.StatusUnprocessableEntity, "item has no video stream")
+		return false
+	}
+	if d.Method == playback.MethodTranscode && e.DurationSec <= 0 {
+		writeError(w, http.StatusUnprocessableEntity, "item has no known duration; it cannot be transcoded")
 		return false
 	}
 	req := stream.Request{
@@ -45,6 +51,11 @@ func (s *Server) attachSession(w http.ResponseWriter, r *http.Request, e store.E
 	}
 	if a, ok := playback.AudioStream(e.Streams, d.AudioIndex); ok && d.AudioIndex >= 0 {
 		req.AudioCodec = a.Codec
+	}
+	if d.Method == playback.MethodTranscode {
+		var reasons []string
+		req.Video, req.Fallback, reasons = s.videoSpecs(video, d, profile)
+		pb.Reasons = append(pb.Reasons, reasons...)
 	}
 
 	sess, err := s.Streams.Create(r.Context(), req)
@@ -63,6 +74,34 @@ func (s *Server) attachSession(w http.ResponseWriter, r *http.Request, e store.E
 	pb.SessionID = sess.ID
 	pb.StartSec = startSec
 	return true
+}
+
+// videoSpecs says how to transcode video for decision d: the spec for the
+// encoder in use, a software fallback when that is a GPU encoder, and the
+// reasons to show the client.
+func (s *Server) videoSpecs(video probe.Stream, d playback.Decision, profile playback.Profile) (
+	primary, fallback *stream.VideoSpec, reasons []string) {
+	info := s.HW.Info()
+	hreq := hwaccel.Request{
+		Codec:        video.Codec,
+		BitDepth:     video.BitDepth(),
+		Width:        video.Width,
+		Height:       video.Height,
+		HDR:          video.HDR() != "",
+		VideoIndex:   video.Index,
+		BurnSubtitle: d.BurnSubtitle,
+		MaxHeight:    profile.MaxHeight,
+	}
+	spec := info.Plan(hreq)
+	primary = videoSpec(video.Codec, spec)
+	if info.Encoder.Hardware() {
+		fallback = videoSpec(video.Codec, info.SoftwareOnly().Plan(hreq))
+	}
+	return primary, fallback, spec.Reasons
+}
+
+func videoSpec(codec string, s hwaccel.Spec) *stream.VideoSpec {
+	return &stream.VideoSpec{Codec: codec, Encode: s.Encode, Pre: s.Pre, Filter: s.Filter, Complex: s.Complex}
 }
 
 // session resolves {sid}, or writes a 404.

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -535,5 +536,163 @@ func TestExtractKeyframesParsing(t *testing.T) {
 		if kf[i] != want[i] {
 			t.Errorf("kf[%d] = %v, want %v", i, kf[i], want[i])
 		}
+	}
+}
+
+// noKeyframes fails the test when a transcode asks for a keyframe index: its
+// segments are the forced keyframes, there is nothing to scan.
+type noKeyframes struct{ t *testing.T }
+
+func (c noKeyframes) Keyframes(context.Context, int64) ([]float64, bool, error) {
+	c.t.Error("a transcode must not read or scan the keyframe index")
+	return nil, false, nil
+}
+func (c noKeyframes) SetKeyframes(context.Context, int64, []float64) error {
+	c.t.Error("a transcode must not write the keyframe index")
+	return nil
+}
+
+func transcodeRequest() Request {
+	r := fakeRequest()
+	r.AudioCopy = false
+	r.Video = &VideoSpec{Codec: "hevc", Encode: []string{"-c:v", "libx264"}, Filter: "scale=-2:720,format=yuv420p"}
+	return r
+}
+
+func TestTranscodeSessionHasEqualSegmentsAndExactSeeks(t *testing.T) {
+	f := newFake(t)
+	m := fakeManager(t, f, func(o *Options) { o.Cache = noKeyframes{t} })
+	ctx := context.Background()
+	s, err := m.Create(ctx, transcodeRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := s.Plan()
+	if len(plan.Segments) != 200 {
+		t.Fatalf("%d segments, want 200 (1200 s / 6 s)", len(plan.Segments))
+	}
+	for i, seg := range plan.Segments {
+		if seg.Duration != 6 || seg.First != i || seg.End != i+1 {
+			t.Fatalf("segment %d = %+v: want one 6 s keyframe interval each", i, seg)
+		}
+	}
+	if pl := s.Playlist(""); strings.Count(pl, "#EXTINF:6.000,") != 200 || !strings.Contains(pl, "#EXT-X-TARGETDURATION:6\n") {
+		t.Errorf("playlist: %.200s", pl)
+	}
+
+	seg, err := s.OpenSegment(ctx, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seg.Close()
+	first := f.starts()[0]
+	for _, want := range []string{"-c:v libx264", "-vf scale=-2:720,format=yuv420p", "-force_key_frames expr:if(isnan(prev_forced_t)", "-c:a aac"} {
+		if !strings.Contains(first, want) {
+			t.Errorf("first start lacks %q: %s", want, first)
+		}
+	}
+	if strings.Contains(first, "-ss") || strings.Contains(first, "-c:v copy") {
+		t.Errorf("first start = %s", first)
+	}
+
+	// A seek lands exactly on the segment start (no copy-mode bias).
+	seg, err = s.OpenSegment(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seg.Close()
+	if starts := f.starts(); len(starts) != 2 || !strings.Contains(starts[1], "-ss 600.000 ") || !strings.Contains(starts[1], "-start_number 100 ") {
+		t.Errorf("seek start = %v", starts)
+	}
+}
+
+func TestTranscodeNeedsADuration(t *testing.T) {
+	f := newFake(t)
+	m := fakeManager(t, f, func(o *Options) { o.Cache = noKeyframes{t} })
+	r := transcodeRequest()
+	r.DurationSec = 0
+	if _, err := m.Create(context.Background(), r); err == nil {
+		t.Error("expected an error for a transcode of unknown duration")
+	}
+	if n := m.Count(); n != 0 {
+		t.Errorf("%d sessions left behind", n)
+	}
+	if n := len(f.starts()); n > 1 || (n == 1 && f.starts()[0] != "") {
+		t.Errorf("ffmpeg was started: %v", f.starts())
+	}
+}
+
+// The GPU encoder is a name ("bad_enc") the fake refuses.
+func failingFake(t *testing.T) fake {
+	t.Helper()
+	f := newFake(t)
+	b, err := os.ReadFile(f.ffmpeg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Refuse the bad encoder right after the argument-logging line.
+	lines := strings.SplitN(string(b), "\n", 4)
+	script := strings.Join(lines[:3], "\n") + "\ncase \"$*\" in *bad_enc*) echo 'bad encoder' >&2; exit 1;; esac\n" + lines[3]
+	if err := writeExecutable(f.ffmpeg, script); err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+func TestGPUFailureFallsBackToSoftware(t *testing.T) {
+	f := failingFake(t)
+	m := fakeManager(t, f, func(o *Options) { o.Cache = noKeyframes{t} })
+	ctx := context.Background()
+
+	r := transcodeRequest()
+	r.Video.Encode = []string{"-c:v", "bad_enc"}
+	r.Fallback = &VideoSpec{Codec: "hevc", Encode: []string{"-c:v", "libx264"}}
+	s, err := m.Create(ctx, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	init, err := s.OpenInit(ctx)
+	if err != nil {
+		t.Fatalf("init after fallback: %v", err)
+	}
+	init.Close()
+	seg, err := s.OpenSegment(ctx, 0)
+	if err != nil {
+		t.Fatalf("segment after fallback: %v", err)
+	}
+	seg.Close()
+	starts := f.starts()
+	if len(starts) < 2 || !strings.Contains(starts[0], "bad_enc") || !strings.Contains(starts[len(starts)-1], "-c:v libx264") {
+		t.Errorf("starts = %v", starts)
+	}
+	for _, st := range starts[1:] {
+		if strings.Contains(st, "bad_enc") && st != starts[0] {
+			t.Errorf("the failing encoder was retried: %v", starts)
+		}
+	}
+
+	// Without a fallback the failure is reported, with ffmpeg's message.
+	r.Fallback = nil
+	m2 := fakeManager(t, failingFake(t), func(o *Options) { o.Cache = noKeyframes{t} })
+	s, err = m2.Create(ctx, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.OpenSegment(ctx, 0); err == nil || !strings.Contains(err.Error(), "bad encoder") {
+		t.Errorf("err = %v, want ffmpeg's message", err)
+	}
+}
+
+// The software encoder's headers would not match an init segment already
+// handed to the player, so a failure after that is not retried.
+func TestNoFallbackOnceInitIsServed(t *testing.T) {
+	s := &Session{req: Request{Fallback: &VideoSpec{}}, initPath: "/x/init.mp4"}
+	s.m = &Manager{log: slog.New(slog.DiscardHandler)}
+	if s.fallBackLocked("boom") {
+		t.Error("fell back after the init segment was served")
+	}
+	s.initPath = ""
+	if !s.fallBackLocked("boom") || s.fallBackLocked("boom") {
+		t.Error("fallback should happen exactly once")
 	}
 }

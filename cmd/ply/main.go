@@ -19,6 +19,7 @@ import (
 	"ply/internal/art"
 	"ply/internal/config"
 	"ply/internal/discovery"
+	"ply/internal/hwaccel"
 	"ply/internal/library"
 	"ply/internal/probe"
 	"ply/internal/store"
@@ -73,10 +74,13 @@ func run() error {
 	port := ln.Addr().(*net.TCPAddr).Port
 
 	ffmpegBin := stream.ResolveFFmpeg(cfg.FFmpeg)
+	// Probing the GPU takes a moment: do it in the background, playback
+	// requests wait for the result if they need it.
+	hw := hwaccel.Start(ctx, hwaccel.Options{FFmpeg: ffmpegBin, Mode: cfg.HWAccel, Logger: log})
 	streams, err := stream.NewManager(stream.Options{
 		FFmpeg:      ffmpegBin,
 		FFprobe:     cfg.FFprobe,
-		IdleTimeout: streamIdle(log),
+		IdleTimeout: cfg.StreamIdle,
 		Cache:       st,
 		Logger:      log,
 	})
@@ -111,6 +115,7 @@ func run() error {
 		Token:   cfg.Token,
 		Logger:  log,
 		Streams: streams,
+		HW:      hw,
 		Art:     artGen,
 	})
 	if artGen != nil {
@@ -155,21 +160,6 @@ func run() error {
 	<-scanDone
 	scanner.Wait()
 	return serveFailure
-}
-
-// streamIdle is how long a streaming session may go without a request before
-// its ffmpeg is killed: 60s, or PLY_STREAM_IDLE (a Go duration) if set.
-func streamIdle(log *slog.Logger) time.Duration {
-	v := os.Getenv("PLY_STREAM_IDLE")
-	if v == "" {
-		return 0 // the stream package default
-	}
-	d, err := time.ParseDuration(v)
-	if err != nil || d <= 0 {
-		log.Warn("ignoring invalid PLY_STREAM_IDLE", "value", v)
-		return 0
-	}
-	return d
 }
 
 // pruneArtAfterScans removes cached artwork of items that are gone or changed

@@ -159,13 +159,10 @@ func (s *Server) handlePlayback(w http.ResponseWriter, r *http.Request) {
 	}
 	d := decide(e, profile, opts)
 	pb := s.playbackFrom(e, d, req.StartSec)
-	switch d.Method {
-	case playback.MethodRemux:
-		if !s.attachSession(w, r, e, d, req.StartSec, &pb) {
+	if d.Method != playback.MethodDirect {
+		if !s.attachSession(w, r, e, d, profile, req.StartSec, &pb) {
 			return
 		}
-	case playback.MethodTranscode:
-		pb.Reasons = append(pb.Reasons, "transcoding is not available yet")
 	}
 	writeJSON(w, http.StatusOK, pb)
 }
@@ -184,9 +181,16 @@ func decide(e store.Entry, p playback.Profile, opts playback.Options) playback.D
 }
 
 // playbackFor describes how e would be delivered to p. Only direct play has a
-// URL: a remux needs a session, which only POST /playback creates.
+// URL: a remux or transcode needs a session, which only POST /playback
+// creates.
 func (s *Server) playbackFor(e store.Entry, p playback.Profile, opts playback.Options, startSec float64) Playback {
-	return s.playbackFrom(e, decide(e, p, opts), startSec)
+	d := decide(e, p, opts)
+	pb := s.playbackFrom(e, d, startSec)
+	if v, ok := playback.VideoStream(e.Streams); ok && d.Method == playback.MethodTranscode {
+		_, _, reasons := s.videoSpecs(v, d, p)
+		pb.Reasons = append(pb.Reasons, reasons...)
+	}
+	return pb
 }
 
 func (s *Server) playbackFrom(e store.Entry, d playback.Decision, startSec float64) Playback {

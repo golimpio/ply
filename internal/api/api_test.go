@@ -109,7 +109,7 @@ func newEnv(t *testing.T, token string) *env {
 			{Index: 2, Type: "subtitle", Codec: "hdmv_pgs_subtitle", Language: "eng"},
 			{Index: 3, Type: "subtitle", Codec: "subrip", Language: "por", Title: "Portuguese"},
 		})
-	e.multi = add("Multi (2019).mp4", store.Item{Kind: store.KindMovie, Title: "Multi", Year: 2019, Container: "mp4"},
+	e.multi = add("Multi (2019).mp4", store.Item{Kind: store.KindMovie, Title: "Multi", Year: 2019, Container: "mp4", DurationSec: 600},
 		[]probe.Stream{
 			{Index: 0, Type: "video", Codec: "h264", CodecTag: "avc1", Width: 1280, Height: 720},
 			{Index: 1, Type: "audio", Codec: "aac", Channels: 2, Default: true},

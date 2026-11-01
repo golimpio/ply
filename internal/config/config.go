@@ -26,6 +26,32 @@ type Config struct {
 	ScanInterval time.Duration
 	FFprobe      string
 	FFmpeg       string
+	StreamIdle   time.Duration // a streaming session without requests this long is stopped
+	HWAccel      string        // auto, none, or a hardware encoder family (see hwaccel.ValidMode)
+}
+
+// DefaultStreamIdle is how long a streaming session may go without a request
+// before its ffmpeg is killed.
+const DefaultStreamIdle = 60 * time.Second
+
+// StreamIdleEnv, when set to a Go duration, replaces the default of
+// -stream-idle. It exists so tests and scripts can shorten the timeout
+// without touching the command line; the flag still wins.
+const StreamIdleEnv = "PLY_STREAM_IDLE"
+
+func defaultStreamIdle() time.Duration {
+	if d, err := time.ParseDuration(os.Getenv(StreamIdleEnv)); err == nil && d > 0 {
+		return d
+	}
+	return DefaultStreamIdle
+}
+
+func validHWAccel(v string) bool {
+	switch v {
+	case "auto", "none", "videotoolbox", "vaapi", "qsv", "nvenc":
+		return true
+	}
+	return false
 }
 
 // DBPath is the SQLite database file inside the data directory.
@@ -66,6 +92,8 @@ func Parse(args []string, out io.Writer) (Config, error) {
 	fs.DurationVar(&c.ScanInterval, "scan-interval", 15*time.Minute, "periodic rescan interval (0 disables; a scan always runs at startup)")
 	fs.StringVar(&c.FFprobe, "ffprobe", "ffprobe", "ffprobe binary")
 	fs.StringVar(&c.FFmpeg, "ffmpeg", "ffmpeg", "ffmpeg binary")
+	fs.DurationVar(&c.StreamIdle, "stream-idle", defaultStreamIdle(), "stop a streaming session after this long without requests (env "+StreamIdleEnv+" sets the default)")
+	fs.StringVar(&c.HWAccel, "hwaccel", "auto", "video encoder: auto (probe the GPU), none (libx264), videotoolbox, vaapi, qsv or nvenc")
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
 	}
@@ -74,6 +102,12 @@ func Parse(args []string, out io.Writer) (Config, error) {
 	}
 	if c.ScanInterval < 0 {
 		return Config{}, errors.New("-scan-interval must not be negative")
+	}
+	if c.StreamIdle <= 0 {
+		return Config{}, errors.New("-stream-idle must be positive")
+	}
+	if !validHWAccel(c.HWAccel) {
+		return Config{}, fmt.Errorf("-hwaccel %q: want auto, none, videotoolbox, vaapi, qsv or nvenc", c.HWAccel)
 	}
 
 	seen := map[string]bool{}

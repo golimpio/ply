@@ -35,6 +35,7 @@ type Session struct {
 	lastSeg  int    // segment most recently requested
 	pruned   int    // GOP files below this index are already removed
 	closed   bool
+	fellBack bool // the GPU transcode failed and the software one took over
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
@@ -107,6 +108,11 @@ func (s *Session) startRunLocked(g int) error {
 	if s.closed {
 		return ErrClosed
 	}
+	// A run that died by itself before anything was served is the signal that
+	// the GPU path does not work for this file.
+	if old := s.run; old != nil && old.exited() && old.err != nil && !old.replaced {
+		s.fallBackLocked(old.failure())
+	}
 	s.stopRunLocked()
 	s.clearFromLocked(g)
 	if g < s.pruned {
@@ -127,9 +133,16 @@ func (s *Session) startRunLocked(g int) error {
 		StartGOP:   g,
 		InitName:   r.initName,
 		Offset:     TimelineOffset,
+		SegmentSec: s.m.o.SegmentSec,
 	}
 	if s.req.Video != nil {
 		spec.Video = *s.req.Video
+	}
+	if !spec.Video.copy() { // seek exactly: the keyframes are ours, not the source's
+		spec.SeekSec = 0
+		if g > 0 {
+			spec.SeekSec = s.plan.TimeOf(g)
+		}
 	}
 
 	ctx, cancel := context.WithCancel(s.m.ctx)
@@ -156,6 +169,20 @@ func (s *Session) startRunLocked(g int) error {
 	s.run = r
 	s.m.log.Debug("ffmpeg started", "session", s.ID, "run", r.id, "gop", g, "seek", spec.SeekSec)
 	return nil
+}
+
+// fallBackLocked switches a failed GPU transcode to its software fallback,
+// once, and only while no init segment has been served (the software
+// encoder's headers would not match it). The caller starts the new run.
+func (s *Session) fallBackLocked(failure string) bool {
+	fb := s.req.Fallback
+	if fb == nil || s.fellBack || s.initPath != "" || s.closed {
+		return false
+	}
+	s.fellBack = true
+	s.req.Video = fb
+	s.m.log.Warn("GPU transcode failed, falling back to software", "session", s.ID, "err", failure)
+	return true
 }
 
 // stopRunLocked kills the current ffmpeg (even a paused one) and waits for
@@ -329,10 +356,19 @@ func (s *Session) ensureGOP(ctx context.Context, g int) error {
 		switch {
 		case mine != nil && mine.exited() && !mine.replaced:
 			msg := mine.failure()
-			s.mu.Unlock()
 			if _, ok := s.gopFile(g); ok { // finished just before it exited
+				s.mu.Unlock()
 				return nil
 			}
+			if s.fallBackLocked(msg) {
+				if err := s.startRunLocked(g); err != nil {
+					s.mu.Unlock()
+					return err
+				}
+				mine = s.run
+				break
+			}
+			s.mu.Unlock()
 			return fmt.Errorf("ffmpeg did not produce segment data: %s", msg)
 		case r == nil || r.exited() || g < r.start || s.plan.TimeOf(g) > s.plan.TimeOf(r.next)+s.m.o.Lookahead:
 			// Outside what the running ffmpeg will produce soon: seek.
@@ -441,6 +477,14 @@ func (s *Session) OpenInit(ctx context.Context) (io.ReadSeekCloser, error) {
 			switch {
 			case mine != nil && mine.exited() && !mine.replaced:
 				msg := mine.failure()
+				if s.fallBackLocked(msg) {
+					if err := s.startRunLocked(s.plan.Segments[min(s.lastSeg, len(s.plan.Segments)-1)].First); err != nil {
+						s.mu.Unlock()
+						return nil, err
+					}
+					mine = s.run
+					break
+				}
 				s.mu.Unlock()
 				return nil, fmt.Errorf("ffmpeg did not produce an init segment: %s", msg)
 			case r == nil || r.exited():

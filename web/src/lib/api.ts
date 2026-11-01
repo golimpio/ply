@@ -79,9 +79,9 @@ export interface Playback {
   audioIndex: number;
   reasons: string[];
   /**
-   * Relative server URL: the file for direct play, an HLS playlist for remux. Empty when there is
-   * none: GET /api/items/{id} only describes a remux, POST /playback starts it; transcoding is not
-   * available yet.
+   * Relative server URL: the file for direct play, an HLS playlist for remux and transcode. Empty
+   * when there is none: GET /api/items/{id} only describes a remux or transcode, POST /playback
+   * starts it (or the server has streaming disabled; the last reason says so).
    */
   url: string;
   /** Set when the server opened an HLS session; DELETE /api/sessions/{id} ends it. */
