@@ -12,6 +12,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image"
+	"image/jpeg"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -149,6 +152,10 @@ func (g *Generator) Runs() int64 { return g.runs.Load() }
 func (g *Generator) Path(ctx context.Context, src Source, k Kind) (string, error) {
 	name := filepath.Join(g.dir, imageName(src.ID, k, src.MTime))
 	if _, err := os.Stat(name); err == nil {
+		if _, ok := g.Colour(src); !ok {
+			// Cached before the colour existed, or by an older colour formula.
+			g.colourFromImage(src, name)
+		}
 		return name, nil
 	}
 	key := filepath.Base(name)
@@ -214,7 +221,7 @@ func (g *Generator) Prune(live map[int64]int64) (int, error) {
 		if strings.HasSuffix(e.Name(), ".tmp") && recent(e) {
 			continue // being written by an in-flight generation
 		}
-		if id, mtime, ok := parseName(e.Name()); ok {
+		if id, mtime, ok := parseName(e.Name()); ok && !staleColour(e.Name()) {
 			if m, current := live[id]; current && m == mtime {
 				continue
 			}
@@ -340,6 +347,58 @@ func (g *Generator) detectToneMap(ctx context.Context) string {
 	return "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv"
 }
 
+// colourExt names colour cache files. Bump it whenever dominant() changes, so
+// colours computed by an older formula are ignored, recomputed and pruned.
+const colourExt = ".color2"
+
+// staleColour reports a colour file written by an older formula.
+func staleColour(name string) bool {
+	return strings.Contains(name, ".color") && !strings.HasSuffix(name, colourExt)
+}
+
+// colourFromImage derives the colour from an already cached JPEG, for images
+// cached before their colour was (re)computed. Pure Go, a few milliseconds,
+// best effort.
+func (g *Generator) colourFromImage(src Source, path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	img, err := jpeg.Decode(f)
+	if err != nil {
+		return
+	}
+	if hex, ok := dominant(sample16x9(img)); ok {
+		g.saveColour(src, hex)
+	}
+}
+
+// sample16x9 reduces img to the same 16×9 RGB24 grid ffmpeg produces for new
+// images, averaging a sparse lattice of pixels in each cell.
+func sample16x9(img image.Image) []byte {
+	b := img.Bounds()
+	out := make([]byte, 0, 16*9*3)
+	for cy := range 9 {
+		for cx := range 16 {
+			x0, x1 := b.Min.X+cx*b.Dx()/16, b.Min.X+(cx+1)*b.Dx()/16
+			y0, y1 := b.Min.Y+cy*b.Dy()/9, b.Min.Y+(cy+1)*b.Dy()/9
+			var r, g, bl, n uint64
+			for y := y0; y < y1; y += 4 {
+				for x := x0; x < x1; x += 4 {
+					pr, pg, pb, _ := img.At(x, y).RGBA()
+					r, g, bl, n = r+uint64(pr>>8), g+uint64(pg>>8), bl+uint64(pb>>8), n+1
+				}
+			}
+			if n == 0 {
+				n = 1
+			}
+			out = append(out, byte(r/n), byte(g/n), byte(bl/n))
+		}
+	}
+	return out
+}
+
 func (g *Generator) saveColour(src Source, hex string) {
 	name := filepath.Join(g.dir, colourName(src.ID, src.MTime))
 	if err := os.WriteFile(name, []byte(hex), 0o644); err != nil {
@@ -356,7 +415,7 @@ func (g *Generator) loadColours() error {
 		return err
 	}
 	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".color") {
+		if !strings.HasSuffix(e.Name(), colourExt) {
 			continue
 		}
 		id, mtime, ok := parseName(e.Name())
@@ -383,23 +442,73 @@ func seekPoint(durationSec float64) float64 {
 	return durationSec * 0.1
 }
 
-// dominant derives a page tint from an RGB24 sample, weighting saturated
-// pixels up and near-black ones (letterbox bars) down so the result is not mud.
+// dominant derives a page tint from an RGB24 sample.
+//
+// Averaging every pixel turns a frame of several strong colours into grey, so
+// colourful pixels are grouped into 12 hue buckets (weighted by saturation ×
+// brightness) and only the strongest bucket and its neighbours are averaged.
+// Frames with almost no colour fall back to their mean, with near-black pixels
+// (letterbox bars) counting little.
 func dominant(rgb []byte) (string, bool) {
 	if len(rgb) < 3 {
 		return "", false
 	}
-	var sr, sg, sb, sw float64
+	type bucket struct{ r, g, b, w float64 }
+	var hues [12]bucket
+	var mean bucket
+	var colourful float64
+	n := 0
 	for i := 0; i+2 < len(rgb); i += 3 {
-		r, gr, b := float64(rgb[i]), float64(rgb[i+1]), float64(rgb[i+2])
-		hi, lo := max(r, gr, b), min(r, gr, b)
-		w := 0.05 + (hi-lo)/255
+		r, g, b := float64(rgb[i]), float64(rgb[i+1]), float64(rgb[i+2])
+		hi, lo := max(r, g, b), min(r, g, b)
+		n++
+		w := 1.0
 		if hi < 24 {
-			w *= 0.1
+			w = 0.1
 		}
-		sr, sg, sb, sw = sr+r*w, sg+gr*w, sb+b*w, sw+w
+		mean = bucket{mean.r + r*w, mean.g + g*w, mean.b + b*w, mean.w + w}
+		if hi < 40 || (hi-lo)/hi < 0.2 {
+			continue // too dark or too grey to carry a hue
+		}
+		cw := (hi - lo) / hi * hi / 255 // saturation × value
+		k := int(hue(r, g, b, hi, lo)/30) % 12
+		hues[k] = bucket{hues[k].r + r*cw, hues[k].g + g*cw, hues[k].b + b*cw, hues[k].w + cw}
+		colourful += cw
 	}
-	return fmt.Sprintf("#%02x%02x%02x", int(sr/sw+0.5), int(sg/sw+0.5), int(sb/sw+0.5)), true
+
+	pick := mean
+	if colourful >= 0.05*float64(n) {
+		best, bestScore := 0, -1.0
+		for k := range hues {
+			score := hues[k].w + 0.5*(hues[(k+11)%12].w+hues[(k+1)%12].w)
+			if score > bestScore {
+				best, bestScore = k, score
+			}
+		}
+		pick = bucket{}
+		for _, k := range []int{(best + 11) % 12, best, (best + 1) % 12} {
+			pick = bucket{pick.r + hues[k].r, pick.g + hues[k].g, pick.b + hues[k].b, pick.w + hues[k].w}
+		}
+	}
+	return fmt.Sprintf("#%02x%02x%02x", int(pick.r/pick.w+0.5), int(pick.g/pick.w+0.5), int(pick.b/pick.w+0.5)), true
+}
+
+// hue returns the HSV hue in degrees [0, 360) of a pixel with hi > lo.
+func hue(r, g, b, hi, lo float64) float64 {
+	d := hi - lo
+	var h float64
+	switch hi {
+	case r:
+		h = math.Mod((g-b)/d, 6)
+	case g:
+		h = (b-r)/d + 2
+	default:
+		h = (r-g)/d + 4
+	}
+	if h *= 60; h < 0 {
+		h += 360
+	}
+	return h
 }
 
 func imageName(id int64, k Kind, mtime int64) string {
@@ -407,11 +516,11 @@ func imageName(id int64, k Kind, mtime int64) string {
 }
 
 func colourName(id, mtime int64) string {
-	return fmt.Sprintf("%d-%d.color", id, mtime)
+	return fmt.Sprintf("%d-%d%s", id, mtime, colourExt)
 }
 
 // parseName extracts the item id and mtime from a cache file name
-// ("<id>-<kind>-<mtime>.jpg", "<id>-<mtime>.color", and their .tmp leftovers).
+// ("<id>-<kind>-<mtime>.jpg", "<id>-<mtime>.color2", and their .tmp leftovers).
 func parseName(name string) (id, mtime int64, ok bool) {
 	base, _, _ := strings.Cut(name, ".")
 	parts := strings.Split(base, "-")

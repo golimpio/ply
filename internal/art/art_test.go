@@ -5,6 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/jpeg"
 	"os"
 	"path/filepath"
 	"slices"
@@ -322,6 +325,102 @@ func TestDominant(t *testing.T) {
 	}
 	if _, ok := dominant(nil); ok {
 		t.Error("empty sample produced a colour")
+	}
+}
+
+func TestDominantKeepsAHueWhenColoursCompete(t *testing.T) {
+	px := func(c [3]byte, n int) []byte { return bytes.Repeat(c[:], n) }
+	sat := func(hex string) float64 {
+		var r, g, b int
+		fmt.Sscanf(hex, "#%02x%02x%02x", &r, &g, &b)
+		hi, lo := max(r, g, b), min(r, g, b)
+		return float64(hi-lo) / float64(max(hi, 1))
+	}
+
+	// Colour bars: six strong hues. A plain mean of these is grey (the old bug).
+	bars := slices.Concat(
+		px([3]byte{230, 30, 30}, 34), // red has the most area
+		px([3]byte{30, 200, 30}, 22), px([3]byte{30, 30, 220}, 22),
+		px([3]byte{220, 220, 30}, 22), px([3]byte{30, 220, 220}, 22), px([3]byte{220, 30, 220}, 22),
+	)
+	hex, _ := dominant(bars)
+	if s := sat(hex); s < 0.6 {
+		t.Errorf("colour bars = %s (saturation %.2f); want a strong hue, not grey", hex, s)
+	}
+	if hex[1:3] < "c0" {
+		t.Errorf("colour bars = %s; want the largest hue (red) to win", hex)
+	}
+
+	// A mostly grey frame with a clear blue area takes the blue as its accent.
+	sky := slices.Concat(px([3]byte{120, 120, 120}, 110), px([3]byte{40, 90, 210}, 34))
+	if hex, _ := dominant(sky); hex[5:7] < "b0" || sat(hex) < 0.5 {
+		t.Errorf("grey with blue = %s; want the blue", hex)
+	}
+
+	// Positive control for the grey fallback: a hint of colour below the
+	// threshold must not hijack an otherwise neutral frame.
+	neutral := slices.Concat(px([3]byte{120, 120, 120}, 142), px([3]byte{200, 40, 40}, 2))
+	if hex, _ := dominant(neutral); sat(hex) > 0.15 {
+		t.Errorf("neutral frame with a speck of red = %s; want near grey", hex)
+	}
+}
+
+// writeJPEG writes a solid-colour JPEG, standing in for an image cached earlier.
+func writeJPEG(t *testing.T, path string, c color.RGBA) {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 64, 36))
+	for y := range 36 {
+		for x := range 64 {
+			img.Set(x, y, c)
+		}
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := jpeg.Encode(f, img, &jpeg.Options{Quality: 95}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOldFormulaColourIsReplacedFromTheCachedImage(t *testing.T) {
+	dir := t.TempDir()
+	in := src(1, 10)
+	thumb := filepath.Join(dir, imageName(in.ID, Thumb, in.MTime))
+	writeJPEG(t, thumb, color.RGBA{30, 60, 200, 255})
+	legacy := filepath.Join(dir, "1-10.color") // written by the averaging formula
+	if err := os.WriteFile(legacy, []byte("#808080"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	g := newTestGenerator(t, dir, &stub{})
+	if hex, ok := g.Colour(in); ok {
+		t.Fatalf("old-formula colour %s was loaded", hex)
+	}
+	if _, err := g.Path(context.Background(), in, Thumb); err != nil {
+		t.Fatal(err)
+	}
+	if g.Runs() != 0 {
+		t.Fatalf("cached image ran ffmpeg %d times", g.Runs())
+	}
+	hex, ok := g.Colour(in)
+	if !ok || hex[5:7] < "b8" || hex[1:3] > "30" {
+		t.Fatalf("colour from cached image = %q, %v; want the image's blue", hex, ok)
+	}
+
+	n, err := g.Prune(map[int64]int64{1: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) || n != 1 {
+		t.Errorf("prune removed %d files, legacy colour file err = %v; want just it gone", n, err)
+	}
+	if _, err := os.Stat(thumb); err != nil {
+		t.Errorf("live image pruned: %v", err)
+	}
+	if _, ok := g.Colour(in); !ok {
+		t.Error("current colour dropped by prune")
 	}
 }
 
