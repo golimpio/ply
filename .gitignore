@@ -5,3 +5,4 @@ web/dist/*
 *.db
 *.db-shm
 *.db-wal
+.playwright-mcp/

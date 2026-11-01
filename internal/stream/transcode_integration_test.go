@@ -125,3 +125,40 @@ func TestHDRSourceTranscodes(t *testing.T) {
 		}
 	})
 }
+
+// libx264 refuses odd dimensions ("height not divisible by 2"), and a source can
+// have them (853x479), or a custom profile can ask for one (maxHeight 361): the
+// software chain has to hand it even sizes either way.
+func TestOddDimensionsTranscode(t *testing.T) {
+	src := generate(t, "odd.mkv", "-f", "lavfi", "-i", "color=c=teal:size=853x479:rate=24", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
+		"-t", "12", "-c:v", "ffv1", "-g", "48", "-c:a", "flac")
+	if out, err := exec.Command("ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+		"-of", "csv=p=0", src).Output(); err != nil || strings.TrimSpace(string(out)) != "853,479" {
+		t.Fatalf("setup: the source is %q (%v), want 853,479", out, err)
+	}
+
+	transcodeVariants(t, func(t *testing.T, info hwaccel.Info) {
+		for _, tc := range []struct {
+			name      string
+			maxHeight int
+			wantH     string
+		}{{"source is odd", 0, "478"}, {"limit is odd", 361, "360"}} {
+			t.Run(tc.name, func(t *testing.T) {
+				spec := info.Plan(hwaccel.Request{Codec: "ffv1", BitDepth: 8, Width: 853, Height: 479, VideoIndex: 0,
+					BurnSubtitle: -1, MaxHeight: tc.maxHeight})
+				r := Request{Path: src, Container: "mkv", DurationSec: 12, VideoIndex: 0, VideoCodec: "ffv1", AudioIndex: 1,
+					AudioCodec: "flac", Video: &VideoSpec{Codec: "ffv1", Encode: spec.Encode, Pre: spec.Pre, Filter: spec.Filter}}
+				p := segmentFile(t, r, 0)
+				out, err := exec.Command("ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+					"-of", "csv=p=0", p).Output()
+				if err != nil {
+					t.Fatal(err)
+				}
+				dims := strings.Split(strings.TrimSpace(string(out)), ",")
+				if len(dims) != 2 || dims[1] != tc.wantH || dims[0] == "" || dims[0][len(dims[0])-1]%2 != 0 {
+					t.Errorf("output is %v, want an even width and height %s", dims, tc.wantH)
+				}
+			})
+		}
+	})
+}

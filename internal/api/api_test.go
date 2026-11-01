@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -745,8 +747,8 @@ func TestPlaybackPost(t *testing.T) {
 		if pb := decode[Playback](t, post(e.mkv, `{"startSec": 30.5}`)); pb.StartSec != 30.5 {
 			t.Errorf("remux startSec = %v, want 30.5", pb.StartSec)
 		}
-		if pb := decode[Playback](t, post(e.mp4, `{"startSec": 30.5}`)); pb.StartSec != 0 {
-			t.Errorf("direct startSec = %v, want 0 (the client seeks itself)", pb.StartSec)
+		if pb := decode[Playback](t, post(e.mp4, `{"startSec": 30.5}`)); pb.Method != "direct" || pb.StartSec != 30.5 {
+			t.Errorf("direct: %+v, want method direct and startSec 30.5 echoed (the client seeks itself)", pb)
 		}
 	})
 
@@ -840,12 +842,7 @@ func TestSPA(t *testing.T) {
 			t.Error("API 404 served index.html")
 		}
 	})
-	t.Run("path traversal stays inside the UI", func(t *testing.T) {
-		rec := e.get("/../../etc/passwd")
-		if strings.Contains(rec.Body.String(), "root:") {
-			t.Error("served a file from outside the UI filesystem")
-		}
-	})
+	// Path traversal has its own test: TestSPAPathTraversal.
 	t.Run("non-GET is rejected", func(t *testing.T) {
 		wantJSONError(t, e.do("POST", "/", nil, ""), 405)
 	})
@@ -865,6 +862,126 @@ func TestSPA(t *testing.T) {
 			t.Errorf("nil UI: %d", rec.Code)
 		}
 	})
+}
+
+// laxFS opens whatever the name says, ".." included, like a careless handler
+// over a plain directory would. It is the harness's way of making a leak
+// possible: only the handler's own path cleaning stands between it and the file.
+type laxFS struct{ root string }
+
+func (l laxFS) Open(name string) (fs.File, error) { return os.Open(filepath.Join(l.root, name)) }
+
+func TestSPAPathTraversal(t *testing.T) {
+	base := t.TempDir()
+	ui := filepath.Join(base, "ui")
+	const secret = "TOP-SECRET-FILE-CONTENT"
+	for path, body := range map[string]string{
+		filepath.Join(ui, "index.html"):          "<html>ply app</html>",
+		filepath.Join(ui, "assets", "app.js"):    "console.log('app')",
+		filepath.Join(base, "secret.txt"):        secret, // beside the UI directory, not in it
+		filepath.Join(base, "ui-secret", "k"):    secret,
+		filepath.Join(base, "ui", "a", "b", "c"): "deep",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// What the probes try to reach: a handler rooted one level up serves it...
+	up := httptest.NewRecorder()
+	spaHandler(os.DirFS(base)).ServeHTTP(up, httptest.NewRequest("GET", "/secret.txt", nil))
+	if up.Code != 200 || up.Body.String() != secret {
+		t.Fatalf("setup: the secret is not reachable from the parent directory: %d %q", up.Code, up.Body.String())
+	}
+	// ...and the lax filesystem really resolves ".." to it.
+	if f, err := (laxFS{ui}).Open("../secret.txt"); err != nil {
+		t.Fatalf("setup: the lax filesystem cannot reach the secret: %v", err)
+	} else {
+		f.Close()
+	}
+
+	probes := []string{
+		"/../secret.txt", "/%2e%2e/secret.txt", "/..%2fsecret.txt", "/..%2Fsecret.txt", "/%2e%2e%2fsecret.txt",
+		"/assets/../../secret.txt", "/assets/%2e%2e/%2e%2e/secret.txt", "/./../secret.txt", "//../secret.txt",
+		"/../ui-secret/k", "/..\\secret.txt", "/....//secret.txt",
+	}
+
+	for name, fsys := range map[string]fs.FS{"os.DirFS": os.DirFS(ui), "lax filesystem": laxFS{ui}} {
+		t.Run(name, func(t *testing.T) {
+			// Positive controls: the UI itself is served, files and fallback.
+			h := spaHandler(fsys)
+			for path, want := range map[string]string{"/": "ply app", "/assets/app.js": "console.log", "/a/b/c": "deep", "/nope": "ply app"} {
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+				if rec.Code != 200 || !strings.Contains(rec.Body.String(), want) {
+					t.Fatalf("GET %s = %d %q, want 200 containing %q", path, rec.Code, rec.Body.String(), want)
+				}
+			}
+
+			// 1. The handler alone, on the path exactly as a client could make
+			// the server see it (no ServeMux cleaning in between).
+			for _, p := range probes {
+				for _, decoded := range []string{p, unescape(p)} {
+					req := httptest.NewRequest("GET", "/", nil)
+					req.URL.Path = decoded
+					rec := httptest.NewRecorder()
+					h.ServeHTTP(rec, req)
+					if strings.Contains(rec.Body.String(), secret) {
+						t.Errorf("handler path %q leaked the secret outside the UI directory", decoded)
+					}
+					// Either the SPA fallback, or http.ServeFileFS refusing a ".." path.
+					if !(rec.Code == 200 && strings.Contains(rec.Body.String(), "ply app")) && rec.Code != 400 {
+						t.Errorf("handler path %q = %d %.40q, want the SPA fallback or 400", decoded, rec.Code, rec.Body.String())
+					}
+				}
+			}
+
+			// 2. The whole server over real HTTP, redirects followed or not.
+			srv := httptest.NewServer(New(Options{UI: fsys}))
+			defer srv.Close()
+			if resp, err := http.Get(srv.URL + "/index.html"); err != nil { // positive control (ServeFileFS redirects it to "/")
+				t.Fatal(err)
+			} else {
+				b, _ := io.ReadAll(resp.Body)
+				resp.Body.Close()
+				if resp.StatusCode != 200 || !strings.Contains(string(b), "ply app") {
+					t.Fatalf("GET /index.html = %d %q", resp.StatusCode, b)
+				}
+			}
+			for _, follow := range []bool{false, true} {
+				client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+				if follow {
+					client = &http.Client{}
+				}
+				for _, p := range probes {
+					resp, err := client.Get(srv.URL + p)
+					if err != nil {
+						t.Errorf("GET %s: %v", p, err)
+						continue
+					}
+					body, _ := io.ReadAll(resp.Body)
+					resp.Body.Close()
+					if strings.Contains(string(body), secret) {
+						t.Errorf("GET %s (follow redirects: %v) leaked the secret", p, follow)
+					}
+					if follow && !(resp.StatusCode == 200 && strings.Contains(string(body), "ply app")) && resp.StatusCode != 400 {
+						t.Errorf("GET %s followed = %d %.40q, want the SPA or 400", p, resp.StatusCode, body)
+					}
+				}
+			}
+		})
+	}
+}
+
+func unescape(p string) string {
+	u, err := url.PathUnescape(p)
+	if err != nil {
+		return p
+	}
+	return u
 }
 
 // plainWriter hides every optional interface of the writer it wraps, like a

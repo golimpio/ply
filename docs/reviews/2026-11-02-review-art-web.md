@@ -291,9 +291,8 @@ clips, `Direct Clip.mp4` (direct play) and `Remux Clip.mkv` (HLS remux). Chrome 
 natively, so where hls.js mattered a context init script made `canPlayType('application/vnd.apple.mpegurl')`
 return `''` (`currentSrc` was a `blob:` URL then) and the service worker's registration was
 blocked, so that `page.route` sees the requests. `window.fetch` was wrapped to log the non-GET
-requests. Table tests of the state machine run without a browser:
-`node --test src/lib/*.nodetest.ts` (named `.nodetest.ts` so they do not collide with the
-vitest suite being added; `tsconfig.json` excludes them from `svelte-check`).
+requests. Table tests of the state machine run without a browser, under vitest (`npm test`):
+`web/src/lib/progress.test.ts` and `web/src/lib/session.test.ts`.
 
 - **W1 fixed, with the server.** The resume target is what the client asked for (`start(at)` ->
   `progress.target`), used for the seek in `onLoadedMetadata`, the hls.js `startPosition` and the

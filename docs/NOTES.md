@@ -119,7 +119,7 @@ stop being true.
   the reasons say "colours will look washed out". The `zscale + tonemap` chain (hable) is only used when both
   filters exist; it is unit-tested for its text but could not be run here. Dolby Vision profile 5 would need
   libplacebo and is not handled.
-- **Burn-in** (`-filter_complex`: scale the video, scale the subtitle canvas to it with `scale2ref`, overlay, then
+- **Burn-in** (`-filter_complex`: scale the video, scale the subtitle canvas to it with `scale=rw:rh` (`scale2ref=w=iw:h=ih` on an ffmpeg whose `scale` takes no second input; never `main_w:main_h`, which is the canvas's own size), overlay, then
   the colour chain) is driven by `Decision.BurnSubtitle`. No tool here can author a bitmap (PGS/VobSub) subtitle,
   so the integration test uses a text subtitle stream as a stand-in: that proves the mapping, graph syntax and
   encoder plumbing but not that bitmaps render. Verify with a real PGS file when one is at hand.

@@ -203,8 +203,9 @@ func (s *Server) playbackFrom(e store.Entry, d playback.Decision, startSec float
 		StartSec:    startSec,
 	}
 	if d.Method == playback.MethodDirect {
+		// The file is served whole: stream time 0 is file time 0, and the client seeks to startSec
+		// itself. startSec stays what was asked for (DESIGN.md: "echoes the requested resume position").
 		pb.URL = s.withToken(fmt.Sprintf("/api/items/%d/file", e.ID))
-		pb.StartSec = 0 // stream time 0 is file time 0; the client seeks itself
 	}
 	return pb
 }

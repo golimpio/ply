@@ -202,3 +202,31 @@ func TestValidMode(t *testing.T) {
 		}
 	}
 }
+
+// A scale filter with a dynamic second input is the successor of scale2ref.
+func TestDetectNotesTheTwoInputScale(t *testing.T) {
+	for _, tc := range []struct {
+		name, help string
+		want       bool
+	}{
+		{"two inputs", "Filter scale\n  Scale the input video size and/or convert the image format.\n    Inputs:\n       #0: default (video)\n        dynamic (depending on the options)\n    Outputs:\n       #0: default (video)\n", true},
+		{"one input", "Filter scale\n  Scale the input video size and/or convert the image format.\n    Inputs:\n       #0: default (video)\n    Outputs:\n       #0: default (video)\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeFFmpeg{works: map[string]bool{}}
+			o := Options{stat: func(string) error { return nil }, run: func(ctx context.Context, bin string, args ...string) ([]byte, error) {
+				joined := strings.Join(args, " ")
+				switch {
+				case strings.Contains(joined, "-h filter=scale"):
+					return []byte(tc.help), nil
+				case strings.HasSuffix(joined, "-filters"):
+					return []byte(filtersOut + " ... scale             V->V       Scale the input video size.\n"), nil
+				}
+				return f.run(ctx, bin, args...)
+			}}
+			if got := Detect(t.Context(), o).Filters[RefScale]; got != tc.want {
+				t.Errorf("Filters[%q] = %v, want %v", RefScale, got, tc.want)
+			}
+		})
+	}
+}

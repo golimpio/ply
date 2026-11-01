@@ -27,6 +27,15 @@ import (
 // ErrConvert reports that ffmpeg could not turn the subtitle into WebVTT.
 var ErrConvert = errors.New("subs: conversion failed")
 
+// ErrClosed is returned by Path after Close.
+var ErrClosed = errors.New("subs: closed")
+
+// failureTTL is how long a failed conversion is remembered (unless the file
+// changes first). A failure can be the disk or the share having a bad moment,
+// and a conversion can take minutes, so it is not retried on every request, but
+// not held against the file for good either.
+const failureTTL = 5 * time.Minute
+
 // textCodecs are the embedded subtitle codecs that become WebVTT.
 var textCodecs = map[string]bool{
 	"subrip": true, "srt": true, "ass": true, "ssa": true, "mov_text": true, "webvtt": true, "text": true,
@@ -61,9 +70,15 @@ type Generator struct {
 	timeout  time.Duration
 	sem      chan struct{}
 
+	ctx    context.Context // ends with Close; every conversion runs under it
+	cancel context.CancelFunc
+	wg     sync.WaitGroup // conversions in flight
+
 	mu       sync.Mutex
+	closed   bool
 	inflight map[string]*call
-	failed   map[string]error // cache names that could not be generated
+	failed   map[string]failure // cache names that could not be generated
+	failTTL  time.Duration
 
 	// run executes ffmpeg and returns its stderr. Tests replace it.
 	run func(ctx context.Context, args []string) (string, error)
@@ -72,6 +87,11 @@ type Generator struct {
 type call struct {
 	done chan struct{}
 	err  error
+}
+
+type failure struct {
+	err error
+	at  time.Time
 }
 
 // New returns a Generator caching under o.Dir.
@@ -94,14 +114,18 @@ func New(o Options) (*Generator, error) {
 	if o.Timeout <= 0 {
 		o.Timeout = 10 * time.Minute
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	g := &Generator{
+		ctx:      ctx,
+		cancel:   cancel,
+		failTTL:  failureTTL,
 		dir:      o.Dir,
 		ffmpeg:   o.FFmpeg,
 		niceness: o.Niceness,
 		timeout:  o.Timeout,
 		sem:      make(chan struct{}, o.Concurrency),
 		inflight: map[string]*call{},
-		failed:   map[string]error{},
+		failed:   map[string]failure{},
 	}
 	g.run = g.exec
 	return g, nil
@@ -118,8 +142,20 @@ func cacheName(src Source) string {
 	return name + ".vtt"
 }
 
+// Close stops the conversions in progress (killing their ffmpeg and removing
+// their half-written files) and waits for them. Path fails afterwards.
+func (g *Generator) Close() {
+	g.mu.Lock()
+	g.closed = true
+	g.mu.Unlock()
+	g.cancel()
+	g.wg.Wait()
+}
+
 // Path returns the cached WebVTT file for src, converting first if needed.
-// A source that failed once is not retried until its mtime changes.
+// A source that failed is not retried until its mtime changes or a few minutes
+// have passed, except when its file could not be reached at all (an unmounted
+// share is not the subtitle's fault).
 func (g *Generator) Path(ctx context.Context, src Source) (string, error) {
 	name := cacheName(src)
 	dst := filepath.Join(g.dir, name)
@@ -128,17 +164,28 @@ func (g *Generator) Path(ctx context.Context, src Source) (string, error) {
 	}
 
 	g.mu.Lock()
-	if err, ok := g.failed[name]; ok {
+	if f, ok := g.failed[name]; ok {
+		if time.Since(f.at) < g.failTTL {
+			g.mu.Unlock()
+			return "", f.err
+		}
+		delete(g.failed, name)
+	}
+	if g.closed {
 		g.mu.Unlock()
-		return "", err
+		return "", ErrClosed
 	}
 	c, ok := g.inflight[name]
 	if !ok {
 		c = &call{done: make(chan struct{})}
 		g.inflight[name] = c
-		// The work outlives the first request: a reload must not restart a
-		// conversion that took minutes.
-		go g.fill(context.WithoutCancel(ctx), c, name, src, dst)
+		// The work outlives the first request (a reload must not restart a
+		// conversion that took minutes), but not the generator.
+		g.wg.Add(1)
+		go func() {
+			defer g.wg.Done()
+			g.fill(g.ctx, c, name, src, dst)
+		}()
 	}
 	g.mu.Unlock()
 
@@ -158,7 +205,9 @@ func (g *Generator) fill(ctx context.Context, c *call, name string, src Source, 
 	g.mu.Lock()
 	delete(g.inflight, name)
 	if errors.Is(c.err, ErrConvert) {
-		g.failed[name] = c.err
+		if _, err := os.Stat(src.Input); err == nil {
+			g.failed[name] = failure{c.err, time.Now()}
+		} // else the input is unreachable (share asleep or unmounted): ask again next time
 	}
 	g.mu.Unlock()
 	close(c.done)

@@ -178,13 +178,41 @@ func TestArtEndpoint(t *testing.T) {
 	})
 }
 
+// A file that has no picture in it is a 404, remembered until the file changes.
 func TestArtFailureIsNotFound(t *testing.T) {
 	e := newEnv(t, "")
 	e.withArt(`
 case "$*" in *-filters*) exit 0;; esac
-echo "no video here" >&2
+echo "Output file does not contain any stream" >&2
 exit 1`)
 	wantJSONError(t, e.get(fmt.Sprintf("/api/items/%d/art/thumb", e.mp4)), 404)
+}
+
+// A failure that may pass (a share that is gone, ffmpeg refused) says nothing about the file:
+// 503 with a Retry-After, so a client or cache does not take it for "no artwork".
+func TestArtTemporaryFailureIsUnavailable(t *testing.T) {
+	e := newEnv(t, "")
+	e.withArt(`
+case "$*" in *-filters*) exit 0;; esac
+echo "Permission denied" >&2
+exit 1`)
+	rec := e.get(fmt.Sprintf("/api/items/%d/art/thumb", e.mp4))
+	wantJSONError(t, rec, 503)
+	if got := rec.Header().Get("Retry-After"); got != "60" {
+		t.Errorf("Retry-After = %q, want 60", got)
+	}
+}
+
+func TestArtAfterShutdownIsUnavailable(t *testing.T) {
+	e := newEnv(t, "")
+	g := e.withArt(fakeArtScript)
+	url := fmt.Sprintf("/api/items/%d/art/thumb", e.mp4)
+	g.Close()
+	rec := e.get(url)
+	wantJSONError(t, rec, 503)
+	if rec.Header().Get("Retry-After") != "60" {
+		t.Errorf("Retry-After = %q, want 60", rec.Header().Get("Retry-After"))
+	}
 }
 
 func TestArtNeedsTheToken(t *testing.T) {

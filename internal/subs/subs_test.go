@@ -3,11 +3,13 @@ package subs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -139,7 +141,7 @@ func TestPathSharesConcurrentRuns(t *testing.T) {
 func TestFailureIsRememberedUntilTheFileChanges(t *testing.T) {
 	f := &fakeRun{fail: errors.New("exit status 1")}
 	g := newGen(t, f)
-	src := Source{ItemID: 1, Key: "4", Input: "/m/a.mkv", Stream: 4, MTime: 5}
+	src := Source{ItemID: 1, Key: "4", Input: existingFile(t, "a.mkv"), Stream: 4, MTime: 5}
 
 	_, err := g.Path(t.Context(), src)
 	if !errors.Is(err, ErrConvert) || !strings.Contains(err.Error(), "boom: bad input") {
@@ -253,4 +255,140 @@ func TestPrune(t *testing.T) {
 	if _, err := os.Stat(fresh); err != nil {
 		t.Error("Prune removed a temp file that is still being written")
 	}
+}
+
+// existingFile is a stand-in for a media file that is there.
+func existingFile(t *testing.T, name string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(p, []byte("media"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// A share that is asleep or unmounted makes ffmpeg fail, and says nothing
+// about the subtitle: the next request has to try again.
+func TestFailureOfAnUnreachableInputIsNotRemembered(t *testing.T) {
+	f := &fakeRun{fail: errors.New("exit status 1")}
+	g := newGen(t, f)
+	input := filepath.Join(t.TempDir(), "share", "a.mkv")
+	src := Source{ItemID: 1, Key: "4", Input: input, Stream: 4, MTime: 5}
+
+	if _, err := g.Path(t.Context(), src); !errors.Is(err, ErrConvert) {
+		t.Fatalf("with the share gone: err = %v, want ErrConvert", err)
+	}
+	// The share comes back.
+	if err := os.MkdirAll(filepath.Dir(input), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(input, []byte("media"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.fail = nil
+	if _, err := g.Path(t.Context(), src); err != nil {
+		t.Errorf("after the share came back: %v (the transient failure was remembered)", err)
+	}
+	if n := f.calls.Load(); n != 2 {
+		t.Errorf("ffmpeg ran %d times, want 2", n)
+	}
+}
+
+// Other failures (a full disk, say) are remembered, but not for good.
+func TestRememberedFailureExpires(t *testing.T) {
+	f := &fakeRun{fail: errors.New("exit status 1")}
+	g := newGen(t, f)
+	g.failTTL = 50 * time.Millisecond
+	src := Source{ItemID: 1, Key: "4", Input: existingFile(t, "a.mkv"), Stream: 4, MTime: 5}
+
+	if _, err := g.Path(t.Context(), src); !errors.Is(err, ErrConvert) {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := g.Path(t.Context(), src); !errors.Is(err, ErrConvert) || f.calls.Load() != 1 {
+		t.Fatalf("within the TTL: err %v, runs %d; want the remembered failure", err, f.calls.Load())
+	}
+	time.Sleep(80 * time.Millisecond)
+	f.fail = nil
+	if _, err := g.Path(t.Context(), src); err != nil {
+		t.Errorf("after the TTL: %v", err)
+	}
+}
+
+// Shutdown must not leave ffmpeg reading a big file for minutes, nor half-written
+// files: Close kills the process group and removes the temp file.
+func TestCloseStopsConversionsInProgress(t *testing.T) {
+	dir := t.TempDir()
+	pids := filepath.Join(dir, "pids")
+	script := filepath.Join(dir, "ffmpeg")
+	// Like ffmpeg: starts writing the output (the last argument), has a helper
+	// process, and takes its time.
+	body := "#!/bin/sh\nfor last; do :; done\necho partial > \"$last\"\nsleep 300 &\necho \"$$ $!\" > " + pids + ".tmp\nmv " + pids + ".tmp " + pids + "\nwait\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	g, err := New(Options{Dir: filepath.Join(dir, "subs"), FFmpeg: script})
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := Source{ItemID: 1, Key: "2", Input: existingFile(t, "a.mkv"), Stream: 2, MTime: 5}
+
+	pathErr := make(chan error, 1)
+	go func() { _, err := g.Path(context.Background(), src); pathErr <- err }()
+
+	var leader, helper int
+	waitFor(t, "ffmpeg and its helper to run", func() bool {
+		b, err := os.ReadFile(pids)
+		if err != nil {
+			return false
+		}
+		_, err = fmt.Sscan(string(b), &leader, &helper)
+		return err == nil
+	})
+	tmp := filepath.Join(g.dir, cacheName(src)+".tmp")
+	if _, err := os.Stat(tmp); err != nil { // positive control: there is a half-written file to clean up
+		t.Fatalf("setup: no temp file: %v", err)
+	}
+	if !alive(leader) || !alive(helper) {
+		t.Fatalf("setup: processes %d and %d are not both running", leader, helper)
+	}
+
+	start := time.Now()
+	g.Close()
+	if d := time.Since(start); d > 2*time.Second {
+		t.Errorf("Close took %v", d)
+	}
+	waitFor(t, "ffmpeg and its helper to be gone", func() bool { return !alive(leader) && !alive(helper) })
+	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
+		t.Errorf("temp file left behind: %v", err)
+	}
+	select {
+	case err := <-pathErr:
+		if err == nil || errors.Is(err, ErrConvert) {
+			t.Errorf("the waiting request got %v, want a cancellation (not a remembered conversion failure)", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("the request waiting for the conversion never returned")
+	}
+	if _, err := g.Path(context.Background(), Source{ItemID: 2, Key: "1", Input: src.Input, Stream: 1, MTime: 1}); !errors.Is(err, ErrClosed) {
+		t.Errorf("Path after Close = %v, want ErrClosed", err)
+	}
+	g.Close() // idempotent
+	if len(g.failed) != 0 {
+		t.Errorf("shutdown was remembered as a failure: %v", g.failed)
+	}
+}
+
+func alive(pid int) bool {
+	p, err := os.FindProcess(pid)
+	return err == nil && p.Signal(syscall.Signal(0)) == nil
+}
+
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if cond() {
+			return
+		}
+	}
+	t.Fatalf("timed out waiting for %s", what)
 }

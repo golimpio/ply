@@ -373,6 +373,14 @@ func (s *Store) DeleteItems(ctx context.Context, ids []int64) error {
 	return tx.Commit()
 }
 
+// SetItemRoot records which configured media root the item belongs to,
+// without touching anything else (the scanner uses it when a file is found
+// under a different root than the one it was indexed with).
+func (s *Store) SetItemRoot(ctx context.Context, id int64, root string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE items SET root = ? WHERE id = ?`, root, id)
+	return err
+}
+
 // CountItems returns the number of items in the library.
 func (s *Store) CountItems(ctx context.Context) (int, error) {
 	var n int

@@ -118,7 +118,20 @@ func TestPlanSoftwareFallbacks(t *testing.T) {
 			[]string{"av1 is not decoded on the GPU"}, nil},
 		{"unknown source size scales to at most the limit", info(x264),
 			func(r Request) Request { r.Width, r.Height = 0, 0; return r }, "",
-			"scale=-2:'min(ih,1080)',format=yuv420p", nil, nil},
+			"scale=-2:'trunc(min(ih,1080)/2)*2',format=yuv420p", nil, nil},
+		// libx264 refuses odd sizes ("height not divisible by 2"), so the software chain never emits one.
+		{"odd source that fits is trimmed to even", info(x264),
+			func(r Request) Request { r.Height, r.Width, r.BitDepth = 479, 853, 8; return r }, "",
+			"scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p", nil, []string{"scaled from"}},
+		{"odd width alone is trimmed too", info(x264),
+			func(r Request) Request { r.Height, r.Width, r.BitDepth = 480, 853, 8; return r }, "",
+			"scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p", nil, nil},
+		{"an odd height limit is rounded down", info(x264),
+			func(r Request) Request { r.MaxHeight = 361; return r }, "",
+			"scale=-2:360,format=yuv420p", []string{"scaled from 2160p to 360p"}, nil},
+		{"an odd height limit with an unknown source", info(x264),
+			func(r Request) Request { r.Width, r.Height, r.MaxHeight = 0, 0, 361; return r }, "",
+			"scale=-2:'trunc(min(ih,360)/2)*2',format=yuv420p", nil, nil},
 		{"no scale when the source fits", info(x264),
 			func(r Request) Request { r.Height, r.Width, r.BitDepth = 720, 1280, 8; return r }, "",
 			"format=yuv420p", nil, []string{"scaled from", "converted to 8-bit"}},
@@ -173,8 +186,11 @@ func TestPlanBurnIn(t *testing.T) {
 	r.VideoIndex = 1
 
 	// A GPU encoder still encodes, but decode, scale and overlay are software.
+	// Without a two-input scale the older scale2ref scales the subtitle canvas
+	// to the video: iw:ih there are the reference's size (main_w:main_h are the
+	// canvas's own, which scales nothing).
 	s := info(vt, "scale_vt").Plan(r)
-	want := "[0:1]scale=-2:1080[m];[0:3][m]scale2ref=w=main_w:h=main_h[sub][ref];[ref][sub]overlay=eof_action=pass,format=yuv420p[v]"
+	want := "[0:1]scale=-2:1080[m];[0:3][m]scale2ref=w=iw:h=ih[sub][ref];[ref][sub]overlay=eof_action=pass,format=yuv420p[v]"
 	if s.GPU || s.Filter != "" || s.Complex != want || len(s.Pre) != 0 {
 		t.Errorf("vt: gpu=%v filter=%q complex=%q pre=%v", s.GPU, s.Filter, s.Complex, s.Pre)
 	}
@@ -182,12 +198,24 @@ func TestPlanBurnIn(t *testing.T) {
 		t.Errorf("reasons = %q", s.Reasons)
 	}
 
+	// With it, scale=rw:rh sizes the canvas by the (split-off) video.
+	s = info(vt, "scale_vt", RefScale).Plan(r)
+	want = "[0:1]scale=-2:1080,split=2[ref][vref];[0:3][vref]scale=w=rw:h=rh[sub];[ref][sub]overlay=eof_action=pass,format=yuv420p[v]"
+	if s.Complex != want {
+		t.Errorf("vt, ref scale: complex=%q", s.Complex)
+	}
+
 	// No scaling needed: the overlay goes straight onto the video.
 	r.MaxHeight = 0
 	s = info(x264).Plan(r)
-	want = "[0:3][0:1]scale2ref=w=main_w:h=main_h[sub][ref];[ref][sub]overlay=eof_action=pass,format=yuv420p[v]"
+	want = "[0:3][0:1]scale2ref=w=iw:h=ih[sub][ref];[ref][sub]overlay=eof_action=pass,format=yuv420p[v]"
 	if s.Complex != want {
 		t.Errorf("x264: complex=%q", s.Complex)
+	}
+	s = info(x264, RefScale).Plan(r)
+	want = "[0:1]split=2[ref][vref];[0:3][vref]scale=w=rw:h=rh[sub];[ref][sub]overlay=eof_action=pass,format=yuv420p[v]"
+	if s.Complex != want {
+		t.Errorf("x264, ref scale: complex=%q", s.Complex)
 	}
 
 	// VAAPI uploads the overlaid frames; HDR tone mapping runs after the overlay.
@@ -196,6 +224,27 @@ func TestPlanBurnIn(t *testing.T) {
 	if !strings.Contains(s.Complex, "overlay=eof_action=pass,zscale=t=linear:npl=100") ||
 		!strings.HasSuffix(s.Complex, "format=nv12,hwupload[v]") {
 		t.Errorf("va: complex=%q", s.Complex)
+	}
+}
+
+// The subtitle canvas must be sized by the video, never by itself: the
+// reference of the scale has to be the video's branch and the thing scaled
+// the subtitle stream, in either form.
+func TestBurnGraphScalesTheSubtitleToTheVideo(t *testing.T) {
+	r := uhd10()
+	r.BurnSubtitle, r.VideoIndex = 5, 2
+	for _, refScale := range []bool{false, true} {
+		g := burnGraph(x264, r, 1080, true, false, refScale)
+		if strings.Contains(g, "main_w") || strings.Contains(g, "main_h") {
+			t.Errorf("refScale=%v: %s scales the canvas by itself", refScale, g)
+		}
+		if refScale {
+			if !strings.Contains(g, "[0:5][vref]scale=w=rw:h=rh[sub]") || !strings.Contains(g, "split=2[ref][vref]") {
+				t.Errorf("graph = %s", g)
+			}
+		} else if !strings.Contains(g, "[0:5][m]scale2ref=w=iw:h=ih[sub][ref]") {
+			t.Errorf("graph = %s", g)
+		}
 	}
 }
 
@@ -254,6 +303,8 @@ func TestTarget(t *testing.T) {
 		{Request{Width: 720, Height: 576, MaxHeight: 480}, 600, 480, true},
 		{Request{Width: 0, Height: 0, MaxHeight: 720}, -2, 720, true},
 		{Request{Width: 0, Height: 0, MaxHeight: 0}, 0, 0, false},
+		{Request{Width: 853, Height: 479, MaxHeight: 361}, 640, 360, true}, // an odd limit rounds down
+		{Request{Width: 3840, Height: 2160, MaxHeight: 1}, 4, 2, true},
 	}
 	for _, tt := range tests {
 		if w, h, resize := target(tt.r); w != tt.w || h != tt.h || resize != tt.resize {

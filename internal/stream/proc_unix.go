@@ -6,7 +6,10 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -31,6 +34,28 @@ func signalGroup(cmd *exec.Cmd, stop bool) error {
 		sig = syscall.SIGSTOP
 	}
 	return syscall.Kill(-cmd.Process.Pid, sig)
+}
+
+// killStaleGroup kills the process group pgid, left behind by a ply that
+// crashed, if its leader still looks like the program that was recorded
+// (pids get reused). A stopped group is continued first. It reports whether
+// anything was killed.
+func killStaleGroup(pgid int, program string) bool {
+	if pgid <= 1 {
+		return false
+	}
+	out, err := exec.Command("ps", "-o", "command=", "-p", strconv.Itoa(pgid)).Output()
+	if err != nil || !strings.Contains(string(out), filepath.Base(program)) {
+		return false
+	}
+	_ = syscall.Kill(-pgid, syscall.SIGCONT)
+	return syscall.Kill(-pgid, syscall.SIGKILL) == nil
+}
+
+// ownedByUs reports whether the file belongs to the user running ply.
+func ownedByUs(fi os.FileInfo) bool {
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	return !ok || int(st.Uid) == os.Geteuid()
 }
 
 func setNice(pid, nice int) { _ = syscall.Setpriority(syscall.PRIO_PROCESS, pid, nice) }

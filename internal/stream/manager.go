@@ -6,10 +6,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -137,6 +139,7 @@ type Manager struct {
 	mu       sync.Mutex
 	sessions map[string]*Session
 	reserved int
+	stopping int // sessions taken out of sessions whose ffmpeg and files are not gone yet
 	closed   bool
 	wg       sync.WaitGroup // session monitors
 
@@ -151,9 +154,13 @@ type kfCall struct {
 }
 
 // NewManager prepares the temp area, removing what crashed predecessors left
-// there, and returns an idle manager.
+// there (including any ffmpeg they left running), and returns an idle
+// manager. It fails if the temp root is not a directory of ours.
 func NewManager(o Options) (*Manager, error) {
 	o.defaults()
+	if err := prepareRoot(o.TempRoot); err != nil {
+		return nil, fmt.Errorf("stream temp dir: %w", err)
+	}
 	removeStale(o.TempRoot, o.Logger)
 	dir := filepath.Join(o.TempRoot, strconv.Itoa(os.Getpid()))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -166,8 +173,35 @@ func NewManager(o Options) (*Manager, error) {
 	}, nil
 }
 
-// removeStale deletes the per-process directories of processes that are gone
-// (and any leftover of an earlier process with our own pid).
+// prepareRoot makes sure the temp root is a real directory that belongs to
+// us. The default (os.TempDir()/ply-sessions) is a predictable name in a
+// possibly shared directory, and everything under it gets deleted, so a
+// symlink or somebody else's directory there is refused, not followed.
+func prepareRoot(root string) error {
+	fi, err := os.Lstat(root)
+	if errors.Is(err, fs.ErrNotExist) {
+		return os.MkdirAll(root, 0o700)
+	}
+	switch {
+	case err != nil:
+		return err
+	case fi.Mode()&fs.ModeSymlink != 0:
+		return fmt.Errorf("%s is a symbolic link; refusing to use it (remove it or choose another temp directory)", root)
+	case !fi.IsDir():
+		return fmt.Errorf("%s is not a directory", root)
+	case !ownedByUs(fi):
+		return fmt.Errorf("%s belongs to another user; refusing to use it", root)
+	}
+	if fi.Mode().Perm()&0o077 != 0 { // ours, so we may tighten it
+		return os.Chmod(root, 0o700)
+	}
+	return nil
+}
+
+// removeStale deletes the per-process directories (named by pid) of processes
+// that are gone, and any leftover of an earlier process with our own pid,
+// after killing the ffmpeg they may have left running. Anything in the root
+// that is not named like a pid is not ours and stays.
 func removeStale(root string, log *slog.Logger) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -175,11 +209,43 @@ func removeStale(root string, log *slog.Logger) {
 	}
 	for _, e := range entries {
 		pid, err := strconv.Atoi(e.Name())
-		if err == nil && pid != os.Getpid() && processAlive(pid) {
+		if err != nil || pid <= 0 || strconv.Itoa(pid) != e.Name() {
+			continue
+		}
+		if pid != os.Getpid() && processAlive(pid) {
 			continue // another live ply sharing the temp area
 		}
-		if err := os.RemoveAll(filepath.Join(root, e.Name())); err != nil {
+		dir := filepath.Join(root, e.Name())
+		killLeftoverFFmpeg(dir, log)
+		if err := os.RemoveAll(dir); err != nil {
 			log.Warn("remove stale session dir", "dir", e.Name(), "err", err)
+		}
+	}
+}
+
+// pidFile is written into every session directory: the process group of the
+// session's ffmpeg and the program it runs, for killLeftoverFFmpeg.
+const pidFile = "ffmpeg.pid"
+
+// killLeftoverFFmpeg kills the ffmpeg process groups recorded in the session
+// directories under dir, the work of a ply that crashed (a throttled ffmpeg is
+// stopped, and would hold its source file open forever).
+func killLeftoverFFmpeg(dir string, log *slog.Logger) {
+	sessions, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range sessions {
+		if !e.IsDir() {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(dir, e.Name(), pidFile))
+		if err != nil {
+			continue
+		}
+		pgidText, program, _ := strings.Cut(strings.TrimSpace(string(b)), " ")
+		if pgid, err := strconv.Atoi(pgidText); err == nil && program != "" && killStaleGroup(pgid, program) {
+			log.Warn("killed an ffmpeg left behind by a crashed ply", "pgid", pgid, "session", e.Name())
 		}
 	}
 }
@@ -187,11 +253,13 @@ func removeStale(root string, log *slog.Logger) {
 // Dir is the directory holding this manager's session directories.
 func (m *Manager) Dir() string { return m.dir }
 
-// Count returns the number of live sessions.
+// Count returns the number of sessions that still hold resources: live ones,
+// and ones being stopped. When it drops, their ffmpeg has exited and their
+// directory is gone.
 func (m *Manager) Count() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return len(m.sessions)
+	return len(m.sessions) + m.stopping
 }
 
 // Get returns a live session.
@@ -206,12 +274,23 @@ func (m *Manager) Get(id string) (*Session, bool) {
 func (m *Manager) Delete(id string) bool {
 	m.mu.Lock()
 	s, ok := m.sessions[id]
-	delete(m.sessions, id)
+	if ok {
+		delete(m.sessions, id)
+		m.stopping++
+	}
 	m.mu.Unlock()
 	if ok {
 		s.stop()
+		m.stopped()
 	}
 	return ok
+}
+
+// stopped records that a session taken out of the map is completely gone.
+func (m *Manager) stopped() {
+	m.mu.Lock()
+	m.stopping--
+	m.mu.Unlock()
 }
 
 // Close stops every session, waits for their processes to exit and removes
@@ -224,12 +303,13 @@ func (m *Manager) Close() {
 		all = append(all, s)
 		delete(m.sessions, id)
 	}
+	m.stopping += len(all)
 	m.mu.Unlock()
 
 	var wg sync.WaitGroup
 	for _, s := range all {
 		wg.Add(1)
-		go func() { defer wg.Done(); s.stop() }()
+		go func() { defer wg.Done(); s.stop(); m.stopped() }()
 	}
 	wg.Wait()
 	m.cancel() // aborts keyframe scans
@@ -246,7 +326,7 @@ func (m *Manager) Create(ctx context.Context, r Request) (*Session, error) {
 		m.mu.Unlock()
 		return nil, ErrClosed
 	}
-	if len(m.sessions)+m.reserved >= m.o.MaxSessions {
+	if len(m.sessions)+m.reserved+m.stopping >= m.o.MaxSessions {
 		m.mu.Unlock()
 		return nil, ErrTooManySessions
 	}

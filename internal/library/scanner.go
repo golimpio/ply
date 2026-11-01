@@ -178,19 +178,70 @@ func (s *Scanner) scanAll(ctx context.Context, sum *summary) error {
 	if err != nil {
 		return fmt.Errorf("load library state: %w", err)
 	}
-	var errs []error
+	// Which configured root indexes which file. Roots may nest (/m and
+	// /m/movies): the root that already has the row keeps it, otherwise the
+	// first one to reach the file takes it, so a file is probed once and does
+	// not move between roots from scan to scan.
+	owners := map[string]string{}
+	for path, st := range states {
+		if s.configured(st.Root) && within(st.Root, path) {
+			owners[path] = st.Root
+		}
+	}
+	var (
+		errs   []error
+		failed []string // roots that did not scan cleanly
+	)
 	for _, root := range s.roots {
 		if ctx.Err() != nil {
 			break
 		}
-		if err := s.scanRoot(ctx, root, states, sum); err != nil {
+		if err := s.scanRoot(ctx, root, states, owners, sum); err != nil {
 			errs = append(errs, err)
+			failed = append(failed, root)
 		}
 	}
 	if err := ctx.Err(); err != nil && !errors.Is(errors.Join(errs...), err) {
 		errs = append(errs, err)
+	} else if err == nil {
+		errs = append(errs, s.removeOrphans(ctx, states, failed, sum))
 	}
 	return errors.Join(errs...)
+}
+
+func (s *Scanner) configured(root string) bool { return slices.Contains(s.roots, root) }
+
+// within reports whether path is inside root.
+func within(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// removeOrphans drops the rows of roots that are no longer configured (and
+// were not taken over by a configured root that contains the file), but only
+// those whose file is positively gone: an item that can still be reached stays
+// until somebody decides otherwise. Files inside a root that failed to scan
+// are left alone too: that root may be the one about to take them over.
+func (s *Scanner) removeOrphans(ctx context.Context, states map[string]store.FileState, failed []string,
+	sum *summary) error {
+	var gone []int64
+	for path, st := range states {
+		if s.configured(st.Root) || slices.ContainsFunc(failed, func(r string) bool { return within(r, path) }) {
+			continue
+		}
+		if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
+			gone = append(gone, st.ID)
+		}
+	}
+	if len(gone) == 0 {
+		return nil
+	}
+	if err := s.store.DeleteItems(ctx, gone); err != nil {
+		return fmt.Errorf("remove items of unconfigured roots: %w", err)
+	}
+	sum.removed.Add(int64(len(gone)))
+	s.log.Info("removed missing files of roots that are no longer configured", "count", len(gone))
+	return nil
 }
 
 type job struct {
@@ -201,16 +252,28 @@ type job struct {
 }
 
 // scanRoot walks one root, indexes new and changed files, and removes rows
-// for files that have disappeared, but only if the root exists and the walk
-// completed without a single error: an unmounted volume or an unreadable
-// directory must never wipe the library.
-func (s *Scanner) scanRoot(ctx context.Context, root string, states map[string]store.FileState, sum *summary) error {
+// for files that have disappeared, but only if the root exists, the walk
+// completed without a single error and it found something: an unmounted
+// volume (an empty mountpoint, a symlink farm whose targets are gone) or an
+// unreadable directory must never wipe the library.
+//
+// owners maps each file to the configured root that indexes it; states is the
+// library as it was when the scan started.
+func (s *Scanner) scanRoot(ctx context.Context, root string, states map[string]store.FileState,
+	owners map[string]string, sum *summary) error {
 	fi, err := os.Stat(root)
 	if err != nil {
 		return fmt.Errorf("root %s: %w", root, err)
 	}
 	if !fi.IsDir() {
 		return fmt.Errorf("root %s: not a directory", root)
+	}
+	// WalkDir does not descend into a root that is a symlink, which would look
+	// like an empty library. Walk the real directory, but keep the paths (and
+	// so the rows) under the configured name.
+	walkRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return fmt.Errorf("root %s: %w", root, err)
 	}
 
 	var (
@@ -248,13 +311,13 @@ func (s *Scanner) scanRoot(ctx context.Context, root string, states map[string]s
 	seen := map[string]struct{}{}
 	var listing dirNames
 	walkErrors := 0
-	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	walkErr := filepath.WalkDir(walkRoot, func(walked string, d fs.DirEntry, err error) error {
 		if err != nil {
 			walkErrors++
-			s.log.Warn("walk error", "path", path, "err", err)
+			s.log.Warn("walk error", "path", walked, "err", err)
 			return nil // keep going, but the root is now ineligible for deletions
 		}
-		if path != root && strings.HasPrefix(d.Name(), ".") {
+		if walked != walkRoot && strings.HasPrefix(d.Name(), ".") {
 			if d.IsDir() {
 				return fs.SkipDir
 			}
@@ -263,21 +326,53 @@ func (s *Scanner) scanRoot(ctx context.Context, root string, states map[string]s
 		if d.IsDir() || !IsVideoFile(d.Name()) {
 			return nil
 		}
+		path := walked
+		if walkRoot != root {
+			rel, err := filepath.Rel(walkRoot, walked)
+			if err != nil {
+				walkErrors++
+				s.log.Warn("walk error", "path", walked, "err", err)
+				return nil
+			}
+			path = filepath.Join(root, rel)
+		}
 		info, err := os.Stat(path) // follows file symlinks
 		if err != nil {
-			if !errors.Is(err, fs.ErrNotExist) { // dangling symlink or raced delete
+			switch {
+			case !errors.Is(err, fs.ErrNotExist):
 				walkErrors++
 				s.log.Warn("stat error", "path", path, "err", err)
+			case d.Type()&fs.ModeSymlink != 0:
+				// A dangling link is not a raced delete: in a symlink farm it is
+				// what an unmounted target drive looks like. One that never
+				// made it into the library is just noise.
+				if _, indexed := states[path]; indexed {
+					walkErrors++
+					s.log.Warn("indexed file is now a dangling symlink", "path", path)
+				}
 			}
 			return nil
 		}
 		if !info.Mode().IsRegular() {
 			return nil
 		}
+		if owner, ok := owners[path]; ok && owner != root {
+			return nil // another configured root (a nested one) indexes this file
+		}
+		owners[path] = root
 		seen[path] = struct{}{}
 		mtime := info.ModTime().UnixNano()
 		subs := sidecars(path, listing.list(filepath.Dir(path)))
 		if st, ok := states[path]; ok && st.Size == info.Size() && st.MTime == mtime {
+			if st.Root != root {
+				// Indexed under a root that is gone from the configuration.
+				if err := s.store.SetItemRoot(ctx, st.ID, root); err != nil {
+					s.log.Warn("move item to its new root", "path", path, "err", err)
+				} else {
+					st.Root = root
+					states[path] = st
+				}
+			}
 			// The video is unchanged, but subtitles come and go on their own.
 			if !slices.Equal(st.Subs, subs) {
 				if err := s.store.SetExternalSubtitles(ctx, st.ID, subs); err != nil {
@@ -305,9 +400,26 @@ func (s *Scanner) scanRoot(ctx context.Context, root string, states map[string]s
 	if walkErrors > 0 {
 		errs = append(errs, fmt.Errorf("root %s: %d errors while walking; removals skipped", root, walkErrors))
 	} else if ctx.Err() == nil {
-		errs = append(errs, s.removeMissing(ctx, root, states, seen, sum))
+		if n := s.rowsOf(root, states); len(seen) == 0 && n > 0 {
+			// Looks like an unmounted volume: its mountpoint is an empty directory.
+			errs = append(errs, fmt.Errorf("root %s: no video files found, but %d indexed items came from it; "+
+				"refusing to remove them (is the volume mounted?)", root, n))
+		} else {
+			errs = append(errs, s.removeMissing(ctx, root, states, seen, sum))
+		}
 	}
 	return errors.Join(errs...)
+}
+
+// rowsOf counts the rows that belong to root.
+func (s *Scanner) rowsOf(root string, states map[string]store.FileState) int {
+	n := 0
+	for _, st := range states {
+		if st.Root == root {
+			n++
+		}
+	}
+	return n
 }
 
 func (s *Scanner) removeMissing(ctx context.Context, root string, states map[string]store.FileState,

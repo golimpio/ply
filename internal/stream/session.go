@@ -2,8 +2,10 @@ package stream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,6 +38,11 @@ type Session struct {
 	pruned   int    // GOP files below this index are already removed
 	closed   bool
 	fellBack bool // the GPU transcode failed and the software one took over
+
+	// Segment requests in progress, by arrival number. Only the newest one may
+	// replace a running ffmpeg (see ensureGOP).
+	reqSeq  uint64
+	waiting map[uint64]struct{}
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
@@ -156,14 +163,24 @@ func (s *Session) startRunLocked(g int) error {
 		return fmt.Errorf("start ffmpeg: %w", err)
 	}
 	r.cmd, r.cancel = cmd, cancel
+	// If ply itself dies without cleaning up, the next one finds this and kills
+	// the ffmpeg (it has its own process group, so nobody else will).
+	if err := os.WriteFile(filepath.Join(s.dir, pidFile), []byte(fmt.Sprintf("%d %s\n", cmd.Process.Pid, cmd.Path)), 0o600); err != nil {
+		s.m.log.Warn("record ffmpeg pid", "session", s.ID, "err", err)
+	}
 	started := time.Now()
 	go func() {
 		r.err = cmd.Wait()
+		diedByItself := r.err != nil && ctx.Err() == nil // not stopped by us
 		cancel()
 		cpu, rss := usage(cmd.ProcessState)
 		s.m.log.Info("ffmpeg stopped", "session", s.ID, "run", r.id, "from_gop", g,
 			"wall", time.Since(started).Round(time.Millisecond), "cpu", cpu.Round(time.Millisecond),
 			"max_rss_mb", rss>>20, "exit", exitText(r.err))
+		if diedByItself {
+			// What ffmpeg said is the only account of why (a client just gets a 500).
+			s.m.log.Warn("ffmpeg failed", "session", s.ID, "run", r.id, "exit", exitText(r.err), "stderr", r.stderr.String())
+		}
 		close(r.done)
 	}()
 	s.run = r
@@ -196,6 +213,7 @@ func (s *Session) stopRunLocked() {
 	r.cancel()
 	<-r.done
 	s.run = nil
+	_ = os.Remove(filepath.Join(s.dir, pidFile))
 	if p := filepath.Join(s.dir, r.initName); p != s.initPath {
 		_ = os.Remove(p)
 	}
@@ -333,9 +351,63 @@ func (s *Session) stop() {
 // gopFile returns the finished fragment for GOP g.
 func (s *Session) gopFile(g int) (fileInfo, bool) { return checkFile(s.gopPath(g), "gop") }
 
+// beginRequest registers a segment request and returns its arrival number
+// and the function that ends it.
+func (s *Session) beginRequest(idx int) (id uint64, end func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastSeg = idx
+	s.reqSeq++
+	id = s.reqSeq
+	if s.waiting == nil {
+		s.waiting = map[uint64]struct{}{}
+	}
+	s.waiting[id] = struct{}{}
+	return id, func() {
+		s.mu.Lock()
+		delete(s.waiting, id)
+		s.mu.Unlock()
+	}
+}
+
+// newestLocked reports whether request id is the most recent one still in
+// progress.
+func (s *Session) newestLocked(id uint64) bool {
+	for other := range s.waiting {
+		if other > id {
+			return false
+		}
+	}
+	return true
+}
+
+// beyondRunLocked reports whether the running ffmpeg r will not produce GOP g
+// soon enough, or ever: g is before its start, too far past its output, or
+// was written and has since been pruned (ffmpeg never rewrites a fragment).
+func (s *Session) beyondRunLocked(r *run, g int) bool {
+	switch {
+	case g < r.start:
+		return true
+	case s.plan.TimeOf(g) > s.plan.TimeOf(r.next)+s.m.o.Lookahead:
+		return true
+	case g < r.next:
+		_, err := os.Stat(s.gopPath(g))
+		return errors.Is(err, fs.ErrNotExist)
+	}
+	return false
+}
+
 // ensureGOP blocks until fragment g is complete on disk, starting or
-// restarting ffmpeg when it is not going to get there by itself.
-func (s *Session) ensureGOP(ctx context.Context, g int) error {
+// restarting ffmpeg when it is not going to get there by itself. req is the
+// arrival number of the segment request g belongs to.
+//
+// One ffmpeg serves the session, so concurrent requests for places far apart
+// cannot all be served at once. The newest request owns it: it alone may
+// replace a running ffmpeg, and older ones wait (they are served if the run
+// happens to reach them, or take over when the newer requests are done, or
+// time out). Without this rule two such waiters would kill each other's ffmpeg
+// on every poll, forever.
+func (s *Session) ensureGOP(ctx context.Context, g int, req uint64) error {
 	timeout := time.NewTimer(s.m.o.WaitTimeout)
 	defer timeout.Stop()
 	poll := time.NewTicker(25 * time.Millisecond)
@@ -370,8 +442,18 @@ func (s *Session) ensureGOP(ctx context.Context, g int) error {
 			}
 			s.mu.Unlock()
 			return fmt.Errorf("ffmpeg did not produce segment data: %s", msg)
-		case r == nil || r.exited() || g < r.start || s.plan.TimeOf(g) > s.plan.TimeOf(r.next)+s.m.o.Lookahead:
-			// Outside what the running ffmpeg will produce soon: seek.
+		case r == nil || r.exited():
+			if err := s.startRunLocked(g); err != nil {
+				s.mu.Unlock()
+				return err
+			}
+			mine = s.run
+		case s.beyondRunLocked(r, g):
+			// Outside what the running ffmpeg will produce soon: seek, unless a
+			// newer request is the one ffmpeg is working for.
+			if !s.newestLocked(req) {
+				break
+			}
 			if err := s.startRunLocked(g); err != nil {
 				s.mu.Unlock()
 				return err
@@ -401,14 +483,13 @@ func (s *Session) OpenSegment(ctx context.Context, idx int) (*Media, error) {
 		return nil, ErrNoSegment
 	}
 	s.touch()
-	s.mu.Lock()
-	s.lastSeg = idx
-	s.mu.Unlock()
+	req, end := s.beginRequest(idx)
+	defer end()
 	seg := s.plan.Segments[idx]
 
 	for attempt := 0; ; attempt++ {
 		for g := seg.First; g < seg.End; g++ {
-			if err := s.ensureGOP(ctx, g); err != nil {
+			if err := s.ensureGOP(ctx, g, req); err != nil {
 				return nil, err
 			}
 		}

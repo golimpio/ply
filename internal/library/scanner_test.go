@@ -513,6 +513,7 @@ func TestScanCancelledDoesNotRemoveItems(t *testing.T) {
 	root := t.TempDir()
 	file := filepath.Join(root, "a (2020).mp4")
 	write(t, file, "a")
+	write(t, filepath.Join(root, "b (2021).mp4"), "b") // stays: a root that loses every file is not synced
 	s, st, _ := newScanner(t, root)
 	mustScan(t, s)
 
@@ -524,11 +525,285 @@ func TestScanCancelledDoesNotRemoveItems(t *testing.T) {
 	if err := s.Scan(ctx); err == nil {
 		t.Error("cancelled scan should report an error")
 	}
-	if n := len(paths(t, st)); n != 1 {
-		t.Errorf("cancelled scan removed items: %d left, want 1", n)
+	if n := len(paths(t, st)); n != 2 {
+		t.Errorf("cancelled scan removed items: %d left, want 2", n)
 	}
 	mustScan(t, s) // positive control: an uncancelled scan removes it
-	if n := len(paths(t, st)); n != 0 {
-		t.Errorf("uncancelled scan left %d items, want 0", n)
+	if got := paths(t, st); len(got) != 1 {
+		t.Errorf("uncancelled scan left %v, want only the file that is still there", keys(got))
 	}
+}
+
+// WalkDir does not descend into a root that is itself a symlink: the walk
+// then "completes" with nothing found and every row would be deleted.
+func TestSymlinkedRootDoesNotWipeLibrary(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "media")
+	write(t, filepath.Join(root, "Movies", "a (2020).mp4"), "a")
+	write(t, filepath.Join(root, "b (2021).mp4"), "b")
+
+	s, st, fp := newScanner(t, root)
+	mustScan(t, s)
+	if n := len(paths(t, st)); n != 2 {
+		t.Fatalf("setup: %d items, want 2", n)
+	}
+
+	// The volume is remounted elsewhere and the old path becomes a link to it.
+	moved := filepath.Join(base, "moved")
+	if err := os.Rename(root, moved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(moved, root); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	probed := fp.calls.Load()
+	mustScan(t, s)
+	got := paths(t, st)
+	if len(got) != 2 {
+		t.Fatalf("a symlinked root wiped the library: %v", keys(got))
+	}
+	if fp.calls.Load() != probed {
+		t.Error("unchanged files were probed again through the symlink")
+	}
+
+	// Positive control: the walk really goes through the link (new files are
+	// found, under the configured path) and deletions still apply.
+	write(t, filepath.Join(moved, "c (2022).mp4"), "c")
+	if err := os.Remove(filepath.Join(moved, "b (2021).mp4")); err != nil {
+		t.Fatal(err)
+	}
+	mustScan(t, s)
+	got = paths(t, st)
+	for _, want := range []string{filepath.Join(root, "Movies", "a (2020).mp4"), filepath.Join(root, "c (2022).mp4")} {
+		if e, ok := got[want]; !ok || e.Root != root {
+			t.Errorf("%s not indexed under the configured root: %v", want, keys(got))
+		}
+	}
+	if len(got) != 2 {
+		t.Errorf("items = %v, want a and c", keys(got))
+	}
+}
+
+func TestFreshLibraryFromSymlinkedRoot(t *testing.T) {
+	base := t.TempDir()
+	real := filepath.Join(base, "real dir")
+	write(t, filepath.Join(real, "Shows", "S01E01 One.mkv"), "1")
+	write(t, filepath.Join(real, ".hidden.mp4"), "x")
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	s, st, _ := newScanner(t, link)
+	mustScan(t, s)
+	got := paths(t, st)
+	want := filepath.Join(link, "Shows", "S01E01 One.mkv")
+	if e, ok := got[want]; !ok || len(got) != 1 || e.Root != link {
+		t.Errorf("-media pointing at a symlink indexed %v, want only %s", keys(got), want)
+	}
+}
+
+// An unmounted NAS leaves an empty mountpoint: it exists and walks cleanly.
+func TestEmptyRootDoesNotWipeLibrary(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "nas")
+	a, b := filepath.Join(root, "a (2020).mp4"), filepath.Join(root, "Dir", "b (2021).mp4")
+	write(t, a, "a")
+	write(t, b, "b")
+
+	s, st, _ := newScanner(t, root)
+	mustScan(t, s)
+	if n := len(paths(t, st)); n != 2 {
+		t.Fatalf("setup: %d items, want 2", n)
+	}
+
+	stash := filepath.Join(base, "stash")
+	if err := os.Rename(root, stash); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(root, 0o755); err != nil { // the mountpoint
+		t.Fatal(err)
+	}
+	err := s.Scan(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "refusing") {
+		t.Errorf("scan of an emptied root = %v, want an error explaining the refusal", err)
+	}
+	if n := len(paths(t, st)); n != 2 {
+		t.Errorf("an empty root wiped the library: %d items left, want 2", n)
+	}
+	if s.Status(context.Background()).LastError == "" {
+		t.Error("lastError not set")
+	}
+
+	// Positive controls: remounted, deletions apply again; and an empty root
+	// with nothing indexed from it is not an error.
+	if err := os.Remove(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(stash, root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(b); err != nil {
+		t.Fatal(err)
+	}
+	mustScan(t, s)
+	if got := paths(t, st); len(got) != 1 {
+		t.Errorf("after remounting and deleting one file: %v, want only a", keys(got))
+	}
+	empty := t.TempDir()
+	s2, _, _ := newScanner(t, empty)
+	mustScan(t, s2)
+}
+
+// In a symlink farm a dangling link is what an unmounted target drive looks
+// like. The existing test covers one that was never indexed.
+func TestDanglingSymlinkOfIndexedFileBlocksRemovals(t *testing.T) {
+	base := t.TempDir()
+	drive := filepath.Join(base, "drive")
+	write(t, filepath.Join(drive, "Linked (2001).mkv"), "linked")
+	root := filepath.Join(base, "farm")
+	keep := filepath.Join(root, "keep (2020).mp4")
+	doomed := filepath.Join(root, "doomed (2021).mp4")
+	link := filepath.Join(root, "Linked (2001).mkv")
+	write(t, keep, "k")
+	write(t, doomed, "d")
+	if err := os.Symlink(filepath.Join(drive, "Linked (2001).mkv"), link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	s, st, _ := newScanner(t, root)
+	mustScan(t, s)
+	if n := len(paths(t, st)); n != 3 {
+		t.Fatalf("setup: %d items, want 3", n)
+	}
+
+	unplugged := filepath.Join(base, "unplugged")
+	if err := os.Rename(drive, unplugged); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(doomed); err != nil { // a genuine deletion in the same scan
+		t.Fatal(err)
+	}
+	err := s.Scan(context.Background())
+	if err == nil {
+		t.Error("a dangling link to an indexed file should be reported")
+	}
+	if n := len(paths(t, st)); n != 3 {
+		t.Errorf("a dangling symlink let the scan delete items: %d left, want 3", n)
+	}
+	if s.Status(context.Background()).LastError == "" {
+		t.Error("lastError not set")
+	}
+
+	// Positive control: the drive is back, the earlier deletion goes through.
+	if err := os.Rename(unplugged, drive); err != nil {
+		t.Fatal(err)
+	}
+	mustScan(t, s)
+	if got := paths(t, st); len(got) != 2 {
+		t.Errorf("after the drive came back: %v, want keep and the linked file", keys(got))
+	}
+}
+
+// Rows of a root that is no longer configured are not left behind for good.
+func TestRowsOfRemovedRootArePrunedWhenTheirFilesVanish(t *testing.T) {
+	base := t.TempDir()
+	rootA, rootB := filepath.Join(base, "a"), filepath.Join(base, "b")
+	write(t, filepath.Join(rootA, "a1 (2020).mp4"), "1")
+	keep := filepath.Join(rootB, "b1 (2021).mp4")
+	gone := filepath.Join(rootB, "b2 (2022).mp4")
+	write(t, keep, "2")
+	write(t, gone, "3")
+
+	s, st, fp := newScanner(t, rootA, rootB)
+	mustScan(t, s)
+	if n := len(paths(t, st)); n != 3 {
+		t.Fatalf("setup: %d items, want 3", n)
+	}
+
+	// Restart with only root A configured.
+	s = NewScanner(context.Background(), st, fp, []string{rootA}, nil)
+	if err := os.Remove(gone); err != nil {
+		t.Fatal(err)
+	}
+	mustScan(t, s)
+	got := paths(t, st)
+	if _, ok := got[gone]; ok {
+		t.Error("row of a removed root whose file is gone was never pruned")
+	}
+	if _, ok := got[keep]; !ok {
+		t.Error("row of a removed root whose file is still there was deleted")
+	}
+	if len(got) != 2 {
+		t.Errorf("items = %v, want a1 and b1", keys(got))
+	}
+}
+
+// With nested roots a file belongs to one of them, is probed once, and stays
+// indexed when the other root goes away.
+func TestNestedRoots(t *testing.T) {
+	base := t.TempDir()
+	outer := filepath.Join(base, "m")
+	inner := filepath.Join(outer, "movies")
+	movie := filepath.Join(inner, "Movie (2020).mp4")
+	top := filepath.Join(outer, "Top (2021).mp4")
+	write(t, movie, "m")
+	write(t, top, "t")
+
+	s, st, fp := newScanner(t, outer, inner)
+	mustScan(t, s)
+	if n := fp.calls.Load(); n != 2 {
+		t.Errorf("first scan probed %d times for 2 files", n)
+	}
+	for _, p := range []string{movie, top} {
+		if e := paths(t, st)[p]; e.Root != outer {
+			t.Errorf("%s belongs to %q, want the root that reached it first (%s)", p, e.Root, outer)
+		}
+	}
+	mustScan(t, s)
+	if n := fp.calls.Load(); n != 2 {
+		t.Errorf("second scan probed again: %d calls", n)
+	}
+
+	// The inner root is removed from the configuration: the outer one still
+	// walks its files, deletions keep working.
+	s = NewScanner(context.Background(), st, fp, []string{outer}, nil)
+	mustScan(t, s)
+	if err := os.Remove(movie); err != nil {
+		t.Fatal(err)
+	}
+	mustScan(t, s)
+	got := paths(t, st)
+	if _, ok := got[movie]; ok || len(got) != 1 {
+		t.Errorf("items = %v, want only %s", keys(got), top)
+	}
+
+	// And the other way round: rows first indexed under the inner root move to
+	// the outer one when the inner one is dropped.
+	st2, fp2 := newScanner2(t)
+	in2 := NewScanner(context.Background(), st2, fp2, []string{inner}, nil)
+	write(t, movie, "m")
+	mustScan(t, in2)
+	if e := paths(t, st2)[movie]; e.Root != inner {
+		t.Fatalf("setup: movie belongs to %q", e.Root)
+	}
+	out2 := NewScanner(context.Background(), st2, fp2, []string{outer}, nil)
+	mustScan(t, out2)
+	if e := paths(t, st2)[movie]; e.Root != outer {
+		t.Errorf("movie belongs to %q after the inner root was dropped, want %s", e.Root, outer)
+	}
+	if err := os.Remove(movie); err != nil {
+		t.Fatal(err)
+	}
+	mustScan(t, out2)
+	if _, ok := paths(t, st2)[movie]; ok {
+		t.Error("a row orphaned by dropping the inner root is never removed")
+	}
+}
+
+// newScanner2 is a store and prober without a scanner, for tests that change
+// the configured roots between scans.
+func newScanner2(t *testing.T) (*store.Store, *fakeProber) {
+	t.Helper()
+	_, st, fp := newScanner(t)
+	return st, fp
 }

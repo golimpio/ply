@@ -269,6 +269,13 @@ func TestSubtitlesEndToEnd(t *testing.T) {
 // whose crop of the box region (x 120-199, y 145-154) is white.
 func brightFrames(t *testing.T, e *e2e, pb Playback) (white, total int) {
 	t.Helper()
+	return brightFramesIn(t, e, pb, 120, 145, 80, 10)
+}
+
+// brightFramesIn counts the frames of the first segment whose w x h crop at
+// (x, y) is white.
+func brightFramesIn(t *testing.T, e *e2e, pb Playback, x, y, w, h int) (white, total int) {
+	t.Helper()
 	_, pl := e.do("GET", pb.URL, "", nil)
 	initURI, segs := parsePlaylist(t, string(pl))
 	base := "/api/sessions/" + pb.SessionID + "/"
@@ -285,7 +292,7 @@ func brightFrames(t *testing.T, e *e2e, pb Playback) (white, total int) {
 		t.Fatal(err)
 	}
 	out, err := exec.Command("ffmpeg", "-nostdin", "-v", "error", "-i", f, "-vf",
-		"crop=80:10:120:145,scale=1:1:flags=area,format=rgb24", "-f", "rawvideo", "-").Output()
+		fmt.Sprintf("crop=%d:%d:%d:%d,scale=1:1:flags=area,format=rgb24", w, h, x, y), "-f", "rawvideo", "-").Output()
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -356,5 +363,87 @@ func TestImageSubtitleIsBurnedIn(t *testing.T) {
 	}
 	if p := ffmpegRunning(t, root); len(p) != 0 {
 		t.Errorf("ffmpeg children left: %v", p)
+	}
+}
+
+// A bitmap subtitle is drawn for its own canvas (the .idx says 320x180 here),
+// which is often not the size of the video. The burn-in has to scale it to the
+// video; with the canvas left as it is, the box lands at the canvas's
+// coordinates, in the top-left part of the picture. (The other burn-in tests
+// use a canvas the size of the video and cannot tell the two apart.)
+func TestImageSubtitleIsScaledToTheVideo(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "media root")
+	movies := filepath.Join(root, "Movies")
+	if err := os.MkdirAll(movies, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	idx := writeVobSub(t, t.TempDir())
+	ffmpegOK(t, "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=24", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
+		"-i", idx, "-map", "0:v", "-map", "1:a", "-map", "2:s", "-t", "12", "-c:v", "libx264", "-preset", "ultrafast", "-g", "48",
+		"-keyint_min", "48", "-sc_threshold", "0", "-pix_fmt", "yuv420p", "-c:a", "aac", "-c:s", "copy", "-metadata:s:s:0", "language=eng",
+		filepath.Join(movies, "Big Video (2023).mkv"))
+
+	detected := hwaccel.Detect(t.Context(), hwaccel.Options{})
+	soft := detected.SoftwareOnly()
+	older := soft // the same ffmpeg, as if its scale filter took no reference input
+	older.Filters = map[string]bool{}
+	for k, v := range soft.Filters {
+		older.Filters[k] = v
+	}
+	delete(older.Filters, hwaccel.RefScale)
+	variants := []struct {
+		name string
+		info hwaccel.Info
+	}{{"scale2ref", older}}
+	if soft.Filters[hwaccel.RefScale] {
+		variants = append(variants, struct {
+			name string
+			info hwaccel.Info
+		}{"scale=rw:rh", soft})
+	}
+
+	for _, v := range variants {
+		t.Run(v.name, func(t *testing.T) {
+			e, _, ids := newSubsE2E(t, hwaccel.Static(v.info), root)
+			id := ids["Big Video (2023).mkv"]
+			post := func(body string) Playback {
+				t.Helper()
+				resp, b := e.do("POST", fmt.Sprintf("/api/items/%d/playback", id), body, nil)
+				if resp.StatusCode != 200 {
+					t.Fatalf("POST playback = %d: %s", resp.StatusCode, b)
+				}
+				var pb Playback
+				if err := json.Unmarshal(b, &pb); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { e.do("DELETE", "/api/sessions/"+pb.SessionID, "", nil) })
+				return pb
+			}
+			const profile = `"custom": {"name": "mp4", "containers": ["mp4"], "videoCodecs": ["h264"], "audioCodecs": ["aac"]}`
+			// The box is 100x20 at (110,140) on the 320x180 canvas: 200x40 at
+			// (220,280) on the 640x360 video. "Right" is inside that; "wrong" is
+			// where an unscaled canvas would put it.
+			right := func(pb Playback) (int, int) { return brightFramesIn(t, e, pb, 240, 290, 160, 20) }
+			wrong := func(pb Playback) (int, int) { return brightFramesIn(t, e, pb, 120, 145, 80, 10) }
+
+			plain := post(`{` + profile + `}`) // control: both places are clean without the subtitle
+			if w1, n := right(plain); n == 0 || w1 != 0 {
+				t.Fatalf("clean picture has %d/%d white frames in the right place", w1, n)
+			}
+			if w2, n := wrong(plain); n == 0 || w2 != 0 {
+				t.Fatalf("clean picture has %d/%d white frames in the wrong place", w2, n)
+			}
+
+			burn := post(`{` + profile + `, "subtitleIndex": 2}`)
+			if burn.Method != "transcode" {
+				t.Fatalf("with the bitmap subtitle: %+v", burn)
+			}
+			if white, total := right(burn); white < 36 || white > 60 {
+				t.Errorf("%d of %d frames show the box where the scaled canvas puts it, want about 48", white, total)
+			}
+			if white, total := wrong(burn); white != 0 {
+				t.Errorf("%d of %d frames show white where an unscaled canvas would put the box", white, total)
+			}
+		})
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -190,9 +191,16 @@ func TestSessionNotFoundAndNames(t *testing.T) {
 	})
 }
 
+// processAlive reports whether the process exists.
+func processAlive(pid int) bool {
+	p, err := os.FindProcess(pid)
+	return err == nil && p.Signal(syscall.Signal(0)) == nil
+}
+
 func TestSessionDelete(t *testing.T) {
 	e := newEnv(t, "")
-	m := e.withStreams(fakeFFmpeg(t, "exec sleep 60"), nil)
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	m := e.withStreams(fakeFFmpeg(t, fmt.Sprintf("echo $$ > %q; exec sleep 60", pidFile)), nil)
 	pb := e.startSession("", `{}`)
 	sess, ok := m.Get(pb.SessionID)
 	if !ok {
@@ -201,6 +209,14 @@ func TestSessionDelete(t *testing.T) {
 	dir := sess.Dir()
 	if _, err := os.Stat(dir); err != nil {
 		t.Fatalf("setup: session dir: %v", err)
+	}
+	var pid int
+	for deadline := time.Now().Add(5 * time.Second); pid == 0 && time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		b, _ := os.ReadFile(pidFile)
+		pid, _ = strconv.Atoi(strings.TrimSpace(string(b)))
+	}
+	if pid == 0 || !processAlive(pid) { // positive control: there is a process to kill
+		t.Fatalf("setup: ffmpeg did not start (pid %d)", pid)
 	}
 
 	rec := e.do("DELETE", "/api/sessions/"+pb.SessionID, nil, "")
@@ -211,8 +227,32 @@ func TestSessionDelete(t *testing.T) {
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Errorf("session dir still exists: %v", err)
 	}
+	if processAlive(pid) {
+		t.Errorf("ffmpeg (pid %d) still running after DELETE", pid)
+	}
 	wantJSONError(t, e.get("/api/sessions/"+pb.SessionID+"/index.m3u8"), 404)
 	wantJSONError(t, e.do("DELETE", "/api/sessions/"+pb.SessionID, nil, ""), 404)
+}
+
+// The player recovers from an expired session by starting a new one, and
+// tells it apart from other failures by the 404 (web/src/lib/session.ts).
+func TestExpiredSessionAnswers404(t *testing.T) {
+	e := newEnv(t, "")
+	m := e.withStreams(fakeFFmpeg(t, "exec sleep 60"), func(o *stream.Options) { o.IdleTimeout = 200 * time.Millisecond })
+	pb := e.startSession("", `{}`)
+	base := "/api/sessions/" + pb.SessionID + "/"
+	wantStatus(t, e.get(base+"index.m3u8"), 200) // positive control: alive until it has been idle
+
+	deadline := time.Now().Add(5 * time.Second)
+	for m.Count() > 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if m.Count() != 0 {
+		t.Fatal("the idle session did not expire")
+	}
+	for _, name := range []string{"index.m3u8", "init.mp4", "seg00003.m4s"} {
+		wantJSONError(t, e.get(base+name), 404)
+	}
 }
 
 func TestSessionLimit(t *testing.T) {

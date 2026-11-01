@@ -5,7 +5,9 @@
   import { channelLabel, codecLabel, episodeLabel, languageLabel, methodLabel } from '../lib/format';
   import { applyProgress } from '../lib/library.svelte';
   import { browserProfile } from '../lib/profile';
+  import { Progress } from '../lib/progress';
   import { href } from '../lib/router.svelte';
+  import { MAX_SESSION_RESTARTS, sessionGone } from '../lib/session';
   import { artSrc } from '../lib/ui-types';
   import PlayerControls, { type Track } from './PlayerControls.svelte';
 
@@ -27,9 +29,27 @@
   let destroyed = false;
   let attempt = 0;
   let resumed = false;
-  /** Where the next start() begins, in seconds from the start of the file. */
-  let resumeFrom = 0;
-  let lastPos = 0;
+  /**
+   * Resume state of the <video> across streams (lib/progress.ts): where each stream must start, what
+   * position counts, where to start the next one from. Unloading the element makes its clock 0, so
+   * nothing here may be read from the element except through this.
+   */
+  const progress = new Progress(
+    () => el,
+    (pos, dur, keepalive) => {
+      api.putProgress(item.id, pos, dur, keepalive).then(
+        (p) => applyProgress(item.id, p),
+        () => {
+          // best effort: the next report carries the position anyway
+        },
+      );
+    },
+    () => item.durationSec,
+  );
+  /** The hls.js chunk would not load: the browser remembers that for the life of the page. */
+  let chunkFailed = false;
+  /** Times in a row the server dropped our session and we started another (reset once playback runs). */
+  let sessionRestarts = 0;
 
   const isHlsUrl = (url: string) => new URL(url).pathname.endsWith('.m3u8');
 
@@ -107,41 +127,16 @@
 
   /** Start a new playback at the current position (a new audio track or burned-in subtitle). */
   function restart() {
-    resumeFrom = el && Number.isFinite(el.currentTime) && el.currentTime > 0 ? el.currentTime : lastPos;
-    void start();
+    void start(progress.position());
   }
 
   // ---- progress ------------------------------------------------------------------
 
-  let armed = false; // false until playback sits at the resume position, so a reload at 0 cannot erase it
-  let lastSent = -1;
   let ticker: ReturnType<typeof setInterval> | undefined;
-
-  /** Tell the server where we are. keepalive lets the request finish while the page is going away. */
-  function report(keepalive = false) {
-    if (!el || !armed) return;
-    const pos = el.currentTime;
-    const dur = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : item.durationSec;
-    if (!Number.isFinite(pos) || pos === lastSent) return;
-    lastSent = pos;
-    api.putProgress(item.id, pos, dur, keepalive).then(
-      (p) => applyProgress(item.id, p),
-      () => {
-        // best effort: the next report carries the position anyway
-      },
-    );
-  }
-
-  function onTimeUpdate() {
-    if (!el) return;
-    lastPos = el.currentTime;
-    const at = playback?.startSec ?? 0;
-    if (!armed && !el.seeking && el.currentTime >= at - 3) armed = true;
-  }
 
   function startTicker() {
     clearInterval(ticker);
-    ticker = setInterval(() => report(), 10_000);
+    ticker = setInterval(() => progress.report(), 10_000);
   }
 
   function stopTicker() {
@@ -155,20 +150,21 @@
 
   function onPause() {
     stopTicker();
-    report();
+    progress.report();
   }
 
   function onEnded() {
     stopTicker();
-    report();
+    progress.report();
   }
 
   // ---- playback ------------------------------------------------------------------
 
   /** Stop media, drop hls.js and end the server session (best effort, survives page unload). */
   function release() {
-    // Unloading resets the clock to 0 and fires `pause` afterwards: nothing may report from here on.
-    armed = false;
+    // Unloading resets the clock to 0 and fires `timeupdate` and `pause` for it: keep the position
+    // first, and nothing reports until the next stream is at its start.
+    progress.end();
     stopTicker();
     hls?.destroy();
     hls = undefined;
@@ -186,19 +182,20 @@
   function fail(message: string) {
     phase = 'error';
     error = message;
+    progress.report(); // where it got to, while the element still knows
     release();
   }
 
-  async function start() {
+  /** Start a stream at `at` seconds into the file, replacing the current one. */
+  async function start(at: number) {
     const run = ++attempt;
-    report(); // the position of the stream we are about to replace (a no-op unless armed)
+    progress.report(); // the position of the stream we are about to replace (a no-op unless it counts)
     release();
+    progress.begin(at);
     phase = 'starting';
     error = '';
     playback = undefined;
     resumed = false;
-    lastSent = -1;
-    const at = resumeFrom;
 
     let pb: Playback;
     try {
@@ -235,7 +232,17 @@
     if (!isHlsUrl(url) || v.canPlayType('application/vnd.apple.mpegurl')) {
       v.src = url; // direct file, or native HLS (Safari / iOS)
     } else {
-      const { default: Hls } = await import('hls.js');
+      let Hls: typeof HlsType;
+      try {
+        ({ default: Hls } = await import('hls.js'));
+      } catch {
+        // A lazy chunk that will not load (flaky network, or a server upgraded under an open tab).
+        if (!destroyed && run === attempt) {
+          chunkFailed = true;
+          fail('Could not load the video player. Check the connection and retry.');
+        }
+        return;
+      }
       if (destroyed || run !== attempt) return;
       if (!Hls.isSupported()) {
         fail('This browser cannot play HLS streams.');
@@ -244,15 +251,26 @@
       // The playlist is the whole file, so a resume is just a start position: the server cuts in
       // at that segment, and later seeks anywhere are plain segment requests it answers by itself.
       const h = new Hls({
-        startPosition: pb.startSec > 0 ? pb.startSec : -1,
+        startPosition: at > 0 ? at : -1,
         backBufferLength: 60,
         maxBufferLength: 40,
       });
       let networkRetries = 0;
       let mediaRetries = 0;
       h.on(Hls.Events.ERROR, (_evt, data) => {
-        if (!data.fatal || h !== hls) return;
-        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && networkRetries++ < 3) h.startLoad();
+        if (h !== hls) return;
+        if (sessionGone(data)) {
+          // The server ends a session that is not asked for anything for a while, and a paused player
+          // with a full buffer asks for nothing: the same URL will never work again (hls.js would
+          // retry it for half a minute). Start a new session at the current position instead; if
+          // that keeps failing the same way, stop (startLoad cannot revive a playlist that 404s).
+          if (sessionRestarts < MAX_SESSION_RESTARTS) {
+            sessionRestarts++;
+            restart();
+          } else if (data.fatal) fail(`Stream error: ${data.details}`);
+        } else if (!data.fatal) {
+          return;
+        } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR && networkRetries++ < 3) h.startLoad();
         else if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRetries++ < 2) h.recoverMediaError();
         else fail(`Stream error: ${data.details}`);
       });
@@ -265,9 +283,10 @@
     });
   }
 
-  // Resume: stream time 0 is file time 0, so a resume is a plain seek once metadata is known.
+  // Resume: stream time 0 is file time 0, so a resume is a plain seek once metadata is known. The
+  // target is what we asked for, not what the server echoed (it did not, for direct play).
   function onLoadedMetadata() {
-    const at = playback?.startSec ?? 0;
+    const at = progress.target;
     if (!resumed && el && at > 0 && Math.abs(el.currentTime - at) > 1) el.currentTime = at;
     resumed = true;
   }
@@ -275,6 +294,11 @@
   function onVideoError() {
     if (!el?.currentSrc) return; // fired by our own teardown
     const code = el.error?.code;
+    if (code === MediaError.MEDIA_ERR_NETWORK && isHlsUrl(el.currentSrc) && sessionRestarts < MAX_SESSION_RESTARTS) {
+      sessionRestarts++; // native HLS (Safari): the same, a session that expired while paused
+      restart();
+      return;
+    }
     const why =
       code === MediaError.MEDIA_ERR_NETWORK
         ? 'a network error interrupted the stream'
@@ -288,20 +312,32 @@
 
   /** Leaving the page: report first (the media element is about to be torn down), then release. */
   function leave() {
-    report(true);
+    progress.report(true);
     release();
   }
 
+  /**
+   * Back from the back/forward cache: pagehide tore the stream down (leave), so start a new one where
+   * it was. A first load also fires pageshow, but not with `persisted`.
+   */
+  function restore(e: PageTransitionEvent) {
+    if (e.persisted && !destroyed) void start(progress.position());
+  }
+
   function retry() {
-    resumeFrom = lastPos > 0 ? lastPos : resumeFrom;
-    void start();
+    if (chunkFailed) {
+      // A failed dynamic import stays failed until the page is reloaded; carry the position over.
+      history.replaceState(null, '', href.play(item.id, progress.position()));
+      location.reload();
+      return;
+    }
+    void start(progress.position());
   }
 
   onMount(() => {
     el = video;
-    resumeFrom = startSec;
     subKey = defaultSubtitle(item.subtitles);
-    void start();
+    void start(startSec);
     return () => {
       destroyed = true;
       leave();
@@ -314,9 +350,9 @@
   );
 </script>
 
-<svelte:window onpagehide={leave} />
+<svelte:window onpagehide={leave} onpageshow={restore} />
 <!-- iOS Safari often skips pagehide when the app is switched away from: report when the page is hidden. -->
-<svelte:document onvisibilitychange={() => document.hidden && report(true)} />
+<svelte:document onvisibilitychange={() => document.hidden && progress.report(true)} />
 
 <div class="player">
   <div class="frame">
@@ -326,11 +362,12 @@
       playsinline
       preload="metadata"
       onloadedmetadata={onLoadedMetadata}
-      ontimeupdate={onTimeUpdate}
+      ontimeupdate={() => progress.update()}
       onplay={onPlay}
       onpause={onPause}
       onended={onEnded}
       oncanplay={() => {
+        sessionRestarts = 0;
         if (phase === 'starting') phase = 'ready';
       }}
       onerror={onVideoError}

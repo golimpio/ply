@@ -15,6 +15,10 @@ func signalGroup(cmd *exec.Cmd, stop bool) error {
 	return errors.New("pausing ffmpeg is not supported on this platform")
 }
 
+func killStaleGroup(pgid int, program string) bool { return false }
+
+func ownedByUs(fi os.FileInfo) bool { return true }
+
 func setNice(pid, nice int) {}
 
 func processAlive(pid int) bool { return false }

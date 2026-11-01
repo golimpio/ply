@@ -64,6 +64,12 @@ func (s *Server) handleArt(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, art.ErrNoFrame):
 		writeError(w, http.StatusNotFound, "no artwork")
 		return
+	case errors.Is(err, art.ErrUnavailable), errors.Is(err, art.ErrClosed):
+		// The file is not reachable right now (an unmounted share), ffmpeg timed out, or we are
+		// shutting down: not the same as "this file has no picture".
+		w.Header().Set("Retry-After", "60")
+		writeError(w, http.StatusServiceUnavailable, "artwork temporarily unavailable")
+		return
 	case r.Context().Err() != nil:
 		return // the client went away
 	case err != nil:

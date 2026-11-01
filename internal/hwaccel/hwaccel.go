@@ -46,6 +46,11 @@ func (e Encoder) Hardware() bool { return e.Kind != Software && e.Kind != "" }
 // SoftwareEncoder is libx264, which every ffmpeg build has.
 func SoftwareEncoder() Encoder { return Encoder{Kind: Software, Name: "libx264"} }
 
+// RefScale is the pseudo filter name under which Info.Filters records that
+// this ffmpeg's scale filter takes a second, reference input (scale=rw:rh),
+// the successor of the deprecated scale2ref.
+const RefScale = "scale:ref"
+
 // Info is what the probe found. The zero value means "software only, nothing
 // known about this ffmpeg's filters".
 type Info struct {
@@ -144,6 +149,9 @@ func Detect(ctx context.Context, o Options) Info {
 	}
 	info.HWAccels = parseHWAccels(o.output(ctx, "-hwaccels"))
 	info.Filters = parseNames(o.output(ctx, "-filters"))
+	if info.Filters["scale"] && strings.Contains(string(o.output(ctx, "-h", "filter=scale")), "dynamic (depending on the options)") {
+		info.Filters[RefScale] = true
+	}
 	if !encoders["libx264"] {
 		note("libx264 is not available in this ffmpeg build")
 	}
@@ -233,10 +241,10 @@ func (o *Options) list(ctx context.Context, opt string) (map[string]bool, error)
 }
 
 // output is list for the optional listings: a failure means "unknown".
-func (o *Options) output(ctx context.Context, opt string) []byte {
+func (o *Options) output(ctx context.Context, opts ...string) []byte {
 	ctx, cancel := context.WithTimeout(ctx, o.Timeout)
 	defer cancel()
-	out, err := o.run(ctx, o.FFmpeg, "-hide_banner", opt)
+	out, err := o.run(ctx, o.FFmpeg, append([]string{"-hide_banner"}, opts...)...)
 	if err != nil {
 		return nil
 	}

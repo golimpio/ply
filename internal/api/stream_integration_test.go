@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -183,10 +184,10 @@ func TestHLSEndToEnd(t *testing.T) {
 		for _, item := range []string{"mkv", "mp4"} {
 			t.Run(fmt.Sprintf("%s token=%q", item, token), func(t *testing.T) {
 				e := newE2E(t, token)
-				id, file := e.mkv, "Hevc Clip (2021).mkv"
+				id := e.mkv
 				body := `{}` // avplayer: mkv remuxes, eac3 audio is copied
 				if item == "mp4" {
-					id, file = e.mp4, "H264 Clip (2022).mp4"
+					id = e.mp4
 					body = `{"custom": {"containers": ["mkv"], "videoCodecs": ["h264"], "audioCodecs": ["aac"]}}`
 				}
 				auth := map[string]string{}
@@ -261,15 +262,15 @@ func TestHLSEndToEnd(t *testing.T) {
 					}
 				}
 
-				// DELETE ends it: no ffmpeg, no directory.
+				// DELETE ends it and removes the directory. (That ffmpeg is gone
+				// too cannot be seen here: this 30 s clip was finished long
+				// before. TestDeleteKillsAThrottledFFmpeg covers it with a live
+				// process.)
 				sess, _ := e.mgr.Get(pb.SessionID)
 				dir := sess.Dir()
 				resp, _ = e.do("DELETE", "/api/sessions/"+pb.SessionID, "", auth)
 				if resp.StatusCode != 204 {
 					t.Fatalf("DELETE = %d", resp.StatusCode)
-				}
-				if p := ffmpegRunning(t, filepath.Join(e.root, "Movies", file)); len(p) != 0 {
-					t.Errorf("ffmpeg still running after DELETE: %v", p)
 				}
 				if _, err := os.Stat(dir); !os.IsNotExist(err) {
 					t.Errorf("session dir still there: %v", err)
@@ -305,32 +306,166 @@ func TestStartSecResumesAtThatSegment(t *testing.T) {
 	}
 }
 
+// longE2E is a library of one 25 minute clip and a stream manager that
+// throttles hard: ffmpeg is still alive, and stopped by SIGSTOP, when the test
+// ends the session. A 30 s clip would be finished long before, and "no ffmpeg
+// afterwards" would prove nothing.
+type longE2E struct {
+	ts    *httptest.Server
+	mgr   *stream.Manager
+	entry store.Entry
+}
+
+func newLongE2E(t *testing.T, mod func(*stream.Options)) *longE2E {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "media root", "Long Clip (2023).mkv")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=gray:size=64x36:rate=5",
+		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=16000", "-t", "1500", "-c:v", "libx264", "-preset", "ultrafast",
+		"-g", "10", "-keyint_min", "10", "-sc_threshold", "0", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "16k", path).CombinedOutput()
+	if err != nil {
+		t.Fatalf("ffmpeg: %v\n%s", err, out)
+	}
+	st, err := store.Open(filepath.Join(t.TempDir(), "data dir", "ply.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	sc := library.NewScanner(t.Context(), st, probe.FFprobe{}, []string{filepath.Dir(path)}, nil)
+	if err := sc.Scan(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := st.ListItems(t.Context(), store.ListFilter{})
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("scan found %d items, %v", len(entries), err)
+	}
+	o := stream.Options{TempRoot: t.TempDir(), Cache: st, Tick: 20 * time.Millisecond, ThrottleHigh: 2, ThrottleLow: 1}
+	if mod != nil {
+		mod(&o)
+	}
+	mgr, err := stream.NewManager(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(mgr.Close)
+	ts := httptest.NewServer(New(Options{Store: st, Scanner: sc, ID: "it", Name: "it", Version: "test", Streams: mgr}))
+	t.Cleanup(ts.Close)
+	return &longE2E{ts: ts, mgr: mgr, entry: entries[0]}
+}
+
+func (l *longE2E) request() stream.Request {
+	return stream.Request{ItemID: l.entry.ID, Path: l.entry.Path, Container: "mkv", DurationSec: l.entry.DurationSec,
+		VideoIndex: 0, VideoCodec: "h264", AudioIndex: 1, AudioCodec: "aac", AudioCopy: true}
+}
+
+// waitStopped waits until n ffmpeg processes read the clip and all are stopped
+// by the throttle (state T), and returns them.
+func (l *longE2E) waitStopped(t *testing.T, n int) []string {
+	t.Helper()
+	var procs []string
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		procs = ffmpegRunning(t, l.entry.Path)
+		stopped := 0
+		for _, p := range procs {
+			out, _ := exec.Command("ps", "-o", "state=", "-p", strings.Fields(p)[0]).Output()
+			if strings.HasPrefix(strings.TrimSpace(string(out)), "T") {
+				stopped++
+			}
+		}
+		if len(procs) == n && stopped == n {
+			return procs
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("wanted %d stopped ffmpeg processes, have %v", n, procs)
+	return nil
+}
+
+// DELETE has to kill an ffmpeg that the throttle has stopped, which only
+// SIGKILL does, before it answers.
+func TestDeleteKillsAThrottledFFmpeg(t *testing.T) {
+	l := newLongE2E(t, nil)
+	resp, err := http.Post(fmt.Sprintf("%s/api/items/%d/playback", l.ts.URL, l.entry.ID), "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pb Playback
+	err = json.NewDecoder(resp.Body).Decode(&pb)
+	resp.Body.Close()
+	if err != nil || pb.SessionID == "" {
+		t.Fatalf("playback = %+v, %v", pb, err)
+	}
+	sess, ok := l.mgr.Get(pb.SessionID)
+	if !ok {
+		t.Fatal("no session")
+	}
+	dir := sess.Dir()
+	l.waitStopped(t, 1) // positive control: there is a process to kill
+
+	req, _ := http.NewRequest("DELETE", l.ts.URL+"/api/sessions/"+pb.SessionID, nil)
+	del, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	del.Body.Close()
+	if del.StatusCode != 204 {
+		t.Fatalf("DELETE = %d", del.StatusCode)
+	}
+	if p := ffmpegRunning(t, l.entry.Path); len(p) != 0 {
+		t.Errorf("ffmpeg still running after DELETE: %v", p)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("session dir still there: %v", err)
+	}
+}
+
 func TestIdleSessionEndsAndShutdownCleans(t *testing.T) {
-	e := newE2E(t, "")
-	mgr, err := stream.NewManager(stream.Options{TempRoot: t.TempDir(), Cache: e.store, IdleTimeout: 700 * time.Millisecond,
-		Tick: 50 * time.Millisecond})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer mgr.Close()
-	entry, err := e.store.GetEntry(context.Background(), e.mkv)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s, err := mgr.Create(context.Background(), stream.Request{ItemID: e.mkv, Path: entry.Path, Container: "mkv",
-		DurationSec: entry.DurationSec, VideoIndex: 0, VideoCodec: "hevc", AudioIndex: 1, AudioCodec: "eac3", AudioCopy: true})
+	l := newLongE2E(t, func(o *stream.Options) { o.IdleTimeout = 1500 * time.Millisecond })
+	s, err := l.mgr.Create(t.Context(), l.request())
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir := s.Dir()
-	deadline := time.Now().Add(10 * time.Second)
-	for mgr.Count() > 0 && time.Now().Before(deadline) {
-		time.Sleep(50 * time.Millisecond)
+	l.waitStopped(t, 1) // positive control: a live (stopped) ffmpeg to be killed
+
+	// Count() is what says the session is over. It must not drop before the
+	// process is dead and the directory gone, so look at the very moment it does.
+	deadline := time.Now().Add(15 * time.Second)
+	for l.mgr.Count() > 0 && time.Now().Before(deadline) {
+		runtime.Gosched()
 	}
-	if mgr.Count() != 0 {
+	if l.mgr.Count() != 0 {
 		t.Fatal("idle session was not ended")
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Errorf("idle session dir still there: %v", err)
+	}
+	if p := ffmpegRunning(t, l.entry.Path); len(p) != 0 {
+		t.Errorf("ffmpeg survived the idle expiry: %v", p)
+	}
+
+	// Shutdown: every session's ffmpeg is killed and everything removed.
+	var dirs []string
+	for range 2 {
+		s, err := l.mgr.Create(t.Context(), l.request())
+		if err != nil {
+			t.Fatal(err)
+		}
+		dirs = append(dirs, s.Dir())
+	}
+	l.waitStopped(t, 2)
+	l.mgr.Close()
+	if p := ffmpegRunning(t, l.entry.Path); len(p) != 0 {
+		t.Errorf("ffmpeg survived shutdown: %v", p)
+	}
+	for _, d := range append(dirs, l.mgr.Dir()) {
+		if _, err := os.Stat(d); !os.IsNotExist(err) {
+			t.Errorf("%s survived shutdown: %v", d, err)
+		}
 	}
 }

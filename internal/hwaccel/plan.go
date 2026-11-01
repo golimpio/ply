@@ -140,7 +140,7 @@ func (i Info) Plan(r Request) Spec {
 	}
 
 	if burn {
-		s.Complex = burnGraph(enc, r, outH, resize, tonemap)
+		s.Complex = burnGraph(enc, r, outH, resize, tonemap, i.Filters[RefScale])
 		s.Filter = ""
 	}
 
@@ -165,7 +165,7 @@ func (i Info) Plan(r Request) Spec {
 func target(r Request) (w, h int, resize bool) {
 	h = r.Height
 	if r.MaxHeight > 0 && (r.Height == 0 || r.Height > r.MaxHeight) {
-		h, resize = r.MaxHeight, true
+		h, resize = max(r.MaxHeight&^1, 2), true // even: a custom profile may say 361
 	}
 	if !resize {
 		return r.Width, r.Height, false
@@ -175,7 +175,7 @@ func target(r Request) (w, h int, resize bool) {
 	} else {
 		w = -2
 		if r.Height == 0 {
-			h = r.MaxHeight // unknown source: the filter uses min(ih, ...)
+			h = max(r.MaxHeight&^1, 2) // unknown source: the filter uses min(ih, ...)
 		}
 	}
 	return w, h, true
@@ -209,15 +209,19 @@ func uploadDeviceArgs(e Encoder) []string {
 	return nil
 }
 
-// scaleFilter is the software scale to outH, "" when the source fits.
+// scaleFilter is the software scale to outH, or the trim to even dimensions,
+// "" when the source already fits and is even. libx264 (and 4:2:0 in general)
+// refuses an odd width or height: "height not divisible by 2".
 func scaleFilter(r Request, outH int, resize bool) string {
 	switch {
-	case !resize:
-		return ""
-	case r.Height > 0:
-		return fmt.Sprintf("scale=-2:%d", outH)
+	case resize && r.Height > 0:
+		return fmt.Sprintf("scale=-2:%d", outH) // -2: the width follows, rounded to even
+	case resize:
+		return fmt.Sprintf("scale=-2:'trunc(min(ih,%d)/2)*2'", outH)
+	case r.Width%2 != 0 || r.Height%2 != 0:
+		return "scale=trunc(iw/2)*2:trunc(ih/2)*2"
 	}
-	return fmt.Sprintf("scale=-2:'min(ih,%d)'", outH)
+	return ""
 }
 
 // colorChain converts to what the encoder takes: optional tone mapping, 8-bit
@@ -250,17 +254,34 @@ func softChain(enc Encoder, r Request, outH int, resize, tonemap bool) string {
 
 // burnGraph overlays subtitle stream r.BurnSubtitle on the video. The
 // subtitle bitmaps are drawn for the source's canvas (often 1920x1080 even on
-// 4K video), so they are scaled to the already scaled video first.
-func burnGraph(enc Encoder, r Request, outH int, resize, tonemap bool) string {
-	var g []string
+// 4K video, or 720x480 on an HD one), so they are scaled to the size of the
+// already scaled video first. refScale says whether this ffmpeg's scale filter
+// takes a reference input; if not, the older scale2ref does the same.
+func burnGraph(enc Encoder, r Request, outH int, resize, tonemap, refScale bool) string {
 	video := fmt.Sprintf("[0:%d]", r.VideoIndex)
-	if sc := scaleFilter(r, outH, resize); sc != "" {
-		g = append(g, video+sc+"[m]")
-		video = "[m]"
+	sub := fmt.Sprintf("[0:%d]", r.BurnSubtitle)
+	sc := scaleFilter(r, outH, resize)
+	var g []string
+	if refScale {
+		// scale=rw:rh with two inputs scales the first to the size of the second
+		// and consumes it, so the video is split: one copy to measure by, one to
+		// draw on.
+		chain := "split=2[ref][vref]"
+		if sc != "" {
+			chain = sc + "," + chain
+		}
+		g = append(g, video+chain, sub+"[vref]scale=w=rw:h=rh[sub]")
+	} else {
+		if sc != "" {
+			g = append(g, video+sc+"[m]")
+			video = "[m]"
+		}
+		// In scale2ref, iw:ih are the reference's size and main_w:main_h the size
+		// of the input being scaled (here the subtitle canvas): the other way
+		// round from what the names suggest, and main_w:main_h scales nothing.
+		g = append(g, sub+video+"scale2ref=w=iw:h=ih[sub][ref]")
 	}
-	g = append(g,
-		fmt.Sprintf("[0:%d]%sscale2ref=w=main_w:h=main_h[sub][ref]", r.BurnSubtitle, video),
-		"[ref][sub]overlay=eof_action=pass,"+strings.Join(colorChain(enc, tonemap), ",")+"[v]")
+	g = append(g, "[ref][sub]overlay=eof_action=pass,"+strings.Join(colorChain(enc, tonemap), ",")+"[v]")
 	return strings.Join(g, ";")
 }
 

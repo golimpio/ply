@@ -157,6 +157,12 @@ func run() error {
 	// Kill every ffmpeg and drop the temp dirs first: requests waiting on
 	// segments return at once instead of holding the HTTP shutdown up.
 	streams.Close()
+	if subGen != nil {
+		subGen.Close() // a first extraction of a big file can run for minutes
+	}
+	if artGen != nil {
+		artGen.Close() // a frame grab on a slow mount can too
+	}
 	shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutCtx); err != nil {

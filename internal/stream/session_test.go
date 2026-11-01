@@ -493,9 +493,9 @@ func TestStaleDirsRemovedAtStartup(t *testing.T) {
 	}
 	dead := mk("2147483000")                   // no such process
 	own := mk(fmt.Sprint(os.Getpid()))         // a crashed predecessor with our pid
-	junk := mk("not-a-pid")                    // not ours at all
+	junk := mk("not-a-pid")                    // not named like a pid: not ours, whatever it is
 	alive := mk(fmt.Sprint(os.Getppid()))      // another live process: leave it alone
-	stray := filepath.Join(root, "stray.file") // loose files are cleared too
+	stray := filepath.Join(root, "stray.file") // so is a loose file
 	os.WriteFile(stray, []byte("x"), 0o644)
 
 	m, err := NewManager(Options{TempRoot: root})
@@ -503,9 +503,12 @@ func TestStaleDirsRemovedAtStartup(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer m.Close()
-	for _, p := range []string{dead, junk, stray} {
-		if _, err := os.Stat(p); !os.IsNotExist(err) {
-			t.Errorf("%s survived startup: %v", p, err)
+	if _, err := os.Stat(dead); !os.IsNotExist(err) {
+		t.Errorf("%s survived startup: %v", dead, err)
+	}
+	for _, p := range []string{junk, stray} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("%s is not a session directory of ours but was removed: %v", p, err)
 		}
 	}
 	if _, err := os.Stat(filepath.Join(own, "session")); !os.IsNotExist(err) {
@@ -695,4 +698,167 @@ func TestNoFallbackOnceInitIsServed(t *testing.T) {
 	if !s.fallBackLocked("boom") || s.fallBackLocked("boom") {
 		t.Error("fallback should happen exactly once")
 	}
+}
+
+// ffmpeg never rewrites a fragment it has passed, so a request for one that
+// was pruned while ffmpeg keeps running has to restart it. (hls.js keeps 60 s of
+// back buffer, the server only a few segments: seeking back past that is
+// ordinary.)
+func TestSeekBackIntoPrunedRangeRestartsFFmpeg(t *testing.T) {
+	f := newFake(t)
+	m := fakeManager(t, f, func(o *Options) {
+		o.ThrottleHigh, o.ThrottleLow = 100, 50 // ffmpeg keeps running
+		o.WaitTimeout = 3 * time.Second
+	})
+	ctx := context.Background()
+	s, err := m.Create(ctx, fakeRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i <= 9; i++ {
+		seg, err := s.OpenSegment(ctx, i)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seg.Close()
+	}
+	waitUntil(t, "old fragments pruned", 5*time.Second, func() bool {
+		_, err0 := os.Stat(s.gopPath(0))
+		_, err17 := os.Stat(s.gopPath(17))
+		return os.IsNotExist(err0) && os.IsNotExist(err17)
+	})
+
+	// Positive control: this is the situation the bug needs. Segment 1 (GOPs
+	// 3..5) is gone, and the one and only ffmpeg is alive and already past it.
+	s.mu.Lock()
+	r := s.run
+	s.advanceLocked()
+	alive, start, next := r != nil && !r.exited(), r.start, r.next
+	s.mu.Unlock()
+	if _, err := os.Stat(s.gopPath(3)); !os.IsNotExist(err) || !alive || start > 3 || next <= 5 {
+		t.Fatalf("setup: gop 3 stat err = %v, run alive=%v start=%d next=%d", err, alive, start, next)
+	}
+	if n := len(f.starts()); n != 1 {
+		t.Fatalf("setup: %d ffmpeg starts, want 1", n)
+	}
+
+	seg, err := s.OpenSegment(ctx, 1)
+	if err != nil {
+		t.Fatalf("seek back into the pruned range: %v", err)
+	}
+	seg.Close()
+	if starts := f.starts(); len(starts) != 2 || !strings.Contains(starts[1], "-start_number 3 ") {
+		t.Errorf("seek back did not restart ffmpeg at GOP 3: %v", starts)
+	}
+	if n := len(f.procs(t)); n != 1 {
+		t.Errorf("%d ffmpeg processes running, want exactly 1", n)
+	}
+}
+
+// Two requests far apart used to replace each other's ffmpeg on every poll,
+// for as long as both waited (about 80 spawns a second with real ffmpeg). The
+// newest request owns ffmpeg; the older one is served once it is done.
+func TestConcurrentFarRequestsDoNotKillEachOther(t *testing.T) {
+	f := newFake(t)
+	m := fakeManager(t, f, func(o *Options) { o.WaitTimeout = 5 * time.Second })
+	ctx := context.Background()
+	s, err := m.Create(ctx, fakeRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	seg0, err := s.OpenSegment(ctx, 0) // the first run is up (and has logged its start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seg0.Close()
+
+	results := map[int]chan error{100: make(chan error, 1), 150: make(chan error, 1)}
+	open := func(idx int) {
+		seg, err := s.OpenSegment(ctx, idx)
+		if err == nil {
+			seg.Close()
+		}
+		results[idx] <- err
+	}
+	go open(100)
+	// The first request has taken ffmpeg to its place before the second arrives.
+	waitUntil(t, "first request restarted ffmpeg", 5*time.Second, func() bool { return len(f.starts()) >= 2 })
+	go open(150)
+
+	for _, idx := range []int{150, 100} {
+		select {
+		case err := <-results[idx]:
+			if err != nil {
+				t.Errorf("segment %d: %v", idx, err)
+			}
+		case <-time.After(8 * time.Second):
+			t.Fatalf("segment %d: no answer", idx)
+		}
+	}
+	// Create, the first request, the second, and the first again when the
+	// second is done. Anything near a restart per poll is the bug.
+	if n := len(f.starts()); n > 5 {
+		t.Errorf("ffmpeg was started %d times for two requests", n)
+	}
+	if n := len(f.procs(t)); n != 1 {
+		t.Errorf("%d ffmpeg processes running, want exactly 1", n)
+	}
+}
+
+type syncBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+// A client only gets a 500 when ffmpeg fails; what ffmpeg said is the only
+// account of why, and has to reach the log.
+func TestFFmpegFailureIsLoggedWithItsStderr(t *testing.T) {
+	ctx := context.Background()
+	var logs syncBuffer
+	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	// Control: an ffmpeg that is stopped on purpose is not a failure.
+	f := newFake(t)
+	m := fakeManager(t, f, func(o *Options) { o.Logger = logger })
+	s, err := m.Create(ctx, fakeRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	seg, err := s.OpenSegment(ctx, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seg.Close()
+	m.Delete(s.ID)
+	if got := logs.String(); !strings.Contains(got, "ffmpeg stopped") || strings.Contains(got, "ffmpeg failed") {
+		t.Fatalf("an ffmpeg stopped by the server was logged as a failure:\n%s", got)
+	}
+
+	// A real failure carries ffmpeg's message.
+	m2 := fakeManager(t, failingFake(t), func(o *Options) { o.Cache = noKeyframes{t}; o.Logger = logger })
+	r := transcodeRequest()
+	r.Video.Encode = []string{"-c:v", "bad_enc"}
+	s, err = m2.Create(ctx, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.OpenSegment(ctx, 0); err == nil {
+		t.Fatal("the failing encoder worked")
+	}
+	waitUntil(t, "the failure in the log", 5*time.Second, func() bool {
+		got := logs.String()
+		return strings.Contains(got, "ffmpeg failed") && strings.Contains(got, "bad encoder")
+	})
 }
