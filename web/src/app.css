@@ -1,17 +1,32 @@
+/*
+ * ply — "projection light". A warm, dark room; the only strong colour is the
+ * light thrown by whatever film is on screen (--tint, taken from its artwork).
+ * Token names are shared with components owned by other agents (Player.svelte):
+ * rename none of --bg, --bg-2, --bg-3, --line, --text, --muted, --accent,
+ * --danger, --ok, --warn, --radius.
+ */
 :root {
   color-scheme: dark;
-  --bg: #0e1116;
-  --bg-2: #151a22;
-  --bg-3: #1f2733;
-  --line: #262e3b;
-  --text: #e6e9ef;
-  --muted: #8c97a8;
-  --accent: #6ea8ff;
-  --danger: #ff7b7b;
-  --ok: #5fd18a;
-  --warn: #f0b35a;
+  --bg: #100e0c; /* velvet: the room */
+  --bg-2: #1a1714; /* seat: raised surfaces */
+  --bg-3: #26211d; /* aisle: controls */
+  --line: #352e28;
+  --text: #f4efe6; /* projector white */
+  --muted: #a89d90;
+  --accent: #f0b64e; /* tungsten lamp: fallback when a film has no colour yet */
+  --on-accent: #1a1206;
+  --danger: #ff8a7a;
+  --ok: #7fd19b;
+  --warn: #ffcf70;
+  --tint: var(--accent); /* set per page from artwork; see lib/ambient */
   --radius: 10px;
+  --radius-lg: 16px;
+  --gutter: clamp(1rem, 4vw, 3rem);
+  --bar-h: 3.5rem;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
 }
 
 *,
@@ -20,31 +35,55 @@
   box-sizing: border-box;
 }
 
-html,
-body {
-  margin: 0;
+html {
   background: var(--bg);
   color: var(--text);
 }
+/* No body background: the fixed projection-light layer (z-index -1) must paint above the room. */
+body {
+  margin: 0;
+}
 
 body {
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.5;
   -webkit-text-size-adjust: 100%;
+  min-height: 100dvh;
+}
+
+img {
+  display: block;
+  max-width: 100%;
 }
 
 a {
-  color: var(--accent);
+  color: inherit;
   text-decoration: none;
 }
-a:hover {
+p a,
+.link {
+  color: var(--text);
   text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, var(--tint) 70%, transparent);
+  text-underline-offset: 0.2em;
 }
 
+h1,
+h2,
+h3 {
+  margin: 0;
+  text-wrap: balance;
+}
 h1 {
-  margin: 0.2rem 0 0.8rem;
-  font-size: 1.6rem;
-  line-height: 1.25;
+  font-size: clamp(1.9rem, 4.2vw, 3rem);
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+}
+h2 {
+  font-size: 1.2rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 code {
@@ -55,9 +94,10 @@ code {
 }
 
 .page {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 1rem 1rem 3rem;
+  padding: calc(var(--bar-h) + 1.25rem) var(--gutter) 4rem;
+}
+.page.flush {
+  padding-top: 0; /* pages that open with a full-bleed hero */
 }
 
 .center {
@@ -77,17 +117,40 @@ code {
   color: var(--danger);
 }
 .count {
-  margin-left: 0.4rem;
-  font-size: 0.9rem;
-  font-weight: 400;
+  margin-left: 0.5rem;
+  font-size: 0.5em;
+  font-weight: 500;
+  letter-spacing: 0;
   color: var(--muted);
+  vertical-align: middle;
+}
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
-/* Library grid */
+/* Metadata runs: items separated by space, not punctuation. */
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 1rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Library grid of 16:9 cards */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 1.25rem 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(min(250px, 100%), 1fr));
+  gap: 1.75rem 1.25rem;
 }
 
 /* Buttons */
@@ -95,55 +158,67 @@ code {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.4rem;
-  padding: 0.45rem 0.95rem;
+  gap: 0.5rem;
+  min-height: 2.5rem;
+  padding: 0.5rem 1.1rem;
   font: inherit;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text);
-  background: var(--bg-3);
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  background: rgb(255 255 255 / 0.08);
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 999px;
   cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
 }
 .btn:hover:not(:disabled) {
-  text-decoration: none;
-  border-color: var(--accent);
+  background: rgb(255 255 255 / 0.14);
 }
 .btn:disabled {
-  opacity: 0.55;
+  opacity: 0.5;
   cursor: default;
 }
 .btn.primary {
-  color: #08111f;
-  background: var(--accent);
-  border-color: var(--accent);
-  font-weight: 600;
+  color: var(--on-accent);
+  background: var(--text);
+  border-color: var(--text);
 }
 .btn.primary:hover:not(:disabled) {
-  filter: brightness(1.08);
+  background: #fff;
 }
-a:focus-visible,
-button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+.btn.icon {
+  width: 2.5rem;
+  padding: 0;
+}
+.btn svg {
+  width: 1.1em;
+  height: 1.1em;
+  flex: none;
 }
 
-/* Badges */
+:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 3px;
+}
+
+/* Badges: format facts (4K, HDR10, codec). */
 .badge {
   display: inline-block;
-  padding: 0.05rem 0.45rem;
+  padding: 0.05rem 0.4rem;
   font-size: 0.72rem;
-  font-weight: 600;
-  line-height: 1.5;
+  font-weight: 700;
+  line-height: 1.55;
   letter-spacing: 0.02em;
   color: var(--text);
-  background: rgb(14 17 22 / 0.78);
-  border: 1px solid rgb(255 255 255 / 0.16);
-  border-radius: 5px;
+  background: rgb(16 14 12 / 0.72);
+  border: 1px solid rgb(255 255 255 / 0.18);
+  border-radius: 4px;
   white-space: nowrap;
+  backdrop-filter: blur(6px);
 }
 .badge.hdr {
-  color: #1c1300;
+  color: #1d1400;
   background: var(--warn);
   border-color: var(--warn);
 }
@@ -152,15 +227,43 @@ button:focus-visible {
   border-color: var(--ok);
 }
 .badge.method.remux {
-  color: var(--accent);
-  border-color: var(--accent);
+  color: var(--text);
+  border-color: var(--text);
 }
 .badge.method.transcode {
   color: var(--warn);
   border-color: var(--warn);
 }
 
-/* Tables */
+/* Chips: toggles for sort / filter */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.chip {
+  min-height: 2.25rem;
+  padding: 0.3rem 0.9rem;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.chip:hover {
+  color: var(--text);
+}
+.chip[aria-pressed='true'],
+.chip[aria-checked='true'],
+.chip[aria-selected='true'] {
+  color: var(--bg);
+  background: var(--text);
+  border-color: var(--text);
+}
+
+/* Tables (technical details) */
 .table {
   width: 100%;
   border-collapse: collapse;
@@ -168,7 +271,7 @@ button:focus-visible {
 }
 .table th,
 .table td {
-  padding: 0.4rem 0.75rem;
+  padding: 0.45rem 0.75rem;
   text-align: left;
   white-space: nowrap;
   border-bottom: 1px solid var(--line);
@@ -178,15 +281,51 @@ button:focus-visible {
   font-weight: 500;
 }
 
-@media (max-width: 540px) {
+/* Skeletons */
+.skeleton {
+  background: linear-gradient(90deg, var(--bg-2) 25%, var(--bg-3) 50%, var(--bg-2) 75%);
+  background-size: 300% 100%;
+  animation: shimmer 1.6s linear infinite;
+  border-radius: var(--radius);
+}
+@keyframes shimmer {
+  to {
+    background-position: -150% 0;
+  }
+}
+
+/* Card → detail morph (same-document view transition, see lib/nav). */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.22s;
+}
+::view-transition-group(hero-art) {
+  animation-duration: 0.38s;
+  animation-timing-function: var(--ease);
+}
+
+@media (max-width: 600px) {
+  :root {
+    --bar-h: 3rem;
+  }
+  body {
+    font-size: 15px;
+  }
   .page {
-    padding: 0.75rem 0.75rem 3rem;
+    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
   }
   .grid {
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-    gap: 1rem 0.75rem;
+    grid-template-columns: repeat(auto-fill, minmax(min(160px, 100%), 1fr));
+    gap: 1.25rem 0.75rem;
   }
-  h1 {
-    font-size: 1.35rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

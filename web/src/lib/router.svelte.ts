@@ -1,28 +1,54 @@
+export type Sort = 'title' | 'added' | 'year' | 'duration';
+export type Filter = '4k' | 'hdr' | 'unwatched';
+
+export interface LibraryView {
+  sort: Sort;
+  filters: Filter[];
+}
+
 export type Route =
-  | { name: 'movies' }
-  | { name: 'shows' }
-  | { name: 'show'; show: string }
+  | { name: 'home' }
+  | ({ name: 'movies' } & LibraryView)
+  | ({ name: 'shows' } & LibraryView)
+  | { name: 'show'; show: string; season?: number }
   | { name: 'item'; id: number }
   | { name: 'play'; id: number; startSec: number }
   | { name: 'notfound' };
 
-/** Hash forms: #/movies, #/shows, #/shows/<name>, #/item/<id>, #/play/<id>[?t=<resume seconds>]. */
+const SORTS: Sort[] = ['title', 'added', 'year', 'duration'];
+const FILTERS: Filter[] = ['4k', 'hdr', 'unwatched'];
+
+function libraryView(q: URLSearchParams, fallback: Sort): LibraryView {
+  const s = q.get('sort') as Sort;
+  const filters = (q.get('f') ?? '').split(',').filter((f): f is Filter => FILTERS.includes(f as Filter));
+  return { sort: SORTS.includes(s) ? s : fallback, filters };
+}
+
+/**
+ * Hash forms: #/ (home), #/movies[?sort=&f=], #/shows[?sort=&f=], #/shows/<name>[?s=<season>],
+ * #/item/<id>, #/play/<id>[?t=<resume seconds>].
+ */
 export function parseRoute(hash: string): Route {
   const [path, query = ''] = hash.replace(/^#\/?/, '').split('?');
   const [head = '', arg = ''] = path.split('/');
+  const q = new URLSearchParams(query);
   try {
     switch (head) {
       case '':
+        return { name: 'home' };
       case 'movies':
-        return { name: 'movies' };
-      case 'shows':
-        return arg ? { name: 'show', show: decodeURIComponent(arg) } : { name: 'shows' };
+        return { name: 'movies', ...libraryView(q, 'title') };
+      case 'shows': {
+        if (!arg) return { name: 'shows', ...libraryView(q, 'title') };
+        const season = Number(q.get('s'));
+        return { name: 'show', show: decodeURIComponent(arg), season: q.has('s') && Number.isInteger(season) ? season : undefined };
+      }
       case 'item':
       case 'play': {
         const id = Number(arg);
         if (!Number.isInteger(id) || id <= 0) break;
         if (head === 'item') return { name: 'item', id };
-        const t = Number(new URLSearchParams(query).get('t'));
+        const t = Number(q.get('t'));
         return { name: 'play', id, startSec: Number.isFinite(t) && t > 0 ? t : 0 };
       }
     }
@@ -35,14 +61,32 @@ export function parseRoute(hash: string): Route {
 export const router = $state<{ route: Route }>({ route: parseRoute(location.hash) });
 
 window.addEventListener('hashchange', () => {
-  router.route = parseRoute(location.hash);
-  window.scrollTo(0, 0);
+  const next = parseRoute(location.hash);
+  // Sort/filter/season changes re-render in place; only real navigation scrolls to the top.
+  const cur = router.route;
+  const samePage =
+    ((next.name === 'movies' || next.name === 'shows') && next.name === cur.name) ||
+    (next.name === 'show' && cur.name === 'show' && next.show === cur.show);
+  router.route = next;
+  if (!samePage) window.scrollTo(0, 0);
 });
 
+function viewQuery(v: Partial<LibraryView>, fallback: Sort): string {
+  const p = new URLSearchParams();
+  if (v.sort && v.sort !== fallback) p.set('sort', v.sort);
+  if (v.filters?.length) p.set('f', v.filters.join(','));
+  const s = p.toString();
+  return s ? `?${s}` : '';
+}
+
 export const href = {
+  home: '#/',
   movies: '#/movies',
   shows: '#/shows',
-  show: (name: string) => `#/shows/${encodeURIComponent(name)}`,
+  moviesWith: (v: Partial<LibraryView>) => `#/movies${viewQuery(v, 'title')}`,
+  showsWith: (v: Partial<LibraryView>) => `#/shows${viewQuery(v, 'title')}`,
+  show: (name: string, season?: number) =>
+    `#/shows/${encodeURIComponent(name)}${season === undefined ? '' : `?s=${season}`}`,
   item: (id: number) => `#/item/${id}`,
   play: (id: number, startSec = 0) => `#/play/${id}${startSec > 0 ? `?t=${Math.floor(startSec)}` : ''}`,
 };

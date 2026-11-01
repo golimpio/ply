@@ -2,11 +2,13 @@
   import type { ItemSummary } from '../lib/api';
   import { hdrLabel, resolutionLabel } from '../lib/format';
 
-  let { item }: { item: Pick<ItemSummary, 'width' | 'height' | 'hdr'> } = $props();
+  // notable: only what sets a file apart (4K, HDR), for cards; otherwise every resolution.
+  let { item, notable = false }: { item: Pick<ItemSummary, 'width' | 'height' | 'hdr'>; notable?: boolean } =
+    $props();
 
   const res = $derived(resolutionLabel(item.width, item.height));
   const hdr = $derived(hdrLabel(item.hdr));
 </script>
 
-{#if res}<span class="badge">{res}</span>{/if}
+{#if res && (!notable || res === '4K')}<span class="badge">{res}</span>{/if}
 {#if hdr}<span class="badge hdr">{hdr}</span>{/if}

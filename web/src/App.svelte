@@ -1,10 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api, ApiError, getToken, onUnauthorized, setToken } from './lib/api';
+  import { ambient } from './lib/ambient.svelte';
   import { router } from './lib/router.svelte';
   import { app, attachToRunningScan } from './lib/state.svelte';
   import Header from './components/Header.svelte';
+  import SearchPalette from './components/SearchPalette.svelte';
+  import TabBar from './components/TabBar.svelte';
   import TokenPrompt from './components/TokenPrompt.svelte';
+  import Home from './pages/Home.svelte';
   import Item from './pages/Item.svelte';
   import Movies from './pages/Movies.svelte';
   import Play from './pages/Play.svelte';
@@ -18,6 +22,13 @@
   let epoch = $state(0);
 
   const route = $derived(router.route);
+  const playing = $derived(route.name === 'play');
+
+  // Projection light: the current film's colour, eased in and out by CSS.
+  $effect(() => {
+    document.documentElement.style.setProperty('--tint', ambient.color || 'var(--accent)');
+    document.documentElement.toggleAttribute('data-lit', !!ambient.color);
+  });
 
   onUnauthorized(() => {
     phase = 'prompt';
@@ -70,28 +81,59 @@
 {:else if phase === 'error'}
   <div class="center">
     <p class="error">{message}</p>
-    <button class="btn" onclick={boot}>Retry</button>
+    <button class="btn" onclick={boot}>Try again</button>
   </div>
 {:else if phase === 'prompt'}
   <TokenPrompt serverName={app.serverName} error={message} busy={checking} onsave={unlock} />
 {:else}
-  {#if route.name !== 'play'}<Header />{/if}
-  <main class="page">
+  <div class="light" aria-hidden="true"></div>
+  {#if !playing}<Header />{/if}
+  <main>
     {#key epoch}
-      {#if route.name === 'movies'}
-        <Movies />
+      {#if route.name === 'home'}
+        <Home />
+      {:else if route.name === 'movies'}
+        <Movies view={route} />
       {:else if route.name === 'shows'}
-        <Shows />
+        <Shows view={route} />
       {:else if route.name === 'show'}
-        {#key route.show}<Show show={route.show} />{/key}
+        {#key route.show}<Show show={route.show} season={route.season} />{/key}
       {:else if route.name === 'item'}
         {#key route.id}<Item id={route.id} />{/key}
       {:else if route.name === 'play'}
-        {#key route.id}<Play id={route.id} startSec={route.startSec} />{/key}
+        <div class="play-page">
+          {#key route.id}<Play id={route.id} startSec={route.startSec} />{/key}
+        </div>
       {:else}
-        <h1>Not found</h1>
-        <p><a href="#/movies">Back to the library</a></p>
+        <div class="page center">
+          <h1>This page doesn’t exist</h1>
+          <p><a href="#/">Go to the library</a></p>
+        </div>
       {/if}
     {/key}
   </main>
+  {#if !playing}<TabBar />{/if}
+  <SearchPalette />
 {/if}
+
+<style>
+  /* The light thrown by the screen: a soft wash of the current film's colour
+     from the top of the room, fading out before the content. */
+  .light {
+    position: fixed;
+    inset: 0 0 auto;
+    height: 90vh;
+    z-index: -1;
+    pointer-events: none;
+    background: radial-gradient(120% 70% at 30% 0%, var(--tint), transparent 70%);
+    opacity: 0.12;
+    transition: opacity 0.8s var(--ease);
+  }
+  :global(html[data-lit]) .light {
+    opacity: 0.3;
+  }
+  /* The player page has no header bar above it. */
+  .play-page {
+    padding: max(1rem, env(safe-area-inset-top)) var(--gutter) 2rem;
+  }
+</style>
