@@ -17,6 +17,7 @@ import (
 	"ply/internal/library"
 	"ply/internal/store"
 	"ply/internal/stream"
+	"ply/internal/subs"
 )
 
 // ScanController is the scanner as the API sees it.
@@ -43,6 +44,9 @@ type Options struct {
 	HW *hwaccel.Detector
 	// Art generates artwork on demand; nil disables it.
 	Art *art.Generator
+	// Subs converts text subtitles to WebVTT; nil disables the subtitle
+	// endpoint (tracks are then listed without a url).
+	Subs *subs.Generator
 }
 
 // Server is the HTTP handler for the whole application.
@@ -66,6 +70,9 @@ func New(o Options) *Server {
 	mux.HandleFunc("POST /api/items/{id}/playback", s.handlePlayback)
 	mux.HandleFunc("GET /api/items/{id}/file", s.handleFile)
 	mux.HandleFunc("GET /api/items/{id}/art/{kind}", s.handleArt)
+	mux.HandleFunc("GET /api/items/{id}/subtitles/{file}", s.handleSubtitle)
+	mux.HandleFunc("PUT /api/items/{id}/progress", s.handleProgress)
+	mux.HandleFunc("GET /api/continue", s.handleContinue)
 	mux.HandleFunc("GET /api/sessions/{sid}/index.m3u8", s.handleSessionPlaylist)
 	mux.HandleFunc("GET /api/sessions/{sid}/{file}", s.handleSessionFile)
 	mux.HandleFunc("DELETE /api/sessions/{sid}", s.handleSessionDelete)

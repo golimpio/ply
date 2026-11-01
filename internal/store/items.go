@@ -36,18 +36,24 @@ type Item struct {
 	UpdatedAt   int64
 }
 
-// Entry is an item with its streams.
+// Entry is an item with its streams. GetEntry also fills External (sidecar
+// subtitles, ordered by path); GetEntry, ListItems and Continue fill Progress
+// (nil when the item has none).
 type Entry struct {
 	Item
-	Streams []probe.Stream
+	Streams  []probe.Stream
+	External []ExternalSubtitle
+	Progress *Progress
 }
 
-// FileState is what the scanner needs to decide whether a file changed.
+// FileState is what the scanner needs to decide whether a file changed, plus
+// the sidecar subtitles it recorded last time.
 type FileState struct {
 	ID    int64
 	Root  string
 	Size  int64
 	MTime int64
+	Subs  []ExternalSubtitle
 }
 
 // ListFilter narrows ListItems. Empty fields match everything; Show matches
@@ -150,20 +156,34 @@ func (s *Store) GetEntry(ctx context.Context, id int64) (Entry, error) {
 	if err != nil {
 		return Entry{}, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+streamCols+` FROM streams WHERE item_id = ? ORDER BY idx`, id)
-	if err != nil {
+	e := Entry{Item: it}
+	if e.Streams, err = s.itemStreams(ctx, id); err != nil {
 		return Entry{}, err
 	}
+	if e.External, err = s.externalSubtitles(ctx, id); err != nil {
+		return Entry{}, err
+	}
+	if e.Progress, err = s.getProgress(ctx, id); err != nil {
+		return Entry{}, err
+	}
+	return e, nil
+}
+
+func (s *Store) itemStreams(ctx context.Context, id int64) ([]probe.Stream, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+streamCols+` FROM streams WHERE item_id = ? ORDER BY idx`, id)
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
-	e := Entry{Item: it}
+	var streams []probe.Stream
 	for rows.Next() {
 		st, err := scanStream(rows)
 		if err != nil {
-			return Entry{}, err
+			return nil, err
 		}
-		e.Streams = append(e.Streams, st)
+		streams = append(streams, st)
 	}
-	return e, rows.Err()
+	return streams, rows.Err()
 }
 
 // ListItems returns matching items with their streams. Movies come first,
@@ -211,7 +231,7 @@ func (s *Store) ListItems(ctx context.Context, f ListFilter) ([]Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() // idempotent: also closed explicitly below
 	for rows.Next() {
 		var (
 			itemID int64
@@ -226,7 +246,20 @@ func (s *Store) ListItems(ctx context.Context, f ListFilter) ([]Entry, error) {
 			e.Streams = append(e.Streams, st)
 		}
 	}
-	return entries, rows.Err()
+	err = rows.Err()
+	rows.Close() // before the next query: the pool has one connection
+	if err != nil {
+		return nil, err
+	}
+
+	progress, err := s.allProgress(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range entries {
+		entries[i].Progress = progress[entries[i].ID]
+	}
+	return entries, nil
 }
 
 func (s *Store) queryItems(ctx context.Context, query string, args []any) ([]Item, error) {
@@ -291,7 +324,7 @@ func (s *Store) FileStates(ctx context.Context) (map[string]FileState, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() // idempotent: also closed explicitly below
 	states := map[string]FileState{}
 	for rows.Next() {
 		var (
@@ -303,7 +336,22 @@ func (s *Store) FileStates(ctx context.Context) (map[string]FileState, error) {
 		}
 		states[path] = st
 	}
-	return states, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+
+	subs, err := s.allExternalSubtitles(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for path, st := range states {
+		if list, ok := subs[st.ID]; ok {
+			st.Subs = list
+			states[path] = st
+		}
+	}
+	return states, nil
 }
 
 // DeleteItems removes the items (and, by cascade, their streams and

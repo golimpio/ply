@@ -94,7 +94,7 @@ func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pb := s.playbackFor(e, profile, playback.NoOptions, 0)
-	d := detail(e, pb)
+	d := s.detail(e, pb)
 	d.Art = s.artOf(e)
 	writeJSON(w, http.StatusOK, d)
 }

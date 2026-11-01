@@ -74,8 +74,13 @@ func TestMigrationsAreIdempotentAndVersioned(t *testing.T) {
 	if err := s2.db.QueryRow(`SELECT COUNT(*) FROM schema_version`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 1 {
-		t.Errorf("schema_version rows = %d after reopen, want 1", versions)
+	// One row per migration file, not one more per Open.
+	files, err := migrationFS.ReadDir("migrations")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("migrations: %v (%d files)", err, len(files))
+	}
+	if versions != len(files) {
+		t.Errorf("schema_version rows = %d after reopen, want %d (one per migration)", versions, len(files))
 	}
 	if n, _ := s2.CountItems(ctx); n != 1 {
 		t.Errorf("items after reopen = %d, want 1 (data must persist)", n)
@@ -366,7 +371,7 @@ func TestFileStates(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := FileState{ID: id, Root: "/media", Size: 100, MTime: it.MTime}
-	if got := states["/media/a.mp4"]; got != want {
+	if got := states["/media/a.mp4"]; !reflect.DeepEqual(got, want) {
 		t.Errorf("state = %+v, want %+v", got, want)
 	}
 }

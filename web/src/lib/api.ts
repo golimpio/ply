@@ -41,7 +41,8 @@ export interface ItemSummary {
   /** The contract does not pin the shape: bool or a label such as "hdr10" / "dv" / "hlg". */
   hdr?: boolean | string | null;
   addedAt: number;
-  progress?: Progress;
+  /** Resume state; null (or absent) when the item has not been started. */
+  progress?: Progress | null;
   /** Artwork links; null/absent when the server has none for this item. */
   art?: ArtUrls | null;
 }
@@ -64,11 +65,16 @@ export interface Stream {
 }
 
 export interface Subtitle {
+  /** The ffprobe stream index of an embedded track, or ext<N> for a sidecar file. */
   key: string;
   language?: string;
   title?: string;
   format: string;
+  /** A bitmap track (PGS, VobSub, DVB): it can only be burned into the video (subtitleIndex). */
   image: boolean;
+  forced?: boolean;
+  default?: boolean;
+  /** WebVTT for a <track>; set for text tracks only (with ?token= when the server needs one). */
   url?: string;
 }
 
@@ -288,9 +294,12 @@ export const api = {
     }
   },
 
-  // M5 (progress / continue watching) — present for the contract, unused by the UI so far.
-  putProgress: (id: number, positionSec: number, durationSec: number) =>
-    request<void>('PUT', `/api/items/${id}/progress`, { positionSec, durationSec }),
+  /**
+   * Report where playback is. The server answers with the resulting state (null when the position
+   * is too early to count as started). keepalive lets it complete while the page is unloading.
+   */
+  putProgress: (id: number, positionSec: number, durationSec: number, keepalive = false) =>
+    request<Progress | null>('PUT', `/api/items/${id}/progress`, { positionSec, durationSec }, keepalive),
 
   async continueWatching(): Promise<ItemSummary[]> {
     return (await request<ItemSummary[] | null>('GET', '/api/continue')) ?? [];

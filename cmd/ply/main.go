@@ -24,6 +24,7 @@ import (
 	"ply/internal/probe"
 	"ply/internal/store"
 	"ply/internal/stream"
+	"ply/internal/subs"
 	"ply/web"
 )
 
@@ -95,6 +96,12 @@ func run() error {
 		artGen = nil
 	}
 
+	subGen, err := subs.New(subs.Options{Dir: filepath.Join(cfg.Data, "subs"), FFmpeg: ffmpegBin})
+	if err != nil {
+		log.Warn("text subtitles disabled", "err", err)
+		subGen = nil
+	}
+
 	if len(cfg.Media) == 0 {
 		log.Warn("no -media roots given; the library will stay empty")
 	}
@@ -117,10 +124,9 @@ func run() error {
 		Streams: streams,
 		HW:      hw,
 		Art:     artGen,
+		Subs:    subGen,
 	})
-	if artGen != nil {
-		go pruneArtAfterScans(ctx, scanner, st, artGen, log)
-	}
+	go pruneCachesAfterScans(ctx, scanner, st, artGen, subGen, log)
 	srv := &http.Server{
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -162,10 +168,14 @@ func run() error {
 	return serveFailure
 }
 
-// pruneArtAfterScans removes cached artwork of items that are gone or changed
-// each time a scan finishes. The scanner has no completion hook, so its
-// status is polled.
-func pruneArtAfterScans(ctx context.Context, sc api.ScanController, st *store.Store, gen *art.Generator, log *slog.Logger) {
+// pruneCachesAfterScans removes cached artwork and subtitles of items that are
+// gone or changed each time a scan finishes. Either generator may be nil. The
+// scanner has no completion hook, so its status is polled.
+func pruneCachesAfterScans(ctx context.Context, sc api.ScanController, st *store.Store, artGen *art.Generator,
+	subGen *subs.Generator, log *slog.Logger) {
+	if artGen == nil && subGen == nil {
+		return
+	}
 	var seen time.Time
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
@@ -189,12 +199,23 @@ func pruneArtAfterScans(ctx context.Context, sc api.ScanController, st *store.St
 		for _, fs := range states {
 			live[fs.ID] = fs.MTime
 		}
-		n, err := gen.Prune(live)
-		if err != nil {
-			log.Warn("artwork prune", "err", err)
+		if artGen != nil {
+			n, err := artGen.Prune(live)
+			if err != nil {
+				log.Warn("artwork prune", "err", err)
+			}
+			if n > 0 {
+				log.Info("artwork pruned", "files", n)
+			}
 		}
-		if n > 0 {
-			log.Info("artwork pruned", "files", n)
+		if subGen != nil {
+			n, err := subGen.Prune(live)
+			if err != nil {
+				log.Warn("subtitle cache prune", "err", err)
+			}
+			if n > 0 {
+				log.Info("subtitle cache pruned", "files", n)
+			}
 		}
 	}
 }

@@ -1,7 +1,7 @@
 // One shared copy of the whole library for the pages that need all of it
 // (home rails, search, show artwork, instant detail heroes). Refetched after
 // every scan; a list of ~10k summaries is a few MB and one request.
-import { api, type ItemSummary } from './api';
+import { api, type ItemSummary, type Progress } from './api';
 import { app } from './state.svelte';
 
 export interface ShowEntry {
@@ -46,6 +46,12 @@ export function ensureLibrary(): Promise<void> {
 
 export function findItem(id: number): ItemSummary | undefined {
   return library.items.find((i) => i.id === id);
+}
+
+/** Reflect a progress report in the cached list, so cards and heroes update without a refetch. */
+export function applyProgress(id: number, progress: Progress | null): void {
+  const item = findItem(id);
+  if (item) item.progress = progress;
 }
 
 export function showsOf(items: ItemSummary[]): ShowEntry[] {

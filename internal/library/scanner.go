@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -196,6 +197,7 @@ type job struct {
 	path, root string
 	size       int64
 	mtime      int64
+	subs       []store.ExternalSubtitle // sidecar subtitles found next to path
 }
 
 // scanRoot walks one root, indexes new and changed files, and removes rows
@@ -244,6 +246,7 @@ func (s *Scanner) scanRoot(ctx context.Context, root string, states map[string]s
 	}
 
 	seen := map[string]struct{}{}
+	var listing dirNames
 	walkErrors := 0
 	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -273,11 +276,18 @@ func (s *Scanner) scanRoot(ctx context.Context, root string, states map[string]s
 		}
 		seen[path] = struct{}{}
 		mtime := info.ModTime().UnixNano()
+		subs := sidecars(path, listing.list(filepath.Dir(path)))
 		if st, ok := states[path]; ok && st.Size == info.Size() && st.MTime == mtime {
+			// The video is unchanged, but subtitles come and go on their own.
+			if !slices.Equal(st.Subs, subs) {
+				if err := s.store.SetExternalSubtitles(ctx, st.ID, subs); err != nil {
+					s.log.Warn("update subtitles", "path", path, "err", err)
+				}
+			}
 			return nil
 		}
 		select {
-		case jobs <- job{path: path, root: root, size: info.Size(), mtime: mtime}:
+		case jobs <- job{path: path, root: root, size: info.Size(), mtime: mtime, subs: subs}:
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
@@ -360,8 +370,12 @@ func (s *Scanner) index(ctx context.Context, j job) error {
 		DurationSec: res.DurationSec,
 		Bitrate:     res.Bitrate,
 	}
-	if _, err := s.store.UpsertItem(ctx, &it, res.Streams); err != nil {
+	id, err := s.store.UpsertItem(ctx, &it, res.Streams)
+	if err != nil {
 		return fmt.Errorf("store %s: %w", j.path, err)
+	}
+	if err := s.store.SetExternalSubtitles(ctx, id, j.subs); err != nil {
+		s.log.Warn("store subtitles", "path", j.path, "err", err)
 	}
 	return nil
 }

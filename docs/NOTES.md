@@ -133,3 +133,53 @@ stop being true.
   `-stream-idle` (default 60 s) replaces the old `PLY_STREAM_IDLE`; the variable now only changes the flag's
   default (tests and scripts), the flag wins.
 - Also decided: an H.264 stream with more than 8 bits (High 10) is never copied, on any built-in profile.
+
+## M5 notes (progress, resume, subtitles)
+
+- **Progress rules** (`internal/store/progress.go`). `PUT /api/items/{id}/progress` stores `{position, duration}` in
+  `progress`. Watched = position >= 90 % of the duration, or within 120 s of the end *and* at least half played (the
+  half guard keeps a 90 s clip from counting as watched at second 5; for anything over 20 minutes the 90 % rule is the
+  stricter one anyway). A position under 30 s that is not watched deletes the row, so "Play from start" and leaving at
+  once clears a resume point; a watched item keeps its row. The server uses the client's duration, else the item's, and
+  clamps a position past the end. The response is the resulting `{positionSec, watched}` or `null`.
+  `updated_at` is unix nanoseconds so back-to-back reports order correctly. `GET /api/continue` = unwatched rows,
+  newest first, limit 20, full ItemSummary (art included). `progress` is always present in summaries and details
+  (`null` when there is none).
+- **Player reporting** (`Player.svelte`). Every 10 s while playing, on pause, ended, leaving the page, `pagehide` and
+  `visibilitychange` (iOS Safari often skips pagehide), with `fetch(keepalive)` (sendBeacon cannot PUT). Reports are
+  gated by `armed`: nothing is sent until playback sits at the resume position, and `release()` disarms first.
+  Unloading the media element resets the clock to 0 and fires `pause` afterwards, which would otherwise have wiped the
+  saved position (found while designing it, covered by checking the server value after leaving in the browser pass).
+  The library cache is patched in place (`applyProgress`) so cards update without a refetch.
+- **Sidecar subtitles** (`internal/library/sidecar.go`). `<base>.srt|vtt|ass` and `<base>.<lang>[.forced|.sdh|.cc].<ext>`
+  in the video's own directory, base and extension case-insensitive; anything else after the base (a second language,
+  an unknown word, more than three parts) is not a sidecar. `hi` is Hindi, not "hearing impaired". They are listed on
+  every scan even when the video is unchanged (the walk lists the directory once per folder, the store compares and
+  writes only on a difference). Migration 002 adds `forced`. The key is `ext<N>`, N = position when ordered by path.
+- **WebVTT** (`internal/subs`). One niced ffmpeg run per track (`-map 0:<idx> -c:s webvtt` for embedded, plain
+  `-i file` for sidecars), cached as `<data>/subs/<id>-<key>-<mtime>.vtt` (sidecars add a path hash, because the list
+  behind ext0 can change; their mtime is the sidecar's own). Concurrent requests share a run; a failure is remembered
+  until the mtime changes (422 for the client). Embedded extraction reads the whole container once, so the first
+  request on a big remux is slow (10 min timeout; the run outlives the request). Pruned after each scan with the
+  artwork cache. ffmpeg exits 0 after dropping the rest of a non-UTF-8 `.srt` ("maybe missing -sub_charenc"), so
+  sidecars that are neither valid UTF-8 nor UTF-16 with a BOM get `-sub_charenc WINDOWS-1252`.
+  Text codecs: subrip, ass, ssa, mov_text, webvtt (and `text`/`srt`). Image codecs are 404 here.
+- **Cue times need no offset.** The HLS timeline is the file's (stream time 0 = file time 0, see M3), so cue times from
+  the VTT line up with `video.currentTime` for direct play and for sessions started at any `startSec`. Verified in
+  Chromium: a remux session resumed at 45 s showed the cue for 40-90 s, and the burned-in clock in the picture matched.
+- **Burn-in verified with a real bitmap subtitle.** ffmpeg cannot turn text into a bitmap subtitle, so
+  `writeVobSub` in `internal/api/subtitles_integration_test.go` builds a VobSub pair by hand (an SPU packet with one
+  RLE'd white 100x20 box, shown 2-4 s, in a PS/PES wrapper plus an `.idx`), ffmpeg muxes it into mkv as a genuine
+  `dvd_subtitle` stream, and `TestImageSubtitleIsBurnedIn` decodes the first segment of a session and counts frames
+  with a white box in the region: about 48 of the 144 frames of segment 0 on libx264 and on h264_videotoolbox (which falls back to software
+  decode + overlay, as the reasons say), none without the subtitle. PGS itself still has no authoring tool here; the
+  filter graph is the same for every bitmap codec.
+- **Decide change**: an explicit `audioIndex` that is not the file's default track is no longer direct play (the file
+  would play its default track whatever was asked); it becomes a remux, with a reason. The browser's audio menu relies
+  on it.
+- **UI**: text subtitle = a `<track kind="subtitles">` added/removed with the selection; bitmap = new playback with
+  `subtitleIndex` at the current position; audio = new playback with `audioIndex` at the current position. Default
+  selection is a text track flagged default, else forced; bitmap tracks are never auto-selected (that would turn a
+  remux into a transcode unasked). Labels use `Intl.DisplayNames`.
+- Not done: charset detection beyond "valid UTF-8 or Windows-1252", sidecars in other directories (`Subs/`), `.ssa`
+  and `.sub/.idx` sidecars, remembering the viewer's subtitle language between items, PGS rendered with real PGS.

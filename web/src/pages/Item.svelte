@@ -109,7 +109,7 @@
         <a class="btn primary" href={href.play(item.id, resumeAt)}>
           <Icon name="play" />Resume from {formatClock(resumeAt)}
         </a>
-        <a class="btn" href={href.play(item.id)}>Start over</a>
+        <a class="btn" href={href.play(item.id)}>Play from start</a>
       {:else}
         <a class="btn primary" href={href.play(item.id)}><Icon name="play" />Play</a>
       {/if}

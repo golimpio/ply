@@ -260,6 +260,15 @@ func Decide(item Item, streams []Stream, p Profile, opts Options) Decision {
 		reason("hevc is tagged %q, %s requires hvc1", video.CodecTag, name)
 	}
 
+	// A player of the file as it is hears the file's default track: choosing
+	// another one takes a session that maps it.
+	otherAudio := false
+	if def, ok := AudioStream(streams, -1); ok && d.AudioIndex >= 0 && d.AudioIndex != def.Index &&
+		videoCopyable && !burn && containerOK && tagOK && audioCopyable {
+		otherAudio = true
+		reason("audio stream %d is not the file's default track, which is all a direct play can offer", d.AudioIndex)
+	}
+
 	switch {
 	case burn || !videoCopyable:
 		d.Method = MethodTranscode
@@ -267,7 +276,7 @@ func Decide(item Item, streams []Stream, p Profile, opts Options) Decision {
 		if !audioCopyable {
 			d.AudioAction = ActionTranscode
 		}
-	case containerOK && tagOK && audioCopyable:
+	case containerOK && tagOK && audioCopyable && !otherAudio:
 		d.Method = MethodDirect
 	default:
 		d.Method = MethodRemux

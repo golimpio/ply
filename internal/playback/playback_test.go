@@ -168,6 +168,19 @@ func TestDecideAVPlayer(t *testing.T) {
 			reasons: []string{"audio codec dts"},
 		},
 		{
+			name: "another copyable audio track cannot be direct play", container: "mp4",
+			streams: streams(vid("h264", "avc1", 1080), aud(1, "aac", true), aud(2, "aac", false)),
+			opts:    Options{AudioIndex: 2, SubtitleIndex: -1},
+			method:  "remux", video: "copy", audio: "copy", audioIndex: 2, burn: -1,
+			reasons: []string{"audio stream 2 is not the file's default track"},
+		},
+		{
+			name: "explicitly choosing the default track stays direct", container: "mp4",
+			streams: streams(vid("h264", "avc1", 1080), aud(1, "aac", true), aud(2, "aac", false)),
+			opts:    Options{AudioIndex: 1, SubtitleIndex: -1},
+			method:  "direct", video: "copy", audio: "copy", audioIndex: 1, burn: -1,
+		},
+		{
 			name: "unknown audio index falls back to default", container: "mp4",
 			streams: streams(vid("h264", "avc1", 1080), aud(1, "aac", true), aud(2, "dts", false)),
 			opts:    Options{AudioIndex: 9, SubtitleIndex: -1},

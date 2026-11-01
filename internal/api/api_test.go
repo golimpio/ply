@@ -514,12 +514,16 @@ func TestItemsList(t *testing.T) {
 		t.Errorf("episode summary = %+v", ep)
 	}
 
-	// Raw JSON: absent optionals are omitted, not null.
+	// Raw JSON: absent optionals are omitted, not null; progress is the exception (M5): always
+	// present, null until the item is started.
 	raw := decode[[]map[string]any](t, e.get("/api/items?kind=movie"))
-	for _, k := range []string{"show", "season", "episode", "episodeTitle", "hdr", "progress"} {
+	for _, k := range []string{"show", "season", "episode", "episodeTitle", "hdr"} {
 		if _, ok := raw[0][k]; ok {
 			t.Errorf("movie JSON has %q", k)
 		}
+	}
+	if v, ok := raw[0]["progress"]; !ok || v != nil {
+		t.Errorf("movie JSON progress = %v (present %v), want null", v, ok)
 	}
 
 	movies := decode[[]listedItem](t, e.get("/api/items?kind=movie"))

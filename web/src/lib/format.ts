@@ -106,6 +106,19 @@ export function methodLabel(m: Method): string {
   }
 }
 
+let languageNames: Intl.DisplayNames | undefined;
+
+/** "eng" / "en" / "pt-BR" -> "English" / "Brazilian Portuguese"; "" for unknown or undetermined. */
+export function languageLabel(code?: string): string {
+  if (!code || code === 'und' || code === 'zxx') return '';
+  try {
+    languageNames ??= new Intl.DisplayNames(['en'], { type: 'language', fallback: 'code' });
+    return languageNames.of(code) ?? code;
+  } catch {
+    return code; // not a well-formed language tag
+  }
+}
+
 export function initials(title: string): string {
   const words = title.match(/[\p{L}\p{N}]+/gu) ?? [];
   return words

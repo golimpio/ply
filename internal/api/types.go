@@ -3,13 +3,15 @@ package api
 import (
 	"fmt"
 	"path/filepath"
+	"strconv"
 
 	"ply/internal/playback"
 	"ply/internal/probe"
 	"ply/internal/store"
+	"ply/internal/subs"
 )
 
-// Progress is the resume state of an item (filled in by M5).
+// Progress is the resume state of an item.
 type Progress struct {
 	PositionSec float64 `json:"positionSec"`
 	Watched     bool    `json:"watched"`
@@ -34,17 +36,22 @@ type ItemSummary struct {
 	Height       int       `json:"height"`
 	HDR          string    `json:"hdr,omitempty"`
 	AddedAt      int64     `json:"addedAt"`
-	Progress     *Progress `json:"progress,omitempty"`
-	Art          *ArtURLs  `json:"art"` // null when there is no artwork
+	Progress     *Progress `json:"progress"` // null when the item has not been started
+	Art          *ArtURLs  `json:"art"`      // null when there is no artwork
 }
 
-// Subtitle describes a selectable subtitle track.
+// Subtitle describes a selectable subtitle track. Key is the ffprobe stream
+// index for an embedded track and ext<N> for a sidecar file. URL (WebVTT) is
+// only set for text tracks; an Image track can only be burned into the video
+// (POST /playback with subtitleIndex = the stream index).
 type Subtitle struct {
-	Key      string `json:"key"` // stream index, or ext<N> for sidecars (M5)
+	Key      string `json:"key"`
 	Language string `json:"language"`
 	Title    string `json:"title"`
 	Format   string `json:"format"`
 	Image    bool   `json:"image"`
+	Forced   bool   `json:"forced"`
+	Default  bool   `json:"default"`
 	URL      string `json:"url,omitempty"`
 }
 
@@ -105,27 +112,44 @@ func summarize(e store.Entry) ItemSummary {
 	if a, ok := playback.AudioStream(e.Streams, -1); ok {
 		s.AudioCodec = a.Codec
 	}
+	if p := e.Progress; p != nil {
+		s.Progress = &Progress{PositionSec: p.PositionSec, Watched: p.Watched}
+	}
 	return s
 }
 
-func subtitlesOf(streams []probe.Stream) []Subtitle {
-	subs := []Subtitle{}
-	for _, st := range streams {
+// subtitlesOf lists the embedded subtitle streams, then the sidecar files.
+func (s *Server) subtitlesOf(e store.Entry) []Subtitle {
+	list := []Subtitle{}
+	for _, st := range e.Streams {
 		if st.Type != "subtitle" {
 			continue
 		}
-		subs = append(subs, Subtitle{
-			Key:      fmt.Sprint(st.Index),
+		sub := Subtitle{
+			Key:      strconv.Itoa(st.Index),
 			Language: st.Language,
 			Title:    st.Title,
 			Format:   st.Codec,
 			Image:    playback.IsImageSubtitle(st.Codec),
-		})
+			Forced:   st.Forced,
+			Default:  st.Default,
+		}
+		if s.Subs != nil && subs.IsText(st.Codec) {
+			sub.URL = s.subtitleURL(e.ID, sub.Key)
+		}
+		list = append(list, sub)
 	}
-	return subs
+	for i, x := range e.External {
+		sub := Subtitle{Key: extKey(i), Language: x.Language, Format: x.Format, Forced: x.Forced}
+		if s.Subs != nil {
+			sub.URL = s.subtitleURL(e.ID, sub.Key)
+		}
+		list = append(list, sub)
+	}
+	return list
 }
 
-func detail(e store.Entry, pb Playback) ItemDetail {
+func (s *Server) detail(e store.Entry, pb Playback) ItemDetail {
 	streams := e.Streams
 	if streams == nil {
 		streams = []probe.Stream{}
@@ -136,7 +160,7 @@ func detail(e store.Entry, pb Playback) ItemDetail {
 		Size:        e.Size,
 		Bitrate:     e.Bitrate,
 		Streams:     streams,
-		Subtitles:   subtitlesOf(e.Streams),
+		Subtitles:   s.subtitlesOf(e),
 		Playback:    pb,
 	}
 }

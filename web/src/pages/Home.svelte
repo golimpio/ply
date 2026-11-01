@@ -18,7 +18,6 @@
   $effect(() => {
     void app.libraryVersion;
     void ensureLibrary();
-    // /api/continue arrives with M5; until then this rail simply stays hidden.
     api.continueWatching().then(
       (list) => (continueItems = list),
       () => (continueItems = []),
