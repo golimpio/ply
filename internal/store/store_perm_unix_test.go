@@ -177,3 +177,41 @@ func TestOpenCarriesOnWhenTheFilesystemRefusesChmod(t *testing.T) {
 		t.Errorf("EACCES: Open = %v, want the error", err)
 	}
 }
+
+// EPERM from chmod is only a warning for a regular file of ours: a database
+// file of another user, or something that is not a file, is refused.
+func TestOpenRefusesADatabaseItCannotOwn(t *testing.T) {
+	eperm := func(name string, _ os.FileMode) error {
+		return &os.PathError{Op: "chmod", Path: name, Err: syscall.EPERM}
+	}
+
+	// Control: our own file on a filesystem that refuses chmod opens, with a warning.
+	s, err := open(filepath.Join(t.TempDir(), "ply.db"), eperm)
+	if err != nil {
+		t.Fatalf("own file: %v", err)
+	}
+	s.Close()
+
+	// Someone else's file.
+	defer func(f func(os.FileInfo) (int, bool)) { fileOwner = f }(fileOwner)
+	fileOwner = func(os.FileInfo) (int, bool) { return os.Geteuid() + 1, true }
+	if s, err := open(filepath.Join(t.TempDir(), "ply.db"), eperm); err == nil || !strings.Contains(err.Error(), "another user") {
+		if s != nil {
+			s.Close()
+		}
+		t.Errorf("another user's file: err = %v, want a refusal", err)
+	}
+	fileOwner = ownerOf
+
+	// A -wal that is a directory, not a file.
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "ply.db-wal-probe"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := ownFile(filepath.Join(dir, "ply.db-wal-probe")); err == nil || !strings.Contains(err.Error(), "not a regular file") {
+		t.Errorf("directory: err = %v, want not a regular file", err)
+	}
+	if err := ownFile(filepath.Join(dir, "missing")); err != nil {
+		t.Errorf("missing file: %v, want nil (nothing to protect)", err)
+	}
+}

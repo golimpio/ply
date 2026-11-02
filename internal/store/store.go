@@ -85,6 +85,13 @@ func open(path string, chmod func(string, os.FileMode) error) (*Store, error) {
 		switch {
 		case err == nil || errors.Is(err, os.ErrNotExist):
 		case noPermissions(err):
+			// Only a file of ours on a filesystem that ignores modes is let
+			// through: EPERM also means "someone else's file", and that is no
+			// place for the key.
+			if err := ownFile(abs + suffix); err != nil {
+				db.Close()
+				return nil, err
+			}
 			if unsupported == nil {
 				unsupported = err
 			}
@@ -99,6 +106,29 @@ func open(path string, chmod func(string, os.FileMode) error) (*Store, error) {
 	}
 	return s, nil
 }
+
+// ownFile returns an error unless path is a regular file owned by this user
+// (or is not there: nothing to protect).
+func ownFile(path string) error {
+	fi, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !fi.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file", path)
+	}
+	if uid, ok := fileOwner(fi); ok && uid != os.Geteuid() {
+		return fmt.Errorf("%s belongs to another user (uid %d); ply keeps the TMDB key in it", path, uid)
+	}
+	return nil
+}
+
+// fileOwner is the owning uid of fi, where the platform has one; a variable so
+// that a test can play another user.
+var fileOwner = ownerOf
 
 // noPermissions reports whether err says the filesystem has no say over modes
 // (vfat, exfat and many network mounts), or does not let this user change them.
