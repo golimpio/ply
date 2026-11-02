@@ -19,6 +19,14 @@ describe('parseRoute', () => {
     ['#/play/3?t=-5', { name: 'play', id: 3, startSec: 0 }],
     ['#/play/3?t=soon', { name: 'play', id: 3, startSec: 0 }],
     ['#/nowhere', notfound],
+    ['#/person/31', { name: 'person', id: 31 }],
+    ['#/genre/18', { name: 'genre', id: 18 }],
+    ['#/collection/2344', { name: 'collection', id: 2344 }],
+    ['#/person/0', notfound],
+    ['#/genre/-3', notfound],
+    ['#/collection/x', notfound],
+    ['#/settings', { name: 'settings' }],
+    ['#/settings/extra', notfound],
   ])('%s', (hash, want) => {
     expect(parseRoute(hash)).toEqual(want);
   });
@@ -60,5 +68,12 @@ describe('href', () => {
     expect(href.play(5)).toBe('#/play/5');
     expect(href.play(5, 0.4)).toBe('#/play/5');
     expect(href.play(5, 61.9)).toBe('#/play/5?t=61');
+  });
+
+  it('round-trips the metadata pages', () => {
+    expect(parseRoute(href.person(7))).toEqual({ name: 'person', id: 7 });
+    expect(parseRoute(href.genre(18))).toEqual({ name: 'genre', id: 18 });
+    expect(parseRoute(href.collection(9))).toEqual({ name: 'collection', id: 9 });
+    expect(parseRoute(href.settings)).toEqual({ name: 'settings' });
   });
 });

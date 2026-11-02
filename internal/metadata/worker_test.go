@@ -52,13 +52,20 @@ type wenv struct {
 	imgDir  string
 	imgHits atomic.Int32
 	imgSrv  *httptest.Server
-	media   string
-	ctx     context.Context
+	// imgHang makes the image server hold requests until imgRelease is closed
+	// (by close), as a CDN that hangs does.
+	imgHang    atomic.Bool
+	imgRelease chan struct{}
+	imgOnce    sync.Once
+	media      string
+	ctx        context.Context
 }
 
 // close releases everything the environment holds; tests that count goroutines
 // call it themselves, the others leave it to t.Cleanup.
 func (e *wenv) close() {
+	e.imgOnce.Do(func() { close(e.imgRelease) })
+	e.w.Close()
 	e.images.Close()
 	e.imgSrv.Close()
 	e.st.Close()
@@ -74,10 +81,17 @@ func newWEnv(t *testing.T, mod ...func(*metadata.WorkerOptions)) *wenv {
 		t.Fatal(err)
 	}
 	e := &wenv{t: t, st: st, fake: &metadatatest.Fake{}, clock: &testClock{t: time.Now().Truncate(time.Second)},
-		media: filepath.Join(dir, "media"), imgDir: filepath.Join(dir, "images"), ctx: t.Context()}
+		media: filepath.Join(dir, "media"), imgDir: filepath.Join(dir, "images"), ctx: t.Context(), imgRelease: make(chan struct{})}
 
 	e.imgSrv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		e.imgHits.Add(1)
+		if e.imgHang.Load() {
+			select {
+			case <-e.imgRelease:
+			case <-r.Context().Done():
+			}
+			return
+		}
 		w.Write(jpeg)
 	}))
 	e.fake.ImageBase = e.imgSrv.URL
@@ -714,14 +728,65 @@ func TestWorkerChangesFeedAndTheAgeFallback(t *testing.T) {
 	}
 }
 
+// A feed too long to follow is not a list of what changed: the refresh goes by
+// age, the poll time stays, and the next refresh asks the feed for everything
+// since then.
+func TestWorkerChangesFeedTooLongFallsBackToAgeAndKeepsThePollTime(t *testing.T) {
+	e := newWEnv(t)
+	ids := refreshFixture(t, e, 24*time.Hour)
+	e.once() // by age: the poll time is recorded
+	poll, ok, _ := e.st.GetSetting(e.ctx, metadata.SettingChangesPoll)
+	if !ok {
+		t.Fatal("no poll time recorded")
+	}
+
+	e.clock.Advance(25 * time.Hour)
+	e.fake.ChangedMovies = []int64{3}
+	e.fake.Hook = func(ctx context.Context, call string) error {
+		if strings.HasPrefix(call, "Changes(") {
+			return metadata.ErrChangesTruncated
+		}
+		return nil
+	}
+	e.once()
+	if e.fake.Count("Changes(") == 0 {
+		t.Fatal("the feed was not tried")
+	}
+	if got, _, _ := e.st.GetSetting(e.ctx, metadata.SettingChangesPoll); got != poll {
+		t.Errorf("poll time = %q after a feed that could not be followed, want it kept at %q", got, poll)
+	}
+	if got, _, _ := e.st.GetSetting(e.ctx, metadata.SettingLastRefresh); got != fmt.Sprint(e.clock.Now().Unix()) {
+		t.Errorf("last refresh = %q, want now (the refresh by age is done)", got)
+	}
+	if overview(t, e, ids["changed"]) != "v1" {
+		t.Errorf("a title the feed never named was refreshed by it: %q", overview(t, e, ids["changed"]))
+	}
+
+	// The feed works again: it is asked for everything since the old poll time.
+	e.fake.Hook = nil
+	e.clock.Advance(25 * time.Hour)
+	e.once()
+	if overview(t, e, ids["changed"]) != "v2" {
+		t.Errorf("the change was lost: %q", overview(t, e, ids["changed"]))
+	}
+	if got, _, _ := e.st.GetSetting(e.ctx, metadata.SettingChangesPoll); got != fmt.Sprint(e.clock.Now().Unix()) {
+		t.Errorf("poll time = %q after a feed that worked, want now", got)
+	}
+}
+
 func TestWorkerChangesFeedBoundaryIsFourteenDays(t *testing.T) {
+	if metadata.ChangesWindow != 14*24*time.Hour {
+		t.Errorf("ChangesWindow = %v; TMDB's changes feed reaches back 14 days", metadata.ChangesWindow)
+	}
 	for name, tc := range map[string]struct {
 		since    time.Duration
 		wantFeed bool
 	}{
-		"13 days": {13 * 24 * time.Hour, true},
-		"14 days": {14 * 24 * time.Hour, true},
-		"15 days": {15*24*time.Hour + time.Second, false},
+		"13 days":              {13 * 24 * time.Hour, true},
+		"14 days":              {14 * 24 * time.Hour, true},
+		"14 days and a second": {14*24*time.Hour + time.Second, false},
+		"14 days and a minute": {14*24*time.Hour + time.Minute, false},
+		"15 days and a second": {15*24*time.Hour + time.Second, false},
 	} {
 		e := newWEnv(t)
 		refreshFixture(t, e, 24*time.Hour)
@@ -790,11 +855,17 @@ func TestWorkerRefreshesAShowWhenItsEpisodeHasAired(t *testing.T) {
 	}
 	fresh := breakingBad()
 	fresh.Overview, fresh.Status = "new episode", "Returning Series"
+	next := e.clock.Now().Add(6 * 24 * time.Hour).Format("2006-01-02")
+	fresh.NextAirDate, fresh.NextEpisodeSeason, fresh.NextEpisodeNumber, fresh.NextEpisodeName = next, 5, 7, "Ozymandias"
 	e.fake.Shows[1396] = fresh
 	e.fake.Hook = nil
 	e.once()
 	if e.title(titleID).Overview != "new episode" {
 		t.Errorf("a show whose episode aired was not refreshed: %+v", e.title(titleID))
+	}
+	// The refresh stores the episode to wait for next, with its date.
+	if got := e.title(titleID); got.NextAirDate != next || got.NextEpisodeSeason != 5 || got.NextEpisodeNumber != 7 || got.NextEpisodeName != "Ozymandias" {
+		t.Errorf("next episode after the refresh: %q S%dE%d %q", got.NextAirDate, got.NextEpisodeSeason, got.NextEpisodeNumber, got.NextEpisodeName)
 	}
 }
 
@@ -865,6 +936,117 @@ func TestWorkerSidecarsOfEpisodesAndShows(t *testing.T) {
 	}
 	if sm := e.series("Breaking Bad"); sm.LocalPoster != showPoster {
 		t.Errorf("show poster = %q, want %q", sm.LocalPoster, showPoster)
+	}
+}
+
+// 40 episodes of one show move: the scanner reports all of them. That is one
+// show to read again, and TMDB is asked nothing while its NFO is the same.
+func TestWorkerSidecarBatchOfAShowReadsItOnceAndAsksTMDBOnlyWhenTheNFOChanged(t *testing.T) {
+	e := newWEnv(t)
+	e.withBreakingBad()
+	nfo := func(plot string) {
+		e.write("TV/Breaking Bad/tvshow.nfo", `<tvshow><title>Breaking Bad</title><plot>`+plot+`</plot></tvshow>`)
+	}
+	nfo("v1")
+	var ids []int64
+	for n := 1; n <= 40; n++ {
+		ids = append(ids, e.addEpisode("Breaking Bad", 1, n))
+	}
+	e.once()
+	sm := e.series("Breaking Bad")
+	if sm.State != store.MatchMatched || e.title(sm.TitleID).Overview != "v1" {
+		t.Fatalf("show after the first pass: %+v, overview %q", sm, e.title(sm.TitleID).Overview)
+	}
+	if e.fake.Count("Series(") == 0 {
+		t.Fatal("control: the show was not fetched")
+	}
+	thumb := e.write("TV/Breaking Bad/Season 1/Breaking Bad S01E40-thumb.jpg", "t")
+
+	// Nothing about the NFO changed: the artwork is read for every episode, the
+	// show not at all.
+	calls := len(e.fake.Calls())
+	e.w.NotifySidecars(ids)
+	e.once()
+	if rest := e.fake.Calls()[calls:]; len(rest) != 0 {
+		t.Errorf("an unchanged NFO cost %d calls to TMDB: %q", len(rest), rest)
+	}
+	if got := e.entry(ids[39]); got.LocalThumb != thumb {
+		t.Errorf("thumb of the last episode = %q, want %q", got.LocalThumb, thumb)
+	}
+
+	// The NFO changed, TMDB is out of reach: the show is tried once, not once
+	// per episode, and the change is not marked as taken in.
+	nfo("version two")
+	e.fake.Offline()
+	calls = len(e.fake.Calls())
+	e.w.NotifySidecars(ids)
+	e.once()
+	if n := e.fake.Count("Series(") - countPrefix(e.fake.Calls()[:calls], "Series("); n != 1 {
+		t.Errorf("a changed NFO read the show %d times for 40 episodes, want 1", n)
+	}
+	if e.title(sm.TitleID).Overview != "v1" {
+		t.Errorf("overview = %q while TMDB was out of reach", e.title(sm.TitleID).Overview)
+	}
+
+	// Back online the next notification takes the change in, once.
+	e.fake.Online()
+	calls = len(e.fake.Calls())
+	e.w.NotifySidecars(ids)
+	e.once()
+	if n := e.fake.Count("Series(") - countPrefix(e.fake.Calls()[:calls], "Series("); n != 1 {
+		t.Errorf("the changed NFO was taken in with %d fetches, want 1", n)
+	}
+	if got := e.title(sm.TitleID); got.Overview != "version two" || got.Source != store.SourceMixed {
+		t.Errorf("title after the NFO changed: %+v", got)
+	}
+	calls = len(e.fake.Calls())
+	e.w.NotifySidecars(ids)
+	e.once()
+	if rest := e.fake.Calls()[calls:]; len(rest) != 0 {
+		t.Errorf("a notification after the change was taken in cost calls: %q", rest)
+	}
+}
+
+func countPrefix(calls []string, prefix string) int {
+	n := 0
+	for _, c := range calls {
+		if strings.HasPrefix(c, prefix) {
+			n++
+		}
+	}
+	return n
+}
+
+// Two files of one movie are one title to read again, and only the NFO of the
+// first one is laid over it.
+func TestWorkerSidecarBatchOfAMovieWithTwoFilesReadsTheTitleOnce(t *testing.T) {
+	e := newWEnv(t)
+	e.withMatrix()
+	a := e.addMovie("Movies/The Matrix (1999)/The Matrix (1999) 1080p.mkv", "The Matrix", 1999)
+	b := e.addMovie("Movies/The Matrix (1999)/The Matrix (1999) 4K.mkv", "The Matrix", 1999)
+	e.once()
+	if e.entry(a).TitleID == 0 || e.entry(a).TitleID != e.entry(b).TitleID {
+		t.Fatalf("the files are not one title: %d %d", e.entry(a).TitleID, e.entry(b).TitleID)
+	}
+	e.write("Movies/The Matrix (1999)/The Matrix (1999) 4K.nfo", `<movie><title>The Matrix</title><plot>of the second file</plot></movie>`)
+	e.fake.Offline() // nothing is stored, so every attempt is counted
+	calls := len(e.fake.Calls())
+	e.w.NotifySidecars([]int64{b})
+	e.once()
+	if rest := e.fake.Calls()[calls:]; len(rest) != 0 {
+		t.Errorf("the NFO of a second version cost calls: %q", rest)
+	}
+	e.write("Movies/The Matrix (1999)/The Matrix (1999) 1080p.nfo", `<movie><title>The Matrix</title><plot>of the first file</plot></movie>`)
+	e.w.NotifySidecars([]int64{b, a})
+	e.once()
+	if n := countPrefix(e.fake.Calls()[calls:], "Movie("); n != 1 {
+		t.Errorf("a movie with two files was fetched %d times, want 1", n)
+	}
+	e.fake.Online()
+	e.w.NotifySidecars([]int64{a, b})
+	e.once()
+	if got := e.title(e.entry(a).TitleID); got.Overview != "of the first file" {
+		t.Errorf("overview = %q, want the first file's", got.Overview)
 	}
 }
 
@@ -1001,6 +1183,318 @@ func TestWorkerManualMatchUnmatchAndSearch(t *testing.T) {
 	}
 	if err := e.w.UnmatchItem(e.ctx, id); err != nil {
 		t.Errorf("unmatching needs no TMDB: %v", err)
+	}
+}
+
+// The match is stored when the call returns: a CDN that hangs holds up neither
+// the answer nor the pruning, whatever the deadline of the request.
+func TestWorkerManualMatchDoesNotWaitForImagesOrFailAfterTheyHang(t *testing.T) {
+	e := newWEnv(t)
+	e.withMatrix()
+	e.withBreakingBad()
+	id := e.addMovie("Movies/Something Else (1990).mkv", "Something Else", 1990)
+	old := e.addMovie("Movies/Old (1991).mkv", "Old", 1991)
+	e.addEpisode("Breaking Bad", 1, 1)
+	// An orphan the pruning after the match must take: a title nobody uses.
+	orphan, err := e.st.UpsertTitle(e.ctx, &store.TitleInput{Title: store.Title{Kind: store.KindMovie, TMDBID: 9, Title: "Orphan"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = old
+	e.imgHang.Store(true)
+
+	// The request's own deadline is short: the match must be done long before it.
+	for name, match := range map[string]func(context.Context) error{
+		"movie": func(ctx context.Context) error { return e.w.MatchMovie(ctx, id, metadata.Ref{TMDBID: 603}) },
+		"show":  func(ctx context.Context) error { return e.w.MatchShow(ctx, "Breaking Bad", metadata.Ref{TMDBID: 1396}) },
+	} {
+		ctx, cancel := context.WithTimeout(e.ctx, 500*time.Millisecond)
+		start := time.Now()
+		err := match(ctx)
+		took := time.Since(start)
+		cancel()
+		if err != nil || took > 300*time.Millisecond {
+			t.Errorf("%s: MatchX = %v after %v with the image server hanging; want nil at once", name, err, took)
+		}
+	}
+	if got := e.entry(id); got.MatchState != store.MatchManual || got.TitleID == 0 || e.title(got.TitleID).TMDBID != 603 {
+		t.Errorf("movie after the match: %+v", got.Item)
+	}
+	if sm := e.series("Breaking Bad"); sm.State != store.MatchManual || sm.TitleID == 0 {
+		t.Errorf("show after the match: %+v", sm)
+	}
+	if _, err := e.st.GetTitle(e.ctx, orphan); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("the orphan was not pruned after the match: %v", err)
+	}
+	// The images are being fetched in the background (positive control: the
+	// server was asked), and nothing is on disk yet.
+	deadline := time.Now().Add(5 * time.Second)
+	for e.imgHits.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if e.imgHits.Load() == 0 {
+		t.Error("the images were never asked for")
+	}
+	if _, err := os.Stat(filepath.Join(e.imgDir, "tmdb/w342/p603.jpg")); err == nil {
+		t.Error("an image arrived from a server that hangs")
+	}
+	// Close (what Run does on the way out) ends the background work.
+	done := make(chan struct{})
+	go func() { e.w.Close(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not stop the background prefetch")
+	}
+}
+
+// Released images are fetched, in the background, after the match.
+func TestWorkerManualMatchPrefetchesInTheBackground(t *testing.T) {
+	e := newWEnv(t)
+	e.withMatrix()
+	id := e.addMovie("Movies/Something Else (1990).mkv", "Something Else", 1990)
+	if err := e.w.MatchMovie(e.ctx, id, metadata.Ref{TMDBID: 603}); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"tmdb/w342/p603.jpg", "tmdb/w1280/b603.jpg"} {
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if _, err := os.Stat(filepath.Join(e.imgDir, f)); err == nil {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		if _, err := os.Stat(filepath.Join(e.imgDir, f)); err != nil {
+			t.Errorf("not prefetched: %s", f)
+		}
+	}
+}
+
+// What a person decided is never matched again on its own: not by a refresh
+// someone asks for, and not by a sidecar that appears. Each case has a control
+// (the same thing done to an unmatched file does requeue it), so that a test
+// that cannot fail is noticed.
+func TestWorkerManualIsNeverRequeued(t *testing.T) {
+	e := newWEnv(t)
+	e.withMatrix()
+	e.withBreakingBad()
+	e.fake.MovieSearch["something"] = []metadata.Candidate{{TMDBID: 603, Title: "The Matrix", OriginalTitle: "The Matrix", Year: 1999, Popularity: 80}}
+
+	manual := e.addMovie("Movies/The Matrix (1999)/The Matrix (1999).mkv", "The Matrix", 1999)
+	lost := e.addMovie("Movies/Lost (2000)/Lost (2000).mkv", "Lost", 2000)
+	manualShow := e.addEpisode("Breaking Bad", 1, 1)
+	lostShow := e.addEpisode("Lost Show", 1, 1)
+	e.once() // the matrix and breaking bad match; the others are unmatched
+	if got := e.entry(lost); got.MatchState != store.MatchUnmatched {
+		t.Fatalf("control file: %+v", got.Item)
+	}
+	if sm := e.series("Lost Show"); sm.State != store.MatchUnmatched {
+		t.Fatalf("control show: %+v", sm)
+	}
+	if err := e.w.UnmatchItem(e.ctx, manual); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.w.UnmatchShow(e.ctx, "Breaking Bad"); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.entry(manual); got.MatchState != store.MatchManual || got.TitleID != 0 {
+		t.Fatalf("manual file: %+v", got.Item)
+	}
+	if sm := e.series("Breaking Bad"); sm.State != store.MatchManual || sm.TitleID != 0 {
+		t.Fatalf("manual show: %+v", sm)
+	}
+	// An NFO that names the title would match a pending file.
+	e.write("Movies/The Matrix (1999)/The Matrix (1999).nfo", `<movie><title>The Matrix</title><uniqueid type="tmdb">603</uniqueid></movie>`)
+	e.write("Movies/Lost (2000)/Lost (2000).nfo", `<movie><title>The Matrix</title><uniqueid type="tmdb">603</uniqueid></movie>`)
+	calls := len(e.fake.Calls())
+
+	// RefreshItem (refreshLinked), RefreshShow (refreshShow) and a sidecar
+	// notification (rereadLocal), for the manual ones and the controls.
+	e.w.RefreshItem(manual)
+	e.w.RefreshItem(manualShow)
+	e.w.RefreshShow("Breaking Bad")
+	e.w.NotifySidecars([]int64{manual})
+	e.w.RefreshItem(lost)
+	e.w.RefreshShow("Lost Show")
+	e.once()
+	if got := e.entry(manual); got.MatchState != store.MatchManual || got.TitleID != 0 {
+		t.Errorf("a manual file was matched again: %+v", got.Item)
+	}
+	if sm := e.series("Breaking Bad"); sm.State != store.MatchManual || sm.TitleID != 0 {
+		t.Errorf("a manual show was matched again: %+v", sm)
+	}
+	for _, c := range e.fake.Calls()[calls:] {
+		if strings.Contains(c, "Breaking") || strings.Contains(c, "1396") {
+			t.Errorf("TMDB was asked about the manual show: %q", c)
+		}
+	}
+	// Controls: an unmatched file and show go back to the queue (and are tried).
+	if got := e.entry(lost); got.MatchState == store.MatchUnmatched && e.fake.Count("Search") == 0 {
+		t.Errorf("control: RefreshItem did not requeue an unmatched file: %+v", got.Item)
+	}
+	if sm := e.series("Lost Show"); sm.State == store.MatchUnmatched && e.fake.Count("SearchSeries") < 2 {
+		t.Errorf("control: RefreshShow did not requeue an unmatched show: %+v", sm)
+	}
+	_ = lostShow
+}
+
+// A file nothing was found for is matched through an NFO that appears next to
+// it, unless a person decided about it.
+func TestWorkerSidecarRequeuesUnmatchedButNotManual(t *testing.T) {
+	e := newWEnv(t)
+	e.withMatrix()
+	unmatched := e.addMovie("Movies/Unknown A (2001)/Unknown A (2001).mkv", "Unknown A", 2001)
+	manual := e.addMovie("Movies/Unknown B (2002)/Unknown B (2002).mkv", "Unknown B", 2002)
+	e.once()
+	if err := e.w.UnmatchItem(e.ctx, manual); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.entry(unmatched); got.MatchState != store.MatchUnmatched {
+		t.Fatalf("control file: %+v", got.Item)
+	}
+	for _, d := range []string{"Unknown A (2001)", "Unknown B (2002)"} {
+		e.write("Movies/"+d+"/"+d+".nfo", `<movie><uniqueid type="tmdb">603</uniqueid></movie>`)
+	}
+	e.w.NotifySidecars([]int64{unmatched, manual})
+	e.once()
+	if got := e.entry(unmatched); got.MatchState != store.MatchMatched || e.title(got.TitleID).TMDBID != 603 {
+		t.Errorf("the NFO did not match an unmatched file: %+v", got.Item)
+	}
+	if got := e.entry(manual); got.MatchState != store.MatchManual || got.TitleID != 0 {
+		t.Errorf("the NFO matched a file a person had decided about: %+v", got.Item)
+	}
+}
+
+// A file replaced under the same item is probed again: the tags and the cover
+// index of the old one are not those of the new one.
+func TestWorkerProbesAReplacedFileAgain(t *testing.T) {
+	probes := &atomic.Int32{}
+	e := newWEnv(t, func(o *metadata.WorkerOptions) {
+		o.Probe = func(ctx context.Context, path string) (probe.Result, error) {
+			if probes.Add(1) == 1 {
+				return probe.Result{Tags: probe.Tags{Title: "Zzz Nothing Like It"}}, nil
+			}
+			return probe.Result{Tags: probe.Tags{Title: "The Matrix", Year: 1999}}, nil
+		}
+	})
+	e.withMatrix()
+	id := e.addMovie("Movies/rip_0042.mkv", "rip 0042", 0)
+	e.once()
+	if got := e.entry(id); got.MatchState != store.MatchUnmatched || probes.Load() != 1 {
+		t.Fatalf("before the file is replaced: %+v, %d probes", got.Item, probes.Load())
+	}
+	// Nothing changed: asking again does not probe again.
+	e.w.RefreshItem(id)
+	e.once()
+	if probes.Load() != 1 {
+		t.Errorf("the same file was probed %d times", probes.Load())
+	}
+
+	// A new file under the same path: same item, other size and time.
+	it := e.entry(id).Item
+	it.Size, it.MTime = it.Size+10, it.MTime+1
+	if again, err := e.st.UpsertItem(e.ctx, &it, nil); err != nil || again != id {
+		t.Fatalf("re-indexing: %d, %v", again, err)
+	}
+	e.w.RefreshItem(id)
+	e.once()
+	if got := e.entry(id); got.MatchState != store.MatchMatched || e.title(got.TitleID).TMDBID != 603 || probes.Load() != 2 {
+		t.Errorf("after the file was replaced: %+v, %d probes (want matched through the new tags, 2 probes)", got.Item, probes.Load())
+	}
+}
+
+// TMDB not having a person, or not answering, is not asked again at once: on
+// every visit to the page would be a request each.
+func TestWorkerEnsurePersonRemembersFailures(t *testing.T) {
+	e := newWEnv(t)
+	e.withMatrix()
+	m := matrix()
+	m.Credits = append(m.Credits,
+		store.Credit{Person: store.Person{TMDBID: 7777, Name: "Carrie-Anne Moss"}, Kind: store.CreditCast, Character: "Trinity", Order: 1},
+		store.Credit{Person: store.Person{TMDBID: 8888, Name: "Laurence Fishburne"}, Kind: store.CreditCast, Character: "Morpheus", Order: 2})
+	e.fake.Movies[603] = m
+	e.addMovie("Movies/The Matrix (1999).mkv", "The Matrix", 1999)
+	e.once()
+	personID := func(name string) int64 {
+		t.Helper()
+		people, err := e.st.SearchPeople(e.ctx, name, 5)
+		if err != nil || len(people) != 1 {
+			t.Fatalf("SearchPeople(%q) = %+v, %v", name, people, err)
+		}
+		return people[0].ID
+	}
+	keanu, carrie := personID("Keanu"), personID("Carrie")
+	asked := func() int { return e.fake.Count("Person(") }
+
+	// Not found: once a day.
+	for i := 0; i < 3; i++ {
+		if err := e.w.EnsurePerson(e.ctx, keanu); !metadata.IsNotFound(err) {
+			t.Fatalf("EnsurePerson %d = %v, want TMDB's 404", i+1, err)
+		}
+	}
+	if asked() != 1 {
+		t.Errorf("a person TMDB does not have was asked for %d times in a row, want 1", asked())
+	}
+	e.clock.Advance(23 * time.Hour)
+	e.w.EnsurePerson(e.ctx, keanu)
+	if asked() != 1 {
+		t.Errorf("asked again after 23 hours (%d)", asked())
+	}
+	e.clock.Advance(2 * time.Hour)
+	e.w.EnsurePerson(e.ctx, keanu)
+	if asked() != 2 {
+		t.Errorf("not asked again after a day (%d)", asked())
+	}
+
+	// Out of reach: five minutes, then longer each time.
+	e.fake.Offline()
+	base := asked()
+	step := func(after time.Duration, wantAsked int, what string) {
+		t.Helper()
+		e.clock.Advance(after)
+		err := e.w.EnsurePerson(e.ctx, carrie)
+		if err == nil || !metadata.IsTransient(err) {
+			t.Fatalf("%s: err = %v, want the transient error", what, err)
+		}
+		if got := asked() - base; got != wantAsked {
+			t.Fatalf("%s: %d requests so far, want %d", what, got, wantAsked)
+		}
+	}
+	step(0, 1, "first failure")
+	step(0, 1, "at once again")
+	step(4*time.Minute, 1, "4 minutes later")
+	step(2*time.Minute, 2, "6 minutes later")
+	step(6*time.Minute, 2, "6 minutes after the second failure (backoff 10 minutes)")
+	step(5*time.Minute, 3, "11 minutes after the second failure")
+
+	// A key change forgets the failures; success is kept for good.
+	e.fake.Online()
+	e.fake.People = map[int64]*store.Person{7777: {TMDBID: 7777, Name: "Carrie-Anne Moss", Biography: "Trinity."}}
+	e.w.Reload()
+	if err := e.w.EnsurePerson(e.ctx, carrie); err != nil {
+		t.Fatalf("after Reload: %v", err)
+	}
+	if d, err := e.st.GetPerson(e.ctx, carrie); err != nil || d.Biography != "Trinity." || d.FetchedAt == 0 {
+		t.Errorf("person after the fetch: %+v, %v", d.Person, err)
+	}
+	n := asked()
+	e.w.EnsurePerson(e.ctx, carrie)
+	if asked() != n {
+		t.Error("a person already fetched was asked for again")
+	}
+
+	// A caller that went away says nothing about the person.
+	morpheus := personID("Laurence")
+	ctx, cancel := context.WithCancel(e.ctx)
+	e.fake.Hook = func(ctx context.Context, call string) error { cancel(); return ctx.Err() } // the client leaves mid-request
+	n = asked()
+	if err := e.w.EnsurePerson(ctx, morpheus); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled: %v", err)
+	}
+	e.fake.Hook = nil
+	e.w.EnsurePerson(e.ctx, morpheus)
+	if asked() != n+2 {
+		t.Errorf("a cancelled request was remembered as a failure of the person (%d requests, want %d)", asked()-n, 2)
 	}
 }
 

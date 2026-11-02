@@ -11,6 +11,7 @@
   <a href={href.movies} aria-current={section === 'movies' ? 'page' : undefined}><Icon name="film" />Movies</a>
   <a href={href.shows} aria-current={section === 'shows' ? 'page' : undefined}><Icon name="tv" />Shows</a>
   <button onclick={openSearch}><Icon name="search" />Search</button>
+  <a href={href.settings} aria-current={section === 'settings' ? 'page' : undefined}><Icon name="settings" />Settings</a>
 </nav>
 
 <style>
@@ -23,7 +24,7 @@
       inset: auto 0 0;
       z-index: 20;
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(5, 1fr);
       padding: 0.35rem 0.5rem calc(0.35rem + env(safe-area-inset-bottom));
       background: rgb(16 14 12 / 0.86);
       backdrop-filter: saturate(1.4) blur(18px);

@@ -359,6 +359,13 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, out any) er
 		}
 		start := c.now()
 		status, header, body, err := c.do(ctx, target)
+		var wait time.Duration
+		if err == nil && status == http.StatusTooManyRequests {
+			// Record the pause before the slot is given back: a queued call that takes
+			// the slot in between must see it, or it sends a second request.
+			wait = retryAfter(header.Get("Retry-After"), c.now())
+			c.pause(wait)
+		}
 		release()
 		if err != nil {
 			return c.failure(ctx, op, err)
@@ -373,8 +380,6 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, out any) er
 			}
 			return nil
 		case status == http.StatusTooManyRequests:
-			wait := retryAfter(header.Get("Retry-After"), c.now())
-			c.pause(wait)
 			c.log.LogAttrs(ctx, slog.LevelWarn, "tmdb rate limited", slog.String("path", path),
 				slog.Duration("retry_after", wait), slog.Int("attempt", attempt+1))
 			if attempt < maxRateRetries && wait <= c.maxWait {
@@ -603,9 +608,14 @@ func (c *Client) TVChanges(ctx context.Context, start, end time.Time) ([]int64, 
 	return c.changes(ctx, "/tv/changes", start, end)
 }
 
+// ErrChangesTruncated means the changes feed has more pages than are followed.
+// The list is not returned: one that stops short would pass for the whole of
+// what changed, and the changes after it would never be looked at.
+var ErrChangesTruncated = errors.New("metadata: TMDB's changes feed is longer than the pages that are followed")
+
 func (c *Client) changes(ctx context.Context, path string, start, end time.Time) ([]int64, error) {
 	var ids []int64
-	for page := 1; page <= maxChangePages; page++ {
+	for page := 1; ; page++ {
 		q := url.Values{
 			"start_date": {start.UTC().Format("2006-01-02")},
 			"end_date":   {end.UTC().Format("2006-01-02")},
@@ -619,8 +629,10 @@ func (c *Client) changes(ctx context.Context, path string, start, end time.Time)
 			ids = append(ids, r.ID)
 		}
 		if page >= out.TotalPages {
-			break
+			return ids, nil
+		}
+		if page >= maxChangePages {
+			return nil, ErrChangesTruncated
 		}
 	}
-	return ids, nil
 }

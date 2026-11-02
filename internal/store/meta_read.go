@@ -21,6 +21,10 @@ type TitleCard struct {
 	Rating   float64
 	ItemID   int64  // movies: the first file
 	Show     string // shows: the first show name that is linked to the title
+
+	// NextAirDate is when a show's next episode airs, YYYY-MM-DD; it may be past
+	// until the show is refreshed.
+	NextAirDate string
 }
 
 // CastMember and CrewMember are a credit with its person's name and photo.
@@ -55,7 +59,6 @@ type TitleDetail struct {
 	VoteCount     int
 	Certification string
 	Logo          string
-	NextAirDate   string
 	Genres        []Genre
 	Collection    *Collection
 	Cast          []CastMember
@@ -79,7 +82,7 @@ const libraryTitle = `(EXISTS (SELECT 1 FROM items WHERE title_id = t.id)
 // The card query: each title with its first movie file or first show, and their
 // sidecar artwork. Titles that are in neither are not in the library.
 const (
-	cardCols = `t.id, t.kind, t.title, t.year, t.poster, t.backdrop, t.rating,
+	cardCols = `t.id, t.kind, t.title, t.year, t.poster, t.backdrop, t.rating, COALESCE(t.next_air_date, ''),
 		COALESCE(mf.item_id, 0), COALESCE(mi.local_poster, ''), COALESCE(mi.local_backdrop, ''),
 		COALESCE(sf.show, ''), COALESCE(ss.rowid, 0), COALESCE(ss.local_poster, ''), COALESCE(ss.local_backdrop, '')`
 	cardJoins = `
@@ -107,7 +110,7 @@ func scanCard(sc scanner, lead ...any) (TitleCard, error) {
 		seriesID                   int64
 		seriesPoster, seriesBackdr string
 	)
-	err := sc.Scan(append(lead, &c.ID, &c.Kind, &c.Title, &c.Year, &c.Poster, &c.Backdrop, &c.Rating,
+	err := sc.Scan(append(lead, &c.ID, &c.Kind, &c.Title, &c.Year, &c.Poster, &c.Backdrop, &c.Rating, &c.NextAirDate,
 		&c.ItemID, &itemPoster, &itemBackdrop, &c.Show, &seriesID, &seriesPoster, &seriesBackdr)...)
 	if err != nil {
 		return c, err
@@ -217,6 +220,37 @@ func cardsByID(ctx context.Context, q queryer, ids []int64) (map[int64]TitleCard
 	return m, nil
 }
 
+// UpcomingShow is a series of the library with an episode still to air.
+type UpcomingShow struct {
+	TitleCard           // NextAirDate is the day the episode airs
+	NextEpisode Episode // Number is 0 when TMDB did not say which episode it is
+}
+
+// Upcoming lists the library's series whose next episode airs on today
+// (YYYY-MM-DD) or later: soonest first, by name within a day, at most limit.
+func (s *Store) Upcoming(ctx context.Context, today string, limit int) ([]UpcomingShow, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT t.next_episode_season, t.next_episode_number, t.next_episode_name, `+cardCols+`
+		FROM titles t`+cardJoins+`
+		WHERE `+cardInLibrary+` AND t.kind = 'series' AND t.next_air_date >= ?
+		ORDER BY t.next_air_date, `+orderByName+` LIMIT ?`, today, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []UpcomingShow
+	for rows.Next() {
+		var ep Episode
+		c, err := scanCard(rows, &ep.Season, &ep.Number, &ep.Name)
+		if err != nil {
+			return nil, err
+		}
+		ep.AirDate = c.NextAirDate
+		out = append(out, UpcomingShow{TitleCard: c, NextEpisode: ep})
+	}
+	return out, rows.Err()
+}
+
 // GetTitleDetail returns a title of the library with its genres, collection
 // and credits, read from one snapshot. A title no file refers to is ErrNotFound.
 func (s *Store) GetTitleDetail(ctx context.Context, id int64) (d TitleDetail, err error) {
@@ -243,7 +277,7 @@ func getTitleDetail(ctx context.Context, q queryer, id int64) (TitleDetail, erro
 		TitleCard: cards[0], TMDBID: t.TMDBID, IMDbID: t.IMDbID, TVDBID: t.TVDBID,
 		OriginalTitle: t.OriginalTitle, SortTitle: t.SortTitle, Overview: t.Overview, Tagline: t.Tagline,
 		ReleaseDate: t.ReleaseDate, EndDate: t.EndDate, Status: t.Status, RuntimeMin: t.RuntimeMin,
-		VoteCount: t.VoteCount, Certification: t.Certification, Logo: t.Logo, NextAirDate: t.NextAirDate,
+		VoteCount: t.VoteCount, Certification: t.Certification, Logo: t.Logo,
 		Source: t.Source, Locked: t.Locked, FetchedAt: t.FetchedAt,
 	}
 	if d.Genres, err = titleGenres(ctx, q, id); err != nil {

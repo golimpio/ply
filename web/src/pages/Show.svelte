@@ -1,22 +1,36 @@
 <script lang="ts">
-  import type { ItemSummary } from '../lib/api';
+  import { api, type ItemSummary } from '../lib/api';
   import { useAmbient } from '../lib/ambient.svelte';
   import { episodeLabel, formatDuration, seasonLabel } from '../lib/format';
-  import { ensureLibrary, library, showsOf } from '../lib/library.svelte';
+  import { ensureLibrary, library, showMeta, showsOf } from '../lib/library.svelte';
+  import { backdropOf, CREDIT_LINES, crewWith, logoSrc, ratingLabel, yearSpan } from '../lib/meta';
   import { morph } from '../lib/nav';
   import { href } from '../lib/router.svelte';
+  import { resource } from '../lib/resource.svelte';
   import { app } from '../lib/state.svelte';
   import { artOf, progressOf } from '../lib/ui-types';
   import Art from '../components/Art.svelte';
   import Badges from '../components/Badges.svelte';
+  import EditTitle from '../components/EditTitle.svelte';
+  import FixMatch from '../components/FixMatch.svelte';
   import Hero from '../components/Hero.svelte';
   import Icon from '../components/Icon.svelte';
+  import Menu from '../components/Menu.svelte';
+  import PersonCard from '../components/PersonCard.svelte';
+  import Rail from '../components/Rail.svelte';
 
   let { show, season }: { show: string; season?: number } = $props();
 
   $effect(() => {
     void app.libraryVersion;
     void ensureLibrary();
+  });
+
+  // The show's metadata and season details; the episodes come from the cached
+  // library, so the page paints before this arrives (and without it).
+  const detail = resource(() => {
+    void app.libraryVersion;
+    return api.show(show);
   });
 
   const entry = $derived(showsOf(library.items.filter((i) => i.show === show))[0]);
@@ -36,10 +50,58 @@
   const current = $derived(season !== undefined && seasons.includes(season) ? season : (next?.season ?? seasons[0]));
   const list = $derived(episodes.filter((e) => (e.season ?? 0) === current));
 
+  const meta = $derived(detail.data?.meta);
+  const summary = $derived(detail.data ?? showMeta(show));
+  const seasonInfo = $derived(detail.data?.seasons.find((s) => s.season === current));
+  const seasonName = (n: number) => detail.data?.seasons.find((s) => s.season === n)?.name || seasonLabel(n);
+  const logo = $derived(logoSrc(meta));
+  const years = $derived(yearSpan(meta, summary?.year));
+  const rating = $derived(ratingLabel(meta?.rating ?? summary?.rating));
+  const credits = $derived(CREDIT_LINES.map((l) => ({ ...l, people: crewWith(meta, l.jobs) })).filter((l) => l.people.length));
+  const needsReview = $derived(!!(meta?.needsReview ?? summary?.needsReview));
+
+  let fixing = $state(false);
+  let editing = $state(false);
+  let notice = $state('');
+
+  async function refresh() {
+    notice = '';
+    try {
+      await api.refreshShow(show);
+      notice = 'Fetching the latest details. They appear here in a moment.';
+      setTimeout(() => app.libraryVersion++, 4000);
+    } catch (e) {
+      notice = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  const menu = $derived([
+    {
+      label: 'Fix the match',
+      run: (): void => {
+        fixing = true;
+      },
+    },
+    {
+      label: 'Edit details',
+      run: (): void => {
+        editing = true;
+      },
+      hidden: !meta,
+    },
+    { label: 'Refresh details', run: refresh },
+  ]);
+
   useAmbient(() => artOf(entry?.cover)?.color);
 
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
   const resumeAt = (e: ItemSummary) => (progressOf(e) > 0 ? (e.progress?.positionSec ?? 0) : 0);
+  const status: Record<string, string> = {
+    'Returning Series': 'Still running',
+    Ended: 'Ended',
+    Canceled: 'Cancelled',
+    'In Production': 'In production',
+  };
 </script>
 
 {#if library.error && !library.loaded}
@@ -52,62 +114,115 @@
     <p><a href={href.shows}>Back to all shows</a></p>
   </div>
 {:else}
-  <Hero item={entry.cover} label={show} landing>
-    <h1>{show}</h1>
+  <Hero item={entry.cover} img={backdropOf(summary) ?? undefined} label={show} landing>
+    <h1 class:sr-only={!!logo}>{meta?.title || show}</h1>
+    {#if logo}<img class="logo" src={logo} alt="" />{/if}
     <div class="meta">
+      {#if years}<span>{years}</span>{/if}
+      {#if meta?.certification}<span class="cert">{meta.certification}</span>{/if}
       <span>{plural(seasons.filter((s) => s !== 0).length || seasons.length, 'season')}</span>
       <span>{plural(episodes.length, 'episode')}</span>
+      {#if rating}<span class="rating"><Icon name="star" filled /><span class="sr-only">Rated</span>{rating}</span>{/if}
+      {#if meta?.status && status[meta.status]}<span>{status[meta.status]}</span>{/if}
     </div>
-    {#if next}
-      <div class="actions">
+    <div class="actions">
+      {#if next}
         <a class="btn primary" href={href.play(next.id, resumeAt(next))}>
           <Icon name="play" />
           {resumeAt(next) ? 'Resume' : 'Play'}
           {episodeLabel(next.season, next.episode)}
         </a>
-      </div>
-    {/if}
+      {/if}
+      <Menu items={menu} />
+    </div>
   </Hero>
 
   <div class="body">
-    {#if seasons.length > 1}
-      <div class="chips" role="tablist" aria-label="Seasons">
-        {#each seasons as s (s)}
-          <a class="chip" role="tab" aria-selected={s === current} href={href.show(show, s)}>{seasonLabel(s)}</a>
-        {/each}
+    {#if needsReview}
+      <div class="review" role="note">
+        <Icon name="alert" />
+        <p>This might not be the right show.</p>
+        <button class="btn" onclick={() => (fixing = true)}>Check the match</button>
       </div>
-    {:else}
-      <h2>{seasonLabel(current)}</h2>
+    {/if}
+    {#if notice}<p class="muted notice" role="status">{notice}</p>{/if}
+
+    {#if meta?.overview || summary?.overview || meta?.genres.length || credits.length}
+      <section class="about">
+        {#if meta?.overview || summary?.overview}<p class="overview">{meta?.overview || summary?.overview}</p>{/if}
+        {#if meta?.genres.length}
+          <ul class="genres" aria-label="Genres">
+            {#each meta.genres as g (g.id)}<li><a class="chip" href={href.genre(g.id)}>{g.name}</a></li>{/each}
+          </ul>
+        {/if}
+        {#if credits.length}
+          <dl class="credits">
+            {#each credits as line (line.label)}
+              <dt>{line.people.length > 1 ? line.plural : line.label}</dt>
+              <dd>
+                {#each line.people as p, i (p.personId)}{#if i}{', '}{/if}<a class="link" href={href.person(p.personId)}>{p.name}</a>{/each}
+              </dd>
+            {/each}
+          </dl>
+        {/if}
+      </section>
     {/if}
 
-    <ol class="episodes" role={seasons.length > 1 ? 'tabpanel' : undefined}>
-      {#each list as ep (ep.id)}
-        {@const p = progressOf(ep)}
-        <li>
-          <a class="ep" href={href.item(ep.id)} onclick={morph}>
-            <div class="thumb">
-              <Art item={ep} label={show} />
-              {#if p > 0}<div class="bar"><span style:width="{p * 100}%"></span></div>{/if}
-              {#if ep.progress?.watched}<span class="watched">Watched</span>{/if}
-            </div>
-            <div class="text">
-              <div class="line">
-                <span class="num tabular">{ep.episode ?? ''}</span>
-                <span class="title">{ep.episodeTitle || `Episode ${ep.episode ?? ''}`.trim()}</span>
+    <section class="season">
+      {#if seasons.length > 1}
+        <div class="chips" role="tablist" aria-label="Seasons">
+          {#each seasons as s (s)}
+            <a class="chip" role="tab" aria-selected={s === current} href={href.show(show, s)}>{seasonName(s)}</a>
+          {/each}
+        </div>
+      {:else}
+        <h2>{seasonName(current)}</h2>
+      {/if}
+      {#if seasonInfo?.overview}<p class="muted season-overview">{seasonInfo.overview}</p>{/if}
+
+      <ol class="episodes" role={seasons.length > 1 ? 'tabpanel' : undefined}>
+        {#each list as ep (ep.id)}
+          {@const p = progressOf(ep)}
+          <li>
+            <a class="ep" href={href.item(ep.id)} onclick={morph}>
+              <div class="thumb">
+                <Art item={ep} label={show} sizes="(max-width: 600px) 7.5rem, 13rem" />
+                {#if p > 0}<div class="bar"><span style:width="{p * 100}%"></span></div>{/if}
+                {#if ep.progress?.watched}<span class="watched">Watched</span>{/if}
               </div>
-              <div class="meta small">
-                {#if ep.durationSec}<span>{formatDuration(ep.durationSec)}</span>{/if}
-                <span class="badges"><Badges item={ep} notable /></span>
+              <div class="text">
+                <div class="line">
+                  <span class="num tabular">{ep.episode ?? ''}</span>
+                  <span class="title">{ep.episodeTitle || `Episode ${ep.episode ?? ''}`.trim()}</span>
+                </div>
+                <div class="meta small">
+                  {#if ep.durationSec}<span>{formatDuration(ep.durationSec)}</span>{/if}
+                  <span class="badges"><Badges item={ep} notable /></span>
+                </div>
+                {#if ep.overview}<p class="ep-overview">{ep.overview}</p>{/if}
               </div>
-            </div>
-          </a>
-          <a class="btn icon play" href={href.play(ep.id, resumeAt(ep))} aria-label="Play {episodeLabel(ep.season, ep.episode)}">
-            <Icon name="play" />
-          </a>
-        </li>
-      {/each}
-    </ol>
+            </a>
+            <a class="btn icon play" href={href.play(ep.id, resumeAt(ep))} aria-label="Play {episodeLabel(ep.season, ep.episode)}">
+              <Icon name="play" />
+            </a>
+          </li>
+        {/each}
+      </ol>
+    </section>
   </div>
+
+  {#if meta?.cast.length}
+    <div class="cast">
+      <Rail title="Cast" items={meta.cast.slice(0, 30)} key={(c) => c.personId} size="person">
+        {#snippet card(c)}
+          <PersonCard id={c.personId} name={c.name} profile={c.profile} role={c.character} />
+        {/snippet}
+      </Rail>
+    </div>
+  {/if}
+
+  <FixMatch bind:open={fixing} kind="series" {show} query={show} matched={!!meta && meta.matchState !== 'unmatched'} />
+  {#if meta}<EditTitle bind:open={editing} {meta} />{/if}
 {/if}
 
 <style>
@@ -115,12 +230,107 @@
     height: min(68vh, 56vw);
     border-radius: 0;
   }
+  .cert {
+    padding: 0 0.4rem;
+    font-size: 0.8rem;
+    font-weight: 700;
+    line-height: 1.5;
+    border: 1px solid currentColor;
+    border-radius: 4px;
+  }
+  .rating {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    color: var(--text);
+    font-weight: 650;
+  }
+  .rating :global(svg) {
+    width: 0.95em;
+    height: 0.95em;
+    color: var(--accent);
+  }
   .actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
     margin-top: 0.4rem;
   }
   .body {
-    padding: 0.5rem var(--gutter) 4rem;
+    padding: 0.5rem var(--gutter) 0;
     max-width: 72rem;
+    display: grid;
+    gap: 2rem;
+  }
+  .cast {
+    padding-bottom: 4rem;
+  }
+  .body:last-child {
+    padding-bottom: 4rem;
+  }
+  .review {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1rem;
+    padding: 0.85rem 1rem;
+    background: color-mix(in oklab, var(--warn) 12%, var(--bg-2));
+    border: 1px solid color-mix(in oklab, var(--warn) 40%, transparent);
+    border-radius: var(--radius);
+  }
+  .review :global(svg) {
+    width: 1.3rem;
+    height: 1.3rem;
+    color: var(--warn);
+    flex: none;
+  }
+  .review p {
+    margin: 0;
+    flex: 1;
+    min-width: 12rem;
+  }
+  .notice {
+    margin: 0;
+  }
+  .about {
+    display: grid;
+    gap: 1.25rem;
+    max-width: 60rem;
+  }
+  .overview {
+    margin: 0;
+    max-width: 65ch;
+    font-size: 1.08rem;
+    line-height: 1.6;
+  }
+  .genres {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .genres .chip {
+    display: inline-flex;
+    align-items: center;
+  }
+  .credits {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.4rem 1.5rem;
+    margin: 0;
+  }
+  .credits dt {
+    color: var(--muted);
+  }
+  .credits dd {
+    margin: 0;
+  }
+  .season-overview {
+    margin: 0.9rem 0 0;
+    max-width: 65ch;
   }
   .episodes {
     list-style: none;
@@ -208,6 +418,19 @@
     padding-left: 2.25rem;
     font-size: 0.875rem;
   }
+  .ep-overview {
+    margin: 0.35rem 0 0;
+    padding-left: 2.25rem;
+    max-width: 70ch;
+    color: var(--muted);
+    font-size: 0.9rem;
+    line-height: 1.45;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
   .badges {
     display: inline-flex;
     gap: 4px;
@@ -219,12 +442,24 @@
     .ep {
       grid-template-columns: 7.5rem 1fr;
       gap: 0.8rem;
+      align-items: start;
     }
-    .small {
+    .small,
+    .ep-overview {
       padding-left: 0;
+    }
+    .ep-overview {
+      display: none;
     }
     .num {
       display: none;
+    }
+    .credits {
+      grid-template-columns: 1fr;
+      gap: 0.1rem;
+    }
+    .credits dd {
+      margin-bottom: 0.5rem;
     }
   }
 </style>

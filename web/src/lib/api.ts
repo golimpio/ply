@@ -158,6 +158,8 @@ export interface TitleCard {
   itemId?: number;
   /** Shows: the show's name in the library. */
   show?: string;
+  /** Shows: when the next episode airs (YYYY-MM-DD). May be past until the show is next refreshed. */
+  nextAirDate?: string;
 }
 
 export interface Genre {
@@ -188,7 +190,6 @@ export interface TitleDetail extends TitleCard {
   tagline?: string;
   releaseDate?: string;
   endDate?: string;
-  nextAirDate?: string;
   status?: string;
   runtimeMin?: number;
   voteCount?: number;
@@ -203,6 +204,27 @@ export interface TitleDetail extends TitleCard {
   locked: boolean;
   matchState: MatchState;
   needsReview: boolean;
+}
+
+/** The episode of a show that airs next. */
+export interface NextEpisode {
+  season: number;
+  episode: number;
+  /** Empty when TMDB has no name for it yet. */
+  name: string;
+}
+
+/** A show of the library with an episode still to air (GET /api/upcoming). */
+export interface UpcomingShow {
+  titleId: number;
+  /** The show's name in the library. */
+  show: string;
+  poster?: string;
+  backdrop?: string;
+  /** YYYY-MM-DD, today or later. */
+  nextAirDate: string;
+  /** Absent when TMDB does not say which episode it is. */
+  nextEpisode?: NextEpisode;
 }
 
 export interface EpisodeInfo {
@@ -316,6 +338,11 @@ export interface Settings {
   /** -metadata=false was given: the switch cannot be turned on here. */
   metadataForcedOff: boolean;
   language: string;
+  /**
+   * Only in the answer to a PUT that stored a key: whether the key was checked against TMDB.
+   * It is not with -metadata=false (nothing is sent to TMDB then), and may be refused later.
+   */
+  tmdbKeyChecked?: boolean;
 }
 
 export interface SettingsUpdate {
@@ -616,6 +643,11 @@ export const api = {
   async collection(id: number): Promise<CollectionDetail> {
     const c = await request<CollectionDetail>('GET', `/api/collections/${id}`);
     return { ...c, titles: c.titles ?? [] };
+  },
+
+  /** Shows of the library whose next episode airs today or later, soonest first (at most 50). */
+  async upcoming(): Promise<UpcomingShow[]> {
+    return (await request<UpcomingShow[] | null>('GET', '/api/upcoming')) ?? [];
   },
 
   /** Edit a title's text; the title is then locked, so that a refresh keeps the edit. */

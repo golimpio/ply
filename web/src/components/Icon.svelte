@@ -22,6 +22,11 @@
     cc: 'M3.5 5.5h17v13h-17zM10.5 10.2a2.3 2.3 0 1 0 0 3.6M17 10.2a2.3 2.3 0 1 0 0 3.6',
     audio: 'M9 18V6l11-2v12M9 18a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0zM20 16a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z',
     airplay: 'M6 17H4.5V5h15v12H18M12 14.5l5 5.5H7z',
+    more: 'M6 12h.01M12 12h.01M18 12h.01',
+    star: 'M12 4l2.4 5 5.4.6-4 3.7 1.1 5.3L12 16l-4.9 2.6 1.1-5.3-4-3.7 5.4-.6z',
+    settings:
+      'M12 9a3 3 0 1 1 0 6 3 3 0 0 1 0-6zM19.4 13.5l1.6 1.2-2 3.4-1.9-.7a7.5 7.5 0 0 1-2.1 1.2L14.7 21h-4l-.3-2.4a7.5 7.5 0 0 1-2.1-1.2l-1.9.7-2-3.4 1.6-1.2a7.6 7.6 0 0 1 0-2.4L4.4 9.9l2-3.4 1.9.7a7.5 7.5 0 0 1 2.1-1.2l.3-2.4h4l.3 2.4a7.5 7.5 0 0 1 2.1 1.2l1.9-.7 2 3.4-1.6 1.2a7.6 7.6 0 0 1 0 2.4z',
+    alert: 'M12 4 21 19.5H3zM12 10v4.5M12 17.2v.3',
   } as const;
   export type IconName = keyof typeof PATHS;
 </script>
@@ -35,6 +40,6 @@
   aria-hidden="true"
   fill={filled || name === 'play' || name === 'pause' ? 'currentColor' : 'none'}
   stroke="currentColor"
-  stroke-width={name === 'play' || name === 'pause' ? 0 : 1.8}
+  stroke-width={name === 'play' || name === 'pause' ? 0 : name === 'more' ? 3.2 : 1.8}
   stroke-linecap="round"
   stroke-linejoin="round"><path d={PATHS[name]} /></svg>

@@ -8,10 +8,14 @@
   import SearchPalette from './components/SearchPalette.svelte';
   import TabBar from './components/TabBar.svelte';
   import TokenPrompt from './components/TokenPrompt.svelte';
+  import Collection from './pages/Collection.svelte';
+  import Genre from './pages/Genre.svelte';
   import Home from './pages/Home.svelte';
   import Item from './pages/Item.svelte';
   import Movies from './pages/Movies.svelte';
+  import Person from './pages/Person.svelte';
   import Play from './pages/Play.svelte';
+  import Settings from './pages/Settings.svelte';
   import Show from './pages/Show.svelte';
   import Shows from './pages/Shows.svelte';
 
@@ -104,6 +108,14 @@
         <div class="play-page">
           {#key route.id}<Play id={route.id} startSec={route.startSec} />{/key}
         </div>
+      {:else if route.name === 'person'}
+        {#key route.id}<Person id={route.id} />{/key}
+      {:else if route.name === 'genre'}
+        {#key route.id}<Genre id={route.id} />{/key}
+      {:else if route.name === 'collection'}
+        {#key route.id}<Collection id={route.id} />{/key}
+      {:else if route.name === 'settings'}
+        <Settings />
       {:else}
         <div class="page center">
           <h1>This page doesn’t exist</h1>

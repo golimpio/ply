@@ -54,7 +54,7 @@ func run() error {
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-	if err := os.MkdirAll(cfg.Data, 0o755); err != nil {
+	if err := os.MkdirAll(cfg.Data, 0o700); err != nil {
 		return fmt.Errorf("create data dir: %w", err)
 	}
 	id, err := config.ServerID(cfg.Data)

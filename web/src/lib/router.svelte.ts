@@ -13,6 +13,10 @@ export type Route =
   | { name: 'show'; show: string; season?: number }
   | { name: 'item'; id: number }
   | { name: 'play'; id: number; startSec: number }
+  | { name: 'person'; id: number }
+  | { name: 'genre'; id: number }
+  | { name: 'collection'; id: number }
+  | { name: 'settings' }
   | { name: 'notfound' };
 
 const SORTS: Sort[] = ['title', 'added', 'year', 'duration'];
@@ -26,7 +30,8 @@ function libraryView(q: URLSearchParams, fallback: Sort): LibraryView {
 
 /**
  * Hash forms: #/ (home), #/movies[?sort=&f=], #/shows[?sort=&f=], #/shows/<name>[?s=<season>],
- * #/item/<id>, #/play/<id>[?t=<resume seconds>].
+ * #/item/<id>, #/play/<id>[?t=<resume seconds>], #/person/<id>, #/genre/<id>,
+ * #/collection/<id>, #/settings.
  */
 export function parseRoute(hash: string): Route {
   const [path, query = ''] = hash.replace(/^#\/?/, '').split('?');
@@ -43,6 +48,16 @@ export function parseRoute(hash: string): Route {
         const s = q.get('s') ?? '';
         const season = s.trim() === '' ? NaN : Number(s); // Number('') would be 0, i.e. Specials
         return { name: 'show', show: decodeURIComponent(arg), season: Number.isInteger(season) ? season : undefined };
+      }
+      case 'settings':
+        if (!arg) return { name: 'settings' };
+        break;
+      case 'person':
+      case 'genre':
+      case 'collection': {
+        const id = Number(arg);
+        if (!Number.isInteger(id) || id <= 0) break;
+        return { name: head, id };
       }
       case 'item':
       case 'play': {
@@ -93,4 +108,8 @@ export const href = {
     const t = Math.floor(startSec);
     return `#/play/${id}${t > 0 ? `?t=${t}` : ''}`;
   },
+  person: (id: number) => `#/person/${id}`,
+  genre: (id: number) => `#/genre/${id}`,
+  collection: (id: number) => `#/collection/${id}`,
+  settings: '#/settings',
 };

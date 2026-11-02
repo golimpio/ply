@@ -178,8 +178,8 @@ func TestMigration003KeepsExistingData(t *testing.T) {
 		versions = append(versions, v)
 	}
 	rows.Close()
-	if !slices.Equal(versions, []int{1, 2, 3}) {
-		t.Errorf("schema_version = %v, want [1 2 3]", versions)
+	if !slices.Equal(versions, []int{1, 2, 3, 4}) {
+		t.Errorf("schema_version = %v, want [1 2 3 4]", versions)
 	}
 	var violations int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_foreign_key_check`).Scan(&violations); err != nil || violations != 0 {

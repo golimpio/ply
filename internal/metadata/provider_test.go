@@ -230,6 +230,26 @@ func TestProviderSeriesAiringAndFailures(t *testing.T) {
 	if in.NextAirDate != "2026-11-08" || in.Status != "Returning Series" || in.EndDate != "2026-11-01" || len(in.Seasons) != 0 || in.Certification != "TV-MA" || in.TVDBID != 392256 {
 		t.Errorf("airing show: %+v", in.Title)
 	}
+	if in.NextEpisodeSeason != 3 || in.NextEpisodeNumber != 4 || in.NextEpisodeName != "Please Hold to My Hand" {
+		t.Errorf("next episode = S%dE%d %q, want S3E4 \"Please Hold to My Hand\"", in.NextEpisodeSeason, in.NextEpisodeNumber, in.NextEpisodeName)
+	}
+
+	// A show with nothing left to air has no next episode.
+	f.on("/tv/1396", "", "tv_1396.json")
+	f.on("/tv/1396/season/1", "", "tv_1396_season_1.json")
+	ended, err := newTMDB(t, f).Series(t.Context(), 1396, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ended.NextAirDate != "" || ended.NextEpisodeSeason != 0 || ended.NextEpisodeNumber != 0 || ended.NextEpisodeName != "" {
+		t.Errorf("ended show: %+v", ended.Title)
+	}
+
+	// A next episode TMDB has no date for is not one to wait for: the date and the episode go together.
+	undated := tvInput(&TVDetails{ID: 7, Name: "Show", NextEpisodeToAir: &EpisodeRef{Name: "TBA", SeasonNumber: 2, EpisodeNumber: 1}}, "en", "US")
+	if undated.NextAirDate != "" || undated.NextEpisodeNumber != 0 || undated.NextEpisodeName != "" {
+		t.Errorf("undated next episode: %+v", undated.Title)
+	}
 
 	// A season that fails for a reason that may pass: no half-fetched show.
 	f = newFakeTMDB(t)

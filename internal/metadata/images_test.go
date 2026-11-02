@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -360,6 +362,148 @@ func TestImageFailuresAreNotCachedForLongOrWrittenToDisk(t *testing.T) {
 		}
 	}
 }
+
+// The image server is not hit by more than a few downloads at once, however many
+// images a library asks for.
+func TestImageDownloadsRunAFewAtATime(t *testing.T) {
+	var cur, peak atomic.Int32
+	started := make(chan struct{}, 64)
+	release := make(chan struct{})
+	srv := newImageServer(t, func(w http.ResponseWriter, r *http.Request) {
+		n := cur.Add(1)
+		defer cur.Add(-1)
+		for {
+			p := peak.Load()
+			if n <= p || peak.CompareAndSwap(p, n) {
+				break
+			}
+		}
+		started <- struct{}{}
+		<-release
+		w.Write(jpegBytes)
+	})
+	c := newCache(t, srv)
+
+	const images = 12
+	var wg sync.WaitGroup
+	errs := make(chan error, images)
+	for i := 0; i < images; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := c.TMDB(t.Context(), "w342", "img"+string(rune('a'+i))+".jpg")
+			errs <- err
+		}()
+	}
+	for i := 0; i < maxDownloads; i++ {
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("only %d downloads started", i)
+		}
+	}
+	time.Sleep(100 * time.Millisecond) // room for a fifth, if it is going to come
+	if got := cur.Load(); got != maxDownloads {
+		t.Errorf("%d downloads at once, want %d (the rest wait)", got, maxDownloads)
+	}
+	close(release)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Errorf("a queued download failed: %v", err)
+		}
+	}
+	if peak.Load() != maxDownloads || srv.hits.Load() != images {
+		t.Errorf("peak %d, %d requests; want %d and %d", peak.Load(), srv.hits.Load(), maxDownloads, images)
+	}
+	if maxDownloads != 4 {
+		t.Errorf("maxDownloads = %d, want 4", maxDownloads)
+	}
+}
+
+func TestImageFailureMemoryIsBounded(t *testing.T) {
+	srv := newImageServer(t, func(w http.ResponseWriter, r *http.Request) { http.Error(w, "gone", http.StatusNotFound) })
+	clock := newFakeClock()
+	c := newCache(t, srv, func(o *ImageOptions) { o.Now = clock.now })
+	if imageFailureTTL != 10*time.Minute {
+		t.Errorf("imageFailureTTL = %v, want 10 minutes", imageFailureTTL)
+	}
+	failedLen := func() int {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return len(c.failed)
+	}
+	for i := 0; i < maxFailedImages+50; i++ {
+		c.TMDB(t.Context(), "w342", fmt.Sprintf("f%d.jpg", i))
+		if n := failedLen(); n > maxFailedImages {
+			t.Fatalf("after %d failures %d are remembered, the limit is %d", i+1, n, maxFailedImages)
+		}
+	}
+	if n := failedLen(); n != maxFailedImages {
+		t.Errorf("%d failures remembered, want the limit %d (positive control: the bound was reached)", n, maxFailedImages)
+	}
+	// The newest are the ones remembered: asking for one again does not go out.
+	hits := srv.hits.Load()
+	c.TMDB(t.Context(), "w342", fmt.Sprintf("f%d.jpg", maxFailedImages+49))
+	if srv.hits.Load() != hits {
+		t.Error("the latest failure was forgotten to make room")
+	}
+	// Once they have expired, a new failure takes their place.
+	clock.advance(imageFailureTTL + time.Second)
+	c.TMDB(t.Context(), "w342", "late.jpg")
+	if n := failedLen(); n != 1 {
+		t.Errorf("%d failures remembered after the others expired, want 1", n)
+	}
+}
+
+// What went wrong with an image is in the log, and the address it was fetched
+// from (which may carry a key) is not.
+func TestImageFailuresAreLoggedWithoutTheAddress(t *testing.T) {
+	var logs strings.Builder
+	var mu sync.Mutex
+	logger := slog.New(slog.NewTextHandler(writerFunc(func(p []byte) (int, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return logs.Write(p)
+	}), &slog.HandlerOptions{Level: slog.LevelDebug}))
+	srv := newImageServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "dropped") {
+			conn, _, _ := w.(http.Hijacker).Hijack()
+			conn.Close() // no answer: a transport error
+			return
+		}
+		http.Error(w, "boom", http.StatusInternalServerError)
+	})
+	c := newCache(t, srv, func(o *ImageOptions) {
+		o.Logger = logger
+		o.URL = func(_ context.Context, size, file string) (string, bool) {
+			return srv.srv.URL + "/t/p/" + size + "/" + file + "?api_key=SECRET-KEY-123", true
+		}
+	})
+	for _, f := range []string{"broken.jpg", "dropped.jpg"} {
+		if _, err := c.TMDB(t.Context(), "w342", f); !errors.Is(err, ErrImageUnavailable) {
+			t.Fatalf("%s: %v", f, err)
+		}
+	}
+	mu.Lock()
+	got := logs.String()
+	mu.Unlock()
+	for _, want := range []string{"tmdb/w342/broken.jpg", "tmdb/w342/dropped.jpg", "500"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the log lacks %q:\n%s", want, got)
+		}
+	}
+	for _, secret := range []string{"SECRET-KEY-123", "api_key", srv.srv.URL} {
+		if strings.Contains(got, secret) {
+			t.Errorf("the log has %q:\n%s", secret, got)
+		}
+	}
+}
+
+type writerFunc func(p []byte) (int, error)
+
+func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
 
 func TestImageDownloadTimeout(t *testing.T) {
 	release := make(chan struct{})

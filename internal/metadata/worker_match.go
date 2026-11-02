@@ -89,18 +89,26 @@ func (w *Worker) adoptLocal(ctx context.Context, existing int64, in *store.Title
 // linkMovie stores a title and links the movie to it in one step that gives way
 // to a person's decision: if the item is no longer pending (somebody fixed it
 // while TMDB was being asked) nothing is written. It reports whether it wrote.
-func (w *Worker) linkMovie(ctx context.Context, id int64, in *store.TitleInput, m store.Match) bool {
-	_, ok, err := w.o.Store.LinkItemTitle(ctx, id, in, m, store.MatchPending)
+//
+// nfoPath is the NFO that was laid over a TMDB title (see noteNFO), "" for none.
+func (w *Worker) linkMovie(ctx context.Context, id int64, in *store.TitleInput, m store.Match, nfoPath string) bool {
+	titleID, ok, err := w.o.Store.LinkItemTitle(ctx, id, in, m, store.MatchPending)
 	if err != nil && !errors.Is(err, store.ErrNotFound) && ctx.Err() == nil {
 		w.noteError(err)
+	}
+	if ok && in.TMDBID != 0 {
+		w.noteNFO(titleID, nfoPath)
 	}
 	return ok
 }
 
-func (w *Worker) linkSeries(ctx context.Context, show string, in *store.TitleInput, m store.Match) bool {
-	_, ok, err := w.o.Store.LinkSeriesTitle(ctx, show, in, m, store.MatchPending)
+func (w *Worker) linkSeries(ctx context.Context, show string, in *store.TitleInput, m store.Match, nfoPath string) bool {
+	titleID, ok, err := w.o.Store.LinkSeriesTitle(ctx, show, in, m, store.MatchPending)
 	if err != nil && !errors.Is(err, store.ErrNotFound) && ctx.Err() == nil {
 		w.noteError(err)
+	}
+	if ok && in.TMDBID != 0 {
+		w.noteNFO(titleID, nfoPath)
 	}
 	return ok
 }
@@ -121,7 +129,7 @@ func (w *Worker) matchMovie(ctx context.Context, p Provider, d store.DueItem) bo
 		}
 		if in, ok := localTitle(store.KindMovie, local.nfo, w.tagsFor(ctx, d.Item, local.nfo)); ok {
 			w.adoptLocal(ctx, d.TitleID, in)
-			return w.linkMovie(ctx, d.ID, in, pending)
+			return w.linkMovie(ctx, d.ID, in, pending, "")
 		}
 		ok, _ := w.o.Store.SetItemMatchIfPending(ctx, d.ID, pending)
 		return ok
@@ -171,14 +179,14 @@ func (w *Worker) matchMovie(ctx context.Context, p Provider, d store.DueItem) bo
 		}
 		if lt, ok := localTitle(store.KindMovie, local.nfo, w.tagsFor(ctx, d.Item, local.nfo)); ok {
 			w.adoptLocal(ctx, d.TitleID, lt)
-			return w.linkMovie(ctx, d.ID, lt, m)
+			return w.linkMovie(ctx, d.ID, lt, m, "")
 		}
 		ok, _ := w.o.Store.SetItemMatchIfPending(ctx, d.ID, m)
 		return ok
 	}
 
 	overlayNFO(in, local.nfo)
-	ok := w.linkMovie(ctx, d.ID, in, store.Match{State: store.MatchMatched, NeedsReview: res.NeedsReview, Score: res.Score})
+	ok := w.linkMovie(ctx, d.ID, in, store.Match{State: store.MatchMatched, NeedsReview: res.NeedsReview, Score: res.Score}, local.loc.NFO)
 	if in.Poster == "" && d.LocalPoster == "" {
 		w.noteCover(ctx, d.Item)
 	}
@@ -240,7 +248,7 @@ func (w *Worker) matchSeries(ctx context.Context, p Provider, d store.DueSeries)
 			NextAttemptAt: w.now().Add(idleRecheck).Unix()}
 		if in, ok := localSeries(); ok {
 			w.adoptLocal(ctx, existing, in)
-			return w.linkSeries(ctx, d.Show, in, m)
+			return w.linkSeries(ctx, d.Show, in, m, "")
 		}
 		ok, _ := w.o.Store.SetSeriesMatchIfPending(ctx, d.Show, m)
 		return ok
@@ -285,14 +293,14 @@ func (w *Worker) matchSeries(ctx context.Context, p Provider, d store.DueSeries)
 		m := store.Match{State: store.MatchUnmatched, Score: res.Score, Attempts: d.Attempts}
 		if lt, ok := localSeries(); ok {
 			w.adoptLocal(ctx, existing, lt)
-			return w.linkSeries(ctx, d.Show, lt, m)
+			return w.linkSeries(ctx, d.Show, lt, m, "")
 		}
 		ok, _ := w.o.Store.SetSeriesMatchIfPending(ctx, d.Show, m)
 		return ok
 	}
 
 	overlayNFO(in, nfo)
-	ok := w.linkSeries(ctx, d.Show, in, store.Match{State: store.MatchMatched, NeedsReview: res.NeedsReview, Score: res.Score})
+	ok := w.linkSeries(ctx, d.Show, in, store.Match{State: store.MatchMatched, NeedsReview: res.NeedsReview, Score: res.Score}, loc.NFO)
 	if ok {
 		w.prefetch(ctx, in)
 	}

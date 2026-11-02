@@ -10,12 +10,15 @@
     key,
     card,
     more,
+    size = 'wide',
   }: {
     title: string;
     items: T[];
     key: (item: T) => string | number;
     card: Snippet<[T]>;
     more?: { href: string; label: string };
+    /** Card width: wide 16:9 cards, 2:3 posters, or the smaller portraits of a cast. */
+    size?: 'wide' | 'poster' | 'person';
   } = $props();
 
   let scroller = $state<HTMLUListElement>();
@@ -79,7 +82,7 @@
     </header>
     <!-- Delegated arrow-key navigation between the focusable card links inside. -->
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-    <ul bind:this={scroller} data-rail onscroll={updateEdges} {onkeydown} aria-label={title}>
+    <ul class={size} bind:this={scroller} data-rail onscroll={updateEdges} {onkeydown} aria-label={title}>
       {#each items as item (key(item))}
         <li>{@render card(item)}</li>
       {/each}
@@ -126,6 +129,12 @@
     scroll-padding-inline: var(--gutter);
     scrollbar-width: none;
   }
+  ul.poster {
+    grid-auto-columns: clamp(140px, 13vw, 200px);
+  }
+  ul.person {
+    grid-auto-columns: clamp(110px, 10vw, 150px);
+  }
   ul::-webkit-scrollbar {
     display: none;
   }
@@ -140,6 +149,12 @@
     ul {
       grid-auto-columns: min(68vw, 260px);
       gap: 0.8rem;
+    }
+    ul.poster {
+      grid-auto-columns: min(38vw, 160px);
+    }
+    ul.person {
+      grid-auto-columns: min(30vw, 120px);
     }
   }
 </style>

@@ -12,13 +12,19 @@
     methodLabel,
   } from '../lib/format';
   import { ensureLibrary, findItem, library } from '../lib/library.svelte';
+  import { CREDIT_LINES, crewWith, logoSrc, ratingLabel, runtimeLabel, versionLabel, yearOf } from '../lib/meta';
   import { href } from '../lib/router.svelte';
   import { resource } from '../lib/resource.svelte';
   import { app } from '../lib/state.svelte';
   import { artOf, progressOf } from '../lib/ui-types';
   import Badges from '../components/Badges.svelte';
+  import EditTitle from '../components/EditTitle.svelte';
+  import FixMatch from '../components/FixMatch.svelte';
   import Hero from '../components/Hero.svelte';
   import Icon from '../components/Icon.svelte';
+  import Menu from '../components/Menu.svelte';
+  import PersonCard from '../components/PersonCard.svelte';
+  import Rail from '../components/Rail.svelte';
 
   let { id }: { id: number } = $props();
 
@@ -37,10 +43,20 @@
   const decision = $derived({ data: detail.data?.playback, error: detail.error });
 
   // The cached summary paints the hero at once (and lands the card morph);
-  // the full detail fills in the technical section when it arrives.
+  // the full detail fills in the metadata and the technical section.
   const item = $derived<ItemSummary | undefined>(detail.data ?? findItem(id));
   const isEpisode = $derived(item?.kind === 'episode');
   const resumeAt = $derived(item && progressOf(item) > 0 ? (item.progress?.positionSec ?? 0) : 0);
+  // The movie's title, or the episode's show.
+  const meta = $derived(detail.data?.meta);
+  const ep = $derived(detail.data?.episodeInfo);
+
+  // Other files of the same film (4K and 1080p, a director's cut).
+  const versions = $derived.by(() => {
+    if (!item || item.kind !== 'movie' || !item.titleId) return [];
+    const all = library.items.filter((i) => i.kind === 'movie' && i.titleId === item.titleId);
+    return all.length > 1 ? all.sort((a, b) => (b.height || 0) - (a.height || 0) || a.id - b.id) : [];
+  });
 
   // Previous / next episode of the same show.
   const siblings = $derived.by(() => {
@@ -51,6 +67,52 @@
     const i = eps.findIndex((e) => e.id === item.id);
     return { prev: i > 0 ? eps[i - 1] : undefined, next: i >= 0 ? eps[i + 1] : undefined };
   });
+
+  const title = $derived(item ? (isEpisode ? ep?.name || item.episodeTitle || `Episode ${item.episode ?? ''}`.trim() : meta?.title || item.title) : '');
+  const logo = $derived(isEpisode ? '' : logoSrc(meta));
+  const year = $derived(isEpisode ? undefined : (yearOf(meta) ?? item?.year));
+  const runtime = $derived(meta?.runtimeMin && !isEpisode ? runtimeLabel(meta.runtimeMin) : formatDuration(item?.durationSec ?? 0));
+  const rating = $derived(ratingLabel(isEpisode ? ep?.rating : (meta?.rating ?? item?.rating)));
+  const overview = $derived(isEpisode ? ep?.overview || item?.overview : meta?.overview);
+  const credits = $derived(
+    CREDIT_LINES.map((l) => ({ ...l, people: crewWith(meta, l.jobs) })).filter((l) => l.people.length),
+  );
+  const needsReview = $derived(!!(meta?.needsReview ?? item?.needsReview));
+  const matchKind = $derived<'movie' | 'series'>(isEpisode ? 'series' : 'movie');
+
+  let fixing = $state(false);
+  let editing = $state(false);
+  let notice = $state('');
+
+  async function refresh() {
+    if (!item) return;
+    notice = '';
+    try {
+      if (isEpisode && item.show) await api.refreshShow(item.show);
+      else await api.refreshItem(item.id);
+      notice = 'Fetching the latest details. They appear here in a moment.';
+      setTimeout(() => app.libraryVersion++, 4000);
+    } catch (e) {
+      notice = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  const menu = $derived([
+    {
+      label: isEpisode ? 'Fix the show’s match' : 'Fix the match',
+      run: (): void => {
+        fixing = true;
+      },
+    },
+    {
+      label: 'Edit details',
+      run: (): void => {
+        editing = true;
+      },
+      hidden: !meta || isEpisode, // an episode's meta is its show's: edited on the show page
+    },
+    { label: 'Refresh details', run: refresh },
+  ]);
 
   useAmbient(() => artOf(item)?.color);
 
@@ -75,6 +137,7 @@
   }
 
   const epTitle = (e: ItemSummary) => e.episodeTitle || `Episode ${e.episode ?? ''}`.trim();
+  const sources: Record<string, string> = { tmdb: 'TMDB', nfo: 'the .nfo file next to it', mixed: 'TMDB and the .nfo file' };
 </script>
 
 {#if !item && detail.error}
@@ -87,15 +150,17 @@
 {:else}
   <Hero {item} label={item.show || item.title} landing>
     {#if isEpisode && item.show}
-      <a class="show link" href={href.show(item.show, item.season)}>{item.show}</a>
-      <h1>{epTitle(item)}</h1>
-    {:else}
-      <h1>{item.title}</h1>
+      <a class="show link" href={href.show(item.show, item.season)}>{meta?.title || item.show}</a>
     {/if}
+    <h1 class:sr-only={!!logo}>{title}</h1>
+    {#if logo}<img class="logo" src={logo} alt="" />{/if}
+    {#if meta?.tagline && !isEpisode}<p class="tagline">{meta.tagline}</p>{/if}
     <div class="meta">
       {#if isEpisode}<span>{episodeLabel(item.season, item.episode)}</span>{/if}
-      {#if item.year}<span>{item.year}</span>{/if}
-      {#if item.durationSec}<span>{formatDuration(item.durationSec)}</span>{/if}
+      {#if year}<span>{year}</span>{/if}
+      {#if meta?.certification}<span class="cert">{meta.certification}</span>{/if}
+      {#if runtime}<span>{runtime}</span>{/if}
+      {#if rating}<span class="rating"><Icon name="star" filled /><span class="sr-only">Rated</span>{rating}</span>{/if}
       <span class="badges"><Badges {item} /></span>
     </div>
     <div class="actions">
@@ -107,8 +172,67 @@
       {:else}
         <a class="btn primary" href={href.play(item.id)}><Icon name="play" />Play</a>
       {/if}
+      <Menu items={menu} />
     </div>
   </Hero>
+
+  <div class="body">
+    {#if needsReview}
+      <div class="review" role="note">
+        <Icon name="alert" />
+        <p>{isEpisode ? 'This might not be the right show.' : 'This might not be the right film.'}</p>
+        <button class="btn" onclick={() => (fixing = true)}>Check the match</button>
+      </div>
+    {/if}
+    {#if notice}<p class="muted notice" role="status">{notice}</p>{/if}
+
+    {#if overview || meta?.genres.length || credits.length || meta?.collection}
+      <section class="about">
+        {#if overview}<p class="overview">{overview}</p>{/if}
+        {#if meta?.genres.length}
+          <ul class="genres" aria-label="Genres">
+            {#each meta.genres as g (g.id)}<li><a class="chip" href={href.genre(g.id)}>{g.name}</a></li>{/each}
+          </ul>
+        {/if}
+        {#if credits.length}
+          <dl class="credits">
+            {#each credits as line (line.label)}
+              <dt>{line.people.length > 1 ? line.plural : line.label}</dt>
+              <dd>
+                {#each line.people as p, i (p.personId)}{#if i}{', '}{/if}<a class="link" href={href.person(p.personId)}>{p.name}</a>{/each}
+              </dd>
+            {/each}
+          </dl>
+        {/if}
+        {#if meta?.collection}
+          <p class="collection">
+            Part of <a class="link" href={href.collection(meta.collection.id)}>{meta.collection.name}</a>
+          </p>
+        {/if}
+      </section>
+    {/if}
+
+    {#if versions.length}
+      <section class="versions">
+        <h2>Versions</h2>
+        <ul class="chips" aria-label="Versions of this film">
+          {#each versions as v (v.id)}
+            <li>
+              <a class="chip" href={href.item(v.id)} aria-current={v.id === item.id ? 'page' : undefined}>{versionLabel(v)}</a>
+            </li>
+          {/each}
+        </ul>
+      </section>
+    {/if}
+  </div>
+
+  {#if meta?.cast.length}
+    <Rail title="Cast" items={meta.cast.slice(0, 30)} key={(c) => c.personId} size="person">
+      {#snippet card(c)}
+        <PersonCard id={c.personId} name={c.name} profile={c.profile} role={c.character} />
+      {/snippet}
+    </Rail>
+  {/if}
 
   <div class="body">
     {#if siblings.prev || siblings.next}
@@ -151,6 +275,11 @@
 
     <details class="tech">
       <summary>Technical details</summary>
+      {#if meta}
+        <p class="muted source">
+          Details from {sources[meta.source] ?? meta.source}{meta.locked ? ', with your edits' : ''}.
+        </p>
+      {/if}
       {#if decision.data?.reasons.length}
         <h3>Why this playback method</h3>
         <ul class="reasons">
@@ -212,6 +341,17 @@
       {/if}
     </details>
   </div>
+
+  <FixMatch
+    bind:open={fixing}
+    kind={matchKind}
+    itemId={isEpisode ? undefined : item.id}
+    show={isEpisode ? item.show : undefined}
+    query={isEpisode ? item.show || '' : item.title}
+    year={isEpisode ? undefined : item.year}
+    matched={!!meta && meta.matchState !== 'unmatched'}
+  />
+  {#if meta && !isEpisode}<EditTitle bind:open={editing} {meta} />{/if}
 {/if}
 
 <style>
@@ -224,26 +364,134 @@
     font-size: 1.05rem;
     width: fit-content;
   }
+  .tagline {
+    margin: -0.2rem 0 0;
+    font-size: clamp(1rem, 1.6vw, 1.2rem);
+    font-style: italic;
+    color: rgb(244 239 230 / 0.86);
+    text-wrap: balance;
+  }
   .badges {
     display: inline-flex;
     gap: 4px;
   }
+  .cert {
+    padding: 0 0.4rem;
+    font-size: 0.8rem;
+    font-weight: 700;
+    line-height: 1.5;
+    border: 1px solid currentColor;
+    border-radius: 4px;
+  }
+  .rating {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    color: var(--text);
+    font-weight: 650;
+  }
+  .rating :global(svg) {
+    width: 0.95em;
+    height: 0.95em;
+    color: var(--accent);
+  }
   .actions {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 0.75rem;
     margin-top: 0.4rem;
   }
   .body {
-    padding: 0.5rem var(--gutter) 4rem;
+    padding: 0.5rem var(--gutter) 0;
     max-width: 60rem;
     display: grid;
     gap: 2rem;
+  }
+  .body:last-of-type {
+    padding-bottom: 4rem;
+  }
+  .review {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1rem;
+    padding: 0.85rem 1rem;
+    background: color-mix(in oklab, var(--warn) 12%, var(--bg-2));
+    border: 1px solid color-mix(in oklab, var(--warn) 40%, transparent);
+    border-radius: var(--radius);
+  }
+  .review :global(svg) {
+    width: 1.3rem;
+    height: 1.3rem;
+    color: var(--warn);
+    flex: none;
+  }
+  .review p {
+    margin: 0;
+    flex: 1;
+    min-width: 12rem;
+  }
+  .notice {
+    margin: 0;
+  }
+  .about {
+    display: grid;
+    gap: 1.25rem;
+  }
+  .overview {
+    margin: 0;
+    max-width: 65ch;
+    font-size: 1.08rem;
+    line-height: 1.6;
+  }
+  .genres {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .genres .chip,
+  .versions .chip {
+    display: inline-flex;
+    align-items: center;
+  }
+  .credits {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.4rem 1.5rem;
+    margin: 0;
+  }
+  .credits dt {
+    color: var(--muted);
+  }
+  .credits dd {
+    margin: 0;
+  }
+  .collection {
+    margin: 0;
+    color: var(--muted);
+  }
+  .versions h2 {
+    margin-bottom: 0.6rem;
+  }
+  .versions ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .versions [aria-current='page'] {
+    color: var(--bg);
+    background: var(--text);
+    border-color: var(--text);
   }
   .siblings {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 1rem;
+    margin-top: 1rem;
   }
   .siblings a {
     display: grid;
@@ -288,6 +536,10 @@
     margin: 1.5rem 0 0.6rem;
     font-size: 1rem;
   }
+  .source {
+    margin: 1rem 0 0;
+    font-size: 0.9rem;
+  }
   .reasons {
     margin: 0;
     padding-left: 1.2rem;
@@ -320,6 +572,13 @@
     }
     .siblings .next {
       grid-column: 1;
+    }
+    .credits {
+      grid-template-columns: 1fr;
+      gap: 0.1rem;
+    }
+    .credits dd {
+      margin-bottom: 0.5rem;
     }
   }
 </style>

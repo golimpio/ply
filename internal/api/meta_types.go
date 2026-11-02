@@ -28,6 +28,10 @@ type TitleCard struct {
 	Rating   *float64 `json:"rating,omitempty"`
 	ItemID   *int64   `json:"itemId,omitempty"` // movies: the first file
 	Show     string   `json:"show,omitempty"`   // shows: the show's name in the library
+
+	// NextAirDate is when a show's next episode airs (YYYY-MM-DD); it can be in the
+	// past until the show is next refreshed.
+	NextAirDate string `json:"nextAirDate,omitempty"`
 }
 
 // Genre, CollectionRef, CastMember and CrewMember are parts of a TitleDetail.
@@ -66,7 +70,6 @@ type TitleDetail struct {
 	Tagline       string         `json:"tagline,omitempty"`
 	ReleaseDate   string         `json:"releaseDate,omitempty"`
 	EndDate       string         `json:"endDate,omitempty"`
-	NextAirDate   string         `json:"nextAirDate,omitempty"`
 	Status        string         `json:"status,omitempty"`
 	RuntimeMin    *int           `json:"runtimeMin,omitempty"`
 	VoteCount     *int           `json:"voteCount,omitempty"`
@@ -80,6 +83,24 @@ type TitleDetail struct {
 	Locked        bool           `json:"locked"`
 	MatchState    string         `json:"matchState"`
 	NeedsReview   bool           `json:"needsReview"`
+}
+
+// NextEpisode is the episode of a show that airs next.
+type NextEpisode struct {
+	Season  int    `json:"season"`
+	Episode int    `json:"episode"`
+	Name    string `json:"name"` // "" when TMDB has no name for it yet
+}
+
+// UpcomingShow is an entry of GET /api/upcoming. Poster and Backdrop are
+// relative URLs that carry the token.
+type UpcomingShow struct {
+	TitleID     int64        `json:"titleId"`
+	Show        string       `json:"show"` // the show's name in the library
+	Poster      string       `json:"poster,omitempty"`
+	Backdrop    string       `json:"backdrop,omitempty"`
+	NextAirDate string       `json:"nextAirDate"` // YYYY-MM-DD, today or later
+	NextEpisode *NextEpisode `json:"nextEpisode,omitempty"`
 }
 
 // PersonCard is a person as a search result shows them.
@@ -201,6 +222,9 @@ type SettingsView struct {
 	MetadataEnabled   bool   `json:"metadataEnabled"`
 	MetadataForcedOff bool   `json:"metadataForcedOff"` // -metadata=false: the switch cannot be turned on here
 	Language          string `json:"language"`
+	// TMDBKeyChecked is in the answer to a PUT that stored a key: whether the key was
+	// checked against TMDB. It was not with -metadata=false, when nothing may be sent.
+	TMDBKeyChecked *bool `json:"tmdbKeyChecked,omitempty"`
 }
 
 // imageURL turns an image ref ("tmdb:/abc.jpg", "local:item:12:poster") into a
@@ -240,7 +264,8 @@ func optInt(v int) *int {
 
 func (s *Server) titleCard(c store.TitleCard) TitleCard {
 	out := TitleCard{ID: c.ID, Kind: c.Kind, Title: c.Title, Year: c.Year, Poster: s.imageURL(c.Poster, posterSize),
-		Backdrop: s.imageURL(c.Backdrop, backdropSize), Rating: optFloat(c.Rating), Show: c.Show}
+		Backdrop: s.imageURL(c.Backdrop, backdropSize), Rating: optFloat(c.Rating), Show: c.Show,
+		NextAirDate: c.NextAirDate}
 	if c.ItemID != 0 {
 		out.ItemID = ptr(c.ItemID)
 	}
@@ -259,7 +284,7 @@ func (s *Server) titleDetail(d store.TitleDetail) *TitleDetail {
 	out := &TitleDetail{
 		TitleCard: s.titleCard(d.TitleCard),
 		TMDBID:    d.TMDBID, IMDbID: d.IMDbID, OriginalTitle: d.OriginalTitle, SortTitle: d.SortTitle,
-		Overview: d.Overview, Tagline: d.Tagline, ReleaseDate: d.ReleaseDate, EndDate: d.EndDate, NextAirDate: d.NextAirDate,
+		Overview: d.Overview, Tagline: d.Tagline, ReleaseDate: d.ReleaseDate, EndDate: d.EndDate,
 		Status: d.Status, RuntimeMin: optInt(d.RuntimeMin), VoteCount: optInt(d.VoteCount), Certification: d.Certification,
 		Logo:   s.imageURL(d.Logo, logoSize),
 		Genres: []Genre{}, Cast: []CastMember{}, Crew: []CrewMember{},

@@ -35,6 +35,15 @@
   >
     <span class="spin" class:on={scan.running}><Icon name="rescan" /></span>
   </button>
+  <a
+    class="btn icon"
+    href={href.settings}
+    aria-label="Settings"
+    title="Settings"
+    aria-current={section === 'settings' ? 'page' : undefined}
+  >
+    <Icon name="settings" />
+  </a>
 </header>
 
 <style>

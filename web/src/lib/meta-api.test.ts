@@ -174,6 +174,44 @@ describe('metadata requests', () => {
     expect(call(fn)[0]).toBe('/api/titles'); // 0 is no id: it is left out
   });
 
+  it('lists the upcoming episodes of the shows in the library', async () => {
+    m.setToken('tok');
+    const list = [
+      {
+        titleId: 9,
+        show: 'Cool Show',
+        poster: '/api/images/tmdb/w342/p.jpg?token=tok',
+        backdrop: '/api/images/tmdb/w1280/b.jpg?token=tok',
+        nextAirDate: '2026-11-08',
+        nextEpisode: { season: 3, episode: 4, name: 'Please Hold to My Hand' },
+      },
+      { titleId: 10, show: 'Other', nextAirDate: '2026-11-09' },
+    ];
+    const fn = stubFetch(json(list));
+    const got = await m.api.upcoming();
+    expect(got).toEqual(list);
+    expect(got[0].nextEpisode?.episode).toBe(4);
+    expect(got[1].nextEpisode).toBeUndefined();
+    const [path, init] = call(fn);
+    expect(path).toBe('/api/upcoming');
+    expect(init.method).toBe('GET');
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer tok');
+
+    // Go sends null for a list with nothing in it.
+    stubFetch(json(null));
+    expect(await m.api.upcoming()).toEqual([]);
+    stubFetch(json([]));
+    expect(await m.api.upcoming()).toEqual([]);
+  });
+
+  it('carries the next air date on a card and in a title', async () => {
+    stubFetch(json([{ id: 1, kind: 'series', title: 'S', year: 2020, show: 'S', nextAirDate: '2026-11-08' }]));
+    const [card] = await m.api.titles();
+    expect(card.nextAirDate).toBe('2026-11-08');
+    stubFetch(json({ show: 'S', episodeCount: 1, seasons: [], meta: { id: 1, nextAirDate: '2026-11-08' } }));
+    expect((await m.api.show('S')).meta?.nextAirDate).toBe('2026-11-08');
+  });
+
   it('encodes a show name as one path segment', async () => {
     const fn = stubFetch(json({ show: 'AC/DC: 100% Live', episodeCount: 1, seasons: [] }));
     await m.api.show('AC/DC: 100% Live');
@@ -262,6 +300,12 @@ describe('metadata requests', () => {
     fn = stubFetch(json(s));
     await m.api.saveSettings({ tmdbKey: 'abc', language: 'pt-BR' });
     expect(sent(fn)).toEqual({ tmdbKey: 'abc', language: 'pt-BR' });
+
+    // With -metadata=false a key is stored without being checked, and the answer says so.
+    stubFetch(json({ ...s, metadataForcedOff: true, tmdbKeyChecked: false }));
+    expect((await m.api.saveSettings({ tmdbKey: 'abc' })).tmdbKeyChecked).toBe(false);
+    stubFetch(json(s));
+    expect((await m.api.saveSettings({ language: 'pt-BR' })).tmdbKeyChecked).toBeUndefined();
   });
 });
 

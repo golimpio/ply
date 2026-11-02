@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ItemSummary } from './api';
 
-vi.mock('./api', () => ({ api: { items: vi.fn() } }));
+vi.mock('./api', () => ({ api: { items: vi.fn(), shows: vi.fn(() => Promise.resolve([])) } }));
 
 // Fresh module state (fetched version, in-flight fetch) for every test.
-let api: { items: ReturnType<typeof vi.fn> };
+let api: { items: ReturnType<typeof vi.fn>; shows: ReturnType<typeof vi.fn> };
 let app: { libraryVersion: number };
 let lib: typeof import('./library.svelte');
 beforeEach(async () => {
@@ -55,6 +55,13 @@ describe('showsOf', () => {
   it('uses a special as the cover when a show has nothing else', () => {
     const only = ep('Extras', 0, 3);
     expect(lib.showsOf([ep('Extras', 0, 4), only])[0].cover).toBe(only);
+  });
+
+  it("attaches each show's metadata row, and only to its own show", () => {
+    const meta = { show: 'B', seasons: [1], episodeCount: 1, poster: '/p.jpg', matchState: 'matched' as const, needsReview: false };
+    const shows = lib.showsOf([ep('A', 1, 1), ep('B', 1, 1)], [meta]);
+    expect(shows.find((s) => s.show === 'B')?.meta).toBe(meta);
+    expect(shows.find((s) => s.show === 'A')?.meta).toBeUndefined();
   });
 });
 
@@ -113,5 +120,21 @@ describe('ensureLibrary', () => {
     await lib.ensureLibrary();
     expect(lib.library.error).toBe('Cannot reach the ply server');
     expect(lib.library.items).toEqual([a]);
+  });
+
+  it('loads the show list with the items, and a failing show list costs only the metadata', async () => {
+    const a = ep('A', 1, 1);
+    const meta = { show: 'A', seasons: [1], episodeCount: 1, poster: '/p.jpg', matchState: 'matched', needsReview: false };
+    api.items.mockResolvedValue([a]);
+    api.shows.mockResolvedValueOnce([meta]).mockRejectedValueOnce(new Error('HTTP 500'));
+    await lib.ensureLibrary();
+    expect(lib.library.shows).toEqual([meta]);
+    expect(lib.showMeta('A')).toEqual(meta);
+    app.libraryVersion++;
+    await lib.ensureLibrary();
+    expect(lib.library.error).toBe('');
+    expect(lib.library.loaded).toBe(true);
+    expect(lib.library.items).toEqual([a]);
+    expect(lib.library.shows).toEqual([]);
   });
 });

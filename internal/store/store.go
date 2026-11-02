@@ -30,13 +30,14 @@ type Store struct {
 }
 
 // Open opens (creating if needed) the database at path and applies pending
-// migrations. The parent directory is created if missing.
+// migrations. The parent directory is created (readable by its owner only) if
+// missing, and the database files are made readable by their owner only.
 func Open(path string) (*Store, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(abs), 0o700); err != nil {
 		return nil, err
 	}
 	db, err := sql.Open("sqlite", dsn(abs))
@@ -56,6 +57,14 @@ func Open(path string) (*Store, error) {
 	if err := s.migrate(ctx); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate %s: %w", abs, err)
+	}
+	// The TMDB key is in here. SQLite makes the database as readable as the umask
+	// allows, and gives its -wal and -shm files the mode the database has.
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if err := os.Chmod(abs+suffix, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
+			db.Close()
+			return nil, err
+		}
 	}
 	return s, nil
 }

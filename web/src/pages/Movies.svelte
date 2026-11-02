@@ -2,6 +2,7 @@
   import type { ItemSummary } from '../lib/api';
   import { formatDuration, hdrLabel, resolutionLabel } from '../lib/format';
   import { byAdded, byTitle, ensureLibrary, library } from '../lib/library.svelte';
+  import { groupByTitle, prefersPosters, type TitleGroup } from '../lib/meta';
   import { href, type LibraryView } from '../lib/router.svelte';
   import { app } from '../lib/state.svelte';
   import LibraryControls from '../components/LibraryControls.svelte';
@@ -21,17 +22,25 @@
     duration: (a, b) => b.durationSec - a.durationSec,
   };
 
-  const all = $derived(library.items.filter((i) => i.kind === 'movie'));
+  // One card per film: its files (4K and 1080p, say) are versions of it.
+  const all = $derived(groupByTitle(library.items.filter((i) => i.kind === 'movie')));
+  // A filter keeps a film when any of its versions passes.
+  const passes = (i: ItemSummary) =>
+    (!view.filters.includes('4k') || resolutionLabel(i.width, i.height) === '4K') &&
+    (!view.filters.includes('hdr') || hdrLabel(i.hdr) !== '') &&
+    (!view.filters.includes('unwatched') || !i.progress?.watched);
   const shown = $derived(
     all
-      .filter(
-        (i) =>
-          (!view.filters.includes('4k') || resolutionLabel(i.width, i.height) === '4K') &&
-          (!view.filters.includes('hdr') || hdrLabel(i.hdr) !== '') &&
-          (!view.filters.includes('unwatched') || !i.progress?.watched),
-      )
-      .sort(order[view.sort]),
+      .filter((g: TitleGroup) => g.versions.some(passes))
+      .sort((a, b) => order[view.sort](a.item, b.item)),
   );
+  const posters = $derived(prefersPosters(all.map((g) => g.item)));
+
+  const sub = (g: TitleGroup) => [
+    g.item.year,
+    formatDuration(g.item.durationSec),
+    g.versions.length > 1 ? `${g.versions.length} versions` : '',
+  ];
 </script>
 
 <div class="page">
@@ -64,14 +73,9 @@
   {:else if shown.length === 0}
     <p class="muted">No movies match these filters. <a href={href.moviesWith({ sort: view.sort })}>Clear filters</a></p>
   {:else}
-    <div class="grid">
-      {#each shown as item (item.id)}
-        <MediaCard
-          {item}
-          href={href.item(item.id)}
-          title={item.title}
-          sub={[item.year, formatDuration(item.durationSec)]}
-        />
+    <div class="grid" class:posters>
+      {#each shown as g (g.key)}
+        <MediaCard item={g.item} shape={posters ? 'poster' : 'wide'} href={href.item(g.item.id)} title={g.item.title} sub={sub(g)} />
       {/each}
     </div>
   {/if}
@@ -80,5 +84,9 @@
 <style>
   .sk {
     aspect-ratio: 16 / 9;
+  }
+  .grid.posters {
+    grid-template-columns: repeat(auto-fill, minmax(min(160px, 42vw), 1fr));
+    gap: 1.75rem 1.1rem;
   }
 </style>

@@ -252,6 +252,36 @@ func TestUpdateValidatesBeforeItStores(t *testing.T) {
 	}
 }
 
+// -metadata=false: the key is kept, and TMDB is not asked about it.
+func TestUpdateWhileForcedOffStoresTheKeyWithoutAskingTMDB(t *testing.T) {
+	ctx := context.Background()
+	str := func(s string) *string { return &s }
+	s, env := newSettings(t, func(o *SettingsOptions) { o.Disabled = true })
+	env.check = &Error{Op: "GET /configuration", Status: 401, Message: "a key TMDB would refuse"}
+
+	if err := s.Update(ctx, Update{Key: str("0123456789abcdef0123456789abcdef"), Language: str("de-DE")}); err != nil {
+		t.Fatalf("Update while forced off: %v", err)
+	}
+	if len(env.checked) != 0 || len(env.built) != 0 {
+		t.Errorf("TMDB was reached while forced off: checked %q, providers built %q", env.checked, env.built)
+	}
+	r := s.Resolve(ctx)
+	if r.Key() != "0123456789abcdef0123456789abcdef" || r.KeySource != KeyFromSettings || r.Language != "de-DE" || !r.ForcedOff || r.Online() {
+		t.Errorf("after Update: %v", r)
+	}
+	// What is local is still checked.
+	if err := s.Update(ctx, Update{Key: str("has space")}); !errors.Is(err, ErrInvalidSetting) {
+		t.Errorf("malformed key while forced off: %v", err)
+	}
+
+	// Positive control: the same update, not forced off, does ask.
+	s2, env2 := newSettings(t)
+	env2.check = &Error{Op: "GET /configuration", Status: 401, Message: "refused"}
+	if err := s2.Update(ctx, Update{Key: str("0123456789abcdef0123456789abcdef")}); !errors.Is(err, ErrKeyRejected) || len(env2.checked) != 1 {
+		t.Errorf("not forced off: err %v, checked %q", err, env2.checked)
+	}
+}
+
 func TestUpdateStoresAShadowedKeyButTheFlagStillWins(t *testing.T) {
 	ctx := context.Background()
 	key := "settingskey"

@@ -139,6 +139,7 @@ async function open(browser, opts = {}) {
     if (m === 'GET' && p === '/api/info') return json(route, { id: 'x', name: 'wiring', version: '0', authRequired: false });
     if (m === 'GET' && p === '/api/scan') return json(route, { running: false, itemCount: 1 });
     if (m === 'GET' && p === '/api/items') return json(route, []); // the item page's neighbours
+    if (m === 'GET' && p === '/api/shows') return json(route, []); // loaded with the library since M6
     if (m === 'GET' && p === `/api/items/${ITEM}`) return json(route, detail(opts.item));
     if (m === 'GET' && p.endsWith('.vtt')) return route.fulfill({ status: 200, contentType: 'text/vtt', body: 'WEBVTT\n\n' });
     if (m === 'PUT' && p === `/api/items/${ITEM}/progress`) {

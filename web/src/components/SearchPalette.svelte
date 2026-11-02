@@ -1,12 +1,15 @@
 <script lang="ts">
-  import type { ItemSummary } from '../lib/api';
+  import { api, type GenreCount, type ItemSummary, type PersonCard } from '../lib/api';
   import { episodeLabel, formatDuration } from '../lib/format';
   import { search } from '../lib/fuzzy';
   import { ensureLibrary, library, showsOf } from '../lib/library.svelte';
+  import { profileImg, type Img } from '../lib/meta';
   import { go } from '../lib/nav';
   import { palette } from '../lib/palette.svelte';
+  import { Latest, matchGenres, PEOPLE_DEBOUNCE_MS, peopleQuery } from '../lib/palette-search';
   import { href } from '../lib/router.svelte';
   import Art from './Art.svelte';
+  import Picture from './Picture.svelte';
 
   // Cmd/Ctrl-K or "/" anywhere outside a text field opens it.
   let dialog = $state<HTMLDialogElement>();
@@ -14,13 +17,32 @@
   let query = $state('');
   let active = $state(0);
 
+  // A hit is a title (artwork from `item`), a person (`portrait`, round) or a genre (a title tile).
   interface Hit {
     id: string;
     href: string;
     title: string;
     sub: (string | number | undefined)[];
-    item: ItemSummary;
+    item?: ItemSummary;
+    portrait?: Img | null;
     label: string; // fallback-tile initials source
+  }
+
+  // People are asked of the server as the query settles; the genres are fetched
+  // once, the first time the palette opens, and matched here.
+  let people = $state<PersonCard[]>([]);
+  let peoplePending = $state(false); // a lookup is waiting for typing to pause, or for its answer
+  let genres = $state<GenreCount[]>([]);
+  let genresRequested = false;
+  const latest = new Latest();
+
+  function loadGenres() {
+    if (genresRequested) return;
+    genresRequested = true;
+    api.genres().then(
+      (list) => (genres = list),
+      () => (genresRequested = false), // try again the next time it opens
+    );
   }
 
   const hits = $derived.by((): Hit[] => {
@@ -52,7 +74,22 @@
       item: it,
       label: it.show || it.title,
     }));
-    return [...showHits, ...itemHits];
+    const personHits = people.slice(0, 8).map((p) => ({
+      id: `person:${p.id}`,
+      href: href.person(p.id),
+      title: p.name,
+      sub: [p.knownFor || 'Person'],
+      portrait: profileImg(p),
+      label: p.name,
+    }));
+    const genreHits = matchGenres(genres, query).map((g) => ({
+      id: `genre:${g.id}`,
+      href: href.genre(g.id),
+      title: g.name,
+      sub: ['Genre', `${g.count} title${g.count === 1 ? '' : 's'}`],
+      label: g.name,
+    }));
+    return [...showHits, ...itemHits, ...personHits, ...genreHits];
   });
 
   $effect(() => {
@@ -60,10 +97,36 @@
     active = 0;
   });
 
+  // Look people up once typing pauses. An answer is used only if no newer query
+  // (or a query too short to ask) has been typed since the request left.
+  $effect(() => {
+    const q = peopleQuery(query);
+    const ticket = latest.begin();
+    if (!q) {
+      people = [];
+      peoplePending = false;
+      return;
+    }
+    peoplePending = true;
+    const answer = (list: PersonCard[]) => {
+      if (!latest.isCurrent(ticket)) return;
+      people = list;
+      peoplePending = false;
+    };
+    const timer = setTimeout(() => {
+      api.people(q).then(answer, () => answer([]));
+    }, PEOPLE_DEBOUNCE_MS);
+    return () => {
+      clearTimeout(timer);
+      latest.cancel();
+    };
+  });
+
   $effect(() => {
     if (!dialog) return;
     if (palette.open && !dialog.open) {
       void ensureLibrary();
+      loadGenres();
       query = '';
       dialog.showModal();
       input?.focus();
@@ -116,7 +179,7 @@
       bind:value={query}
       onkeydown={onInputKey}
       type="search"
-      placeholder="Search movies, shows and episodes"
+      placeholder="Search movies, shows, people and genres"
       role="combobox"
       aria-expanded={hits.length > 0}
       aria-controls="search-hits"
@@ -136,7 +199,13 @@
             onpointermove={() => (active = i)}
             onclick={() => choose(hit)}
           >
-            <div class="thumb"><Art item={hit.item} label={hit.label} /></div>
+            {#if hit.portrait !== undefined}
+              <div class="thumb round">
+                <Picture img={hit.portrait} ratio="1 / 1" label={hit.label} sizes="52px" />
+              </div>
+            {:else}
+              <div class="thumb"><Art item={hit.item} label={hit.label} /></div>
+            {/if}
             <div class="text">
               <div class="title">{hit.title}</div>
               <div class="sub">
@@ -146,12 +215,12 @@
           </li>
         {:else}
           <li class="empty" role="presentation">
-            {library.loaded ? `Nothing matches “${query.trim()}”.` : 'Loading the library…'}
+            {#if !library.loaded}Loading the library…{:else if peoplePending}Searching…{:else}Nothing matches “{query.trim()}”.{/if}
           </li>
         {/each}
       </ul>
     {:else}
-      <p class="tip">Type a title, a show or a year. Use ↑ ↓ to move and Enter to open.</p>
+      <p class="tip">Type a title, a name, a genre or a year. Use ↑ ↓ to move and Enter to open.</p>
     {/if}
   </div>
 </dialog>
@@ -214,6 +283,11 @@
   .thumb {
     border-radius: 6px;
     overflow: hidden;
+  }
+  .thumb.round {
+    width: 3.25rem;
+    justify-self: center; /* centred in the artwork column, so the text lines up with the other rows */
+    border-radius: 50%;
   }
   .thumb :global(.tile) {
     font-size: 1rem;

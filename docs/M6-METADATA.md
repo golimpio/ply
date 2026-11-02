@@ -66,7 +66,7 @@ An id hint gives confidence 1.0 (TMDB `/find/{imdb}?external_source=imdb_id` or 
 - Person (lazy, when the person page is first opened, then cached): `/person/{id}` → biography, birthday,
   deathday, place of birth, known_for_department, profile path, imdb id.
 
-## Data model — migration `003_metadata.sql`
+## Data model — migration `003_metadata.sql` (`004_next_episode.sql` adds the next-episode columns)
 ```
 titles(id PK, kind TEXT CHECK(kind IN('movie','series')), tmdb_id INT, imdb_id, tvdb_id INT,
        title, original_title, sort_title, year INT, overview, tagline, release_date TEXT /*YYYY-MM-DD*/,
@@ -75,6 +75,7 @@ titles(id PK, kind TEXT CHECK(kind IN('movie','series')), tmdb_id INT, imdb_id, 
        collection_id INT REFERENCES collections(id) ON DELETE SET NULL,
        source TEXT /*tmdb|nfo|mixed*/, locked INT NOT NULL DEFAULT 0, /*user edited: refresh keeps text fields*/
        next_air_date TEXT /*series: next_episode_to_air.air_date*/,
+       next_episode_season INT, next_episode_number INT, next_episode_name TEXT, /*migration 004; series: next_episode_to_air; 0/'' unknown*/
        fetched_at INT, created_at INT, updated_at INT,
        UNIQUE(kind, tmdb_id))
 items  + title_id INT REFERENCES titles(id) ON DELETE SET NULL,   -- movies only (episodes go via series_matches)
@@ -109,7 +110,9 @@ Moving/renaming a file keeps its item id (see Watching), so progress, match and 
   `Cache-Control: public, max-age=31536000, immutable`. Fails → 404 (UI falls back to frame-grab art).
 - `GET /api/images/local/{kind}/{id}/{slot}` serves sidecar artwork found by the scanner (path from the DB only).
 - After a match, the worker prefetches the poster (w342) and backdrop (w1280) so browsing is instant and keeps
-  working offline; profile photos and stills are fetched lazily.
+  working offline; profile photos and stills are fetched lazily. After a manual match the prefetch runs in the
+  background (the request is answered once the match is stored). At most 4 images are downloaded at once; a failed
+  one is not retried for 10 minutes (at most 1024 failures are remembered).
 - Local artwork names (case-insensitive, jpg/jpeg/png/webp): movie `<base>-poster`, `poster`, `folder`, `cover`;
   backdrop `<base>-fanart`, `fanart`, `backdrop`, `background`; episode thumb `<base>-thumb`, `<base>`;
   show folder `poster`, `folder`, `fanart`, `backdrop`; season `seasonNN-poster`, `Season NN/poster`.
@@ -118,6 +121,11 @@ Moving/renaming a file keeps its item id (see Watching), so progress, match and 
 ## NFO (`internal/metadata/nfo.go`)
 `<base>.nfo`, else `movie.nfo` in a one-movie folder; `tvshow.nfo` in the show folder; `<base>.nfo` for episodes.
 Parse with `encoding/xml`, tolerant: unknown elements ignored, a non-XML NFO is scanned for TMDB/IMDb URLs/ids.
+Encoding: a Latin-1 family declaration (`ISO-8859-1`, `windows-1252`, ...) is converted to UTF-8 before parsing, so every
+offset the parser reports is an offset into the text it cut (a UTF-16 file with a byte order mark is converted the same way).
+Ids outside the XML (Kodi appends a URL after it) are read from the text before the root element and, after the first
+root's end tag, from text that is not inside another element. A second root's content and attributes, and comments, are
+not scanned: a plot that mentions a movie is not that movie's id, whichever element it is in.
 Fields: title, originaltitle, sorttitle, year, premiered/releasedate, plot, outline, tagline, runtime, mpaa,
 rating(s), genre*, studio, director*, credits*, actor{name, role, order, thumb}*, uniqueid*, set{name}.
 If it has an id → fetch from TMDB (if enabled) and overlay NFO text fields on top (`source=mixed`). If online
@@ -135,11 +143,18 @@ is off or nothing matches → NFO alone (`source=nfo`). Fuzz test the parser.
   still refresh images/credits. A season with new files and no `episodes` rows is fetched immediately.
 - **Changes feed** (preferred over age-based refresh): once a day poll TMDB `/movie/changes` and `/tv/changes`
   (paged, last 24 h) and refresh only library titles in the set; last poll time in `settings`. If the last poll is
-  older than 14 days (the endpoint's window), fall back to the age-based refresh above.
+  older than 14 days (the endpoint's window), fall back to the age-based refresh above. A feed with more than 200
+  pages is an error, not a short list: the refresh goes by age and the poll time is kept, so the next one asks the
+  feed for everything since then.
 - **Airing series**: refresh at `next_air_date + 6h` so a new episode's name/still is there when the file lands;
-  the same data drives an "Upcoming" rail and a "new episode" badge.
+  the same data (`next_air_date` and the next episode's season, number and name, all set from TMDB's
+  `next_episode_to_air` wherever the worker sets the date) drives `GET /api/upcoming` and a "new episode" badge.
 - **Local sources changed** (`.nfo`/artwork created/changed/removed next to an existing item, reported by the
-  scanner's `OnSidecarsChanged`): re-read local sources for those items without a full re-match.
+  scanner's `OnSidecarsChanged`): re-read local sources for those items without a full re-match. A batch reads each
+  show once, however many of its episodes are in it, and a TMDB title is fetched again only when the NFO laid over
+  it is not the one that was laid over it last (artwork-only changes and moved files ask TMDB nothing).
+- A person TMDB has no details for (404) is not asked about again for 24 hours; one it could not be asked about,
+  5 minutes, doubling up to an hour.
 - `-metadata-refresh` flag (default 24h, 0 disables the periodic refresh, not the matching of new files).
 - New files: scanner/watcher → `Notify()` → metadata visible in the UI within seconds of the file appearing.
 - Status: `{enabled, keySet, running, pending, unmatched, needsReview, lastRefresh, lastError}`.
@@ -182,6 +197,7 @@ All image URLs are relative and carry `?token=` like other media URLs.
 | GET | `/api/genres` | `[{id, name, count}]` |
 | GET | `/api/titles?genre=&collection=&person=` | `[TitleCard]` |
 | GET | `/api/collections/{id}` | `{id, name, overview, poster, backdrop, titles:[TitleCard]}` (release order) |
+| GET | `/api/upcoming` | `[{titleId, show, poster?, backdrop?, nextAirDate, nextEpisode?: {season, episode, name}}]` — series with a file in the library whose `next_air_date` is today (server's local date) or later, soonest first (by name within a day), at most 50; `nextEpisode` is absent when TMDB did not say which episode; `[]` when none |
 | GET | `/api/metadata/search?kind=movie\|series&q=&year=` | `[{tmdbId, title, originalTitle, year, overview, poster, score}]` for the fix dialog |
 | PUT | `/api/items/{id}/match` | `{tmdbId}` or `{imdbId}` → re-match this movie file, `match_state=manual`, returns ItemDetail |
 | PUT | `/api/shows/{name}/match` | same for a whole show |
@@ -191,10 +207,11 @@ All image URLs are relative and carry `?token=` like other media URLs.
 | POST | `/api/metadata/refresh` | refresh everything (202) |
 | GET | `/api/metadata/status` | worker status (above) |
 | GET | `/api/metadata/review` | `[{kind:'movie'\|'series', itemId?, show?, title, year, matchState, needsReview, score, candidate?:TitleCard}]` |
-| GET/PUT | `/api/settings` | `{tmdbKeySet, tmdbKeySource:'flag'\|'env'\|'settings'\|'default'\|'', metadataEnabled, language}`; PUT `{tmdbKey?, metadataEnabled?, language?}` validates the key against TMDB `/configuration` (400 with a clear message if bad); the key is never returned |
+| GET/PUT | `/api/settings` | `{tmdbKeySet, tmdbKeySource:'flag'\|'env'\|'settings'\|'default'\|'', metadataEnabled, language}`; PUT `{tmdbKey?, metadataEnabled?, language?}` validates the key against TMDB `/configuration` (400 with a clear message if bad); with `-metadata=false` nothing is sent to TMDB: the key is stored as given (format checked) and the answer has `tmdbKeyChecked: false` (`true` otherwise, when the PUT stored a key); the key is never returned |
 
 ```
-TitleCard   {id, kind, title, year, poster?, backdrop?, rating?, itemId? /*movie: first file*/, show? /*series*/}
+TitleCard   {id, kind, title, year, poster?, backdrop?, rating?, itemId? /*movie: first file*/, show? /*series*/,
+            nextAirDate? /*series: YYYY-MM-DD, may be past until the next refresh*/}
 TitleDetail TitleCard + {tmdbId?, imdbId?, originalTitle?, sortTitle, overview?, tagline?, releaseDate?,
             endDate?, status?, runtimeMin?, voteCount?, certification?, logo?, genres:[{id,name}],
             collection?: {id, name}, cast:[{personId, name, character, profile?}],
@@ -222,7 +239,7 @@ Mutating endpoints need the token like everything else. Unknown ids → 404. Bad
 ## Tests (acceptance)
 - Fake TMDB (`httptest`) serving recorded fixtures; no test touches the network. Includes 429 + Retry-After,
   5xx backoff, timeout, malformed JSON.
-- Store: migration 003 on a DB that already has M5 data keeps it; orphan pruning; move keeps id.
+- Store: migration 003 on a DB that already has M5 data keeps it, and 004 on one with 003 data; orphan pruning; move keeps id.
 - Matching tables (above); NFO parser tables + fuzz; local artwork discovery tables.
 - Worker: new item → matched → images prefetched; offline → stays pending with backoff; refresh honours
   `locked`; shutdown leaves no goroutines (check with a counter or `goleak`-style comparison of runtime stacks).

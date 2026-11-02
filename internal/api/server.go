@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"ply/internal/art"
 	"ply/internal/hwaccel"
@@ -57,6 +58,8 @@ type Options struct {
 	Metadata *metadata.Worker   // matching, refreshing, fixing matches
 	Settings *metadata.Settings // the TMDB key, the privacy switch, the language
 	Images   *metadata.ImageCache
+	// Now is the clock; nil means time.Now. (GET /api/upcoming asks which day it is.)
+	Now func() time.Time
 }
 
 // Server is the HTTP handler for the whole application.
@@ -99,6 +102,7 @@ func New(o Options) *Server {
 	mux.HandleFunc("GET /api/titles", s.handleTitles)
 	mux.HandleFunc("PATCH /api/titles/{id}", s.handlePatchTitle)
 	mux.HandleFunc("GET /api/collections/{id}", s.handleCollection)
+	mux.HandleFunc("GET /api/upcoming", s.handleUpcoming)
 	mux.HandleFunc("GET /api/images/tmdb/{size}/{file}", s.handleTMDBImage)
 	mux.HandleFunc("GET /api/images/local/{kind}/{id}/{slot}", s.handleLocalImage)
 	mux.HandleFunc("GET /api/metadata/search", s.handleMetadataSearch)
@@ -121,13 +125,43 @@ func New(o Options) *Server {
 // ServeHTTP implements http.Handler.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.handler.ServeHTTP(w, r) }
 
-// middleware applies CORS to everything and, when token is set, requires it
-// for /api/* except /api/info.
+// middleware applies CORS to everything, keeps other sites from changing
+// anything and, when token is set, requires it for /api/* except /api/info.
 //
-// Neither layer wraps the ResponseWriter, so http.ServeContent still sees the
+// No layer wraps the ResponseWriter, so http.ServeContent still sees the
 // server's own writer (io.ReaderFrom for sendfile, http.Flusher).
 func middleware(next http.Handler, token string) http.Handler {
-	return cors(requireToken(next, token))
+	return cors(sameOriginWrites(requireToken(next, token), token))
+}
+
+// sameOriginWrites refuses a request that is not a read (not GET, HEAD or
+// OPTIONS) and comes from a page of another site, unless it carries the token.
+// CORS is open for the media and for Cast, so without this any page the user
+// opens could change the settings of a server that has no token. Browsers send
+// Origin on every such request; native clients send none and are not affected.
+func sameOriginWrites(next http.Handler, token string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+		default:
+			if origin := r.Header.Get("Origin"); origin != "" && !sameOrigin(origin, r) && (token == "" || !validToken(r, token)) {
+				writeError(w, http.StatusForbidden, "cross-origin request refused")
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// sameOrigin reports whether origin is the scheme and host the request was made
+// to. A TLS-terminating proxy says so in X-Forwarded-Proto; a page of another
+// site cannot set that header (the CORS preflight would not allow it).
+func sameOrigin(origin string, r *http.Request) bool {
+	scheme := "http"
+	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+	return strings.EqualFold(origin, scheme+"://"+r.Host)
 }
 
 func cors(next http.Handler) http.Handler {

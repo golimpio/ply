@@ -39,10 +39,10 @@ type Session struct {
 	closed   bool
 	fellBack bool // the GPU transcode failed and the software one took over
 
-	// Segment requests in progress, by arrival number. Only the newest one may
-	// replace a running ffmpeg (see ensureGOP).
+	// Segment requests in progress: arrival number to segment. Only the newest
+	// one may replace a running ffmpeg (see ensureGOP).
 	reqSeq  uint64
-	waiting map[uint64]struct{}
+	waiting map[uint64]int
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
@@ -303,13 +303,26 @@ func (s *Session) monitor() {
 				s.pauseLocked(r, false)
 			}
 		}
-		limit := s.plan.Segments[max(s.lastSeg-keepBehind, 0)].First
-		for g := s.pruned; g < limit; g++ {
-			_ = os.Remove(s.gopPath(g))
-		}
-		s.pruned = max(s.pruned, limit)
+		s.pruneLocked()
 		s.mu.Unlock()
 	}
+}
+
+// pruneLocked removes the fragments the player is done with: those more than
+// keepBehind segments behind the one it asked for last and behind the oldest
+// request still waiting. That one may be far behind the newest, held up by it
+// (see ensureGOP); its fragments are not "played", and removing them as they
+// appear would make it restart ffmpeg for them again and again.
+func (s *Session) pruneLocked() {
+	from := s.lastSeg
+	for _, idx := range s.waiting {
+		from = min(from, idx)
+	}
+	limit := s.plan.Segments[max(from-keepBehind, 0)].First
+	for g := s.pruned; g < limit; g++ {
+		_ = os.Remove(s.gopPath(g))
+	}
+	s.pruned = max(s.pruned, limit)
 }
 
 type throttleAction int
@@ -360,9 +373,9 @@ func (s *Session) beginRequest(idx int) (id uint64, end func()) {
 	s.reqSeq++
 	id = s.reqSeq
 	if s.waiting == nil {
-		s.waiting = map[uint64]struct{}{}
+		s.waiting = map[uint64]int{}
 	}
-	s.waiting[id] = struct{}{}
+	s.waiting[id] = idx
 	return id, func() {
 		s.mu.Lock()
 		delete(s.waiting, id)

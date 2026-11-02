@@ -26,6 +26,7 @@ const (
 	maxTextLen     = 20000
 	maxTaglineLen  = 1000
 	maxSearchQuery = 200
+	upcomingLimit  = 50
 )
 
 var reIMDb = regexp.MustCompile(`^tt\d{7,8}$`)
@@ -164,6 +165,29 @@ func (s *Server) handleTitles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.titleCards(cards))
+}
+
+// handleUpcoming lists the library's shows with an episode still to air, soonest
+// first. Today is the server's own date: TMDB's air dates have no zone.
+func (s *Server) handleUpcoming(w http.ResponseWriter, r *http.Request) {
+	now := time.Now()
+	if s.Now != nil {
+		now = s.Now()
+	}
+	shows, err := s.Store.Upcoming(r.Context(), now.Format(time.DateOnly), upcomingLimit)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	out := make([]UpcomingShow, len(shows))
+	for i, u := range shows {
+		card := s.titleCard(u.TitleCard)
+		out[i] = UpcomingShow{TitleID: u.ID, Show: u.Show, Poster: card.Poster, Backdrop: card.Backdrop, NextAirDate: u.NextAirDate}
+		if e := u.NextEpisode; e.Number > 0 {
+			out[i].NextEpisode = &NextEpisode{Season: e.Season, Episode: e.Number, Name: e.Name}
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleCollection(w http.ResponseWriter, r *http.Request) {
@@ -372,10 +396,25 @@ func (m matchRequest) ref() (metadata.Ref, string) {
 	return metadata.Ref{}, "give tmdbId or imdbId"
 }
 
+// decodeBody reads the JSON body of an edit (at most maxEditBody bytes) into v.
+// It answers 413 for a body that is too big and 400 for one that is not JSON.
+func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
+	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxEditBody)).Decode(v)
+	var tooBig *http.MaxBytesError
+	switch {
+	case err == nil:
+		return true
+	case errors.As(err, &tooBig):
+		writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+	default:
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+	}
+	return false
+}
+
 func readMatchRequest(w http.ResponseWriter, r *http.Request) (metadata.Ref, bool) {
 	var req matchRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxEditBody)).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+	if !decodeBody(w, r, &req) {
 		return metadata.Ref{}, false
 	}
 	ref, problem := req.ref()
@@ -498,8 +537,7 @@ func (s *Server) handlePatchTitle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req titlePatch
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxEditBody)).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+	if !decodeBody(w, r, &req) {
 		return
 	}
 	if req == (titlePatch{}) {
@@ -683,8 +721,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req settingsRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxEditBody)).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+	if !decodeBody(w, r, &req) {
 		return
 	}
 	if req == (settingsRequest{}) {
@@ -707,5 +744,9 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	if s.Metadata != nil {
 		s.Metadata.Reload() // a new key or language takes effect at once
 	}
-	writeJSON(w, http.StatusOK, s.settingsView(r.Context()))
+	view := s.settingsView(r.Context())
+	if req.TMDBKey != nil && strings.TrimSpace(*req.TMDBKey) != "" {
+		view.TMDBKeyChecked = ptr(!view.MetadataForcedOff)
+	}
+	writeJSON(w, http.StatusOK, view)
 }

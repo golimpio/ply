@@ -81,8 +81,17 @@ type Worker struct {
 	running        bool
 	lastError      string
 	retryRefreshAt time.Time
-	probes         map[int64]probeInfo
+	probes         map[int64]probeEntry
 	seasonTried    map[seasonKey]time.Time
+	nfoApplied     map[int64]string // title id -> stamp of the NFO last laid over it
+	personFailed   map[int64]personFailure
+	closed         bool
+
+	// Background work (prefetching images after a manual match) runs under bgCtx,
+	// which Close cancels; bg is waited for there and at the end of Run.
+	bgCtx    context.Context
+	bgCancel context.CancelFunc
+	bg       sync.WaitGroup
 
 	// Used by the goroutine that runs a pass only.
 	dirs    map[string][]string
@@ -97,6 +106,14 @@ type probeInfo struct {
 	tags     probe.Tags
 	cover    int
 	hasCover bool
+}
+
+// probeEntry is what was read from an item's file, and the size and
+// modification time of the file it was read from: a file replaced under the
+// same item is read again.
+type probeEntry struct {
+	size, mtime int64
+	info        probeInfo
 }
 
 type seasonKey struct {
@@ -125,10 +142,41 @@ func NewWorker(o WorkerOptions) *Worker {
 	if o.Logger == nil {
 		o.Logger = slog.New(slog.DiscardHandler)
 	}
-	return &Worker{
+	w := &Worker{
 		o: o, log: o.Logger, wake: make(chan struct{}, 1),
-		sidecars: map[int64]struct{}{}, probes: map[int64]probeInfo{}, seasonTried: map[seasonKey]time.Time{},
+		sidecars: map[int64]struct{}{}, probes: map[int64]probeEntry{}, seasonTried: map[seasonKey]time.Time{},
+		nfoApplied: map[int64]string{}, personFailed: map[int64]personFailure{},
 	}
+	w.bgCtx, w.bgCancel = context.WithCancel(context.Background())
+	return w
+}
+
+// background runs fn on a goroutine the worker owns, for work that must not
+// hold up whoever asked for it. fn's context is cancelled by Close. After Close
+// nothing is started.
+func (w *Worker) background(fn func(ctx context.Context)) {
+	w.mu.Lock()
+	if w.closed {
+		w.mu.Unlock()
+		return
+	}
+	w.bg.Add(1)
+	w.mu.Unlock()
+	go func() {
+		defer w.bg.Done()
+		fn(w.bgCtx)
+	}()
+}
+
+// Close cancels the background work and waits for it. Run calls it when it
+// returns; tests that do not run the worker call it themselves. It is safe to
+// call more than once.
+func (w *Worker) Close() {
+	w.mu.Lock()
+	w.closed = true
+	w.mu.Unlock()
+	w.bgCancel()
+	w.bg.Wait()
 }
 
 func (w *Worker) now() time.Time { return w.o.Now() }
@@ -163,6 +211,7 @@ func (w *Worker) NotifySidecars(ids []int64) {
 func (w *Worker) Reload() {
 	w.mu.Lock()
 	w.reload = true
+	clear(w.personFailed) // a new key may find what the old one could not
 	w.mu.Unlock()
 	w.Notify()
 }
@@ -222,6 +271,7 @@ func (w *Worker) setSettingTime(ctx context.Context, key string, t time.Time) {
 // Run does the work until ctx is cancelled: a pass at the start, then one each
 // time the worker is woken or the tick comes. It returns when ctx is done.
 func (w *Worker) Run(ctx context.Context) {
+	defer w.Close()
 	if err := w.o.Store.ReleasePending(ctx); err != nil && ctx.Err() == nil {
 		w.log.Warn("metadata: releasing pending files", "err", err)
 	}
@@ -383,11 +433,12 @@ func (w *Worker) inbox(ctx context.Context, p Provider) bool {
 	w.jobs = nil
 	w.mu.Unlock()
 
+	done := map[string]bool{}
 	for _, id := range ids {
 		if ctx.Err() != nil || w.aborted {
 			break
 		}
-		w.rereadLocal(ctx, p, id)
+		w.rereadLocal(ctx, p, id, done)
 	}
 	for _, j := range jobs {
 		if ctx.Err() != nil || w.aborted {
@@ -413,13 +464,26 @@ func (w *Worker) prefetch(ctx context.Context, in *store.TitleInput) {
 	}
 }
 
+// prefetchLater is prefetch on the worker's own time: the caller, a request
+// with a deadline, is not kept waiting for a slow image server.
+func (w *Worker) prefetchLater(in *store.TitleInput) {
+	if w.o.Images == nil {
+		return
+	}
+	refs := &store.TitleInput{Title: store.Title{Poster: in.Poster, Backdrop: in.Backdrop}}
+	w.background(func(ctx context.Context) { w.prefetch(ctx, refs) })
+}
+
 // probeOf returns the tags and cover of an item's file, asking ffprobe once.
 func (w *Worker) probeOf(ctx context.Context, it store.Item) probeInfo {
 	w.mu.Lock()
-	pi, ok := w.probes[it.ID]
+	pe, ok := w.probes[it.ID]
 	w.mu.Unlock()
-	if ok || w.o.Probe == nil {
-		return pi
+	if ok && pe.size == it.Size && pe.mtime == it.MTime {
+		return pe.info
+	}
+	if w.o.Probe == nil {
+		return probeInfo{}
 	}
 	res, err := w.o.Probe(ctx, it.Path)
 	if err != nil {
@@ -428,9 +492,9 @@ func (w *Worker) probeOf(ctx context.Context, it store.Item) probeInfo {
 		}
 		return probeInfo{}
 	}
-	pi = probeInfo{tags: res.Tags, cover: res.Cover, hasCover: res.HasCover}
+	pi := probeInfo{tags: res.Tags, cover: res.Cover, hasCover: res.HasCover}
 	w.mu.Lock()
-	w.probes[it.ID] = pi
+	w.probes[it.ID] = probeEntry{size: it.Size, mtime: it.MTime, info: pi}
 	w.mu.Unlock()
 	return pi
 }

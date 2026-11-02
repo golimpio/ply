@@ -117,9 +117,14 @@ func TestSidecarArtBeatsTMDBAndEmbeddedCoverComesLast(t *testing.T) {
 		t.Fatal(err)
 	}
 	byID := map[int64]ItemSummary{}
-	for _, it := range decode[[]ItemSummary](t, m.get("/api/items")) {
-		byID[it.ID] = it
+	read := func() {
+		t.Helper()
+		clear(byID)
+		for _, it := range decode[[]ItemSummary](t, m.get("/api/items")) {
+			byID[it.ID] = it
+		}
 	}
+	read()
 	if got, want := byID[m.mp4].Poster, fmt.Sprintf("/api/images/local/item/%d/poster", m.mp4); got != want {
 		t.Errorf("poster with a sidecar = %q, want %q", got, want)
 	}
@@ -129,12 +134,29 @@ func TestSidecarArtBeatsTMDBAndEmbeddedCoverComesLast(t *testing.T) {
 	if got, want := byID[m.multi].Poster, fmt.Sprintf("/api/images/local/item/%d/poster", m.multi); got != want {
 		t.Errorf("embedded cover = %q, want %q (nothing else to show)", got, want)
 	}
-	// With a TMDB poster as well, TMDB's wins over the embedded cover.
-	if err := m.store.SetItemEmbeddedCover(ctx, m.mkv, 3); err != nil {
+	// With a TMDB poster as well, TMDB's wins over the embedded cover. (The movie
+	// has the TMDB poster of The Matrix; its cover is set after the list was read once.)
+	other := newMetaEnv(t, "")
+	read = func() {
+		t.Helper()
+		clear(byID)
+		for _, it := range decode[[]ItemSummary](t, other.get("/api/items")) {
+			byID[it.ID] = it
+		}
+	}
+	read()
+	if got := byID[other.mp4].Poster; got != "/api/images/tmdb/w342/p603.jpg" {
+		t.Fatalf("movie poster before it has a cover = %q", got)
+	}
+	if err := other.store.SetItemEmbeddedCover(ctx, other.mp4, 3); err != nil {
 		t.Fatal(err)
 	}
-	if got := byID[m.mkv].Poster; got != "/api/images/tmdb/w342/show.jpg" {
-		t.Errorf("episode poster = %q", got)
+	read() // the cover is only in what is read after it was set
+	if e, err := other.store.GetEntry(ctx, other.mp4); err != nil || !strings.HasPrefix(e.LocalPoster, store.EmbeddedPrefix) {
+		t.Fatalf("movie local poster = %q, %v; want an embedded cover", e.LocalPoster, err)
+	}
+	if got := byID[other.mp4].Poster; got != "/api/images/tmdb/w342/p603.jpg" {
+		t.Errorf("movie poster with an embedded cover = %q; TMDB's ranks above it", got)
 	}
 }
 
@@ -483,7 +505,7 @@ func TestMatchRequestsAreValidated(t *testing.T) {
 	wantJSONError(t, m.do("PUT", path, `{"tmdbId": 424242}`), 400) // TMDB has nothing there
 
 	// Too big a body.
-	wantJSONError(t, m.do("PUT", path, `{"imdbId": "`+strings.Repeat("t", maxEditBody)+`"}`), 400)
+	wantJSONError(t, m.do("PUT", path, `{"imdbId": "`+strings.Repeat("t", maxEditBody)+`"}`), 413)
 
 	// TMDB trouble is a 502; no key (or switched off) a 409; no worker at all a 503.
 	m.fake.Offline()

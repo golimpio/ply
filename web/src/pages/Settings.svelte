@@ -1,0 +1,469 @@
+<script lang="ts">
+  import { api, ApiError, imageUrl, type ReviewEntry, type TitleKind } from '../lib/api';
+  import { href } from '../lib/router.svelte';
+  import { resource } from '../lib/resource.svelte';
+  import { app, rescan, scan } from '../lib/state.svelte';
+  import FixMatch from '../components/FixMatch.svelte';
+  import Picture from '../components/Picture.svelte';
+
+  const settings = resource(() => {
+    void app.libraryVersion;
+    return api.settings();
+  });
+  const status = resource(() => {
+    void app.libraryVersion;
+    return api.metadataStatus();
+  });
+  const review = resource(() => {
+    void app.libraryVersion;
+    return api.review();
+  });
+  const scanInfo = resource(() => {
+    void app.libraryVersion;
+    return api.scanStatus();
+  });
+
+  // TMDB "language" codes people are likely to want; whatever the server has is kept.
+  const LANGUAGES: [string, string][] = [
+    ['en-US', 'English (US)'],
+    ['en-GB', 'English (UK)'],
+    ['en-AU', 'English (Australia)'],
+    ['pt-BR', 'Português (Brasil)'],
+    ['pt-PT', 'Português (Portugal)'],
+    ['es-ES', 'Español (España)'],
+    ['es-MX', 'Español (México)'],
+    ['fr-FR', 'Français'],
+    ['de-DE', 'Deutsch'],
+    ['it-IT', 'Italiano'],
+    ['nl-NL', 'Nederlands'],
+    ['sv-SE', 'Svenska'],
+    ['ja-JP', '日本語'],
+    ['ko-KR', '한국어'],
+    ['zh-CN', '中文（简体）'],
+  ];
+
+  const SOURCES: Record<string, string> = {
+    flag: 'the -tmdb-key flag',
+    env: 'the PLY_TMDB_KEY environment variable',
+    settings: 'this page',
+    default: 'the build',
+  };
+
+  let key = $state('');
+  let saving = $state(false);
+  let message = $state<{ ok: boolean; text: string } | null>(null);
+
+  async function save(update: Parameters<typeof api.saveSettings>[0], done: string) {
+    saving = true;
+    message = null;
+    try {
+      await api.saveSettings(update);
+      message = { ok: true, text: done };
+      key = '';
+      app.libraryVersion++; // lookups may start (or stop): refresh this page and what every page shows
+    } catch (e) {
+      const why = e instanceof ApiError && e.status === 502 ? 'TMDB could not be reached to check the key.' : e instanceof Error ? e.message : String(e);
+      message = { ok: false, text: why };
+    } finally {
+      saving = false;
+    }
+  }
+
+  function saveKey(e: Event) {
+    e.preventDefault();
+    const k = key.trim();
+    if (k) void save({ tmdbKey: k }, 'Key saved. Matching starts in the background.');
+  }
+
+  let refreshNote = $state('');
+  async function refreshAll() {
+    refreshNote = '';
+    try {
+      await api.refreshAll();
+      refreshNote = 'Refreshing every title in the background.';
+    } catch (e) {
+      refreshNote = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  // The "fix" dialog for one row of the review list.
+  let fixing = $state(false);
+  let fix = $state<{ kind: TitleKind; itemId?: number; show?: string; query: string; year?: number }>({
+    kind: 'movie',
+    query: '',
+  });
+  function openFix(r: ReviewEntry) {
+    fix = { kind: r.kind, itemId: r.itemId, show: r.show, query: r.kind === 'series' ? r.show || r.title : r.title, year: r.year || undefined };
+    fixing = true;
+  }
+
+  const when = (iso?: string | null) => (iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '');
+  const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+</script>
+
+<div class="page settings">
+  <h1>Settings</h1>
+
+  <section aria-labelledby="meta-h">
+    <h2 id="meta-h">Movie and show details</h2>
+    <p class="muted lead">
+      ply fills in posters, plots, cast and more from TMDB. It sends only titles and years, never your files.
+      <code>.nfo</code> files and artwork next to your media are used first and need no key.
+    </p>
+
+    {#if settings.error}
+      <p class="error">{settings.error}</p>
+    {:else if !settings.data}
+      <div class="skeleton block" aria-busy="true"></div>
+    {:else}
+      {@const s = settings.data}
+      <div class="card">
+        <div class="row">
+          <div>
+            <h3>TMDB key</h3>
+            <p class="muted">
+              {#if s.tmdbKeySet}
+                A key is set, from {SOURCES[s.tmdbKeySource] ?? 'the server'}.
+              {:else}
+                No key yet. Get a free one from your
+                <a class="link" href="https://www.themoviedb.org/settings/api" target="_blank" rel="noreferrer">TMDB account</a>
+                (an API key or a read access token both work).
+              {/if}
+            </p>
+          </div>
+        </div>
+        <form class="key" onsubmit={saveKey}>
+          <label class="sr-only" for="tmdb-key">{s.tmdbKeySet ? 'Replace the key' : 'TMDB key'}</label>
+          <input
+            id="tmdb-key"
+            bind:value={key}
+            type="password"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder={s.tmdbKeySet ? 'Paste a new key to replace it' : 'Paste your key'}
+          />
+          <button class="btn primary" disabled={saving || !key.trim()}>{saving ? 'Checking…' : 'Save key'}</button>
+          {#if s.tmdbKeySet && s.tmdbKeySource === 'settings'}
+            <button type="button" class="btn" disabled={saving} onclick={() => save({ tmdbKey: '' }, 'Key removed.')}>
+              Remove
+            </button>
+          {/if}
+        </form>
+        {#if message}<p class:error={!message.ok} class:ok={message.ok} role="status">{message.text}</p>{/if}
+
+        <div class="row">
+          <div>
+            <h3 id="online-h">Online lookups</h3>
+            <p class="muted">
+              {s.metadataForcedOff
+                ? 'Turned off when ply was started (-metadata=false). Only local .nfo files and artwork are used.'
+                : 'Off keeps everything on this network: only local .nfo files and artwork are used.'}
+            </p>
+          </div>
+          <button
+            class="switch"
+            role="switch"
+            aria-checked={s.metadataEnabled && !s.metadataForcedOff}
+            aria-labelledby="online-h"
+            disabled={saving || s.metadataForcedOff}
+            onclick={() =>
+              save({ metadataEnabled: !s.metadataEnabled }, s.metadataEnabled ? 'Online lookups are off.' : 'Online lookups are on.')}
+          ><span></span></button>
+        </div>
+
+        <div class="row">
+          <div>
+            <h3><label for="lang">Language</label></h3>
+            <p class="muted">For titles, plots and posters, where TMDB has them.</p>
+          </div>
+          <select
+            id="lang"
+            value={s.language}
+            disabled={saving}
+            onchange={(e) => save({ language: e.currentTarget.value }, 'Language saved. Refresh details to see it everywhere.')}
+          >
+            {#if !LANGUAGES.some(([code]) => code === s.language)}<option value={s.language}>{s.language}</option>{/if}
+            {#each LANGUAGES as [code, name] (code)}<option value={code}>{name}</option>{/each}
+          </select>
+        </div>
+      </div>
+    {/if}
+
+    {#if status.data}
+      {@const m = status.data}
+      <div class="card status">
+        <p>
+          {#if !m.enabled}
+            Matching is off.
+          {:else if m.running || m.pending}
+            Matching {plural(m.pending, 'title')}…
+          {:else}
+            Everything has been looked up.
+          {/if}
+          {#if m.lastRefresh}<span class="muted">Last refreshed {when(m.lastRefresh)}.</span>{/if}
+        </p>
+        {#if m.lastError}<p class="error">{m.lastError}</p>{/if}
+        <div class="buttons">
+          <button class="btn" onclick={refreshAll} disabled={!m.enabled}>Refresh all details</button>
+          <button class="btn" onclick={rescan} disabled={scan.running}>{scan.running ? 'Scanning…' : 'Scan the library now'}</button>
+        </div>
+        {#if refreshNote}<p class="muted" role="status">{refreshNote}</p>{/if}
+      </div>
+    {/if}
+  </section>
+
+  <section aria-labelledby="review-h">
+    <h2 id="review-h">
+      Needs attention{#if review.data?.length}<span class="count">{review.data.length}</span>{/if}
+    </h2>
+    {#if review.error}
+      <p class="error">{review.error}</p>
+    {:else if !review.data}
+      <div class="skeleton block" aria-busy="true"></div>
+    {:else if !review.data.length}
+      <p class="muted">Every movie and show has a match.</p>
+    {:else}
+      <ul class="review">
+        {#each review.data as r (`${r.kind}:${r.itemId ?? r.show}`)}
+          <li>
+            <div class="poster">
+              <Picture img={r.candidate?.poster ? { src: imageUrl(r.candidate.poster, 'w92') } : null} ratio="2 / 3" label={r.title} />
+            </div>
+            <div class="text">
+              <a class="title" href={r.kind === 'movie' && r.itemId ? href.item(r.itemId) : href.show(r.show ?? r.title)}>
+                {r.title}{#if r.year}<span class="muted year">{r.year}</span>{/if}
+              </a>
+              <p class="muted">
+                {#if r.matchState === 'unmatched'}
+                  Nothing found{r.kind === 'series' ? ' for this show' : ''}.
+                {:else if r.candidate}
+                  Matched with {r.candidate.title}{r.candidate.year ? ` (${r.candidate.year})` : ''}, but not for sure.
+                {:else}
+                  Not sure about this match.
+                {/if}
+              </p>
+            </div>
+            <button class="btn" onclick={() => openFix(r)}>Fix</button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </section>
+
+  <section aria-labelledby="folders-h">
+    <h2 id="folders-h">Media folders</h2>
+    {#if scanInfo.data}
+      {@const sc = scanInfo.data}
+      <p class="muted">
+        {plural(sc.itemCount, 'item')} in the library.
+        {#if sc.lastFinished}Last full scan {when(sc.lastFinished)}.{/if}
+      </p>
+      {#if sc.watching?.length}
+        <ul class="folders">
+          {#each sc.watching as w (w.root)}
+            <li>
+              <code>{w.root}</code>
+              {#if w.watching}
+                <span class="ok">New files show up within seconds.</span>
+              {:else}
+                <span class="warn">Not watched{w.error ? `: ${w.error}` : ''}. Picked up by the regular scan.</span>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {:else}
+        <p class="muted">Folder watching is off. New files are picked up by the regular scan.</p>
+      {/if}
+    {:else if scanInfo.error}
+      <p class="error">{scanInfo.error}</p>
+    {/if}
+  </section>
+
+  <footer class="attribution">
+    <p class="muted">
+      This product uses the TMDB API but is not endorsed or certified by
+      <a class="link" href="https://www.themoviedb.org/" target="_blank" rel="noreferrer">TMDB</a>.
+    </p>
+  </footer>
+</div>
+
+<FixMatch bind:open={fixing} kind={fix.kind} itemId={fix.itemId} show={fix.show} query={fix.query} year={fix.year} matched />
+
+<style>
+  .settings {
+    max-width: 50rem;
+    display: grid;
+    gap: 2.75rem;
+  }
+  section {
+    display: grid;
+    gap: 1rem;
+  }
+  .lead {
+    margin: 0;
+    max-width: 62ch;
+  }
+  h3 {
+    margin: 0 0 0.15rem;
+    font-size: 1rem;
+  }
+  h3 label {
+    cursor: pointer;
+  }
+  .card {
+    display: grid;
+    gap: 1.1rem;
+    padding: 1.1rem 1.25rem;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+  }
+  .card p {
+    margin: 0;
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem 2rem;
+  }
+  .row + .row,
+  .key + .row,
+  [role='status'] + .row {
+    padding-top: 1.1rem;
+    border-top: 1px solid var(--line);
+  }
+  .key {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+  }
+  input,
+  select {
+    min-height: 2.5rem;
+    padding: 0.45rem 0.85rem;
+    font: inherit;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+  }
+  input {
+    flex: 1 1 16rem;
+  }
+  input:focus-visible,
+  select:focus-visible {
+    border-color: var(--text);
+    outline: none;
+  }
+  .ok {
+    color: var(--ok);
+  }
+  .warn {
+    color: var(--warn);
+  }
+  /* An on/off switch: role="switch" with aria-checked. */
+  .switch {
+    flex: none;
+    position: relative;
+    width: 3.1rem;
+    height: 1.8rem;
+    padding: 0;
+    background: var(--bg-3);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .switch span {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: calc(1.8rem - 8px);
+    height: calc(1.8rem - 8px);
+    background: var(--muted);
+    border-radius: 50%;
+    transition:
+      transform 0.2s var(--ease),
+      background 0.2s;
+  }
+  .switch[aria-checked='true'] {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .switch[aria-checked='true'] span {
+    transform: translateX(1.3rem);
+    background: var(--on-accent);
+  }
+  .switch:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .status .buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+  }
+  .block {
+    height: 9rem;
+  }
+  .review,
+  .folders {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.5rem;
+  }
+  .review li {
+    display: grid;
+    grid-template-columns: 2.6rem 1fr auto;
+    align-items: center;
+    gap: 0.9rem;
+    padding: 0.5rem 0.75rem 0.5rem 0.5rem;
+    background: var(--bg-2);
+    border-radius: var(--radius);
+  }
+  .review .poster {
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .review .poster :global(.tile) {
+    font-size: 0.7rem;
+  }
+  .review .text {
+    min-width: 0;
+  }
+  .review .title {
+    font-weight: 650;
+  }
+  .review .year {
+    margin-left: 0.5rem;
+    font-weight: 500;
+  }
+  .review p {
+    margin: 0.1rem 0 0;
+    font-size: 0.875rem;
+  }
+  .folders li {
+    display: grid;
+    gap: 0.2rem;
+    font-size: 0.92rem;
+  }
+  .folders code {
+    width: fit-content;
+    overflow-wrap: anywhere;
+  }
+  .attribution p {
+    margin: 0;
+    font-size: 0.85rem;
+  }
+  @media (max-width: 600px) {
+    .row {
+      align-items: flex-start;
+    }
+    .settings {
+      padding-bottom: 6rem;
+    }
+  }
+</style>

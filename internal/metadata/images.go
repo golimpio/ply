@@ -33,7 +33,9 @@ var (
 const (
 	MaxImageBytes   = 20 << 20
 	ImageTimeout    = 30 * time.Second
-	imageFailureTTL = 30 * time.Second // how long a failed download is not retried
+	imageFailureTTL = 10 * time.Minute // how long a failed download is not retried
+	maxFailedImages = 1024             // failures remembered at once
+	maxDownloads    = 4                // concurrent downloads from the image server
 	maxCovers       = 2                // concurrent cover extractions
 )
 
@@ -102,10 +104,11 @@ type ImageCache struct {
 	log      *slog.Logger
 	now      func() time.Time
 
-	base   context.Context // parent of every download; cancelled by Close
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
-	covers chan struct{}
+	base      context.Context // parent of every download; cancelled by Close
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	downloads chan struct{}
+	covers    chan struct{}
 
 	mu       sync.Mutex
 	closed   bool
@@ -129,9 +132,10 @@ func NewImageCache(o ImageOptions) (*ImageCache, error) {
 	c := &ImageCache{
 		dir: o.Dir, url: o.URL, http: o.HTTPClient, timeout: o.Timeout, maxBytes: o.MaxBytes,
 		ffmpeg: o.FFmpeg, nice: o.Niceness, log: o.Logger, now: o.Now,
-		covers:   make(chan struct{}, maxCovers),
-		inflight: map[string]*imageCall{},
-		failed:   map[string]time.Time{},
+		downloads: make(chan struct{}, maxDownloads),
+		covers:    make(chan struct{}, maxCovers),
+		inflight:  map[string]*imageCall{},
+		failed:    map[string]time.Time{},
 	}
 	if c.http == nil {
 		c.http = &http.Client{}
@@ -180,7 +184,15 @@ func (c *ImageCache) TMDB(ctx context.Context, size, file string) (string, error
 		return "", ErrImageUnavailable // switched off: nothing leaves the machine
 	}
 	key := "tmdb/" + size + "/" + file
-	err := c.once(ctx, key, func(ctx context.Context) error { return c.download(ctx, size, file, dest) })
+	err := c.once(ctx, key, func(ctx context.Context) error {
+		select {
+		case c.downloads <- struct{}{}:
+			defer func() { <-c.downloads }()
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		return c.download(ctx, size, file, dest)
+	})
 	if err != nil {
 		return "", err
 	}
@@ -224,10 +236,15 @@ func (c *ImageCache) once(ctx context.Context, key string, fn func(ctx context.C
 			err := fn(c.base)
 			c.mu.Lock()
 			delete(c.inflight, key)
-			if err != nil && c.base.Err() == nil {
-				c.failed[key] = c.now().Add(imageFailureTTL)
+			failed := err != nil && c.base.Err() == nil
+			if failed {
+				c.noteFailedLocked(key)
 			}
 			c.mu.Unlock()
+			if failed {
+				// The error holds no address: redactURL took it out.
+				c.log.Warn("metadata: image unavailable", "image", key, "err", err)
+			}
 			call.err = err
 			close(call.done)
 		}()
@@ -243,6 +260,31 @@ func (c *ImageCache) once(ctx context.Context, key string, fn func(ctx context.C
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// noteFailedLocked remembers that key failed, for imageFailureTTL, in a map
+// that does not grow past maxFailedImages: when it is full the expired entries
+// go, and if all still count, the one that would be tried again first.
+func (c *ImageCache) noteFailedLocked(key string) {
+	now := c.now()
+	if len(c.failed) >= maxFailedImages {
+		for k, until := range c.failed {
+			if !now.Before(until) {
+				delete(c.failed, k)
+			}
+		}
+	}
+	if len(c.failed) >= maxFailedImages {
+		var first string
+		var soonest time.Time
+		for k, until := range c.failed {
+			if first == "" || until.Before(soonest) {
+				first, soonest = k, until
+			}
+		}
+		delete(c.failed, first)
+	}
+	c.failed[key] = now.Add(imageFailureTTL)
 }
 
 // download fetches one image into dest through a temporary file in the same

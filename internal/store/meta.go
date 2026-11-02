@@ -62,9 +62,15 @@ type Title struct {
 	Source        string
 	Locked        bool   // the user edited the text: a refresh keeps it
 	NextAirDate   string // a show's next episode, YYYY-MM-DD
-	FetchedAt     int64  // unix seconds; 0 = never
-	CreatedAt     int64
-	UpdatedAt     int64
+
+	// A show's next episode, as TMDB's next_episode_to_air names it (0 and "" = unknown).
+	NextEpisodeSeason int
+	NextEpisodeNumber int
+	NextEpisodeName   string
+
+	FetchedAt int64 // unix seconds; 0 = never
+	CreatedAt int64
+	UpdatedAt int64
 }
 
 // Genre is a TMDB genre, or an NFO-only one (negative id; UpsertTitle assigns
@@ -150,7 +156,8 @@ type TitleInput struct {
 
 const titleCols = `id, kind, tmdb_id, imdb_id, tvdb_id, title, original_title, sort_title, year,
 	overview, tagline, release_date, end_date, status, runtime_min, rating, vote_count, certification,
-	poster, backdrop, logo, collection_id, source, locked, next_air_date, fetched_at, created_at, updated_at`
+	poster, backdrop, logo, collection_id, source, locked, next_air_date, next_episode_season,
+	next_episode_number, next_episode_name, fetched_at, created_at, updated_at`
 
 func scanTitle(sc scanner) (Title, error) {
 	var (
@@ -161,7 +168,8 @@ func scanTitle(sc scanner) (Title, error) {
 	err := sc.Scan(&t.ID, &t.Kind, &tmdb, &t.IMDbID, &tvdb, &t.Title, &t.OriginalTitle, &t.SortTitle,
 		&t.Year, &t.Overview, &t.Tagline, &t.ReleaseDate, &t.EndDate, &t.Status, &t.RuntimeMin,
 		&t.Rating, &t.VoteCount, &t.Certification, &t.Poster, &t.Backdrop, &t.Logo, &collection,
-		&t.Source, &t.Locked, &nextAir, &t.FetchedAt, &t.CreatedAt, &t.UpdatedAt)
+		&t.Source, &t.Locked, &nextAir, &t.NextEpisodeSeason, &t.NextEpisodeNumber, &t.NextEpisodeName,
+		&t.FetchedAt, &t.CreatedAt, &t.UpdatedAt)
 	t.TMDBID, t.TVDBID, t.CollectionID = tmdb.Int64, tvdb.Int64, collection.Int64
 	t.NextAirDate = nextAir.String
 	return t, err
@@ -246,13 +254,14 @@ func upsertTitleRow(ctx context.Context, tx *sql.Tx, in *TitleInput) (int64, err
 			INSERT INTO titles (kind, tmdb_id, imdb_id, tvdb_id, title, original_title, sort_title, year,
 				overview, tagline, release_date, end_date, status, runtime_min, rating, vote_count,
 				certification, poster, backdrop, logo, collection_id, source, next_air_date,
-				fetched_at, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?)
+				next_episode_season, next_episode_number, next_episode_name, fetched_at, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?)
 			RETURNING id`,
 			in.Kind, nullInt(in.TMDBID), in.IMDbID, nullInt(in.TVDBID), in.Title.Title, in.OriginalTitle,
 			in.SortTitle, in.Year, in.Overview, in.Tagline, in.ReleaseDate, in.EndDate, in.Status,
 			in.RuntimeMin, in.Rating, in.VoteCount, in.Certification, in.Poster, in.Backdrop, in.Logo,
-			collection, source, in.NextAirDate, fetched, now, now).Scan(&id)
+			collection, source, in.NextAirDate, in.NextEpisodeSeason, in.NextEpisodeNumber, in.NextEpisodeName,
+			fetched, now, now).Scan(&id)
 		return id, err
 	}
 
@@ -272,13 +281,15 @@ func upsertTitleRow(ctx context.Context, tx *sql.Tx, in *TitleInput) (int64, err
 			poster   = CASE WHEN ? <> '' THEN ? ELSE poster   END,
 			backdrop = CASE WHEN ? <> '' THEN ? ELSE backdrop END,
 			logo     = CASE WHEN ? <> '' THEN ? ELSE logo     END,
-			collection_id = ?, source = ?, next_air_date = NULLIF(?, ''), fetched_at = ?, updated_at = ?
+			collection_id = ?, source = ?, next_air_date = NULLIF(?, ''),
+			next_episode_season = ?, next_episode_number = ?, next_episode_name = ?, fetched_at = ?, updated_at = ?
 		WHERE id = ?`,
 		nullInt(in.TMDBID), in.IMDbID, nullInt(in.TVDBID), in.OriginalTitle,
 		in.Title.Title, in.SortTitle, in.Year, in.Overview, in.Tagline,
 		in.ReleaseDate, in.EndDate, in.Status, in.RuntimeMin, in.Rating, in.VoteCount, in.Certification,
 		in.Poster, in.Poster, in.Backdrop, in.Backdrop, in.Logo, in.Logo,
-		collection, source, in.NextAirDate, fetched, now, id)
+		collection, source, in.NextAirDate, in.NextEpisodeSeason, in.NextEpisodeNumber, in.NextEpisodeName,
+		fetched, now, id)
 	return id, err
 }
 

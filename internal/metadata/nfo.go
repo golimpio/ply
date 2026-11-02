@@ -92,7 +92,7 @@ func ParseNFO(data []byte) NFO {
 	if len(data) > MaxNFOBytes {
 		data = data[:MaxNFOBytes]
 	}
-	data = toUTF8(data)
+	data = declaredToUTF8(toUTF8(data))
 	var n NFO
 	end := parseXML(data, &n)
 	if n.IDs.IsZero() {
@@ -111,10 +111,11 @@ func ParseNFO(data []byte) NFO {
 
 var reStartTag = regexp.MustCompile(`<[A-Za-z_]`)
 
-// outsideRoot returns what lies before the root element's start tag and after
-// its end tag (end is the offset parseXML reported, -1 when the root never
-// closed). A decoder reading a Latin-1 file counts bytes after conversion, which
-// can only be more than the file's own, so the cut never lands inside the XML.
+// outsideRoot returns what lies before the root element's start tag and, after
+// its end tag, the text that is not inside another element (end is the offset
+// parseXML reported, -1 when the root never closed). data is the very text
+// parseXML read, already UTF-8, so the offset is an offset into it. Comments,
+// processing instructions and attributes after the root are not scanned.
 func outsideRoot(data []byte, end int) []byte {
 	var out []byte
 	if loc := reStartTag.FindIndex(data); loc != nil {
@@ -122,9 +123,41 @@ func outsideRoot(data []byte, end int) []byte {
 	}
 	if end >= 0 && end < len(data) {
 		out = append(out, '\n')
-		out = append(out, data[end:]...)
+		out = append(out, textOutsideElements(data[end:])...)
 	}
 	return out
+}
+
+// textOutsideElements returns the character data (CDATA included) of data that
+// is at the top level, in pieces on lines of their own: what follows a first
+// root, such as the URL Kodi appends, and not the plot or the attributes of
+// a second root. It stops at the first syntax error.
+func textOutsideElements(data []byte) []byte {
+	d := xml.NewDecoder(bytes.NewReader(data))
+	d.Strict = false
+	d.Entity = xml.HTMLEntity
+	d.CharsetReader = charsetReader
+	var (
+		out   []byte
+		depth int
+	)
+	for {
+		tok, err := d.Token()
+		if err != nil {
+			return out
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			depth++
+		case xml.EndElement:
+			depth--
+		case xml.CharData:
+			if depth == 0 {
+				out = append(out, t...)
+				out = append(out, '\n')
+			}
+		}
+	}
 }
 
 // toUTF8 strips a UTF-8 byte order mark and converts UTF-16 that has one.
@@ -141,13 +174,31 @@ func toUTF8(data []byte) []byte {
 	return data
 }
 
-func charsetReader(label string, input io.Reader) (io.Reader, error) {
-	switch strings.ToLower(label) {
-	case "iso-8859-1", "iso8859-1", "latin1", "latin-1", "windows-1252", "cp1252", "iso-8859-15":
-		return charmap.Windows1252.NewDecoder().Reader(input), nil
+// reXMLDecl finds the encoding in an XML declaration at the start of the text.
+var reXMLDecl = regexp.MustCompile(`(?i)\A\s*<\?xml\s[^>]*?\bencoding\s*=\s*["']([^"']+)["']`)
+
+// declaredToUTF8 converts a file whose XML declaration names a Latin-1 family
+// encoding. It is done before parsing, not by the decoder's CharsetReader, so that
+// the offsets the decoder reports count the same bytes as the text they are
+// used to cut. Anything else is returned as it is.
+func declaredToUTF8(data []byte) []byte {
+	m := reXMLDecl.FindSubmatch(data)
+	if m == nil {
+		return data
 	}
-	// UTF-8, ASCII, UTF-16 (already converted) and anything unknown: as is. Bytes
-	// that are not UTF-8 stop the parse, and what came before is kept.
+	switch strings.ToLower(string(m[1])) {
+	case "iso-8859-1", "iso8859-1", "latin1", "latin-1", "windows-1252", "cp1252", "iso-8859-15":
+		if out, err := charmap.Windows1252.NewDecoder().Bytes(data); err == nil {
+			return out
+		}
+	}
+	return data
+}
+
+// charsetReader lets the decoder go on whatever the declaration says: Latin-1 and
+// UTF-16 were converted before parsing, and the text of anything else is read as
+// it is. Bytes that are not UTF-8 stop the parse, and what came before is kept.
+func charsetReader(_ string, input io.Reader) (io.Reader, error) {
 	return input, nil
 }
 

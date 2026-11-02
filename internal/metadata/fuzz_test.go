@@ -17,6 +17,8 @@ func FuzzNFO(f *testing.F) {
 		`<episodedetails><season>1</season><episode>2</episode><aired>2008-01-20</aired></episodedetails>`,
 		`<movie><ratings><rating max="5" default="true"><value>4</value><votes>1,000</votes></rating></ratings></movie>`,
 		`<?xml version="1.0" encoding="ISO-8859-1"?><movie><title>Am` + "\xe9" + `lie</title></movie>`,
+		`<?xml version="1.0" encoding="ISO-8859-1"?><movie><plot>` + "\xe9\xe9\xe9" + `</plot></movie>` + "\nhttps://www.themoviedb.org/movie/603",
+		`<movie><title>a</title></movie><x><y>https://www.imdb.com/title/tt0133093</y></x>https://www.themoviedb.org/movie/1`,
 		"\xef\xbb\xbf<movie><title>bom</title></movie>",
 		"\xff\xfe<\x00m\x00o\x00v\x00i\x00e\x00>\x00",
 		`<movie><title>a</title></movie><movie><title>b</title></movie>`,

@@ -798,10 +798,64 @@ func TestConcurrentFarRequestsDoNotKillEachOther(t *testing.T) {
 	// Create, the first request, the second, and the first again when the
 	// second is done. Anything near a restart per poll is the bug.
 	if n := len(f.starts()); n > 5 {
-		t.Errorf("ffmpeg was started %d times for two requests", n)
+		t.Errorf("ffmpeg was started %d times for two requests: %q", n, f.starts())
 	}
 	if n := len(f.procs(t)); n != 1 {
 		t.Errorf("%d ffmpeg processes running, want exactly 1", n)
+	}
+}
+
+// The player's position is that of the newest request. An older request that
+// the newest one holds up is served later, from fragments that are far behind
+// that position: they must not be removed as played, or it restarts ffmpeg for
+// them over and over (the cause of the restarts the test above counts).
+func TestPruneKeepsWhatAWaitingRequestNeeds(t *testing.T) {
+	f := newFake(t)
+	m := fakeManager(t, f, nil)
+	s, err := m.Create(context.Background(), fakeRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	write := func(g int) {
+		t.Helper()
+		if err := os.WriteFile(s.gopPath(g), fakeGOP, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exists := func(g int) bool {
+		_, err := os.Stat(s.gopPath(g))
+		return err == nil
+	}
+
+	// Request 100 waits; request 150 is newer and sets the player's position.
+	old, endOld := s.beginRequest(100)
+	_, endNew := s.beginRequest(150)
+	defer endNew()
+	for _, g := range []int{300, 302, 400, 450} { // segment 100 is GOPs 300-302; 400 is behind 150 anyway
+		write(g)
+	}
+	s.mu.Lock()
+	s.pruned = 0
+	s.pruneLocked()
+	s.mu.Unlock()
+	if !exists(300) || !exists(302) {
+		t.Errorf("the fragments request %d is waiting for were removed (300: %v, 302: %v)", old, exists(300), exists(302))
+	}
+	if !exists(450) {
+		t.Error("the newest request's own fragment was removed")
+	}
+
+	// Positive control: once request 100 is gone they are behind the player.
+	endOld()
+	s.mu.Lock()
+	s.pruned = 0
+	s.pruneLocked()
+	s.mu.Unlock()
+	if exists(300) || exists(302) || exists(400) {
+		t.Errorf("fragments far behind the player were kept (300: %v, 302: %v, 400: %v)", exists(300), exists(302), exists(400))
+	}
+	if !exists(450) {
+		t.Error("a fragment at the player's position was removed")
 	}
 }
 

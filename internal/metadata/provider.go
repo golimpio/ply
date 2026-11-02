@@ -248,8 +248,9 @@ func tvInput(d *TVDetails, lang, region string) *store.TitleInput {
 			break
 		}
 	}
-	if d.NextEpisodeToAir != nil {
-		in.NextAirDate = d.NextEpisodeToAir.AirDate
+	if n := d.NextEpisodeToAir; n != nil && n.AirDate != "" {
+		in.NextAirDate = n.AirDate
+		in.NextEpisodeSeason, in.NextEpisodeNumber, in.NextEpisodeName = n.SeasonNumber, n.EpisodeNumber, n.Name
 	}
 	for _, g := range d.Genres {
 		in.Genres = append(in.Genres, store.Genre{ID: g.ID, Name: g.Name})

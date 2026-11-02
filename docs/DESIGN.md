@@ -52,7 +52,8 @@ M6 (metadata, live library):
   `PLY_METADATA_REFRESH`, default 24h; 0 turns the periodic refresh off, not the matching of new files).
 - Hidden, for tests: `-tmdb-url` (env `PLY_TMDB_URL`) and `-tmdb-image-url` (env `PLY_TMDB_IMAGE_URL`).
 Data dir: macOS `~/Library/Application Support/ply`; Linux `$XDG_DATA_HOME/ply` or `~/.local/share/ply`;
-`-data` overrides. Persist a random server id (`server-id` file, 16 hex bytes). DB: `<data>/ply.db`.
+`-data` overrides. Persist a random server id (`server-id` file, 16 hex bytes). DB: `<data>/ply.db` (it holds the TMDB key:
+the data dir is created 0700, and the DB with its `-wal` and `-shm` files is chmod 0600 at every start).
 
 ## Store
 modernc.org/sqlite, DSN `file:<path>?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)`
@@ -131,6 +132,9 @@ Auth: if `-token` set, all `/api/*` except `/api/info` need `Authorization: Bear
 (constant-time compare). SPA assets are public. CORS middleware on everything: `Access-Control-Allow-Origin: *`,
 allow headers `Range, Authorization, Content-Type`, methods `GET, POST, PUT, PATCH, DELETE, OPTIONS`, expose
 `Content-Range, Accept-Ranges, Content-Length, Content-Type`; OPTIONS → 204.
+Cross-site writes: a request that is not GET, HEAD or OPTIONS and has an `Origin` other than its own `scheme://host`
+(`X-Forwarded-Proto: https` counts as https) is refused with 403 unless it carries the valid token; native clients send
+no `Origin`. Reads keep CORS `*` (media, Cast); a preflight is answered as above and the request it announces is refused.
 
 | Method | Path | Body / result |
 |---|---|---|
@@ -165,6 +169,7 @@ bad input → 400, TMDB unreachable → 502, lookups off (no key / `-metadata=fa
 | GET | `/api/genres` | `[{id, name, count}]` |
 | GET | `/api/titles?genre=&collection=&person=` | `[TitleCard]` (ids; non-numeric → 400) |
 | GET | `/api/collections/{id}` | `{id, name, overview?, poster?, backdrop?, titles:[TitleCard]}` in release order |
+| GET | `/api/upcoming` | `[{titleId, show, poster?, backdrop?, nextAirDate, nextEpisode?: {season, episode, name}}]` library series airing today or later, soonest first, max 50 |
 | GET | `/api/metadata/search?kind=movie\|series&q=&year=` | `[{tmdbId, title, originalTitle?, year, overview?, poster?, score}]` best first |
 | GET | `/api/metadata/status` | `{enabled, keySet, running, pending, unmatched, needsReview, lastRefresh, lastError}` |
 | GET | `/api/metadata/review` | `[{kind, itemId?, show?, title, year, matchState, needsReview, score, candidate?}]` unmatched first |
@@ -180,9 +185,9 @@ ItemSummary {id, kind, title, year, show, season, episode, episodeTitle, duratio
 ItemDetail  ItemSummary + {path(basename only), size, bitrate, streams:[Stream], subtitles:[{key, language,
              title, format, image:bool, url?}], playback: Playback, meta?: TitleDetail,
              episodeInfo?: {name, overview, airDate, still, rating}}   -- "episode" stays the episode number
-TitleCard   {id, kind: movie|series, title, year, poster?, backdrop?, rating?, itemId?, show?}
+TitleCard   {id, kind: movie|series, title, year, poster?, backdrop?, rating?, itemId?, show?, nextAirDate?}
 TitleDetail TitleCard + {tmdbId?, imdbId?, originalTitle?, sortTitle, overview?, tagline?, releaseDate?, endDate?,
-             nextAirDate?, status?, runtimeMin?, voteCount?, certification?, logo?, genres:[{id,name}],
+             status?, runtimeMin?, voteCount?, certification?, logo?, genres:[{id,name}],
              collection?: {id,name}, cast:[{personId,name,character,profile?}], crew:[{personId,name,job,profile?}],
              source: tmdb|nfo|mixed, locked, matchState, needsReview}
 PersonCard  {id, name, profile?, knownFor?}

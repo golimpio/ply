@@ -209,7 +209,9 @@ type Update struct {
 
 // Update validates and stores a change. A new key is checked against TMDB
 // first (ErrKeyRejected, ErrUnreachable); a malformed key or language is
-// ErrInvalidSetting. Nothing is stored unless everything is valid.
+// ErrInvalidSetting. Nothing is stored unless everything is valid. With
+// -metadata=false nothing may leave the machine, so a key is stored as it is
+// given, unchecked (its format is still checked).
 func (s *Settings) Update(ctx context.Context, u Update) error {
 	var key string
 	if u.Key != nil {
@@ -223,7 +225,7 @@ func (s *Settings) Update(ctx context.Context, u Update) error {
 	if u.Language != nil && !languageCode.MatchString(*u.Language) {
 		return fmt.Errorf("%w: language must look like en-US or pt", ErrInvalidSetting)
 	}
-	if u.Key != nil && key != "" {
+	if u.Key != nil && key != "" && !s.o.Disabled {
 		lang := s.Resolve(ctx).Language
 		if u.Language != nil {
 			lang = *u.Language

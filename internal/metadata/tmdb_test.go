@@ -234,18 +234,33 @@ func TestClientChangesFollowPages(t *testing.T) {
 		t.Errorf("requests:\n got %q\nwant %q", got, want)
 	}
 
-	// A feed that never ends is cut off.
+	// A feed that never ends is cut off, and says so: a list that stops short
+	// would pass for all that changed.
 	var pages atomic.Int32
-	endless := newFakeTMDB(t)
-	for p := 1; p <= maxChangePages+5; p++ {
-		endless.handle("/movie/changes", params("end_date", "2026-11-02", "page", fmt.Sprint(p), "start_date", "2026-11-02"),
-			func(w http.ResponseWriter, r *http.Request) {
-				pages.Add(1)
-				fmt.Fprint(w, `{"results":[{"id":1}],"total_pages":99999}`)
-			})
+	feed := func(totalPages int) *fakeTMDB {
+		f := newFakeTMDB(t)
+		pages.Store(0)
+		for p := 1; p <= maxChangePages+5; p++ {
+			f.handle("/movie/changes", params("end_date", "2026-11-02", "page", fmt.Sprint(p), "start_date", "2026-11-02"),
+				func(w http.ResponseWriter, r *http.Request) {
+					pages.Add(1)
+					fmt.Fprintf(w, `{"results":[{"id":1}],"total_pages":%d}`, totalPages)
+				})
+		}
+		return f
 	}
-	if ids, err := testClient(t, endless).MovieChanges(ctx, start, end); err != nil || len(ids) != maxChangePages || int(pages.Load()) != maxChangePages {
-		t.Errorf("endless feed: %d ids, %d pages, %v; want %d", len(ids), pages.Load(), err, maxChangePages)
+	if ids, err := testClient(t, feed(99999)).MovieChanges(ctx, start, end); !errors.Is(err, ErrChangesTruncated) || ids != nil || int(pages.Load()) != maxChangePages {
+		t.Errorf("endless feed: %d ids, %d pages, %v; want ErrChangesTruncated after %d pages", len(ids), pages.Load(), err, maxChangePages)
+	}
+	if ids, err := testClient(t, feed(maxChangePages+1)).MovieChanges(ctx, start, end); !errors.Is(err, ErrChangesTruncated) || ids != nil {
+		t.Errorf("a feed one page too long: %d ids, %v", len(ids), err)
+	}
+	if IsTransient(ErrChangesTruncated) {
+		t.Error("a feed that is too long is not a transient error: retrying cannot make it shorter")
+	}
+	// Exactly as many pages as are followed is all of it.
+	if ids, err := testClient(t, feed(maxChangePages)).MovieChanges(ctx, start, end); err != nil || len(ids) != maxChangePages || int(pages.Load()) != maxChangePages {
+		t.Errorf("a feed of exactly %d pages: %d ids, %d pages, %v", maxChangePages, len(ids), pages.Load(), err)
 	}
 
 	// An error on a later page is an error, not a short list.
