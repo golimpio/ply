@@ -3,6 +3,7 @@ module ply
 go 1.27
 
 require (
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/grandcat/zeroconf v1.0.0
 	golang.org/x/text v0.43.0
 	modernc.org/sqlite v1.61.1
