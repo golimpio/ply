@@ -20,8 +20,9 @@ func setMtime(t *testing.T, p string, tm time.Time) {
 }
 
 // A file whose mtime is well in the future (FAT/exFAT local time, a skewed NAS
-// clock) is indexed, and its directory is not asked for again and again; one a
-// few seconds ahead (written while the scan runs) still waits.
+// clock) is indexed, and its directory is looked at once more (a copy may
+// still be growing) but not again and again; one a few seconds ahead (written
+// while the scan runs) still waits.
 func TestFutureMtimeIsIndexed(t *testing.T) {
 	root := t.TempDir()
 	s, st, _ := newScanner(t, root)
@@ -41,8 +42,16 @@ func TestFutureMtimeIsIndexed(t *testing.T) {
 	if _, ok := got[near]; ok {
 		t.Error("control: a file written just now (mtime 2s ahead) was indexed before settling")
 	}
-	if want := []Dir{{Path: filepath.Dir(near)}}; !slices.Equal(res.Deferred, want) {
-		t.Errorf("Deferred = %v, want %v (not the skewed file's directory)", res.Deferred, want)
+	if want := []Dir{{Path: filepath.Dir(far)}, {Path: filepath.Dir(near)}}; !slices.Equal(res.Deferred, want) {
+		t.Errorf("Deferred = %v, want %v (the skewed file's directory once, after indexing it)", res.Deferred, want)
+	}
+	res = scanDirs(t, s, Dir{Path: filepath.Dir(far)})
+	if len(res.Deferred) != 0 {
+		t.Errorf("unchanged since: Deferred = %v, want none (no endless rescans)", res.Deferred)
+	}
+	setMtime(t, far, time.Now().Add(3*time.Hour+time.Minute)) // it grew (or was touched): look again
+	if res = scanDirs(t, s, Dir{Path: filepath.Dir(far)}); len(res.Deferred) != 1 {
+		t.Errorf("changed again: Deferred = %v, want its directory", res.Deferred)
 	}
 
 	s2, st2, _ := newScanner(t, root) // and a full scan
@@ -158,6 +167,138 @@ func TestUnmountedVolumeInsideARootKeepsItsItems(t *testing.T) {
 	mustScan(t, s) // a full scan keeps them too
 	if _, ok := paths(t, st)[ep]; !ok {
 		t.Error("a full scan removed the rows of the unmounted volume")
+	}
+}
+
+// Mount boundaries survive a restart: a volume that is down when ply starts
+// keeps its rows. A boundary whose directory was removed outright is forgotten,
+// and its rows go.
+func TestMountBoundariesAreRemembered(t *testing.T) {
+	root := t.TempDir()
+	vol := filepath.Join(root, "Anime")
+	ep := filepath.Join(vol, "Show", "Ep (2001).mkv")
+	write(t, ep, "aaaa")
+	write(t, filepath.Join(root, "Keep (2000).mkv"), "c")
+	s, st, fp := newScanner(t, root)
+	mounted := true
+	fakeDev := func(p string) (uint64, bool) {
+		dev, ok := deviceOf(p)
+		if mounted && (filepath.Base(p) == "Anime" || strings.Contains(p, "/Anime/")) {
+			return dev + 1000, ok
+		}
+		return dev, ok
+	}
+	s.devOf = fakeDev
+	mustScan(t, s) // learns and stores the boundary
+
+	// ply restarts while the volume is down.
+	mounted = false
+	mustRemove(t, filepath.Join(vol, "Show"))
+	s2 := NewScanner(context.Background(), st, fp, []string{root}, nil)
+	s2.devOf = fakeDev
+	mustScan(t, s2)
+	if idOf(t, st, ep) == 0 {
+		t.Fatal("after a restart, the rows of a volume that is down were removed")
+	}
+
+	// The mount point itself is deleted: no volume will come back there.
+	mustRemove(t, vol)
+	mustScan(t, s2)
+	if idOf(t, st, ep) != 0 {
+		t.Error("the rows under a removed mount point were kept")
+	}
+	if v, _, _ := st.GetSetting(context.Background(), mountsKey); strings.Contains(v, "Anime") {
+		t.Errorf("the removed mount point is still remembered: %s", v)
+	}
+}
+
+// A boundary met by a partial scan (the watcher's) is remembered too.
+func TestMountBoundaryFromAPartialScanIsRemembered(t *testing.T) {
+	root := t.TempDir()
+	vol := filepath.Join(root, "Disk2")
+	ep := filepath.Join(vol, "Film (2001).mkv")
+	write(t, ep, "aaaa")
+	write(t, filepath.Join(root, "Keep (2000).mkv"), "c")
+	s, st, fp := newScanner(t, root)
+	mounted := true
+	fakeDev := func(p string) (uint64, bool) {
+		dev, ok := deviceOf(p)
+		if mounted && (filepath.Base(p) == "Disk2" || strings.Contains(p, "/Disk2/")) {
+			return dev + 1000, ok
+		}
+		return dev, ok
+	}
+	s.devOf = fakeDev
+	scanDirs(t, s, Dir{Path: root, Recursive: true})
+	if v, _, _ := st.GetSetting(context.Background(), mountsKey); !strings.Contains(v, "Disk2") {
+		t.Fatalf("a partial scan did not remember the boundary: %q", v)
+	}
+	mounted = false
+	mustRemove(t, ep)
+	s2 := NewScanner(context.Background(), st, fp, []string{root}, nil)
+	s2.devOf = fakeDev
+	mustScan(t, s2)
+	if idOf(t, st, ep) == 0 {
+		t.Error("after a restart, the rows of a volume that is down were removed")
+	}
+}
+
+// A rename that changes only the case of a folder keeps its items too.
+func TestCaseOnlyFolderRenameKeepsTheItems(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "probe"), "x")
+	if _, err := os.Lstat(filepath.Join(root, "PROBE")); err != nil {
+		t.Skip("case-sensitive file system")
+	}
+	mustRemove(t, filepath.Join(root, "probe"))
+	from := filepath.Join(root, "breaking bad", "S01E01.mkv")
+	write(t, from, "1")
+	write(t, filepath.Join(root, "Other (2000).mkv"), "22")
+	s, st, _ := newScanner(t, root)
+	mustScan(t, s)
+	id := idOf(t, st, from)
+	if err := os.Rename(filepath.Join(root, "breaking bad"), filepath.Join(root, "Breaking Bad")); err != nil {
+		t.Fatal(err)
+	}
+	mustScan(t, s)
+	if got := idOf(t, st, filepath.Join(root, "Breaking Bad", "S01E01.mkv")); got != id {
+		t.Errorf("after a case-only folder rename: id %d, want %d", got, id)
+	}
+}
+
+// A row held because a file of its size is settling is looked at again when
+// the copy is: its directory (or what is left of it) is in Deferred.
+func TestHeldRowsAreLookedAtAgain(t *testing.T) {
+	root := t.TempDir()
+	goneFile := filepath.Join(root, "A", "Sub", "Gone (2001).mkv")
+	other := filepath.Join(root, "B", "Other (2002).mkv")
+	write(t, goneFile, "0123456789")
+	write(t, filepath.Join(root, "A", "keep.txt"), "x")
+	write(t, filepath.Join(root, "Keep (2000).mkv"), "k")
+	setMtime(t, goneFile, time.Now().Add(-time.Hour))
+	s, st, _ := newScanner(t, root)
+	mustScan(t, s)
+
+	now := time.Now()
+	s.SetSettle(DefaultSettle)
+	s.now = func() time.Time { return now }
+	mustRemove(t, filepath.Join(root, "A", "Sub")) // the file and its folder
+	write(t, other, "abcdefghij")                  // same size, other content, still settling
+	res := scanDirs(t, s, Dir{Path: root, Recursive: true})
+	if idOf(t, st, goneFile) == 0 {
+		t.Fatal("setup: the row was not held")
+	}
+	if !slices.Contains(res.Deferred, Dir{Path: filepath.Join(root, "A"), Recursive: true}) {
+		t.Fatalf("Deferred = %v, want A (what is left of the held row's folder), recursive", res.Deferred)
+	}
+
+	now = now.Add(time.Minute) // the copy has settled; only the deferred dirs are scanned
+	scanDirs(t, s, res.Deferred...)
+	if idOf(t, st, goneFile) != 0 {
+		t.Error("the held row was still there after its folder was looked at again")
+	}
+	if idOf(t, st, other) == 0 {
+		t.Error("control: the settled copy was not indexed")
 	}
 }
 

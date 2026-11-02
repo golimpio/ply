@@ -159,12 +159,13 @@ func TestRenameKeepsTheItem(t *testing.T) {
 	if _, err := st.SetProgress(context.Background(), id, 30, 600); err != nil {
 		t.Fatal(err)
 	}
-	var added []int64
+	var added, sidecars []int64
 	s.OnAdded(func(ids []int64) { added = append(added, ids...) })
+	s.OnSidecarsChanged(func(ids []int64) { sidecars = append(sidecars, ids...) })
 	probes := fp.calls.Load()
 
 	mustRename(t, from, to)
-	mustScan(t, s)
+	mustScan(t, s) // a full scan
 
 	if got := idOf(t, st, to); got != id {
 		t.Fatalf("renamed file has id %d, want %d (the old item)", got, id)
@@ -190,6 +191,10 @@ func TestRenameKeepsTheItem(t *testing.T) {
 	}
 	if !slices.Equal(added, []int64{id}) {
 		t.Errorf("OnAdded got %v, want [%d]", added, id)
+	}
+	// Its sidecar artwork is wherever it went: the metadata must look again.
+	if !slices.Equal(sidecars, []int64{id}) {
+		t.Errorf("OnSidecarsChanged got %v, want [%d] after a move found by a full scan", sidecars, id)
 	}
 }
 

@@ -3,6 +3,7 @@ package library
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -70,9 +71,10 @@ type Scanner struct {
 	wg       sync.WaitGroup
 	fpCursor int64 // fingerprint backfill: the last item id done (guarded by sem)
 
-	devOf   func(path string) (dev uint64, ok bool) // device of a directory (tests replace it)
-	mountMu sync.Mutex
-	mounts  map[string]bool // mount boundaries met so far, in configured spelling
+	devOf        func(path string) (dev uint64, ok bool) // device of a directory (tests replace it)
+	mountMu      sync.Mutex
+	mounts       map[string]bool // mount boundaries met so far, in configured spelling (persisted)
+	mountsLoaded bool
 
 	mu     sync.Mutex // guards status
 	status Status
@@ -235,8 +237,10 @@ func (s *Scanner) run(ctx context.Context) error {
 	if err != nil {
 		err = fmt.Errorf("load library state: %w", err)
 	} else {
+		s.loadMounts(ctx)
 		p = s.newPass(states)
 		err = s.scanAll(ctx, p)
+		p.saveMounts(ctx)
 	}
 
 	end := time.Now()
@@ -275,7 +279,7 @@ type pass struct {
 	seen     map[string]struct{} // every video file found, whichever root owns it
 	seenBy   map[string]int      // root -> files it owns that were found
 	work     []job               // new and changed files to probe
-	deferred map[string]struct{} // directories to look at again soon: files settling or just written
+	deferred map[string]bool     // directories to look at again soon (true: with their subdirectories)
 	settling map[int64]bool      // sizes of the files left for later because they are still settling
 	listing  dirNames
 	added    []int64 // created or moved
@@ -287,6 +291,8 @@ type pass struct {
 	names     map[string]map[string]bool // directory -> the exact names in it
 	devs      map[string]uint64          // walked directory (real path) -> its device
 	down      map[string]bool            // mount boundary -> it is not mounted now
+
+	mountsChanged bool // a boundary was learned or forgotten: save them
 }
 
 // futureSkew is how far in the future a file's mtime may be and still be
@@ -303,7 +309,7 @@ const recheckWindow = time.Minute
 
 func (s *Scanner) newPass(states map[string]store.FileState) *pass {
 	p := &pass{s: s, states: states, owners: map[string]string{}, now: s.now(),
-		seen: map[string]struct{}{}, seenBy: map[string]int{}, deferred: map[string]struct{}{},
+		seen: map[string]struct{}{}, seenBy: map[string]int{}, deferred: map[string]bool{},
 		settling: map[int64]bool{}, available: map[string]bool{}, failed: map[string]bool{},
 		names: map[string]map[string]bool{}, devs: map[string]uint64{}, down: map[string]bool{}}
 	// Which configured root indexes which file. Roots may nest (/m and
@@ -540,7 +546,7 @@ func (p *pass) visit(ctx context.Context, path string, d fs.DirEntry, claimant f
 	st, indexed := p.states[path]
 	age := p.now.Sub(info.ModTime()) // negative: written since the pass started, or a skewed clock
 	if p.s.settle > 0 && age > -futureSkew && age < recheckWindow {
-		p.deferred[filepath.Dir(path)] = struct{}{}
+		p.recheck(filepath.Dir(path), false)
 	}
 	if indexed && st.Size == info.Size() && st.MTime == mtime {
 		if st.Root != root {
@@ -567,12 +573,24 @@ func (p *pass) visit(ctx context.Context, path string, d fs.DirEntry, claimant f
 		// Still being written (or just finished): a later scan takes it. Its
 		// old row, if any, stays: the file is there. A gone row of the same
 		// size stays too: this may be it, copied without its mtime.
-		p.deferred[filepath.Dir(path)] = struct{}{}
+		p.recheck(filepath.Dir(path), false)
 		p.settling[info.Size()] = true
 		return nil
 	}
+	if p.s.settle > 0 && age <= -futureSkew {
+		// A skewed clock: its age says nothing. Look once more after indexing
+		// it, so that a copy still growing is seen to change; once it stops,
+		// it is unchanged and not looked at again.
+		p.recheck(filepath.Dir(path), false)
+	}
 	p.work = append(p.work, job{path: path, root: root, size: info.Size(), mtime: mtime, subs: subs, isNew: !indexed})
 	return nil
+}
+
+// recheck asks for dir (and, when recursive, its subdirectories) to be
+// scanned again soon.
+func (p *pass) recheck(dir string, recursive bool) {
+	p.deferred[dir] = p.deferred[dir] || recursive
 }
 
 // rowsOf counts the rows that belong to root.
@@ -609,7 +627,14 @@ func (p *pass) removeMissing(ctx context.Context, in func(path string, st store.
 			continue
 		}
 		if p.settling[st.Size] {
+			// Held, not dropped: the next look (once the copy settles) decides.
+			// That look must cover this row's directory, or what is left of it.
 			held++
+			dir := filepath.Dir(path)
+			for within(st.Root, dir) && !exists(dir) {
+				dir = filepath.Dir(dir)
+			}
+			p.recheck(dir, dir != filepath.Dir(path))
 			continue
 		}
 		gone = append(gone, st.ID)
@@ -757,16 +782,33 @@ func (p *pass) gone(candidates []string) []string {
 			continue // its drive may just be unmounted: the file is not known to be gone
 		}
 		_, err := os.Lstat(old)
-		if errors.Is(err, fs.ErrNotExist) || (err == nil && !p.spelled(old)) {
+		if errors.Is(err, fs.ErrNotExist) || (err == nil && !p.spelled(old, p.states[old].Root)) {
 			out = append(out, old)
 		}
 	}
 	return out
 }
 
-// spelled reports whether path's directory lists its name exactly.
-func (p *pass) spelled(path string) bool {
-	dir := filepath.Dir(path)
+// spelled reports whether every directory from root down to path lists the
+// next part of it exactly as path spells it (a case-insensitive file system
+// also opens a path whose folder, or file, was renamed to another case).
+func (p *pass) spelled(path, root string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return p.nameIn(filepath.Dir(path), filepath.Base(path))
+	}
+	dir := root
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if !p.nameIn(dir, part) {
+			return false
+		}
+		dir = filepath.Join(dir, part)
+	}
+	return true
+}
+
+// nameIn reports whether dir lists name exactly (an unreadable dir: assume so).
+func (p *pass) nameIn(dir, name string) bool {
 	names, ok := p.names[dir]
 	if !ok {
 		names = map[string]bool{}
@@ -779,7 +821,12 @@ func (p *pass) spelled(path string) bool {
 		}
 		p.names[dir] = names
 	}
-	return names == nil || names[filepath.Base(path)]
+	return names == nil || names[name]
+}
+
+func exists(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
 }
 
 // noteDir records, for a directory met by a walk (real path walked, configured
@@ -802,16 +849,22 @@ func (p *pass) noteDir(walked, path string) {
 	}
 	if dev != parent {
 		p.s.mountMu.Lock()
-		if p.s.mounts == nil {
-			p.s.mounts = map[string]bool{}
+		if !p.s.mounts[path] {
+			if p.s.mounts == nil {
+				p.s.mounts = map[string]bool{}
+			}
+			p.s.mounts[path] = true
+			p.mountsChanged = true
 		}
-		p.s.mounts[path] = true
 		p.s.mountMu.Unlock()
 	}
 }
 
 // unmounted returns the remembered mount boundary between root and path that
-// is not mounted now (gone, or on its parent's device again), or "".
+// is not mounted now (its directory is back on its parent's device, or cannot
+// be looked at), or "". A boundary whose directory is gone altogether, from a
+// parent that is there, was removed rather than unmounted: it is forgotten,
+// and the rows under it may go.
 func (p *pass) unmounted(path, root string) string {
 	p.s.mountMu.Lock()
 	defer p.s.mountMu.Unlock()
@@ -821,6 +874,13 @@ func (p *pass) unmounted(path, root string) string {
 		}
 		down, known := p.down[b]
 		if !known {
+			_, err := os.Lstat(b)
+			if errors.Is(err, fs.ErrNotExist) && exists(filepath.Dir(b)) {
+				delete(p.s.mounts, b)
+				p.mountsChanged = true
+				p.s.log.Info("a mount point inside a media root was removed; forgetting it", "dir", b)
+				continue
+			}
 			dev, ok := p.s.devOf(b)
 			parent, pok := p.s.devOf(filepath.Dir(b))
 			down = !ok || (pok && dev == parent)
@@ -831,6 +891,57 @@ func (p *pass) unmounted(path, root string) string {
 		}
 	}
 	return ""
+}
+
+// mountsKey is the settings key the mount boundaries are kept under, so that
+// a volume that is down when ply starts still keeps its rows.
+const mountsKey = "scan.mounts"
+
+// loadMounts reads the remembered mount boundaries, once.
+func (s *Scanner) loadMounts(ctx context.Context) {
+	s.mountMu.Lock()
+	defer s.mountMu.Unlock()
+	if s.mountsLoaded {
+		return
+	}
+	v, ok, err := s.store.GetSetting(ctx, mountsKey)
+	if err != nil {
+		s.log.Warn("read the remembered mount points", "err", err)
+		return // try again next pass
+	}
+	s.mountsLoaded = true
+	if !ok {
+		return
+	}
+	var list []string
+	if err := json.Unmarshal([]byte(v), &list); err != nil {
+		s.log.Warn("the remembered mount points are unreadable; starting afresh", "err", err)
+		return
+	}
+	if s.mounts == nil {
+		s.mounts = map[string]bool{}
+	}
+	for _, b := range list {
+		s.mounts[b] = true
+	}
+}
+
+// saveMounts stores the mount boundaries if the pass changed them.
+func (p *pass) saveMounts(ctx context.Context) {
+	if !p.mountsChanged {
+		return
+	}
+	p.s.mountMu.Lock()
+	list := make([]string, 0, len(p.s.mounts))
+	for b := range p.s.mounts {
+		list = append(list, b)
+	}
+	p.s.mountMu.Unlock()
+	slices.Sort(list)
+	data, _ := json.Marshal(list)
+	if err := p.s.store.SetSetting(ctx, mountsKey, string(data)); err != nil {
+		p.s.log.Warn("remember the mount points", "err", err)
+	}
 }
 
 // move gives the row of old the new file of p.work[i].

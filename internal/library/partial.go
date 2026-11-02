@@ -64,7 +64,9 @@ func (s *Scanner) ScanDirs(ctx context.Context, dirs []Dir) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: load library state: %w", ErrNotScanned, err)
 	}
+	s.loadMounts(ctx)
 	p := s.newPass(states)
+	defer p.saveMounts(ctx)
 	claimant := func(path string) string {
 		if root, ok := p.owners[path]; ok {
 			return root
@@ -108,8 +110,8 @@ func (s *Scanner) ScanDirs(ctx context.Context, dirs []Dir) (Result, error) {
 	}
 
 	res := Result{Added: p.added}
-	for dir := range p.deferred {
-		res.Deferred = append(res.Deferred, Dir{Path: dir})
+	for dir, recursive := range p.deferred {
+		res.Deferred = append(res.Deferred, Dir{Path: dir, Recursive: recursive})
 	}
 	slices.SortFunc(res.Deferred, func(a, b Dir) int { return strings.Compare(a.Path, b.Path) })
 	// Moved items too: their sidecar artwork, if any, is somewhere else now.
