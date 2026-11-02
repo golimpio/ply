@@ -174,7 +174,7 @@ All image URLs are relative and carry `?token=` like other media URLs.
 | Method | Path | Result |
 |---|---|---|
 | GET | `/api/items`, `/api/items/{id}` | ItemSummary gains `titleId?`, `poster?`, `backdrop?`, `logo?`, `rating?`, `certification?`, `genres?:[string]`, `matchState`, `needsReview`; episodes get `episodeTitle`/`overview`/`still` from metadata when present |
-| GET | `/api/items/{id}` | ItemDetail gains `meta?: TitleDetail` (movie, or the episode's series) and `episode?: {name, overview, airDate, still, rating}` |
+| GET | `/api/items/{id}` | ItemDetail gains `meta?: TitleDetail` (movie, or the episode's series) and `episodeInfo?: {name, overview, airDate, still, rating}` (not `episode`: that key is the episode number) |
 | GET | `/api/shows` | each show gains `titleId?`, `poster?`, `backdrop?`, `year?`, `overview?`, `genres?`, `rating?`, `matchState`, `needsReview` |
 | GET | `/api/shows/{name}` | `{show…, meta?: TitleDetail, seasons:[{season, name, overview, poster, airDate, episodeCount}]}` |
 | GET | `/api/people/{id}` | `{id, name, profile?, biography?, birthday?, deathday?, placeOfBirth?, knownFor?, imdbId?, credits:[{titleId, kind, job, character, title:TitleCard}]}` — only titles in the library, newest first |

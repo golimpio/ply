@@ -42,6 +42,15 @@ CGO_ENABLED=0 must build for darwin/linux × amd64/arm64.
 ## Config
 Flags: `-media` (repeatable roots), `-addr` (default `:8420`, `:0` allowed), `-data`, `-token`, `-name`
 (default hostname), `-scan-interval` (default 15m, 0 disables), `-ffprobe`, `-ffmpeg` (default from PATH).
+M6 (metadata, live library):
+- `-watch` (default true): watch the media folders and pick up changes within seconds (`internal/watch`).
+- `-tmdb-key` (env `PLY_TMDB_KEY`): TMDB v3 API key or v4 read access token. Precedence: flag > env > the key saved
+  from the web UI (settings table) > the build default (`-ldflags -X ply/internal/metadata.DefaultKey=...`). The key
+  is never returned by the API nor logged.
+- `-metadata` (env `PLY_METADATA`, default true): `false` switches every online lookup and image download off.
+- `-metadata-language` (env `PLY_METADATA_LANGUAGE`, default `en-US`), `-metadata-refresh` (env
+  `PLY_METADATA_REFRESH`, default 24h; 0 turns the periodic refresh off, not the matching of new files).
+- Hidden, for tests: `-tmdb-url` (env `PLY_TMDB_URL`) and `-tmdb-image-url` (env `PLY_TMDB_IMAGE_URL`).
 Data dir: macOS `~/Library/Application Support/ply`; Linux `$XDG_DATA_HOME/ply` or `~/.local/share/ply`;
 `-data` overrides. Persist a random server id (`server-id` file, 16 hex bytes). DB: `<data>/ply.db`.
 
@@ -76,7 +85,7 @@ Keep `codec_tag_string`, drop ones that look like `[0][0][0][0]`. Container norm
 - **Safety**: delete DB rows for missing files under a root ONLY if that root's walk finished with zero errors
   and the root exists. Unmounted/permission errors never wipe the library.
 - Titles NFC-normalised (`golang.org/x/text/unicode/norm`); path stored RAW (never normalised).
-- Periodic rescan (`-scan-interval`) + `POST /api/scan`. fsnotify is out of scope.
+- Periodic rescan (`-scan-interval`) + `POST /api/scan`. M6 adds the watcher (`-watch`), which runs partial scans.
 - Sidecar subtitles (M5): `<basename>.srt|.vtt|.ass` and `<basename>.<lang>.srt` etc.
 
 ## Name parsing
@@ -120,30 +129,63 @@ All URLs returned are RELATIVE (clients build absolute LAN URLs). When a token i
 stream/file/subtitle URL carries `?token=<t>` (AirPlay/Cast receivers can't send headers).
 Auth: if `-token` set, all `/api/*` except `/api/info` need `Authorization: Bearer <t>` or `?token=<t>`
 (constant-time compare). SPA assets are public. CORS middleware on everything: `Access-Control-Allow-Origin: *`,
-allow headers `Range, Authorization, Content-Type`, methods `GET, POST, PUT, DELETE, OPTIONS`, expose
+allow headers `Range, Authorization, Content-Type`, methods `GET, POST, PUT, PATCH, DELETE, OPTIONS`, expose
 `Content-Range, Accept-Ranges, Content-Length, Content-Type`; OPTIONS → 204.
 
 | Method | Path | Body / result |
 |---|---|---|
 | GET | `/api/info` | `{id, name, version, authRequired}` (no auth) |
 | GET | `/api/items?kind=movie\|episode&show=<name>` | `[ItemSummary]` (movies by title; episodes by season, episode) |
-| GET | `/api/shows` | `[{show, seasons:[int], episodeCount}]` |
+| GET | `/api/shows` | `[ShowSummary]`: `{show, seasons:[int], episodeCount}` + (M6) `year?, overview?, titleId?, poster?, backdrop?, logo?, rating?, certification?, genres?, matchState, needsReview` |
 | GET | `/api/items/{id}?target=<profile>` | `ItemDetail` incl. `playback` (Decision + `url`) for built-in profile (default avplayer) |
 | POST | `/api/items/{id}/playback` | body `{profile?: name, custom?: Profile, startSec?, audioIndex?, subtitleIndex?}` → `Playback` |
 | GET | `/api/items/{id}/file` | direct play, `http.ServeContent` (Range/ETag), explicit Content-Type: mp4 `video/mp4`, mov `video/quicktime`, m4v `video/x-m4v`, mkv `video/x-matroska`, webm `video/webm`, ts `video/mp2t`, avi `video/x-msvideo` |
 | POST | `/api/scan` | 202 `{started:true}` or 409 if running |
-| GET | `/api/scan` | `{running, lastStarted, lastFinished, lastError, itemCount}` |
+| GET | `/api/scan` | `{running, lastStarted, lastFinished, lastError, itemCount, watching:[{root, watching, dirs, error?}]}` (`watching` is `[]` when `-watch=false`) |
 | GET | `/api/sessions/{sid}/index.m3u8`, `/api/sessions/{sid}/{file}` | (M3) HLS playlist / init.mp4 / segments |
 | DELETE | `/api/sessions/{sid}` | (M3) stop session |
 | GET | `/api/items/{id}/subtitles/{key}.vtt` | (M5) key = stream idx or `ext<N>` for sidecar; WebVTT |
 | PUT | `/api/items/{id}/progress` | (M5) `{positionSec, durationSec}`; watched when ≥ 90% |
 | GET | `/api/continue` | (M5) in-progress items, most recent first |
 
+M6 (metadata; full details and the data model in `docs/M6-METADATA.md`). All need the token; `{id}` etc. unknown → 404,
+bad input → 400, TMDB unreachable → 502, lookups off (no key / `-metadata=false`) → 409, no metadata subsystem → 503.
+
+| Method | Path | Body / result |
+|---|---|---|
+| GET | `/api/shows/{name}` | `ShowDetail`: ShowSummary fields minus `seasons` + `meta?: TitleDetail`, `seasons:[{season, name, overview?, poster?, airDate?, episodeCount}]` (`episodeCount` = files); name matched without regard to case |
+| PUT | `/api/shows/{name}/match` | `{tmdbId}` or `{imdbId}` → whole show linked by hand (`manual`); returns ShowDetail |
+| DELETE | `/api/shows/{name}/match` | unmatch (`manual`, no auto re-match); returns ShowDetail |
+| POST | `/api/shows/{name}/metadata/refresh`, `/api/items/{id}/metadata/refresh`, `/api/metadata/refresh` | 202 `{started:true}`; the worker refreshes in the background |
+| PUT | `/api/items/{id}/match` | `{tmdbId}` or `{imdbId}` (a movie; episodes → 400) → `manual`; returns ItemDetail |
+| DELETE | `/api/items/{id}/match` | unmatch; returns ItemDetail |
+| PATCH | `/api/titles/{id}` | `{title?, sortTitle?, year?, overview?, tagline?}` (at least one) → title `locked`; returns TitleDetail |
+| GET | `/api/people?q=` | `[PersonCard]` (≥1 title in the library, max 20; blank q → `[]`) |
+| GET | `/api/people/{id}` | `Person` (details fetched from TMDB on first visit) with `credits` for library titles, newest first |
+| GET | `/api/genres` | `[{id, name, count}]` |
+| GET | `/api/titles?genre=&collection=&person=` | `[TitleCard]` (ids; non-numeric → 400) |
+| GET | `/api/collections/{id}` | `{id, name, overview?, poster?, backdrop?, titles:[TitleCard]}` in release order |
+| GET | `/api/metadata/search?kind=movie\|series&q=&year=` | `[{tmdbId, title, originalTitle?, year, overview?, poster?, score}]` best first |
+| GET | `/api/metadata/status` | `{enabled, keySet, running, pending, unmatched, needsReview, lastRefresh, lastError}` |
+| GET | `/api/metadata/review` | `[{kind, itemId?, show?, title, year, matchState, needsReview, score, candidate?}]` unmatched first |
+| GET, PUT | `/api/settings` | `{tmdbKeySet, tmdbKeySource: flag\|env\|settings\|default\|"", metadataEnabled, metadataForcedOff, language}`; PUT `{tmdbKey?, metadataEnabled?, language?}`: a new key is checked against TMDB (400 refused, 502 unreachable), `""` removes the stored key; **the key is never returned or logged** |
+| GET | `/api/images/tmdb/{size}/{file}` | size ∈ `w92 w185 w342 w500 w780 w1280 original`, file `^[A-Za-z0-9_-]+\.(jpg\|png\|svg)$` else 400; downloaded once into `<data>/images`, `Cache-Control: public, max-age=31536000, immutable`; not available → 404 |
+| GET | `/api/images/local/{item\|series}/{id}/{poster\|backdrop\|thumb}` | sidecar art (path from the DB, must be a regular file whose bytes sniff as an image) or a cover extracted from the media file; `no-cache` |
+
 ```
 ItemSummary {id, kind, title, year, show, season, episode, episodeTitle, durationSec, container, videoCodec,
-             audioCodec, width, height, hdr, addedAt, progress?: {positionSec, watched}}
+             audioCodec, width, height, hdr, addedAt, progress?: {positionSec, watched}, art?}
+             + (M6) titleId?, poster?, backdrop?, logo?, rating?, certification?, genres?: [string], matchState,
+             needsReview, and for episodes overview?, still? (image fields are relative URLs, with ?token=)
 ItemDetail  ItemSummary + {path(basename only), size, bitrate, streams:[Stream], subtitles:[{key, language,
-             title, format, image:bool, url?}], playback: Playback}
+             title, format, image:bool, url?}], playback: Playback, meta?: TitleDetail,
+             episodeInfo?: {name, overview, airDate, still, rating}}   -- "episode" stays the episode number
+TitleCard   {id, kind: movie|series, title, year, poster?, backdrop?, rating?, itemId?, show?}
+TitleDetail TitleCard + {tmdbId?, imdbId?, originalTitle?, sortTitle, overview?, tagline?, releaseDate?, endDate?,
+             nextAirDate?, status?, runtimeMin?, voteCount?, certification?, logo?, genres:[{id,name}],
+             collection?: {id,name}, cast:[{personId,name,character,profile?}], crew:[{personId,name,job,profile?}],
+             source: tmdb|nfo|mixed, locked, matchState, needsReview}
+PersonCard  {id, name, profile?, knownFor?}
 Stream      {index, type, codec, codecTag, profile, width, height, pixFmt, colorTransfer, channels, language,
              title, default, forced}
 Playback    {method, videoAction, audioAction, audioIndex, reasons, url, sessionId?, startSec}

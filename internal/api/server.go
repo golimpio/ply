@@ -15,9 +15,11 @@ import (
 	"ply/internal/art"
 	"ply/internal/hwaccel"
 	"ply/internal/library"
+	"ply/internal/metadata"
 	"ply/internal/store"
 	"ply/internal/stream"
 	"ply/internal/subs"
+	"ply/internal/watch"
 )
 
 // ScanController is the scanner as the API sees it.
@@ -47,6 +49,14 @@ type Options struct {
 	// Subs converts text subtitles to WebVTT; nil disables the subtitle
 	// endpoint (tracks are then listed without a url).
 	Subs *subs.Generator
+	// Watcher reports which media roots are being watched (GET /api/scan); nil
+	// when watching is off.
+	Watcher interface{ Status() []watch.RootStatus }
+	// Metadata (M6). Each may be nil: the endpoints that need it then answer
+	// 503, and the lists carry no metadata.
+	Metadata *metadata.Worker   // matching, refreshing, fixing matches
+	Settings *metadata.Settings // the TMDB key, the privacy switch, the language
+	Images   *metadata.ImageCache
 }
 
 // Server is the HTTP handler for the whole application.
@@ -66,16 +76,37 @@ func New(o Options) *Server {
 	mux.HandleFunc("GET /api/info", s.handleInfo)
 	mux.HandleFunc("GET /api/items", s.handleItems)
 	mux.HandleFunc("GET /api/shows", s.handleShows)
+	mux.HandleFunc("GET /api/shows/{name}", s.handleShow)
+	mux.HandleFunc("PUT /api/shows/{name}/match", s.handleMatchShow)
+	mux.HandleFunc("DELETE /api/shows/{name}/match", s.handleUnmatchShow)
+	mux.HandleFunc("POST /api/shows/{name}/metadata/refresh", s.handleRefreshShow)
 	mux.HandleFunc("GET /api/items/{id}", s.handleItem)
 	mux.HandleFunc("POST /api/items/{id}/playback", s.handlePlayback)
 	mux.HandleFunc("GET /api/items/{id}/file", s.handleFile)
 	mux.HandleFunc("GET /api/items/{id}/art/{kind}", s.handleArt)
+	mux.HandleFunc("PUT /api/items/{id}/match", s.handleMatchItem)
+	mux.HandleFunc("DELETE /api/items/{id}/match", s.handleUnmatchItem)
+	mux.HandleFunc("POST /api/items/{id}/metadata/refresh", s.handleRefreshItem)
 	mux.HandleFunc("GET /api/items/{id}/subtitles/{file}", s.handleSubtitle)
 	mux.HandleFunc("PUT /api/items/{id}/progress", s.handleProgress)
 	mux.HandleFunc("GET /api/continue", s.handleContinue)
 	mux.HandleFunc("GET /api/sessions/{sid}/index.m3u8", s.handleSessionPlaylist)
 	mux.HandleFunc("GET /api/sessions/{sid}/{file}", s.handleSessionFile)
 	mux.HandleFunc("DELETE /api/sessions/{sid}", s.handleSessionDelete)
+	mux.HandleFunc("GET /api/people", s.handlePeople)
+	mux.HandleFunc("GET /api/people/{id}", s.handlePerson)
+	mux.HandleFunc("GET /api/genres", s.handleGenres)
+	mux.HandleFunc("GET /api/titles", s.handleTitles)
+	mux.HandleFunc("PATCH /api/titles/{id}", s.handlePatchTitle)
+	mux.HandleFunc("GET /api/collections/{id}", s.handleCollection)
+	mux.HandleFunc("GET /api/images/tmdb/{size}/{file}", s.handleTMDBImage)
+	mux.HandleFunc("GET /api/images/local/{kind}/{id}/{slot}", s.handleLocalImage)
+	mux.HandleFunc("GET /api/metadata/search", s.handleMetadataSearch)
+	mux.HandleFunc("GET /api/metadata/status", s.handleMetadataStatus)
+	mux.HandleFunc("GET /api/metadata/review", s.handleReview)
+	mux.HandleFunc("POST /api/metadata/refresh", s.handleRefreshAll)
+	mux.HandleFunc("GET /api/settings", s.handleSettings)
+	mux.HandleFunc("PUT /api/settings", s.handlePutSettings)
 	mux.HandleFunc("POST /api/scan", s.handleScanStart)
 	mux.HandleFunc("GET /api/scan", s.handleScanStatus)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
@@ -104,7 +135,7 @@ func cors(next http.Handler) http.Handler {
 		h := w.Header()
 		h.Set("Access-Control-Allow-Origin", "*")
 		h.Set("Access-Control-Allow-Headers", "Range, Authorization, Content-Type")
-		h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		h.Set("Access-Control-Expose-Headers", "Content-Range, Accept-Ranges, Content-Length, Content-Type")
 		if r.Method == http.MethodOptions {
 			h.Set("Access-Control-Max-Age", "600")

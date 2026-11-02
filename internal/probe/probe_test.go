@@ -135,3 +135,85 @@ func TestStreamBitDepth(t *testing.T) {
 		}
 	}
 }
+
+const taggedJSON = `{
+  "streams": [
+    {"index": 0, "codec_type": "video", "codec_name": "h264", "disposition": {"default": 1}},
+    {"index": 1, "codec_type": "audio", "codec_name": "aac", "disposition": {"default": 1}},
+    {"index": 2, "codec_type": "video", "codec_name": "mjpeg", "disposition": {"attached_pic": 1}},
+    {"index": 3, "codec_type": "video", "codec_name": "png", "disposition": {"attached_pic": 1}}
+  ],
+  "format": {"format_name": "mov,mp4,m4a,3gp,3g2,mj2", "duration": "60", "tags": {
+    "TITLE": "Pilot", "Date": "2019-12-25T10:00:00Z", "SYNOPSIS": "A synopsis.", "show": "The Show",
+    "season_number": "2", "episode_sort": "5", "episode_id": "S02E05", "encoder": "Lavf"}}
+}`
+
+func TestParseTagsAndCover(t *testing.T) {
+	res, err := Parse([]byte(taggedJSON), "/media/x.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Tags{Title: "Pilot", Year: 2019, Date: "2019-12-25T10:00:00Z", Description: "A synopsis.", Show: "The Show",
+		Season: 2, Episode: 5, EpisodeID: "S02E05"}
+	if res.Tags != want {
+		t.Errorf("tags = %+v, want %+v", res.Tags, want)
+	}
+	if !res.HasCover || res.Cover != 2 {
+		t.Errorf("cover = %d (%v), want the first attached picture, stream 2", res.Cover, res.HasCover)
+	}
+	if len(res.Streams) != 2 {
+		t.Errorf("streams = %d, want video and audio only", len(res.Streams))
+	}
+}
+
+func TestParseTagEdgeCases(t *testing.T) {
+	for name, tc := range map[string]struct {
+		json string
+		want Tags
+	}{
+		"none":               {`{"format":{"format_name":"mpegts"},"streams":[]}`, Tags{}},
+		"description wins":   {`{"format":{"format_name":"mpegts","tags":{"description":"d","synopsis":"s"}}}`, Tags{Description: "d"}},
+		"year tag":           {`{"format":{"format_name":"mpegts","tags":{"year":"1999"}}}`, Tags{Date: "1999", Year: 1999}},
+		"implausible year":   {`{"format":{"format_name":"mpegts","tags":{"date":"1066-10-14"}}}`, Tags{Date: "1066-10-14"}},
+		"bad numbers":        {`{"format":{"format_name":"mpegts","tags":{"season_number":"two","episode_sort":"-3"}}}`, Tags{}},
+		"blank values":       {`{"format":{"format_name":"mpegts","tags":{"title":"  ","show":""}}}`, Tags{}},
+		"whitespace trimmed": {`{"format":{"format_name":"mpegts","tags":{"title":"  Pilot \n"}}}`, Tags{Title: "Pilot"}},
+	} {
+		res, err := Parse([]byte(tc.json), "x.ts")
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if res.Tags != tc.want {
+			t.Errorf("%s: tags = %+v, want %+v", name, res.Tags, tc.want)
+		}
+		if res.HasCover {
+			t.Errorf("%s: cover reported without an attached picture", name)
+		}
+	}
+	if !(Tags{}).Empty() || (Tags{Title: "x"}).Empty() {
+		t.Error("Tags.Empty")
+	}
+
+	// A huge description is cut, and stays valid UTF-8.
+	huge := make([]rune, 20000)
+	for i := range huge {
+		huge[i] = 'é'
+	}
+	res, err := Parse([]byte(`{"format":{"format_name":"mpegts","tags":{"description":"`+string(huge)+`"}}}`), "x.ts")
+	if err != nil || len(res.Tags.Description) == 0 || len(res.Tags.Description) > maxTagText {
+		t.Errorf("huge description: %d bytes, %v", len(res.Tags.Description), err)
+	}
+	for _, r := range res.Tags.Description {
+		if r == 0xFFFD {
+			t.Fatal("the description was cut in the middle of a character")
+		}
+	}
+}
+
+func TestCoverIsOnlyTheFirstVideoAttachedPicture(t *testing.T) {
+	// A subtitle or audio stream flagged attached_pic is not a cover.
+	res, err := Parse([]byte(`{"streams":[{"index":5,"codec_type":"audio","disposition":{"attached_pic":1}}],"format":{"format_name":"mpegts"}}`), "x.ts")
+	if err != nil || res.HasCover {
+		t.Errorf("audio flagged as a picture: %+v, %v", res, err)
+	}
+}

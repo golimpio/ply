@@ -179,15 +179,26 @@ func nullInt(v int64) any {
 // collection, seasons and episodes in one transaction and returns the title id.
 // Genres and credits are replaced; seasons are replaced only for the ones given.
 func (s *Store) UpsertTitle(ctx context.Context, in *TitleInput) (int64, error) {
-	if in.Kind != KindMovie && in.Kind != KindSeries {
-		return 0, fmt.Errorf("store: title kind %q", in.Kind)
-	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
+	id, err := upsertTitleTx(ctx, tx, in)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return id, nil
+}
 
+// upsertTitleTx is UpsertTitle inside a transaction of the caller's.
+func upsertTitleTx(ctx context.Context, tx *sql.Tx, in *TitleInput) (int64, error) {
+	if in.Kind != KindMovie && in.Kind != KindSeries {
+		return 0, fmt.Errorf("store: title kind %q", in.Kind)
+	}
 	id, err := upsertTitleRow(ctx, tx, in)
 	if err != nil {
 		return 0, err
@@ -199,9 +210,6 @@ func (s *Store) UpsertTitle(ctx context.Context, in *TitleInput) (int64, error) 
 		return 0, err
 	}
 	if err := setSeasons(ctx, tx, id, in.Seasons); err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
 	return id, nil
@@ -401,7 +409,9 @@ func setCredits(ctx context.Context, tx *sql.Tx, titleID int64, credits []Credit
 }
 
 // upsertPerson finds or creates a person by TMDB id, or by exact name when
-// there is none. An empty profile never replaces a known one.
+// there is none. An empty profile never replaces a known one, and a person's
+// fetched details (biography, birthday, fetched_at...) are never touched: a
+// credit only knows a name and a photo.
 func upsertPerson(ctx context.Context, tx *sql.Tx, p Person) (int64, error) {
 	var id int64
 	if p.TMDBID != 0 {

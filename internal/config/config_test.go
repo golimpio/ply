@@ -6,6 +6,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -150,5 +151,128 @@ func TestParseStreamIdleAndHWAccel(t *testing.T) {
 	t.Setenv(StreamIdleEnv, "garbage")
 	if c, _ := Parse([]string{"-data", dir}, &bytes.Buffer{}); c.StreamIdle != DefaultStreamIdle {
 		t.Errorf("invalid env should be ignored: %v", c.StreamIdle)
+	}
+}
+
+func TestMetadataDefaults(t *testing.T) {
+	for _, name := range []string{TMDBKeyEnv, MetadataEnv, MetadataLanguageEnv, MetadataRefreshEnv, TMDBURLEnv, TMDBImageURLEnv} {
+		t.Setenv(name, "")
+	}
+	c, err := Parse([]string{"-data", t.TempDir()}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.TMDBKey != "" || c.TMDBKeyEnv != "" || !c.Metadata || c.MetadataLanguage != "en-US" || c.MetadataRefresh != 24*time.Hour ||
+		c.TMDBURL != "" || c.TMDBImageURL != "" {
+		t.Errorf("defaults: %+v", c)
+	}
+}
+
+func TestMetadataFlags(t *testing.T) {
+	for _, name := range []string{TMDBKeyEnv, MetadataEnv, MetadataLanguageEnv, MetadataRefreshEnv, TMDBURLEnv, TMDBImageURLEnv} {
+		t.Setenv(name, "")
+	}
+	c, err := Parse([]string{"-data", t.TempDir(), "-tmdb-key", " abc123 ", "-metadata=false", "-metadata-language", "pt-BR",
+		"-metadata-refresh", "6h", "-tmdb-url", "http://127.0.0.1:1/3", "-tmdb-image-url", "http://127.0.0.1:1/img"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.TMDBKey != "abc123" || c.Metadata || c.MetadataLanguage != "pt-BR" || c.MetadataRefresh != 6*time.Hour ||
+		c.TMDBURL != "http://127.0.0.1:1/3" || c.TMDBImageURL != "http://127.0.0.1:1/img" {
+		t.Errorf("flags: %+v", c)
+	}
+	c, err = Parse([]string{"-data", t.TempDir(), "-metadata-refresh", "0"}, &bytes.Buffer{})
+	if err != nil || c.MetadataRefresh != 0 {
+		t.Errorf("refresh 0: %+v, %v", c, err)
+	}
+}
+
+func TestMetadataEnvironment(t *testing.T) {
+	t.Setenv(TMDBKeyEnv, "envkey")
+	t.Setenv(MetadataEnv, "false")
+	t.Setenv(MetadataLanguageEnv, "de-DE")
+	t.Setenv(MetadataRefreshEnv, "12h")
+	t.Setenv(TMDBURLEnv, "http://tmdb.test/3")
+	t.Setenv(TMDBImageURLEnv, "http://img.test")
+	c, err := Parse([]string{"-data", t.TempDir()}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.TMDBKey != "" || c.TMDBKeyEnv != "envkey" || c.Metadata || c.MetadataLanguage != "de-DE" || c.MetadataRefresh != 12*time.Hour ||
+		c.TMDBURL != "http://tmdb.test/3" || c.TMDBImageURL != "http://img.test" {
+		t.Errorf("env: %+v", c)
+	}
+
+	// The flag wins over the environment; the key stays in two places so that
+	// the settings page can say which one is in use.
+	c, err = Parse([]string{"-data", t.TempDir(), "-tmdb-key", "flagkey", "-metadata=true", "-metadata-language", "fr-FR",
+		"-metadata-refresh", "1h", "-tmdb-url", "http://flag/3"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.TMDBKey != "flagkey" || c.TMDBKeyEnv != "envkey" || !c.Metadata || c.MetadataLanguage != "fr-FR" ||
+		c.MetadataRefresh != time.Hour || c.TMDBURL != "http://flag/3" || c.TMDBImageURL != "http://img.test" {
+		t.Errorf("flags over env: %+v", c)
+	}
+}
+
+func TestMetadataErrors(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args []string
+		env  map[string]string
+	}{
+		"negative refresh":      {args: []string{"-metadata-refresh", "-1h"}},
+		"bad refresh":           {args: []string{"-metadata-refresh", "daily"}},
+		"bad language":          {args: []string{"-metadata-language", "english"}},
+		"empty language":        {args: []string{"-metadata-language", ""}},
+		"bad bool in env":       {env: map[string]string{MetadataEnv: "maybe"}},
+		"bad duration in env":   {env: map[string]string{MetadataRefreshEnv: "soon"}},
+		"negative duration env": {env: map[string]string{MetadataRefreshEnv: "-5m"}},
+		"bad language in env":   {env: map[string]string{MetadataLanguageEnv: "en_US"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, e := range []string{TMDBKeyEnv, MetadataEnv, MetadataLanguageEnv, MetadataRefreshEnv} {
+				t.Setenv(e, "")
+			}
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			if _, err := Parse(append([]string{"-data", t.TempDir()}, tc.args...), &bytes.Buffer{}); err == nil {
+				t.Error("expected an error")
+			}
+		})
+	}
+}
+
+func TestUsageHidesTheTestFlags(t *testing.T) {
+	var out bytes.Buffer
+	if _, err := Parse([]string{"-h"}, &out); !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("-h: %v", err)
+	}
+	usage := out.String()
+	for _, want := range []string{"-media", "-tmdb-key", "-metadata", "-metadata-language", "-metadata-refresh", "-hwaccel", "-token"} {
+		if !strings.Contains(usage, want) {
+			t.Errorf("usage lacks %s:\n%s", want, usage)
+		}
+	}
+	for _, hidden := range []string{"-tmdb-url", "-tmdb-image-url"} {
+		if strings.Contains(usage, hidden) {
+			t.Errorf("usage shows the hidden flag %s", hidden)
+		}
+	}
+	// Hidden is not unknown.
+	if _, err := Parse([]string{"-data", t.TempDir(), "-tmdb-url", "http://x/3"}, &bytes.Buffer{}); err != nil {
+		t.Errorf("hidden flag rejected: %v", err)
+	}
+}
+
+func TestWatchFlag(t *testing.T) {
+	c, err := Parse([]string{"-data", t.TempDir()}, &bytes.Buffer{})
+	if err != nil || !c.Watch {
+		t.Fatalf("default: %+v, %v; watching is on by default", c.Watch, err)
+	}
+	c, err = Parse([]string{"-data", t.TempDir(), "-watch=false"}, &bytes.Buffer{})
+	if err != nil || c.Watch {
+		t.Errorf("-watch=false: %+v, %v", c.Watch, err)
 	}
 }

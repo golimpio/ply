@@ -38,6 +38,12 @@ type ItemSummary struct {
 	AddedAt      int64     `json:"addedAt"`
 	Progress     *Progress `json:"progress"` // null when the item has not been started
 	Art          *ArtURLs  `json:"art"`      // null when there is no artwork
+
+	// Metadata (M6): poster, backdrop and logo are image URLs, the frame-grab
+	// Art above stays the fallback. Overview and Still are an episode's.
+	MetaFields
+	Overview string `json:"overview,omitempty"`
+	Still    string `json:"still,omitempty"`
 }
 
 // Subtitle describes a selectable subtitle track. Key is the ffprobe stream
@@ -64,6 +70,12 @@ type ItemDetail struct {
 	Streams   []probe.Stream `json:"streams"`
 	Subtitles []Subtitle     `json:"subtitles"`
 	Playback  Playback       `json:"playback"`
+
+	// Meta is the movie's title, or the show's for an episode; EpisodeInfo is the
+	// episode's own metadata. Both are absent when there is none. (The spec calls
+	// the second one "episode", which an item's episode number already is.)
+	Meta        *TitleDetail `json:"meta,omitempty"`
+	EpisodeInfo *EpisodeInfo `json:"episodeInfo,omitempty"`
 }
 
 // Playback is a delivery decision plus the URL to play.
@@ -83,6 +95,10 @@ type ShowSummary struct {
 	Show         string `json:"show"`
 	Seasons      []int  `json:"seasons"`
 	EpisodeCount int    `json:"episodeCount"`
+
+	Year     *int   `json:"year,omitempty"`
+	Overview string `json:"overview,omitempty"`
+	MetaFields
 }
 
 func summarize(e store.Entry) ItemSummary {
@@ -93,6 +109,7 @@ func summarize(e store.Entry) ItemSummary {
 		DurationSec: e.DurationSec,
 		Container:   e.Container,
 		AddedAt:     e.AddedAt,
+		MetaFields:  MetaFields{MatchState: e.MatchState, NeedsReview: e.NeedsReview},
 	}
 	if e.Year > 0 {
 		s.Year = &e.Year

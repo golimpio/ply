@@ -776,3 +776,154 @@ func TestRedact(t *testing.T) {
 		t.Errorf("redact without a key changed the text: %q", got)
 	}
 }
+
+// A call that is queued for a slot must not sleep through a pause that another
+// call's 429 set while it waited.
+func TestQueuedCallDoesNotSitOutALongPauseSetMeanwhile(t *testing.T) {
+	f, clk := newFakeTMDB(t), newFakeClock()
+	gate := make(chan struct{})
+	var hits atomic.Int32
+	f.handle("/configuration", "", func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		<-gate
+		w.Header().Set("Retry-After", "3600")
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write(f.fixture("error_429.json"))
+	})
+	c := testClient(t, f, func(o *Options) { o.MaxInFlight = 1 })
+	useClock(c, clk, 1000, 1000)
+
+	first := make(chan error, 1)
+	go func() { _, err := c.Configuration(t.Context()); first <- err }()
+	for hits.Load() == 0 {
+		time.Sleep(2 * time.Millisecond)
+	}
+	second := make(chan error, 1)
+	go func() { _, err := c.Configuration(t.Context()); second <- err }() // queued: the only slot is taken
+	time.Sleep(100 * time.Millisecond)
+	close(gate) // the first gets its 429 and sets the pause
+
+	for i, ch := range []chan error{first, second} {
+		select {
+		case err := <-ch:
+			var e *Error
+			if !errors.As(err, &e) || e.Status != 429 || !e.Transient || e.RetryAfter < 3500*time.Second || !strings.Contains(e.Op, "GET /configuration") {
+				t.Errorf("call %d: err = %#v", i+1, err)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("call %d sat out the pause", i+1)
+		}
+	}
+	if s := clk.slept(); len(s) != 0 {
+		t.Errorf("slept %v; a pause longer than MaxWait is never sat out", s)
+	}
+	if hits.Load() != 1 {
+		t.Errorf("%d requests reached TMDB, want 1", hits.Load())
+	}
+}
+
+func TestClientDefaults(t *testing.T) {
+	c := NewClient(Options{})
+	if c.bucket.rate != 20 || c.bucket.burst != 20 || DefaultRate != 20 {
+		t.Errorf("rate %v burst %v, want 20 and 20", c.bucket.rate, c.bucket.burst)
+	}
+	if cap(c.slots) != 4 || c.timeout != DefaultTimeout || c.maxWait != DefaultMaxWait || c.lang != "en-US" {
+		t.Errorf("slots %d timeout %v maxWait %v lang %q", cap(c.slots), c.timeout, c.maxWait, c.lang)
+	}
+	if DefaultTimeout != 15*time.Second || DefaultMaxWait != 30*time.Second || DefaultMaxInFlight != 4 {
+		t.Error("the documented defaults changed")
+	}
+	// The bucket starts full: 20 requests at once, the 21st waits.
+	for i := 0; i < 20; i++ {
+		if w := c.bucket.take(); w != 0 {
+			t.Fatalf("request %d waits %v", i+1, w)
+		}
+	}
+	if w := c.bucket.take(); w < 40*time.Millisecond || w > 60*time.Millisecond {
+		t.Errorf("the 21st request waits %v, want about 50ms (20 a second)", w)
+	}
+	// What is asked for is what is used.
+	c = NewClient(Options{Rate: 5, MaxInFlight: 2, Timeout: time.Second, MaxWait: time.Minute, Language: "fr-FR"})
+	if c.bucket.rate != 5 || c.bucket.burst != 5 || cap(c.slots) != 2 || c.timeout != time.Second || c.maxWait != time.Minute || c.lang != "fr-FR" {
+		t.Errorf("explicit options: rate %v slots %d timeout %v maxWait %v lang %q", c.bucket.rate, cap(c.slots), c.timeout, c.maxWait, c.lang)
+	}
+}
+
+// Calls cancelled while they wait out a pause give their slot back: after as
+// many cancellations as there are slots the client still works.
+func TestCancelledCallsDuringAPauseReleaseTheirSlot(t *testing.T) {
+	f := newFakeTMDB(t)
+	f.on("/configuration", "", "configuration.json")
+	c := testClient(t, f, func(o *Options) { o.MaxInFlight = 1; o.MaxWait = 20 * time.Second })
+	c.pause(10 * time.Second) // within MaxWait: calls sleep it out
+	for i := 0; i < 3; i++ {
+		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
+		_, err := c.Configuration(ctx)
+		cancel()
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("call %d: %v, want its own deadline", i+1, err)
+		}
+	}
+	c.mu.Lock()
+	c.pauseUntil = time.Time{}
+	c.mu.Unlock()
+	done := make(chan error, 1)
+	go func() { _, err := c.Configuration(t.Context()); done <- err }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("after the cancellations: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the slots leaked: the client is stuck after cancelled calls")
+	}
+}
+
+// roundTripper fails as it is told.
+type roundTripper func(*http.Request) (*http.Response, error)
+
+func (f roundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestTransportErrorTextIsRedacted(t *testing.T) {
+	// A proxy, a TLS library or a custom transport may put the credentials it
+	// was handed in its error text.
+	for _, key := range []string{testKey, testToken} {
+		tr := roundTripper(func(r *http.Request) (*http.Response, error) {
+			return nil, fmt.Errorf("proxyconnect tcp: refused for api_key=%s (token %s)", key, key)
+		})
+		c := NewClient(Options{Key: key, BaseURL: "http://tmdb.invalid/3", HTTPClient: &http.Client{Transport: tr}, Logger: discardLogger()})
+		_, err := c.Configuration(t.Context())
+		if err == nil || !IsTransient(err) {
+			t.Fatalf("err = %v", err)
+		}
+		all := err.Error() + fmt.Sprintf("%v %+v %#v", err, err, err)
+		for u := errors.Unwrap(err); u != nil; u = errors.Unwrap(u) {
+			all += u.Error() + fmt.Sprintf("%#v", u)
+		}
+		if strings.Contains(all, key) {
+			t.Errorf("the key is in %q", all)
+		}
+		if !strings.Contains(err.Error(), "***") || !strings.Contains(err.Error(), "proxyconnect") {
+			t.Errorf("err = %q; the cause should be there with the key cut out", err)
+		}
+	}
+}
+
+func TestResponsesAreCappedAtEightMiB(t *testing.T) {
+	big := func(n int) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			// Valid JSON of about n bytes.
+			fmt.Fprintf(w, `{"id": 1, "overview": "%s"}`, strings.Repeat("x", n))
+		}
+	}
+	f := newFakeTMDB(t)
+	f.handle("/movie/1", "", big(7<<20))
+	f.handle("/movie/2", "", big(9<<20))
+	c := testClient(t, f)
+	if m, err := c.MovieDetails(t.Context(), 1); err != nil || len(m.Overview) != 7<<20 {
+		t.Errorf("7 MiB response: %v", err)
+	}
+	if _, err := c.MovieDetails(t.Context(), 2); err == nil || !IsTransient(err) {
+		t.Errorf("9 MiB response: err = %v; it is cut off at 8 MiB and so cannot be read", err)
+	}
+}

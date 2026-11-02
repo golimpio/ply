@@ -112,7 +112,8 @@ func scanCard(sc scanner, lead ...any) (TitleCard, error) {
 	if err != nil {
 		return c, err
 	}
-	if c.ItemID != 0 && itemPoster != "" {
+	// A cover embedded in the file ranks below TMDB's poster; sidecar art beats it.
+	if c.ItemID != 0 && itemPoster != "" && (c.Poster == "" || !strings.HasPrefix(itemPoster, EmbeddedPrefix)) {
 		c.Poster = LocalRef(ArtItem, c.ItemID, "poster")
 	}
 	if c.ItemID != 0 && itemBackdrop != "" {

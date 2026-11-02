@@ -287,7 +287,7 @@ func checkCORSHeaders(t *testing.T, rec *httptest.ResponseRecorder, what string)
 	want := map[string]string{
 		"Access-Control-Allow-Origin":   "*",
 		"Access-Control-Allow-Headers":  "Range, Authorization, Content-Type",
-		"Access-Control-Allow-Methods":  "GET, POST, PUT, DELETE, OPTIONS",
+		"Access-Control-Allow-Methods":  "GET, POST, PUT, PATCH, DELETE, OPTIONS",
 		"Access-Control-Expose-Headers": "Content-Range, Accept-Ranges, Content-Length, Content-Type",
 	}
 	for k, v := range want {

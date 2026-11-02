@@ -66,19 +66,41 @@ func (s Stream) BitDepth() int {
 	return 8
 }
 
+// Tags are the container-level tags that describe the content: what a tagger
+// or a ripper wrote into the file. Anything missing is zero.
+type Tags struct {
+	Title       string
+	Year        int    // from the date tag
+	Date        string // as written ("2019-12-25", "2019")
+	Description string // description, else synopsis
+	Show        string
+	Season      int // season_number
+	Episode     int // episode_sort
+	EpisodeID   string
+}
+
+// Empty reports whether the file has no descriptive tags.
+func (t Tags) Empty() bool { return t == Tags{} }
+
 // Result is the normalised ffprobe output for one file.
 type Result struct {
 	Container   string // mp4 mov m4v mkv webm ts avi, or ffprobe's first format name
 	DurationSec float64
 	Bitrate     int64
 	Streams     []Stream // video, audio and subtitle streams only; cover art excluded
+	Tags        Tags
+	// Cover is the ffprobe stream index of the picture attached to the file
+	// (an iTunes or Matroska cover), when HasCover.
+	Cover    int
+	HasCover bool
 }
 
 type ffprobeOutput struct {
 	Format struct {
-		FormatName string `json:"format_name"`
-		Duration   string `json:"duration"`
-		BitRate    string `json:"bit_rate"`
+		FormatName string            `json:"format_name"`
+		Duration   string            `json:"duration"`
+		BitRate    string            `json:"bit_rate"`
+		Tags       map[string]string `json:"tags"`
 	} `json:"format"`
 	Streams []struct {
 		Index          int               `json:"index"`
@@ -110,6 +132,7 @@ func Parse(data []byte, path string) (Result, error) {
 		Container:   container(out.Format.FormatName, filepath.Ext(path)),
 		DurationSec: parseFloat(out.Format.Duration),
 		Bitrate:     int64(parseFloat(out.Format.BitRate)),
+		Tags:        parseTags(out.Format.Tags),
 	}
 	for _, s := range out.Streams {
 		switch s.CodecType {
@@ -118,6 +141,9 @@ func Parse(data []byte, path string) (Result, error) {
 			continue
 		}
 		if s.Disposition["attached_pic"] == 1 {
+			if s.CodecType == "video" && !res.HasCover {
+				res.Cover, res.HasCover = s.Index, true
+			}
 			continue
 		}
 		st := Stream{
@@ -166,6 +192,52 @@ func container(formatName, ext string) string {
 		return "avi"
 	}
 	return names[0]
+}
+
+// maxTagText bounds a tag we keep: a plot, not a novel.
+const maxTagText = 8 << 10
+
+func parseTags(m map[string]string) Tags {
+	if len(m) == 0 {
+		return Tags{}
+	}
+	text := func(keys ...string) string {
+		for _, k := range keys {
+			if v := strings.TrimSpace(tag(m, k)); v != "" {
+				return truncate(strings.ToValidUTF8(v, ""), maxTagText)
+			}
+		}
+		return ""
+	}
+	num := func(key string) int {
+		n, err := strconv.Atoi(strings.TrimSpace(tag(m, key)))
+		if err != nil || n < 0 || n > 9999 {
+			return 0
+		}
+		return n
+	}
+	t := Tags{
+		Title:       text("title"),
+		Date:        text("date", "year"),
+		Description: text("description", "synopsis"),
+		Show:        text("show"),
+		Season:      num("season_number"),
+		Episode:     num("episode_sort"),
+		EpisodeID:   text("episode_id"),
+	}
+	if len(t.Date) >= 4 {
+		if y, err := strconv.Atoi(t.Date[:4]); err == nil && y >= 1800 && y <= 2200 {
+			t.Year = y
+		}
+	}
+	return t
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return strings.ToValidUTF8(s[:n], "")
 }
 
 // cleanTag drops the "[0][0][0][0]" placeholder ffprobe prints for unknown tags.

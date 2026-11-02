@@ -37,6 +37,10 @@ type Fake struct {
 	ChangedShows  []int64
 	// ImageBase is where ImageURL points (an httptest server serving images).
 	ImageBase string
+	// Hook, when set, is called at the start of every method with the call as a
+	// string ("Movie(603)"); a non-nil error is returned by the method. A test
+	// can make calls slow or block them until the context is done.
+	Hook func(ctx context.Context, call string) error
 
 	mu    sync.Mutex
 	err   error
@@ -77,41 +81,46 @@ func (f *Fake) Count(prefix string) int {
 	return n
 }
 
-func (f *Fake) enter(format string, args ...any) error {
+func (f *Fake) enter(ctx context.Context, format string, args ...any) error {
+	call := fmt.Sprintf(format, args...)
 	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.calls = append(f.calls, fmt.Sprintf(format, args...))
-	return f.err
+	f.calls = append(f.calls, call)
+	err := f.err
+	f.mu.Unlock()
+	if err == nil && f.Hook != nil {
+		err = f.Hook(ctx, call)
+	}
+	return err
 }
 
 func notFound(op string) error {
 	return &metadata.Error{Op: op, Status: http.StatusNotFound, Message: "The resource you requested could not be found."}
 }
 
-func (f *Fake) SearchMovies(_ context.Context, query string, year int) ([]metadata.Candidate, error) {
-	if err := f.enter("SearchMovies(%q, %d)", query, year); err != nil {
+func (f *Fake) SearchMovies(ctx context.Context, query string, year int) ([]metadata.Candidate, error) {
+	if err := f.enter(ctx, "SearchMovies(%q, %d)", query, year); err != nil {
 		return nil, err
 	}
 	return slices.Clone(f.MovieSearch[strings.ToLower(query)]), nil
 }
 
-func (f *Fake) SearchSeries(_ context.Context, query string, year int) ([]metadata.Candidate, error) {
-	if err := f.enter("SearchSeries(%q, %d)", query, year); err != nil {
+func (f *Fake) SearchSeries(ctx context.Context, query string, year int) ([]metadata.Candidate, error) {
+	if err := f.enter(ctx, "SearchSeries(%q, %d)", query, year); err != nil {
 		return nil, err
 	}
 	return slices.Clone(f.SeriesSearch[strings.ToLower(query)]), nil
 }
 
-func (f *Fake) Find(_ context.Context, source, id string) (movies, series []metadata.Candidate, err error) {
-	if err := f.enter("Find(%s, %s)", source, id); err != nil {
+func (f *Fake) Find(ctx context.Context, source, id string) (movies, series []metadata.Candidate, err error) {
+	if err := f.enter(ctx, "Find(%s, %s)", source, id); err != nil {
 		return nil, nil, err
 	}
 	key := source + ":" + id
 	return slices.Clone(f.FindMovies[key]), slices.Clone(f.FindSeries[key]), nil
 }
 
-func (f *Fake) Movie(_ context.Context, id int64) (*store.TitleInput, error) {
-	if err := f.enter("Movie(%d)", id); err != nil {
+func (f *Fake) Movie(ctx context.Context, id int64) (*store.TitleInput, error) {
+	if err := f.enter(ctx, "Movie(%d)", id); err != nil {
 		return nil, err
 	}
 	in, ok := f.Movies[id]
@@ -122,8 +131,8 @@ func (f *Fake) Movie(_ context.Context, id int64) (*store.TitleInput, error) {
 	return &cp, nil
 }
 
-func (f *Fake) Series(_ context.Context, id int64, seasons []int) (*store.TitleInput, error) {
-	if err := f.enter("Series(%d, %v)", id, seasons); err != nil {
+func (f *Fake) Series(ctx context.Context, id int64, seasons []int) (*store.TitleInput, error) {
+	if err := f.enter(ctx, "Series(%d, %v)", id, seasons); err != nil {
 		return nil, err
 	}
 	in, ok := f.Shows[id]
@@ -140,8 +149,8 @@ func (f *Fake) Series(_ context.Context, id int64, seasons []int) (*store.TitleI
 	return &cp, nil
 }
 
-func (f *Fake) Person(_ context.Context, id int64) (*store.Person, error) {
-	if err := f.enter("Person(%d)", id); err != nil {
+func (f *Fake) Person(ctx context.Context, id int64) (*store.Person, error) {
+	if err := f.enter(ctx, "Person(%d)", id); err != nil {
 		return nil, err
 	}
 	p, ok := f.People[id]
@@ -152,8 +161,8 @@ func (f *Fake) Person(_ context.Context, id int64) (*store.Person, error) {
 	return &cp, nil
 }
 
-func (f *Fake) Changes(_ context.Context, kind string, _, _ time.Time) ([]int64, error) {
-	if err := f.enter("Changes(%s)", kind); err != nil {
+func (f *Fake) Changes(ctx context.Context, kind string, _, _ time.Time) ([]int64, error) {
+	if err := f.enter(ctx, "Changes(%s)", kind); err != nil {
 		return nil, err
 	}
 	if kind == store.KindSeries {
@@ -162,8 +171,11 @@ func (f *Fake) Changes(_ context.Context, kind string, _, _ time.Time) ([]int64,
 	return slices.Clone(f.ChangedMovies), nil
 }
 
-func (f *Fake) Check(context.Context) error { return f.enter("Check()") }
+func (f *Fake) Check(ctx context.Context) error { return f.enter(ctx, "Check()") }
 
 func (f *Fake) ImageURL(size, file string) string {
+	if !metadata.ValidSize(size) || !metadata.ValidImagePath(file) {
+		return ""
+	}
 	return strings.TrimRight(f.ImageBase, "/") + "/" + size + "/" + strings.TrimPrefix(file, "/")
 }

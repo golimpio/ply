@@ -127,6 +127,9 @@ func (s *Store) UpsertItem(ctx context.Context, it *Item, streams []probe.Stream
 			container, duration_sec, bitrate, added_at, updated_at, fingerprint)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (path) DO UPDATE SET
+			-- title_id, match_state, needs_review, match_*, next_attempt_at and the
+			-- local_* art are deliberately not here: a file that changed is still the
+			-- same movie, and its match, its fix and its edits survive a re-index.
 			kind = excluded.kind, title = excluded.title, year = excluded.year,
 			show = excluded.show, season = excluded.season, episode = excluded.episode,
 			root = excluded.root, size = excluded.size, mtime = excluded.mtime,

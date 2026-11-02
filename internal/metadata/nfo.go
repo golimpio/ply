@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/xml"
 	"io"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -61,9 +60,10 @@ const (
 	maxDepth    = 32
 )
 
-// ReadNFO reads and parses an NFO file (at most MaxNFOBytes of it).
+// ReadNFO reads and parses an NFO file (at most MaxNFOBytes of it). Only a
+// regular file is read: a FIFO or a device with an .nfo name is an error.
 func ReadNFO(path string) (NFO, error) {
-	f, err := os.Open(path)
+	f, err := OpenRegular(path)
 	if err != nil {
 		return NFO{}, err
 	}
@@ -94,12 +94,37 @@ func ParseNFO(data []byte) NFO {
 	}
 	data = toUTF8(data)
 	var n NFO
-	parseXML(data, &n)
+	end := parseXML(data, &n)
 	if n.IDs.IsZero() {
-		n.IDs = scanURLs(data, n.Root == "")
+		// Ids in the text around the XML (Kodi appends the URL after it), never in
+		// the XML itself: a plot that mentions a movie is not that movie's id.
+		switch {
+		case n.Root == "":
+			n.IDs = scanURLs(data, true)
+		default:
+			n.IDs = scanURLs(outsideRoot(data, end), false)
+		}
 	}
 	n.sanitize()
 	return n
+}
+
+var reStartTag = regexp.MustCompile(`<[A-Za-z_]`)
+
+// outsideRoot returns what lies before the root element's start tag and after
+// its end tag (end is the offset parseXML reported, -1 when the root never
+// closed). A decoder reading a Latin-1 file counts bytes after conversion, which
+// can only be more than the file's own, so the cut never lands inside the XML.
+func outsideRoot(data []byte, end int) []byte {
+	var out []byte
+	if loc := reStartTag.FindIndex(data); loc != nil {
+		out = append(out, data[:loc[0]]...)
+	}
+	if end >= 0 && end < len(data) {
+		out = append(out, '\n')
+		out = append(out, data[end:]...)
+	}
+	return out
 }
 
 // toUTF8 strips a UTF-8 byte order mark and converts UTF-16 that has one.
@@ -144,8 +169,9 @@ func (f *frame) attr(name string) string {
 }
 
 // parseXML walks the first root element of data, filling n. It stops at the
-// first error, keeping what it has.
-func parseXML(data []byte, n *NFO) {
+// first error, keeping what it has. It returns the offset after the root's end
+// tag, or -1 when there was no root or it did not close.
+func parseXML(data []byte, n *NFO) (end int) {
 	d := xml.NewDecoder(bytes.NewReader(data))
 	d.Strict = false
 	d.Entity = xml.HTMLEntity
@@ -157,15 +183,15 @@ func parseXML(data []byte, n *NFO) {
 	for {
 		tok, err := d.Token()
 		if err != nil {
-			return
+			return -1
 		}
 		switch t := tok.(type) {
 		case xml.StartElement:
 			if len(stack) == 0 && n.Root != "" {
-				return // a second root: the first one is the file's subject
+				return -1 // a second root: the first one is the file's subject
 			}
 			if len(stack) >= maxDepth {
-				return
+				return -1
 			}
 			f := &frame{name: strings.ToLower(t.Name.Local), attrs: t.Attr, kids: map[string]string{}}
 			if len(stack) == 0 {
@@ -174,8 +200,10 @@ func parseXML(data []byte, n *NFO) {
 			stack = append(stack, f)
 		case xml.CharData:
 			if len(stack) > 0 {
+				// Keep at most maxText bytes per element, however the decoder
+				// chunked the text (a closed 300 KiB plot arrives in one piece).
 				if top := stack[len(stack)-1]; top.text.Len() < maxText {
-					top.text.Write(t)
+					top.text.Write(t[:min(len(t), maxText-top.text.Len())])
 				}
 			}
 		case xml.EndElement:
@@ -185,7 +213,7 @@ func parseXML(data []byte, n *NFO) {
 			f := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
 			if len(stack) == 0 {
-				return
+				return int(d.InputOffset())
 			}
 			text := strings.TrimSpace(f.text.String())
 			parent := stack[len(stack)-1]

@@ -167,6 +167,20 @@ func TestParseNFOTable(t *testing.T) {
 			NFO{Root: "movie", Title: "Foo", IDs: Hints{IMDb: "tt0133093"}}},
 		{"elements beat urls", []byte("<movie><uniqueid type=\"tmdb\">1</uniqueid></movie>\nhttps://www.themoviedb.org/movie/603\n"),
 			NFO{Root: "movie", IDs: Hints{TMDB: 1}}},
+		// A plot, a thumb or any other element that mentions a title is not that title's id.
+		{"a url in the plot is not the id", []byte("<movie><plot>Like https://www.themoviedb.org/movie/603 and https://www.imdb.com/title/tt0133093</plot></movie>"),
+			NFO{Root: "movie", Plot: "Like https://www.themoviedb.org/movie/603 and https://www.imdb.com/title/tt0133093"}},
+		{"a url in a thumb is not the id", []byte("<movie><title>Foo</title><thumb>https://www.themoviedb.org/movie/603</thumb></movie>"),
+			NFO{Root: "movie", Title: "Foo"}},
+		{"a url in an unterminated plot is not the id", []byte("<movie><title>Foo</title><plot>see themoviedb.org/movie/603"), NFO{Root: "movie", Title: "Foo"}},
+		{"the url after the xml is, not the plot's", []byte("<movie><plot>https://www.themoviedb.org/movie/1</plot></movie>\nhttps://www.themoviedb.org/movie/2\n"),
+			NFO{Root: "movie", Plot: "https://www.themoviedb.org/movie/1", IDs: Hints{TMDB: 2}}},
+		{"the url before the xml is, not the plot's", []byte("https://www.imdb.com/title/tt0133093/\n<movie><plot>https://www.imdb.com/title/tt0111161/</plot></movie>"),
+			NFO{Root: "movie", Plot: "https://www.imdb.com/title/tt0111161/", IDs: Hints{IMDb: "tt0133093"}}},
+		{"a url in a latin1 plot is not the id", bytesOf(`<?xml version="1.0" encoding="ISO-8859-1"?><movie><title>Am`, 0xE9, `lie</title><plot>`, 0xE9, 0xE9, 0xE9, ` https://www.themoviedb.org/movie/603</plot></movie>`),
+			NFO{Root: "movie", Title: "Amélie", Plot: "ééé https://www.themoviedb.org/movie/603"}},
+		{"a latin1 file with a url after it", bytesOf(`<?xml version="1.0" encoding="ISO-8859-1"?><movie><title>Am`, 0xE9, `lie</title></movie>`, "\nhttps://www.themoviedb.org/movie/603\n"),
+			NFO{Root: "movie", Title: "Amélie", IDs: Hints{TMDB: 603}}},
 		{"a bare imdb id inside xml text is not trusted", []byte("<movie><plot>like tt0133093</plot></movie>"), NFO{Root: "movie", Plot: "like tt0133093"}},
 
 		// Tolerance.
@@ -264,10 +278,41 @@ func TestParseNFOLimits(t *testing.T) {
 		t.Errorf("deeply nested file: %+v", n)
 	}
 
-	huge := "<movie><title>Foo</title><plot>" + strings.Repeat("x", 3*MaxNFOBytes) + "</plot></movie>https://www.themoviedb.org/movie/603"
+	huge := "<movie><title>Foo</title><plot>" + strings.Repeat("x", 3*MaxNFOBytes) + "</plot></movie>\nhttps://www.themoviedb.org/movie/603"
 	n = ParseNFO([]byte(huge))
 	if n.Title != "Foo" || len(n.Plot) > maxText || n.IDs.TMDB != 0 {
 		t.Errorf("huge file: title %q, plot %d bytes, ids %+v (the tail past the cap is not read)", n.Title, len(n.Plot), n.IDs)
+	}
+}
+
+func TestParseNFOKeepsAtMostMaxTextOfAnElement(t *testing.T) {
+	// The decoder hands over a closed 300 KiB plot in one piece.
+	plot := strings.Repeat("x", 300<<10)
+	n := ParseNFO([]byte("<movie><title>Foo</title><plot>" + plot + "</plot><year>1999</year></movie>"))
+	if len(n.Plot) != maxText {
+		t.Errorf("plot of %d bytes, want it cut at %d", len(n.Plot), maxText)
+	}
+	if n.Title != "Foo" || n.Year != 1999 {
+		t.Errorf("what is around the plot: %+v", n)
+	}
+	// Many pieces (entities and CDATA break the text up) are capped too.
+	pieces := strings.Repeat("a&amp;<![CDATA[b]]>", 40<<10)
+	if n := ParseNFO([]byte("<movie><plot>" + pieces + "</plot></movie>")); len(n.Plot) > maxText+8 || len(n.Plot) < maxText-8 {
+		t.Errorf("plot in pieces = %d bytes, want about %d", len(n.Plot), maxText)
+	}
+}
+
+func TestParseNFODepthIsCapped(t *testing.T) {
+	nest := func(depth int) string {
+		return "<movie><title>Before</title>" + strings.Repeat("<a>", depth) + strings.Repeat("</a>", depth) + "<year>1999</year></movie>"
+	}
+	// Deep enough to be a problem: parsing stops there and keeps what it had.
+	if n := ParseNFO([]byte(nest(maxDepth + 10))); n.Title != "Before" || n.Year != 0 {
+		t.Errorf("nested past the cap: %+v; want the title and no year", n)
+	}
+	// Just inside the cap: all of it.
+	if n := ParseNFO([]byte(nest(maxDepth - 2))); n.Title != "Before" || n.Year != 1999 {
+		t.Errorf("nested within the cap: %+v", n)
 	}
 }
 

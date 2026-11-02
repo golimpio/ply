@@ -154,8 +154,13 @@ func (c *Client) langCode() string {
 }
 
 // ImageURL is the address of an image: size is "w342", "original", ...; file
-// is TMDB's file name with or without the leading slash.
+// is TMDB's file name with or without the leading slash. A size not on the
+// allowlist or a file that is not a plain TMDB image name gives "": nothing
+// that comes from TMDB can steer the address elsewhere.
 func (c *Client) ImageURL(size, file string) string {
+	if !ValidSize(size) || !ValidImagePath(file) {
+		return ""
+	}
 	return c.imageBase + "/" + size + "/" + strings.TrimPrefix(file, "/")
 }
 
@@ -271,6 +276,12 @@ func (c *Client) acquire(ctx context.Context) (release func(), err error) {
 		if wait <= 0 {
 			break
 		}
+		if wait > c.maxWait {
+			// A pause that began while this call queued for a slot, longer than we
+			// are willing to sit out: give the caller the 429 at once.
+			release()
+			return nil, rateLimited("", wait)
+		}
 		if err := c.sleep(ctx, wait); err != nil {
 			release()
 			return nil, err
@@ -283,6 +294,11 @@ func (c *Client) acquire(ctx context.Context) (release func(), err error) {
 		}
 	}
 	return release, nil
+}
+
+// rateLimited is the error of a call refused because TMDB asked us to stay away.
+func rateLimited(op string, wait time.Duration) *Error {
+	return &Error{Op: op, Status: http.StatusTooManyRequests, Transient: true, RetryAfter: wait, Message: "rate limited"}
 }
 
 func (c *Client) pauseLeft() time.Duration {
@@ -330,10 +346,15 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, out any) er
 		// Fail at once, rather than sit out a long pause, when TMDB asked us to
 		// stay away for longer than we are willing to wait.
 		if wait := c.pauseLeft(); wait > c.maxWait {
-			return &Error{Op: op, Status: http.StatusTooManyRequests, Transient: true, RetryAfter: wait, Message: "rate limited"}
+			return rateLimited(op, wait)
 		}
 		release, err := c.acquire(ctx)
 		if err != nil {
+			var rl *Error
+			if errors.As(err, &rl) {
+				rl.Op = op
+				return rl
+			}
 			return fmt.Errorf("tmdb %s: %w", op, err)
 		}
 		start := c.now()
@@ -414,21 +435,23 @@ func (c *Client) failure(ctx context.Context, op string, err error) error {
 	return &Error{Op: op, Transient: true, Message: msg, Err: causeOf(err, msg)}
 }
 
-// causeOf returns err itself when its text is safe, else a plain error.
+// causeOf is the error to keep as the cause of an Error: the error itself when
+// its text is safe to show, else a plain error with the redacted text (the
+// original must not stay reachable through errors.Unwrap, where anything that
+// walks the chain would print the key). Timeouts and cancellations keep their
+// identity.
 func causeOf(err error, safe string) error {
 	if err.Error() == safe {
 		return err
 	}
-	return redacted{err: err, text: safe}
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return context.DeadlineExceeded
+	case errors.Is(err, context.Canceled):
+		return context.Canceled
+	}
+	return errors.New(safe)
 }
-
-type redacted struct {
-	err  error
-	text string
-}
-
-func (r redacted) Error() string { return r.text }
-func (r redacted) Unwrap() error { return r.err }
 
 // message extracts TMDB's status_message from an error body.
 func (c *Client) message(body []byte) string {

@@ -66,10 +66,5 @@ func (s *Server) handleContinue(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	out := make([]ItemSummary, len(entries))
-	for i, e := range entries {
-		out[i] = summarize(e)
-		out[i].Art = s.artOf(e)
-	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, s.summaries(r.Context(), entries))
 }

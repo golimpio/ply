@@ -317,6 +317,19 @@ func makeFixtures(t *testing.T, media string) {
 	if err := os.WriteFile(filepath.Join(media, srtRel), []byte(srt), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// The server only indexes files that have been left alone for a few seconds
+	// (a file still being copied is skipped until it settles). These were just
+	// written: make them look like files that have been in the library a while.
+	old := time.Now().Add(-time.Minute)
+	err := filepath.WalkDir(media, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		return os.Chtimes(path, old, old)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 // ply is a running server process.

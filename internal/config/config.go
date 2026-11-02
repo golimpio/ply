@@ -11,7 +11,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -28,6 +30,68 @@ type Config struct {
 	FFmpeg       string
 	StreamIdle   time.Duration // a streaming session without requests this long is stopped
 	HWAccel      string        // auto, none, or a hardware encoder family (see hwaccel.ValidMode)
+
+	Watch bool // -watch: pick up changes in the media folders within seconds
+
+	// Metadata (M6). The TMDB key is kept as two values, because the settings
+	// page says where the key in use came from: -tmdb-key, then PLY_TMDB_KEY.
+	TMDBKey          string        // -tmdb-key
+	TMDBKeyEnv       string        // PLY_TMDB_KEY
+	Metadata         bool          // -metadata: false switches every online lookup off
+	MetadataLanguage string        // -metadata-language, a TMDB language such as en-US
+	MetadataRefresh  time.Duration // -metadata-refresh: how often titles are refreshed; 0 never
+	TMDBURL          string        // hidden: -tmdb-url replaces TMDB's API address (tests)
+	TMDBImageURL     string        // hidden: -tmdb-image-url replaces TMDB's image address (tests)
+}
+
+// Environment variables that stand in for flags (the flag wins).
+const (
+	TMDBKeyEnv           = "PLY_TMDB_KEY"
+	MetadataEnv          = "PLY_METADATA"
+	MetadataLanguageEnv  = "PLY_METADATA_LANGUAGE"
+	MetadataRefreshEnv   = "PLY_METADATA_REFRESH"
+	TMDBURLEnv           = "PLY_TMDB_URL"
+	TMDBImageURLEnv      = "PLY_TMDB_IMAGE_URL"
+	DefaultMetadataLang  = "en-US"
+	DefaultMetadataEvery = 24 * time.Hour
+)
+
+// hiddenFlags are accepted but not listed in the usage.
+var hiddenFlags = map[string]bool{"tmdb-url": true, "tmdb-image-url": true}
+
+var languageCode = regexp.MustCompile(`^[a-z]{2,3}(-[A-Za-z]{2})?$`)
+
+// envBool reads a boolean from the environment; unset gives def. A value that
+// is not a boolean is an error: a privacy switch must not be guessed.
+func envBool(name string, def bool) (bool, error) {
+	v, ok := os.LookupEnv(name)
+	if !ok || v == "" {
+		return def, nil
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return false, fmt.Errorf("%s=%q: want true or false", name, v)
+	}
+	return b, nil
+}
+
+func envDuration(name string, def time.Duration) (time.Duration, error) {
+	v, ok := os.LookupEnv(name)
+	if !ok || v == "" {
+		return def, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("%s=%q: %v", name, v, err)
+	}
+	return d, nil
+}
+
+func envString(name, def string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	return def
 }
 
 // DefaultStreamIdle is how long a streaming session may go without a request
@@ -89,14 +153,32 @@ func Parse(args []string, out io.Writer) (Config, error) {
 	fs.StringVar(&data, "data", "", "data directory (default: per-user application data dir)")
 	fs.StringVar(&c.Token, "token", "", "require this token for /api (Bearer header or ?token=)")
 	fs.StringVar(&c.Name, "name", hostname, "server name shown to clients")
+	fs.BoolVar(&c.Watch, "watch", true, "watch media folders and pick up changes within seconds")
 	fs.DurationVar(&c.ScanInterval, "scan-interval", 15*time.Minute, "periodic rescan interval (0 disables; a scan always runs at startup)")
 	fs.StringVar(&c.FFprobe, "ffprobe", "ffprobe", "ffprobe binary")
 	fs.StringVar(&c.FFmpeg, "ffmpeg", "ffmpeg", "ffmpeg binary")
 	fs.DurationVar(&c.StreamIdle, "stream-idle", defaultStreamIdle(), "stop a streaming session after this long without requests (env "+StreamIdleEnv+" sets the default)")
 	fs.StringVar(&c.HWAccel, "hwaccel", "auto", "video encoder: auto (probe the GPU), none (libx264), videotoolbox, vaapi, qsv or nvenc")
+
+	envMetadata, err := envBool(MetadataEnv, true)
+	if err != nil {
+		return Config{}, err
+	}
+	envRefresh, err := envDuration(MetadataRefreshEnv, DefaultMetadataEvery)
+	if err != nil {
+		return Config{}, err
+	}
+	fs.StringVar(&c.TMDBKey, "tmdb-key", "", "TMDB API key or read access token for posters, plots and cast (env "+TMDBKeyEnv+"; can also be set in the web UI)")
+	fs.BoolVar(&c.Metadata, "metadata", envMetadata, "look up metadata online (TMDB); false keeps everything local (env "+MetadataEnv+")")
+	fs.StringVar(&c.MetadataLanguage, "metadata-language", envString(MetadataLanguageEnv, DefaultMetadataLang), "TMDB language, such as en-US or pt-BR (env "+MetadataLanguageEnv+")")
+	fs.DurationVar(&c.MetadataRefresh, "metadata-refresh", envRefresh, "how often titles are refreshed from TMDB (0 turns the refresh off; env "+MetadataRefreshEnv+")")
+	fs.StringVar(&c.TMDBURL, "tmdb-url", envString(TMDBURLEnv, ""), "")
+	fs.StringVar(&c.TMDBImageURL, "tmdb-image-url", envString(TMDBImageURLEnv, ""), "")
+	fs.Usage = func() { usage(fs, out) }
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
 	}
+	c.TMDBKeyEnv = os.Getenv(TMDBKeyEnv)
 	if fs.NArg() > 0 {
 		return Config{}, fmt.Errorf("unexpected argument %q", fs.Arg(0))
 	}
@@ -109,6 +191,14 @@ func Parse(args []string, out io.Writer) (Config, error) {
 	if !validHWAccel(c.HWAccel) {
 		return Config{}, fmt.Errorf("-hwaccel %q: want auto, none, videotoolbox, vaapi, qsv or nvenc", c.HWAccel)
 	}
+	if c.MetadataRefresh < 0 {
+		return Config{}, errors.New("-metadata-refresh must not be negative")
+	}
+	if !languageCode.MatchString(c.MetadataLanguage) {
+		return Config{}, fmt.Errorf("-metadata-language %q: want a language such as en-US or pt-BR", c.MetadataLanguage)
+	}
+	c.TMDBKey = strings.TrimSpace(c.TMDBKey)
+	c.TMDBKeyEnv = strings.TrimSpace(c.TMDBKeyEnv)
 
 	seen := map[string]bool{}
 	for _, m := range media {
@@ -122,11 +212,24 @@ func Parse(args []string, out io.Writer) (Config, error) {
 		}
 	}
 
-	var err error
 	if c.Data, err = DataDir(data); err != nil {
 		return Config{}, err
 	}
 	return c, nil
+}
+
+// usage prints the flags that are not hidden, as the flag package would.
+func usage(fs *flag.FlagSet, out io.Writer) {
+	fmt.Fprintf(out, "Usage of %s:\n", fs.Name())
+	shown := flag.NewFlagSet(fs.Name(), flag.ContinueOnError)
+	shown.SetOutput(out)
+	fs.VisitAll(func(f *flag.Flag) {
+		if !hiddenFlags[f.Name] {
+			shown.Var(f.Value, f.Name, f.Usage)
+			shown.Lookup(f.Name).DefValue = f.DefValue
+		}
+	})
+	shown.PrintDefaults()
 }
 
 // DataDir returns the data directory: override if non-empty, else the

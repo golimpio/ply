@@ -13,8 +13,10 @@ import (
 	"strconv"
 	"strings"
 
+	"ply/internal/library"
 	"ply/internal/playback"
 	"ply/internal/store"
+	"ply/internal/watch"
 )
 
 func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
@@ -38,25 +40,7 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	out := make([]ItemSummary, len(entries))
-	for i, e := range entries {
-		out[i] = summarize(e)
-		out[i].Art = s.artOf(e)
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-func (s *Server) handleShows(w http.ResponseWriter, r *http.Request) {
-	shows, err := s.Store.Shows(r.Context())
-	if err != nil {
-		s.internalError(w, r, err)
-		return
-	}
-	out := make([]ShowSummary, len(shows))
-	for i, sh := range shows {
-		out[i] = ShowSummary{Show: sh.Name, Seasons: sh.Seasons, EpisodeCount: sh.EpisodeCount}
-	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, s.summaries(r.Context(), entries))
 }
 
 // loadEntry resolves {id}; it writes the error response and reports false if
@@ -88,14 +72,30 @@ func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
 	if target == "" {
 		target = "avplayer"
 	}
-	profile, ok := playback.Builtin(target)
-	if !ok {
+	if _, ok := playback.Builtin(target); !ok {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("unknown profile %q", target))
 		return
 	}
+	s.writeDetail(w, r, e, target)
+}
+
+// writeDetail answers with the full view of an item, deciding playback for the
+// built-in profile target.
+func (s *Server) writeDetail(w http.ResponseWriter, r *http.Request, e store.Entry, target string) {
+	profile, _ := playback.Builtin(target)
 	pb := s.playbackFor(e, profile, playback.NoOptions, 0)
 	d := s.detail(e, pb)
 	d.Art = s.artOf(e)
+	v := s.newMetaView(r.Context(), []store.Entry{e})
+	v.apply(&d.ItemSummary, e)
+	d.EpisodeInfo = v.episodeInfo(e)
+	if id := v.titleIDOf(e); id != 0 {
+		if td, err := s.Store.GetTitleDetail(r.Context(), id); err == nil {
+			d.Meta = s.titleDetail(td)
+		} else if !errors.Is(err, store.ErrNotFound) {
+			s.Logger.Warn("metadata: reading a title", "id", id, "err", err)
+		}
+	}
 	writeJSON(w, http.StatusOK, d)
 }
 
@@ -265,8 +265,20 @@ func (s *Server) handleScanStart(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]bool{"started": true})
 }
 
+// scanStatus is GET /api/scan: the scanner's state and what the watcher watches.
+type scanStatus struct {
+	library.Status
+	Watching []watch.RootStatus `json:"watching"`
+}
+
 func (s *Server) handleScanStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.Scanner.Status(r.Context()))
+	out := scanStatus{Status: s.Scanner.Status(r.Context()), Watching: []watch.RootStatus{}}
+	if s.Watcher != nil {
+		if roots := s.Watcher.Status(); roots != nil {
+			out.Watching = roots
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // spaHandler serves the embedded SPA: files that exist, otherwise index.html

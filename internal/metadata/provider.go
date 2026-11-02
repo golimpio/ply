@@ -68,10 +68,13 @@ var crewJobs = []string{"Director", "Writer", "Screenplay", "Story", "Novel", "O
 	"Director of Photography", "Producer"}
 
 // ImageRef is the stored reference of a TMDB file path: "tmdb:/abc.jpg".
-// An empty path gives an empty ref.
+// An empty path, or one that is not a plain TMDB file path, gives an empty ref.
 func ImageRef(path string) string {
-	if path == "" {
+	if !ValidImagePath(path) {
 		return ""
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
 	}
 	return "tmdb:" + path
 }

@@ -96,24 +96,35 @@ const (
 // RefreshIdleAge), or whose next episode aired AiringDelay ago or longer and
 // has not been fetched since. The least recently fetched come first.
 func (s *Store) TitlesDueForRefresh(ctx context.Context, now time.Time, limit int) ([]Title, error) {
-	active := now.Add(-RefreshActiveAge).Unix()
-	idle := now.Add(-RefreshIdleAge).Unix()
-	recent := now.Add(-RecentMovieWindow).Format("2006-01-02")
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT `+prefixed("t.", titleCols)+` FROM titles t
-		WHERE t.tmdb_id IS NOT NULL AND `+libraryTitle+`
-			AND (
-				t.fetched_at < CASE
+	return s.dueTitles(ctx, now, limit, true)
+}
+
+// AiringTitlesDue is TitlesDueForRefresh for the airing rule alone: shows whose
+// next episode aired AiringDelay ago or longer and that have not been fetched
+// since. It is what still applies when a changes feed does the rest.
+func (s *Store) AiringTitlesDue(ctx context.Context, now time.Time, limit int) ([]Title, error) {
+	return s.dueTitles(ctx, now, limit, false)
+}
+
+func (s *Store) dueTitles(ctx context.Context, now time.Time, limit int, byAge bool) ([]Title, error) {
+	delay := int64(AiringDelay / time.Second)
+	cond := `(t.kind = 'series' AND COALESCE(t.next_air_date, '') <> ''
+			AND strftime('%s', t.next_air_date) + ? <= ?
+			AND t.fetched_at < strftime('%s', t.next_air_date) + ?)`
+	args := []any{delay, now.Unix(), delay}
+	if byAge {
+		cond = `t.fetched_at < CASE
 					WHEN (t.kind = 'series' AND t.status NOT IN ('Ended', 'Canceled'))
 						OR (t.kind = 'movie' AND t.release_date >= ?) THEN ?
 					ELSE ? END
-				OR (t.kind = 'series' AND COALESCE(t.next_air_date, '') <> ''
-					AND strftime('%s', t.next_air_date) + ? <= ?
-					AND t.fetched_at < strftime('%s', t.next_air_date) + ?)
-			)
-		ORDER BY t.fetched_at, t.id LIMIT ?`,
-		recent, active, idle,
-		int64(AiringDelay/time.Second), now.Unix(), int64(AiringDelay/time.Second), limit)
+				OR ` + cond
+		args = append([]any{now.Add(-RecentMovieWindow).Format("2006-01-02"),
+			now.Add(-RefreshActiveAge).Unix(), now.Add(-RefreshIdleAge).Unix()}, args...)
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT `+prefixed("t.", titleCols)+` FROM titles t
+		WHERE t.tmdb_id IS NOT NULL AND `+libraryTitle+` AND (`+cond+`)
+		ORDER BY t.fetched_at, t.id LIMIT ?`, append(args, limit)...)
 	if err != nil {
 		return nil, err
 	}

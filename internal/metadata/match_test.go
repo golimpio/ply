@@ -255,6 +255,35 @@ func TestMatchNeverMakesTMDBTroubleAnUnmatch(t *testing.T) {
 		t.Errorf("a failing find fell back to the search: %+v, %v", res, err)
 	}
 
+	// The ids of a show: the TVDB and IMDb lookups failing is just as little a
+	// reason to fall through to a search, let alone to unmatch.
+	for _, tc := range []struct {
+		name  string
+		hints Hints
+		path  string
+		query string
+	}{
+		{"tvdb", Hints{TVDB: 81189}, "/find/81189", params("external_source", "tvdb_id")},
+		{"imdb for a show", Hints{IMDb: "tt0903747"}, "/find/tt0903747", params("external_source", "imdb_id")},
+	} {
+		for _, status := range []int{503, 429} {
+			f = newFakeTMDB(t)
+			headers := map[string]string{}
+			if status == 429 {
+				headers["Retry-After"] = "9999"
+			}
+			f.fail(tc.path, tc.query, status, "", headers)
+			f.on("/search/tv", params("query", "Breaking Bad"), "search_tv_breaking_bad.json")
+			res, err := Match(t.Context(), newTMDB(t, f), Query{Kind: store.KindSeries, Title: "Breaking Bad", Hints: tc.hints})
+			if err == nil || !IsTransient(err) || res.TMDBID != 0 || res.State == store.MatchUnmatched || res.State == store.MatchMatched {
+				t.Errorf("%s with %d: %+v, %v; want a transient error and no verdict", tc.name, status, res, err)
+			}
+			if f.count("/search/tv") != 0 {
+				t.Errorf("%s with %d fell through to a search", tc.name, status)
+			}
+		}
+	}
+
 	// And a failure on a later search of the cascade.
 	f = newFakeTMDB(t)
 	f.fail("/search/movie", params("query", "The Matrix"), 500, "", nil)

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // Match is the metadata-matching state of a movie item or of a show.
@@ -277,6 +278,11 @@ func (s *Store) SetItemArt(ctx context.Context, itemID int64, a Art) error {
 	}
 	if err != nil {
 		return err
+	}
+	// The scanner reports sidecar files only: no poster from it is not a reason
+	// to forget the cover the metadata worker found inside the file.
+	if a.Poster == "" && strings.HasPrefix(cur.Poster, EmbeddedPrefix) {
+		a.Poster = cur.Poster
 	}
 	if cur == a {
 		return nil
