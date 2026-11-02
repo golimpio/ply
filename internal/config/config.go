@@ -33,6 +33,10 @@ type Config struct {
 
 	Watch bool // -watch: pick up changes in the media folders within seconds
 
+	// AllowHosts are extra Host names the server answers to (-allow-host, or
+	// PLY_ALLOW_HOSTS comma-separated); see api.Options.AllowedHosts.
+	AllowHosts []string
+
 	// Metadata (M6). The TMDB key is kept as two values, because the settings
 	// page says where the key in use came from: -tmdb-key, then PLY_TMDB_KEY.
 	TMDBKey          string        // -tmdb-key
@@ -52,6 +56,7 @@ const (
 	MetadataRefreshEnv   = "PLY_METADATA_REFRESH"
 	TMDBURLEnv           = "PLY_TMDB_URL"
 	TMDBImageURLEnv      = "PLY_TMDB_IMAGE_URL"
+	AllowHostsEnv        = "PLY_ALLOW_HOSTS"
 	DefaultMetadataLang  = "en-US"
 	DefaultMetadataEvery = 24 * time.Hour
 )
@@ -154,6 +159,13 @@ func Parse(args []string, out io.Writer) (Config, error) {
 	fs.StringVar(&c.Token, "token", "", "require this token for /api (Bearer header or ?token=)")
 	fs.StringVar(&c.Name, "name", hostname, "server name shown to clients")
 	fs.BoolVar(&c.Watch, "watch", true, "watch media folders and pick up changes within seconds")
+	fs.Func("allow-host", "also answer to this host name, e.g. a reverse proxy's public name; \".example.com\" allows every name under it (repeatable; env "+AllowHostsEnv+")", func(v string) error {
+		if v = strings.TrimSpace(v); v == "" {
+			return errors.New("empty host name")
+		}
+		c.AllowHosts = append(c.AllowHosts, v)
+		return nil
+	})
 	fs.DurationVar(&c.ScanInterval, "scan-interval", 15*time.Minute, "periodic rescan interval (0 disables; a scan always runs at startup)")
 	fs.StringVar(&c.FFprobe, "ffprobe", "ffprobe", "ffprobe binary")
 	fs.StringVar(&c.FFmpeg, "ffmpeg", "ffmpeg", "ffmpeg binary")
@@ -179,6 +191,13 @@ func Parse(args []string, out io.Writer) (Config, error) {
 		return Config{}, err
 	}
 	c.TMDBKeyEnv = os.Getenv(TMDBKeyEnv)
+	if len(c.AllowHosts) == 0 {
+		for _, h := range strings.Split(os.Getenv(AllowHostsEnv), ",") {
+			if h = strings.TrimSpace(h); h != "" {
+				c.AllowHosts = append(c.AllowHosts, h)
+			}
+		}
+	}
 	if fs.NArg() > 0 {
 		return Config{}, fmt.Errorf("unexpected argument %q", fs.Arg(0))
 	}

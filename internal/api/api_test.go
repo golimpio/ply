@@ -1004,7 +1004,7 @@ func TestMiddlewareKeepsZeroCopyInterfaces(t *testing.T) {
 		innerCh <- describe(w)
 		io.WriteString(w, "ok")
 	})
-	chain := middleware(probe, "tok")
+	chain := middleware(probe, "tok", nil)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		outerCh <- describe(w)
 		chain.ServeHTTP(w, r)

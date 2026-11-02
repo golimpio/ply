@@ -162,11 +162,13 @@ func run() error {
 		Name:    cfg.Name,
 		Version: version,
 		Token:   cfg.Token,
-		Logger:  log,
-		Streams: streams,
-		HW:      hw,
-		Art:     artGen,
-		Subs:    subGen,
+
+		AllowedHosts: cfg.AllowHosts,
+		Logger:       log,
+		Streams:      streams,
+		HW:           hw,
+		Art:          artGen,
+		Subs:         subGen,
 
 		Metadata: worker,
 		Settings: settings,

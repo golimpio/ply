@@ -6,10 +6,13 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -60,6 +63,10 @@ type Options struct {
 	Images   *metadata.ImageCache
 	// Now is the clock; nil means time.Now. (GET /api/upcoming asks which day it is.)
 	Now func() time.Time
+	// AllowedHosts are extra Host names to answer, beyond the ones knownHost
+	// always accepts (a public name behind a reverse proxy, say). An entry that
+	// starts with "." accepts every name under it.
+	AllowedHosts []string
 }
 
 // Server is the HTTP handler for the whole application.
@@ -118,20 +125,71 @@ func New(o Options) *Server {
 	})
 	mux.Handle("/", spaHandler(o.UI))
 
-	s.handler = middleware(mux, o.Token)
+	s.handler = middleware(mux, o.Token, o.AllowedHosts)
 	return s
 }
 
 // ServeHTTP implements http.Handler.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.handler.ServeHTTP(w, r) }
 
-// middleware applies CORS to everything, keeps other sites from changing
-// anything and, when token is set, requires it for /api/* except /api/info.
+// middleware applies CORS to everything, answers only names this server is
+// known by, keeps other sites from changing anything and, when token is set,
+// requires it for /api/* except /api/info.
 //
 // No layer wraps the ResponseWriter, so http.ServeContent still sees the
 // server's own writer (io.ReaderFrom for sendfile, http.Flusher).
-func middleware(next http.Handler, token string) http.Handler {
-	return cors(sameOriginWrites(requireToken(next, token), token))
+func middleware(next http.Handler, token string, hosts []string) http.Handler {
+	return cors(knownHosts(sameOriginWrites(requireToken(next, token), token), hosts))
+}
+
+// knownHosts refuses a request whose Host is a name ply doesn't know. That
+// stops DNS rebinding: a page on evil.com whose name is re-pointed at
+// this server's LAN address would otherwise be same-origin with it, read the
+// library and pass sameOriginWrites.
+func knownHosts(next http.Handler, extra []string) http.Handler {
+	self, _ := os.Hostname()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !knownHost(r.Host, self, extra) {
+			writeError(w, http.StatusForbidden, fmt.Sprintf("unknown host name; start ply with -allow-host %s to use it", hostOnly(r.Host)))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// knownHost reports whether host (a Host header, port optional) names this
+// server: an IP address; a name no one can point at us from the internet
+// (localhost, a single label, .local mDNS, .home.arpa, and the RFC 2606/6761
+// reserved names); the machine's hostname; or an entry of extra.
+func knownHost(host, self string, extra []string) bool {
+	h := strings.TrimSuffix(strings.ToLower(hostOnly(host)), ".")
+	if h == "" || net.ParseIP(h) != nil || !strings.Contains(h, ".") {
+		return true
+	}
+	for _, suffix := range []string{".localhost", ".local", ".home.arpa", ".test", ".example", ".invalid"} {
+		if strings.HasSuffix(h, suffix) {
+			return true
+		}
+	}
+	switch h {
+	case "example.com", "example.net", "example.org", strings.TrimSuffix(strings.ToLower(self), "."):
+		return true
+	}
+	for _, e := range extra {
+		e = strings.TrimSuffix(strings.ToLower(e), ".")
+		if e != "" && (h == e || strings.HasPrefix(e, ".") && (strings.HasSuffix(h, e) || h == e[1:])) {
+			return true
+		}
+	}
+	return false
+}
+
+// hostOnly drops the port (and IPv6 brackets) from a Host header.
+func hostOnly(host string) string {
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		return h
+	}
+	return strings.Trim(host, "[]")
 }
 
 // sameOriginWrites refuses a request that is not a read (not GET, HEAD or
