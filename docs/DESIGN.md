@@ -46,8 +46,15 @@ M6 (metadata, live library):
 - `-watch` (default true): watch the media folders and pick up changes within seconds (`internal/watch`).
 - `-allow-host <name>` (repeatable; env `PLY_ALLOW_HOSTS`, comma-separated; `.example.org` allows every name under it):
   extra Host names to answer. Every request whose Host is not an IP, localhost, a single label, `.local`,
-  `.home.arpa`, an RFC 2606/6761 reserved name, the machine's hostname or one of these gets 403 (DNS-rebinding guard).
+  `.home.arpa`, `.internal` (ICANN private-use, e.g. `host.docker.internal`), an RFC 2606/6761 reserved name, the
+  machine's hostname or one of these gets 403 (DNS-rebinding guard). Entries are case-insensitive, a trailing dot is
+  ignored, and `.name` also matches `name` itself; `name` alone matches only `name`.
   Non-GET requests with a foreign `Origin` also need the token.
+  Names that are not on that list need `-allow-host`: `.lan`, `.home`, `.localdomain`, `*.ts.net` (Tailscale
+  MagicDNS) and any real domain. Behind a reverse proxy the proxy must pass the original Host through, or the
+  Host is the proxy's upstream name and the same-origin check on writes (Origin vs Host) fails: for nginx,
+  `proxy_set_header Host $host;` (use `$http_host` to keep a non-default port). The 403 bodies say which name or
+  Origin was refused.
 - `-tmdb-key` (env `PLY_TMDB_KEY`): TMDB v3 API key or v4 read access token. Precedence: flag > env > the key saved
   from the web UI (settings table) > the build default (`-ldflags -X ply/internal/metadata.DefaultKey=...`). The key
   is never returned by the API nor logged.
@@ -57,7 +64,9 @@ M6 (metadata, live library):
 - Hidden, for tests: `-tmdb-url` (env `PLY_TMDB_URL`) and `-tmdb-image-url` (env `PLY_TMDB_IMAGE_URL`).
 Data dir: macOS `~/Library/Application Support/ply`; Linux `$XDG_DATA_HOME/ply` or `~/.local/share/ply`;
 `-data` overrides. Persist a random server id (`server-id` file, 16 hex bytes). DB: `<data>/ply.db` (it holds the TMDB key:
-the data dir is created 0700, and the DB with its `-wal` and `-shm` files is chmod 0600 at every start).
+the data dir is created 0700, a new DB file is created 0600 (never briefly readable), and the DB with its `-wal` and
+`-shm` files is chmod 0600 at every start). Where chmod is refused (EPERM, ENOTSUP, EROFS: vfat, exfat, some network
+mounts) ply starts anyway and logs a warning (`store.Warnings()`).
 
 ## Store
 modernc.org/sqlite, DSN `file:<path>?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)`

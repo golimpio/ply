@@ -429,6 +429,9 @@ func TestImageFailureMemoryIsBounded(t *testing.T) {
 	if imageFailureTTL != 10*time.Minute {
 		t.Errorf("imageFailureTTL = %v, want 10 minutes", imageFailureTTL)
 	}
+	if maxFailedImages != 1024 { // the loop below follows whatever the limit is
+		t.Errorf("maxFailedImages = %d, want 1024", maxFailedImages)
+	}
 	failedLen := func() int {
 		c.mu.Lock()
 		defer c.mu.Unlock()

@@ -1007,6 +1007,51 @@ func TestWorkerSidecarBatchOfAShowReadsItOnceAndAsksTMDBOnlyWhenTheNFOChanged(t 
 	}
 }
 
+// The NFO laid over a title is told from the next one by its size and by its
+// time, each on its own: a longer file whose time was put back, and a rewrite of
+// the same length with a later time, are both taken in. An NFO that did not
+// change costs TMDB nothing.
+func TestWorkerNFOChangeIsSeenBySizeAndByTimeEachOnItsOwn(t *testing.T) {
+	e := newWEnv(t)
+	e.withBreakingBad()
+	base := time.Now().Add(-time.Hour).Truncate(time.Second)
+	nfo := func(plot string, mtime time.Time) {
+		t.Helper()
+		p := e.write("TV/Breaking Bad/tvshow.nfo", `<tvshow><title>Breaking Bad</title><plot>`+plot+`</plot></tvshow>`)
+		if err := os.Chtimes(p, mtime, mtime); err != nil {
+			t.Fatal(err)
+		}
+	}
+	nfo("v11", base)
+	ids := []int64{e.addEpisode("Breaking Bad", 1, 1)}
+	e.once()
+	sm := e.series("Breaking Bad")
+	if sm.State != store.MatchMatched || e.title(sm.TitleID).Overview != "v11" {
+		t.Fatalf("show after the first pass: %+v, overview %q", sm, e.title(sm.TitleID).Overview)
+	}
+	notify := func(what string, wantFetches int, wantOverview string) {
+		t.Helper()
+		calls := len(e.fake.Calls())
+		e.w.NotifySidecars(ids)
+		e.once()
+		if n := countPrefix(e.fake.Calls()[calls:], "Series("); n != wantFetches {
+			t.Errorf("%s: the show was fetched %d times, want %d", what, n, wantFetches)
+		}
+		if got := e.title(sm.TitleID).Overview; got != wantOverview {
+			t.Errorf("%s: overview = %q, want %q", what, got, wantOverview)
+		}
+	}
+	notify("nothing changed", 0, "v11")
+	nfo("v11", base) // written again, as it was
+	notify("the same file rewritten", 0, "v11")
+	nfo("v2222", base) // longer, same time
+	notify("only the size changed", 1, "v2222")
+	notify("after it was taken in", 0, "v2222")
+	nfo("v3333", base.Add(time.Minute)) // same length, later
+	notify("only the time changed", 1, "v3333")
+	notify("after that was taken in", 0, "v3333")
+}
+
 func countPrefix(calls []string, prefix string) int {
 	n := 0
 	for _, c := range calls {
@@ -1403,6 +1448,42 @@ func TestWorkerProbesAReplacedFileAgain(t *testing.T) {
 	}
 }
 
+// A file is the one that was probed while its size and its time are both what
+// they were: a change to either alone is another file, probed again.
+func TestWorkerProbesAgainWhenOnlyTheSizeOrOnlyTheTimeChanged(t *testing.T) {
+	probes := &atomic.Int32{}
+	e := newWEnv(t, func(o *metadata.WorkerOptions) {
+		o.Probe = func(ctx context.Context, path string) (probe.Result, error) {
+			probes.Add(1)
+			return probe.Result{Tags: probe.Tags{Title: "Zzz Nothing Like It"}}, nil
+		}
+	})
+	e.withMatrix()
+	id := e.addMovie("Movies/rip_0042.mkv", "rip 0042", 0)
+	e.once()
+	if got := e.entry(id); got.MatchState != store.MatchUnmatched || probes.Load() != 1 {
+		t.Fatalf("first pass: %+v, %d probes", got.Item, probes.Load())
+	}
+	it := e.entry(id).Item
+	step := func(what string, size, mtime int64, wantProbes int32) {
+		t.Helper()
+		it.Size, it.MTime = size, mtime
+		if again, err := e.st.UpsertItem(e.ctx, &it, nil); err != nil || again != id {
+			t.Fatalf("%s: re-indexing: %d, %v", what, again, err)
+		}
+		e.w.RefreshItem(id)
+		e.once()
+		if got := probes.Load(); got != wantProbes {
+			t.Errorf("%s: %d probes, want %d", what, got, wantProbes)
+		}
+	}
+	size, mtime := it.Size, it.MTime
+	step("nothing changed", size, mtime, 1)
+	step("only the size changed", size+10, mtime, 2)
+	step("only the time changed", size+10, mtime+1, 3)
+	step("nothing changed again", size+10, mtime+1, 3)
+}
+
 // TMDB not having a person, or not answering, is not asked again at once: on
 // every visit to the page would be a request each.
 func TestWorkerEnsurePersonRemembersFailures(t *testing.T) {
@@ -1495,6 +1576,112 @@ func TestWorkerEnsurePersonRemembersFailures(t *testing.T) {
 	e.w.EnsurePerson(e.ctx, morpheus)
 	if asked() != n+2 {
 		t.Errorf("a cancelled request was remembered as a failure of the person (%d requests, want %d)", asked()-n, 2)
+	}
+}
+
+// The wait after a failure doubles from five minutes and stops at an hour, to
+// the second, however many times it failed.
+func TestWorkerEnsurePersonBackoffStopsAtAnHour(t *testing.T) {
+	e := newWEnv(t)
+	e.withMatrix()
+	m := matrix()
+	m.Credits = append(m.Credits,
+		store.Credit{Person: store.Person{TMDBID: 7777, Name: "Carrie-Anne Moss"}, Kind: store.CreditCast, Character: "Trinity", Order: 1})
+	e.fake.Movies[603] = m
+	e.addMovie("Movies/The Matrix (1999).mkv", "The Matrix", 1999)
+	e.once()
+	people, err := e.st.SearchPeople(e.ctx, "Carrie", 5)
+	if err != nil || len(people) != 1 {
+		t.Fatalf("SearchPeople = %+v, %v", people, err)
+	}
+	carrie := people[0].ID
+	e.fake.Offline()
+	asked := func() int { return e.fake.Count("Person(") }
+
+	// try asks after d and says whether TMDB was asked.
+	try := func(d time.Duration) bool {
+		t.Helper()
+		e.clock.Advance(d)
+		before := asked()
+		if err := e.w.EnsurePerson(e.ctx, carrie); err == nil || !metadata.IsTransient(err) {
+			t.Fatalf("EnsurePerson = %v, want the transient error", err)
+		}
+		return asked() > before
+	}
+	if !try(0) {
+		t.Fatal("the first failure was not a request (positive control)")
+	}
+	for i, wait := range []time.Duration{5 * time.Minute, 10 * time.Minute, 20 * time.Minute, 40 * time.Minute} {
+		if try(wait - time.Second) {
+			t.Fatalf("failure %d: asked a second early", i+1)
+		}
+		if !try(time.Second) {
+			t.Fatalf("failure %d: not asked after %v", i+1, wait)
+		}
+	}
+	// The fifth would wait 80 minutes, the sixth 160, and so on: an hour.
+	for i := 5; i <= 8; i++ {
+		if try(time.Hour - time.Second) {
+			t.Fatalf("failure %d: asked a second early", i)
+		}
+		if !try(time.Second) {
+			t.Fatalf("failure %d: not asked after an hour", i)
+		}
+	}
+}
+
+// What is remembered about failed people does not grow without end: 1024, and
+// then the ones whose time is up give way. When all of them still count, the
+// newcomer is asked again next time.
+func TestWorkerEnsurePersonFailuresAreLimitedTo1024(t *testing.T) {
+	const limit = 1024
+	e := newWEnv(t)
+	e.withMatrix()
+	m := matrix()
+	m.Credits = nil
+	for i := 0; i < limit+1; i++ {
+		m.Credits = append(m.Credits, store.Credit{Person: store.Person{TMDBID: int64(100000 + i), Name: fmt.Sprintf("Extra %04d", i)},
+			Kind: store.CreditCast, Character: "Extra", Order: i})
+	}
+	e.fake.Movies[603] = m
+	e.addMovie("Movies/The Matrix (1999).mkv", "The Matrix", 1999)
+	e.once()
+	people, err := e.st.SearchPeople(e.ctx, "Extra ", 2*limit)
+	if err != nil || len(people) != limit+1 {
+		t.Fatalf("SearchPeople found %d people (%v), want %d", len(people), err, limit+1)
+	}
+	asked := func() int { return e.fake.Count("Person(") }
+	// pass asks about each of them (TMDB has none) and returns how many requests that cost.
+	pass := func(who []store.PersonCard) int {
+		t.Helper()
+		before := asked()
+		for _, p := range who {
+			if err := e.w.EnsurePerson(e.ctx, p.ID); !metadata.IsNotFound(err) {
+				t.Fatalf("EnsurePerson(%d) = %v, want TMDB's 404", p.ID, err)
+			}
+		}
+		return asked() - before
+	}
+	if n := pass(people); n != limit+1 {
+		t.Fatalf("the first pass made %d requests, want %d (positive control)", n, limit+1)
+	}
+	// The first 1024 are remembered, the last one did not fit. (Four of them
+	// stand for all: the first, the ones around the middle, the 1024th.)
+	for _, i := range []int{0, limit/2 - 1, limit / 2, limit - 1} {
+		if n := pass(people[i : i+1]); n != 0 {
+			t.Errorf("person %d of %d was asked again (%d requests), it should be remembered", i+1, limit, n)
+		}
+	}
+	if n := pass(people[limit:]); n != 1 {
+		t.Errorf("the person that did not fit was asked %d times, want 1", n)
+	}
+	// Once the others are due again they give way to the newcomer.
+	e.clock.Advance(25 * time.Hour)
+	if n := pass(people[limit:]); n != 1 {
+		t.Errorf("after a day the newcomer was asked %d times, want 1", n)
+	}
+	if n := pass(people[limit:]); n != 0 {
+		t.Errorf("the newcomer was asked %d more times, want 0: it should have taken a place", n)
 	}
 }
 
@@ -1625,6 +1812,139 @@ func settle(t *testing.T, base int) int {
 		t.Errorf("%d goroutines after shutdown, started with %d:\n%s", n, base, buf)
 	}
 	return n
+}
+
+// hangingImages is an image cache whose lookups never answer and, once they
+// are cancelled, take linger to give up (a stack that unwinds slowly). entered
+// gets a value for each lookup that starts; the Worker option gives the cache
+// to a worker.
+func hangingImages(t *testing.T, linger time.Duration) (use func(*metadata.WorkerOptions), entered chan struct{}) {
+	t.Helper()
+	entered = make(chan struct{}, 8)
+	cache, err := metadata.NewImageCache(metadata.ImageOptions{
+		Dir: filepath.Join(t.TempDir(), "images"),
+		URL: func(ctx context.Context, size, file string) (string, bool) {
+			select {
+			case entered <- struct{}{}:
+			default:
+			}
+			<-ctx.Done()
+			time.Sleep(linger)
+			return "", false
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cache.Close)
+	return func(o *metadata.WorkerOptions) { o.Images = cache }, entered
+}
+
+// backgroundGoroutines returns how many goroutines run a function the worker
+// started with background(), and the stacks of all goroutines for a message.
+func backgroundGoroutines() (int, string) {
+	buf := make([]byte, 1<<16)
+	for {
+		n := runtime.Stack(buf, true)
+		if n < len(buf) {
+			buf = buf[:n]
+			break
+		}
+		buf = make([]byte, 2*len(buf))
+	}
+	count := 0
+	for _, g := range strings.Split(string(buf), "\n\n") {
+		if strings.Contains(g, "(*Worker).background") {
+			count++
+		}
+	}
+	return count, string(buf)
+}
+
+// The images of a manual match are fetched on a goroutine the worker owns. Close
+// (what Run does on its way out) cancels it and waits for it, however slowly it
+// gives up: when Close has returned, no goroutine of background() is left. The
+// scan of the stacks has a positive control, taken while the prefetch hangs.
+func TestWorkerCloseWaitsForThePrefetchOfAManualMatch(t *testing.T) {
+	const linger = 200 * time.Millisecond
+	use, entered := hangingImages(t, linger)
+	e := newWEnv(t, use)
+	e.withMatrix()
+	id := e.addMovie("Movies/Something Else (1990).mkv", "Something Else", 1990)
+	if err := e.w.MatchMovie(e.ctx, id, metadata.Ref{TMDBID: 603}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the images were never asked for")
+	}
+	if n, stacks := backgroundGoroutines(); n != 1 {
+		t.Fatalf("%d goroutines of background() while the prefetch hangs, want 1:\n%s", n, stacks)
+	}
+
+	took := make(chan time.Duration, 1)
+	go func() {
+		start := time.Now()
+		e.w.Close()
+		took <- time.Since(start)
+	}()
+	select {
+	case d := <-took:
+		if d < linger/2 {
+			t.Errorf("Close returned after %v, before the prefetch had given up (%v)", d, linger)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close does not return")
+	}
+	if n, stacks := backgroundGoroutines(); n != 0 {
+		t.Errorf("%d goroutines of background() after Close:\n%s", n, stacks)
+	}
+	e.w.Close() // more than once is fine
+}
+
+// Once Close has been called nothing is started: a match made afterwards still
+// stores, and leaves its images alone. A goroutine started now would end at once
+// (its context is cancelled), so the scan follows the match with nothing in
+// between, on one processor: the new goroutine could not have run yet.
+func TestWorkerStartsNothingAfterClose(t *testing.T) {
+	use, entered := hangingImages(t, 20*time.Millisecond)
+	e := newWEnv(t, use)
+	e.withMatrix()
+	first := e.addMovie("Movies/Something Else (1990).mkv", "Something Else", 1990)
+	second := e.addMovie("Movies/Another (1991).mkv", "Another", 1991)
+	if err := e.w.MatchMovie(e.ctx, first, metadata.Ref{TMDBID: 603}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the images were never asked for")
+	}
+	closed := make(chan struct{})
+	go func() { e.w.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close does not return")
+	}
+
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+	err := e.w.MatchMovie(e.ctx, second, metadata.Ref{TMDBID: 603})
+	n, stacks := backgroundGoroutines()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("%d goroutines of background() after the match that followed Close:\n%s", n, stacks)
+	}
+	if got := e.entry(second); got.MatchState != store.MatchManual || got.TitleID == 0 {
+		t.Errorf("the match after Close was not stored: %+v", got.Item)
+	}
+	time.Sleep(50 * time.Millisecond) // time for a goroutine that was started, if one was
+	if len(entered) != 0 {
+		t.Error("the images of a match made after Close were asked for")
+	}
 }
 
 func TestWorkerRunReturnsPromptlyWhileTMDBIsHanging(t *testing.T) {

@@ -56,6 +56,10 @@ func TestEndToEnd(t *testing.T) {
 
 	bin := buildPly(t, base)
 	makeFixtures(t, media)
+	// ply makes the data dir itself: its mode is only ply's if it does not exist yet.
+	if _, err := os.Stat(data); !os.IsNotExist(err) {
+		t.Fatalf("the data dir should not exist before the first start: %v", err)
+	}
 
 	p := startPly(t, base, bin, tmp, "-media", media, "-addr", "127.0.0.1:0", "-data", data,
 		"-token", e2eToken, "-name", e2eName, "-scan-interval", "0", "-hwaccel", "none")
@@ -79,8 +83,15 @@ func TestEndToEnd(t *testing.T) {
 	if id, err := os.ReadFile(filepath.Join(data, "server-id")); err != nil || strings.TrimSpace(string(id)) != info.ID {
 		t.Errorf("server-id in the data dir = %q (%v), want %q", id, err, info.ID)
 	}
-	if _, err := os.Stat(filepath.Join(data, "ply.db")); err != nil {
-		t.Errorf("database not in the data dir: %v", err)
+	// The database holds the TMDB key: the directory ply makes for it is the
+	// owner's alone and so is the file.
+	for path, want := range map[string]os.FileMode{data: 0o700, filepath.Join(data, "ply.db"): 0o600} {
+		fi, err := os.Stat(path)
+		if err != nil {
+			t.Errorf("%s not created: %v", filepath.Base(path), err)
+		} else if fi.Mode().Perm() != want {
+			t.Errorf("%s mode = %v, want %v", filepath.Base(path), fi.Mode().Perm(), want)
+		}
 	}
 	for name, hdr := range map[string]map[string]string{
 		"no token":    nil,

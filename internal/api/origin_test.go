@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"fmt"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -19,14 +21,17 @@ func TestCrossSiteWritesAreRefused(t *testing.T) {
 		{"no origin (a native client)", "", nil, 200},
 		{"the server's own page", "http://example.com", nil, 200}, // httptest requests are for example.com
 		{"a page of another site", "http://evil.example", nil, 403},
+		{"a subdomain of the host", "http://evil.example.com", nil, 403},
+		{"a host that ends like ours", "http://notexample.com", nil, 403},
 		{"another port of the same host", "http://example.com:8421", nil, 403},
+		{"the same host in other case", "http://EXAMPLE.com", nil, 200},
 		{"another scheme of the same host", "https://example.com", nil, 403},
 		{"the same page behind a TLS proxy", "https://example.com", map[string]string{"X-Forwarded-Proto": "https"}, 200},
 		{"another site, saying it is behind a proxy", "https://evil.example", map[string]string{"X-Forwarded-Proto": "https"}, 403},
 		{"a sandboxed page", "null", nil, 403},
 	} {
 		m := newMetaEnv(t, "") // no token
-		patch := func() int {
+		patch := func() *httptest.ResponseRecorder {
 			hdr := map[string]string{"Origin": tc.origin}
 			for k, v := range tc.hdr {
 				hdr[k] = v
@@ -34,15 +39,22 @@ func TestCrossSiteWritesAreRefused(t *testing.T) {
 			if tc.origin == "" {
 				delete(hdr, "Origin")
 			}
-			return m.env.do("PATCH", fmt.Sprintf("/api/titles/%d", m.matrixTitle), hdr, `{"title":"Edited"}`).Code
+			return m.env.do("PATCH", fmt.Sprintf("/api/titles/%d", m.matrixTitle), hdr, `{"title":"Edited"}`)
 		}
-		got := patch()
+		rec := patch()
+		got := rec.Code
 		title, _ := m.store.GetTitle(context.Background(), m.matrixTitle)
 		if got != tc.want {
 			t.Errorf("%s: PATCH = %d, want %d", tc.name, got, tc.want)
 		}
 		if edited := title.Title == "Edited"; edited != (tc.want == 200) {
 			t.Errorf("%s: the title was edited = %v with status %d", tc.name, edited, got)
+		}
+		if tc.want == 403 {
+			want := fmt.Sprintf("Origin %s does not match Host example.com; a reverse proxy must pass the original Host header", tc.origin)
+			if !strings.Contains(rec.Body.String(), want) {
+				t.Errorf("%s: the refusal should say %q: %s", tc.name, want, rec.Body)
+			}
 		}
 	}
 }

@@ -25,6 +25,19 @@ func TestKnownHost(t *testing.T) {
 		{"media.home.arpa", nil, true}, // RFC 8375
 		{"example.com", nil, true},     // RFC 2606 (httptest's default Host)
 		{"build-box.lan.example", nil, true},
+		{"ci.test", nil, true},              // RFC 2606 .test
+		{"x.invalid", nil, true},            // RFC 2606 .invalid
+		{"example.net", nil, true},          // RFC 2606
+		{"example.org", nil, true},          // RFC 2606
+		{"host.docker.internal", nil, true}, // ICANN private-use .internal
+		{"nas.internal.", nil, true},
+		{"x.notinternal", nil, false}, // the suffix is ".internal", not "internal"
+		{"internal.evil.com", nil, false},
+		{"x.notatest", nil, false},
+		{"mynas.lan", nil, false}, // .lan, .home, .localdomain and .ts.net are not reserved: -allow-host
+		{"mynas.home", nil, false},
+		{"mynas.localdomain", nil, false},
+		{"box.tail1234.ts.net", nil, false},
 		{"self.corp.net", nil, true},  // the machine's own hostname (see below)
 		{"", nil, true},               // HTTP/1.0, no Host
 		{"evil.com:8420", nil, false}, // DNS rebinding
@@ -35,6 +48,16 @@ func TestKnownHost(t *testing.T) {
 		{"tv.example.org", []string{".example.org"}, true},
 		{"example.org.evil.com", []string{".example.org"}, false},
 		{"notexample.org", []string{".example.org"}, false},
+		{"mynas.com", []string{"mynas.com"}, true},
+		{"evilmynas.com", []string{"mynas.com"}, false}, // an entry without a dot is that name only
+		{"evil.mynas.com", []string{"mynas.com"}, false},
+		{"tv.mynas.com", []string{".mynas.com"}, true},
+		{"mynas.com", []string{".mynas.com"}, true}, // ".name" covers the bare name too
+		{"evilmynas.com", []string{".mynas.com"}, false},
+		{"example.org", []string{".example.org"}, true},             // (reserved anyway: the mynas.com line pins the entry)
+		{"media.example.org", []string{"Media.Example.org."}, true}, // entries are lower-cased and lose a trailing dot
+		{"media.mynas.com", []string{"Media.MyNas.com."}, true},
+		{"tv.mynas.com", []string{".MyNas.com."}, true},
 	}
 	for _, c := range cases {
 		if got := knownHost(c.host, "self.corp.net", c.extra); got != c.want {
@@ -72,8 +95,29 @@ func TestRebindingIsRefused(t *testing.T) {
 		if rec.Code != c.want {
 			t.Errorf("%s %s Host=%s Origin=%q = %d, want %d: %s", c.method, path, c.host, c.origin, rec.Code, c.want, rec.Body)
 		}
-		if c.want == http.StatusForbidden && !strings.Contains(rec.Body.String(), "-allow-host evil.com") {
-			t.Errorf("refusal should name the flag and host: %s", rec.Body)
+		if c.want == http.StatusForbidden {
+			for _, part := range []string{"unknown host name evil.com;", "-allow-host evil.com ", "original Host header"} {
+				if !strings.Contains(rec.Body.String(), part) {
+					t.Errorf("refusal should contain %q: %s", part, rec.Body)
+				}
+			}
+		}
+	}
+
+	// The guard covers every route, not just /api: the web UI, its assets, the
+	// public /api/info, the media and the artwork.
+	for _, path := range []string{"/", "/assets/x.js", "/api/info", "/api/items/1/file", "/api/images/tmdb/w342/a.jpg"} {
+		for host, refused := range map[string]bool{"192.168.1.20:8420": false, "evil.com:8420": true} {
+			req := httptest.NewRequest("GET", path, nil)
+			req.Host = host
+			rec := httptest.NewRecorder()
+			e.srv.ServeHTTP(rec, req)
+			if got := rec.Code == http.StatusForbidden; got != refused {
+				t.Errorf("GET %s Host=%s = %d, refused = %v, want %v: %s", path, host, rec.Code, got, refused, rec.Body)
+			}
+			if refused && !strings.Contains(rec.Body.String(), "-allow-host evil.com ") {
+				t.Errorf("GET %s: refusal should name the flag and host: %s", path, rec.Body)
+			}
 		}
 	}
 }

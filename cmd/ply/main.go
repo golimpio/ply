@@ -66,6 +66,9 @@ func run() error {
 		return err
 	}
 	defer st.Close()
+	for _, w := range st.Warnings() {
+		log.Warn(w)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

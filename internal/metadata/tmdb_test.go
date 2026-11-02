@@ -793,7 +793,10 @@ func TestRedact(t *testing.T) {
 }
 
 // A call that is queued for a slot must not sleep through a pause that another
-// call's 429 set while it waited.
+// call's 429 set while it waited. The pause must be recorded before the slot is
+// given back; that is only a few instructions apart, so once the 429 is on its
+// way the clock is made slow, which stretches recording the pause (it reads the
+// time) while the queued call, woken by the slot, looks for one.
 func TestQueuedCallDoesNotSitOutALongPauseSetMeanwhile(t *testing.T) {
 	f, clk := newFakeTMDB(t), newFakeClock()
 	gate := make(chan struct{})
@@ -807,6 +810,13 @@ func TestQueuedCallDoesNotSitOutALongPauseSetMeanwhile(t *testing.T) {
 	})
 	c := testClient(t, f, func(o *Options) { o.MaxInFlight = 1 })
 	useClock(c, clk, 1000, 1000)
+	var slow atomic.Bool
+	c.now = func() time.Time {
+		if slow.Load() {
+			time.Sleep(30 * time.Millisecond)
+		}
+		return clk.now()
+	}
 
 	first := make(chan error, 1)
 	go func() { _, err := c.Configuration(t.Context()); first <- err }()
@@ -816,6 +826,7 @@ func TestQueuedCallDoesNotSitOutALongPauseSetMeanwhile(t *testing.T) {
 	second := make(chan error, 1)
 	go func() { _, err := c.Configuration(t.Context()); second <- err }() // queued: the only slot is taken
 	time.Sleep(100 * time.Millisecond)
+	slow.Store(true)
 	close(gate) // the first gets its 429 and sets the pause
 
 	for i, ch := range []chan error{first, second} {

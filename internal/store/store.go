@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 
 	_ "modernc.org/sqlite"
 )
@@ -26,19 +27,37 @@ var ErrNotFound = errors.New("store: not found")
 // Store is a SQLite-backed library store. All methods are safe for
 // concurrent use; the underlying pool has a single connection.
 type Store struct {
-	db *sql.DB
+	db       *sql.DB
+	warnings []string
 }
+
+// Warnings returns what Open could live with but the caller should log: the
+// store has no logger of its own.
+func (s *Store) Warnings() []string { return s.warnings }
 
 // Open opens (creating if needed) the database at path and applies pending
 // migrations. The parent directory is created (readable by its owner only) if
-// missing, and the database files are made readable by their owner only.
-func Open(path string) (*Store, error) {
+// missing, a new database file is created readable by its owner only, and the
+// files of an existing one are made so. On a filesystem without permissions
+// (vfat, exfat, some network mounts) the last step is a warning, not an error.
+func Open(path string) (*Store, error) { return open(path, os.Chmod) }
+
+// open is Open with the chmod to use, so that a test can make it fail.
+func open(path string, chmod func(string, os.FileMode) error) (*Store, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(filepath.Dir(abs), 0o700); err != nil {
 		return nil, err
+	}
+	// SQLite would create the file with the mode the umask leaves (0644) and it
+	// would stay readable until the chmod below. The -wal and -shm files it makes
+	// next take the mode of the database.
+	if f, err := os.OpenFile(abs, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600); err == nil {
+		f.Close()
+	} else if !errors.Is(err, os.ErrExist) {
+		return nil, fmt.Errorf("create %s: %w", abs, err)
 	}
 	db, err := sql.Open("sqlite", dsn(abs))
 	if err != nil {
@@ -58,15 +77,38 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate %s: %w", abs, err)
 	}
-	// The TMDB key is in here. SQLite makes the database as readable as the umask
-	// allows, and gives its -wal and -shm files the mode the database has.
+	// The TMDB key is in here. A database an earlier version left readable is
+	// closed up now.
+	var unsupported error
 	for _, suffix := range []string{"", "-wal", "-shm"} {
-		if err := os.Chmod(abs+suffix, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
+		err := chmod(abs+suffix, 0o600)
+		switch {
+		case err == nil || errors.Is(err, os.ErrNotExist):
+		case noPermissions(err):
+			if unsupported == nil {
+				unsupported = err
+			}
+		default:
 			db.Close()
 			return nil, err
 		}
 	}
+	if unsupported != nil {
+		s.warnings = append(s.warnings, fmt.Sprintf("cannot make the database files owner-only (%v): the filesystem "+
+			"may not support permissions; keep the data directory %s private, it holds the TMDB key", unsupported, filepath.Dir(abs)))
+	}
 	return s, nil
+}
+
+// noPermissions reports whether err says the filesystem has no say over modes
+// (vfat, exfat and many network mounts), or does not let this user change them.
+func noPermissions(err error) bool {
+	for _, e := range []error{syscall.EPERM, syscall.ENOTSUP, syscall.EOPNOTSUPP, syscall.EROFS} {
+		if errors.Is(err, e) {
+			return true
+		}
+	}
+	return false
 }
 
 // queryer is the read side that *sql.DB and *sql.Tx share.

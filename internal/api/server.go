@@ -150,7 +150,9 @@ func knownHosts(next http.Handler, extra []string) http.Handler {
 	self, _ := os.Hostname()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !knownHost(r.Host, self, extra) {
-			writeError(w, http.StatusForbidden, fmt.Sprintf("unknown host name; start ply with -allow-host %s to use it", hostOnly(r.Host)))
+			h := hostOnly(r.Host)
+			writeError(w, http.StatusForbidden, fmt.Sprintf("unknown host name %s; start ply with -allow-host %s to use it "+
+				"(if ply is behind a proxy, also pass the original Host header through)", h, h))
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -159,14 +161,14 @@ func knownHosts(next http.Handler, extra []string) http.Handler {
 
 // knownHost reports whether host (a Host header, port optional) names this
 // server: an IP address; a name no one can point at us from the internet
-// (localhost, a single label, .local mDNS, .home.arpa, and the RFC 2606/6761
-// reserved names); the machine's hostname; or an entry of extra.
+// (localhost, a single label, .local mDNS, .home.arpa, .internal, and the
+// RFC 2606/6761 reserved names); the machine's hostname; or an entry of extra.
 func knownHost(host, self string, extra []string) bool {
 	h := strings.TrimSuffix(strings.ToLower(hostOnly(host)), ".")
 	if h == "" || net.ParseIP(h) != nil || !strings.Contains(h, ".") {
 		return true
 	}
-	for _, suffix := range []string{".localhost", ".local", ".home.arpa", ".test", ".example", ".invalid"} {
+	for _, suffix := range []string{".localhost", ".local", ".home.arpa", ".internal", ".test", ".example", ".invalid"} {
 		if strings.HasSuffix(h, suffix) {
 			return true
 		}
@@ -203,7 +205,8 @@ func sameOriginWrites(next http.Handler, token string) http.Handler {
 		case http.MethodGet, http.MethodHead, http.MethodOptions:
 		default:
 			if origin := r.Header.Get("Origin"); origin != "" && !sameOrigin(origin, r) && (token == "" || !validToken(r, token)) {
-				writeError(w, http.StatusForbidden, "cross-origin request refused")
+				writeError(w, http.StatusForbidden, fmt.Sprintf("cross-origin request refused (Origin %s does not match Host %s; "+
+					"a reverse proxy must pass the original Host header)", origin, r.Host))
 				return
 			}
 		}
