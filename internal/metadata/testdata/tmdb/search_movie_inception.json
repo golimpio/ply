@@ -1,0 +1,55 @@
+{
+  "page": 1,
+  "results": [
+    {
+      "adult": false,
+      "backdrop_path": "/8ZTVqvKDQ8emSGUEMjsS4yHAwrp.jpg",
+      "genre_ids": [28, 878, 12],
+      "id": 27205,
+      "original_language": "en",
+      "original_title": "Inception",
+      "overview": "Cobb, a skilled thief who commits corporate espionage by infiltrating the subconscious of his targets, is offered a chance to regain his old life as payment for a task considered to be impossible: inception.",
+      "popularity": 90.512,
+      "poster_path": "/ljsZTbVsrQSqZgWeep2B1QiDKuh.jpg",
+      "release_date": "2010-07-15",
+      "title": "Inception",
+      "video": false,
+      "vote_average": 8.4,
+      "vote_count": 36000
+    },
+    {
+      "adult": false,
+      "backdrop_path": null,
+      "genre_ids": [16, 28],
+      "id": 64956,
+      "original_language": "en",
+      "original_title": "Inception: The Cobol Job",
+      "overview": "An animated prequel to Inception.",
+      "popularity": 7.4,
+      "poster_path": "/7bQBWvmOrc8MvWTPYJeq1c1ZHHw.jpg",
+      "release_date": "2010-12-07",
+      "title": "Inception: The Cobol Job",
+      "video": false,
+      "vote_average": 6.9,
+      "vote_count": 221
+    },
+    {
+      "adult": false,
+      "backdrop_path": null,
+      "genre_ids": [99],
+      "id": 105112,
+      "original_language": "en",
+      "original_title": "Inception: Jump Right Into the Action",
+      "overview": "A featurette.",
+      "popularity": 3.1,
+      "poster_path": null,
+      "release_date": "2010-12-07",
+      "title": "Inception: Jump Right Into the Action",
+      "video": false,
+      "vote_average": 6.0,
+      "vote_count": 15
+    }
+  ],
+  "total_pages": 1,
+  "total_results": 3
+}

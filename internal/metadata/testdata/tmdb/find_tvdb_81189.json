@@ -1,0 +1,25 @@
+{
+  "movie_results": [],
+  "person_results": [],
+  "tv_results": [
+    {
+      "adult": false,
+      "backdrop_path": "/tsRy63Mu5cu8etL1X7ZLyf7UP1M.jpg",
+      "id": 1396,
+      "name": "Breaking Bad",
+      "original_language": "en",
+      "original_name": "Breaking Bad",
+      "overview": "When Walter White, a New Mexico chemistry teacher, is diagnosed with Stage III cancer...",
+      "poster_path": "/ggFHVNu6YYI5L9pCfOacjizRGt.jpg",
+      "media_type": "tv",
+      "genre_ids": [18, 80],
+      "popularity": 150.0,
+      "first_air_date": "2008-01-20",
+      "vote_average": 8.9,
+      "vote_count": 12500,
+      "origin_country": ["US"]
+    }
+  ],
+  "tv_episode_results": [],
+  "tv_season_results": []
+}

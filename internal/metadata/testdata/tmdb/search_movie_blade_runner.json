@@ -1,0 +1,55 @@
+{
+  "page": 1,
+  "results": [
+    {
+      "adult": false,
+      "backdrop_path": "/ilRyazdMJwN05exqhwK4tMKBYZs.jpg",
+      "genre_ids": [878, 18],
+      "id": 335984,
+      "original_language": "en",
+      "original_title": "Blade Runner 2049",
+      "overview": "Thirty years after the events of the first film, a new blade runner unearths a long-buried secret.",
+      "popularity": 55.0,
+      "poster_path": "/gajva2L0rPYkEWjzgFlBXCAVBE5.jpg",
+      "release_date": "2017-10-04",
+      "title": "Blade Runner 2049",
+      "video": false,
+      "vote_average": 7.5,
+      "vote_count": 12600
+    },
+    {
+      "adult": false,
+      "backdrop_path": "/63N9uy8nd9j7Eog2axPQ8lbr3Wj.jpg",
+      "genre_ids": [878, 18, 53],
+      "id": 78,
+      "original_language": "en",
+      "original_title": "Blade Runner",
+      "overview": "In the smog-choked dystopian Los Angeles of 2019, blade runner Rick Deckard is called out of retirement to terminate a quartet of replicants.",
+      "popularity": 40.1,
+      "poster_path": "/63N9uy8nd9j7Eog2axPQ8lbr3Wj.jpg",
+      "release_date": "1982-06-25",
+      "title": "Blade Runner",
+      "video": false,
+      "vote_average": 7.9,
+      "vote_count": 13100
+    },
+    {
+      "adult": false,
+      "backdrop_path": null,
+      "genre_ids": [878],
+      "id": 74201,
+      "original_language": "en",
+      "original_title": "Blade Runner 2: The Edge of Human",
+      "overview": "A novel adaptation that never reached the screen.",
+      "popularity": 3.2,
+      "poster_path": null,
+      "release_date": "",
+      "title": "Blade Runner 2: The Edge of Human",
+      "video": false,
+      "vote_average": 0.0,
+      "vote_count": 0
+    }
+  ],
+  "total_pages": 1,
+  "total_results": 3
+}

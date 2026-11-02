@@ -1,0 +1,71 @@
+{
+  "page": 1,
+  "results": [
+    {
+      "adult": false,
+      "backdrop_path": "/jNpGrRi5SzbwQxOGXxLsrvf9FCx.jpg",
+      "genre_ids": [27, 9648, 878],
+      "id": 60935,
+      "original_language": "en",
+      "original_title": "The Thing",
+      "overview": "A U.S. scientist and her team in Antarctica discover a mysterious spacecraft buried in the ice, and a creature that has been frozen for thousands of years.",
+      "popularity": 20.411,
+      "poster_path": "/tM0sYWDzoPFvV1N2nrDEtbHWmBt.jpg",
+      "release_date": "2011-10-12",
+      "title": "The Thing",
+      "video": false,
+      "vote_average": 6.2,
+      "vote_count": 3902
+    },
+    {
+      "adult": false,
+      "backdrop_path": "/eLLV2dTBJw1e0HFy1pxsvZxbRb8.jpg",
+      "genre_ids": [27, 9648, 878],
+      "id": 1091,
+      "original_language": "en",
+      "original_title": "The Thing",
+      "overview": "In remote Antarctica, a group of American research scientists are disturbed at their base camp by a helicopter shooting at a sled dog.",
+      "popularity": 25.812,
+      "poster_path": "/tzGY49kseSE9QAKk47uuDGwnSCu.jpg",
+      "release_date": "1982-06-25",
+      "title": "The Thing",
+      "video": false,
+      "vote_average": 8.1,
+      "vote_count": 7854
+    },
+    {
+      "adult": false,
+      "backdrop_path": "/o6v4pHLVAL2PtJzhpLHfRa72gaR.jpg",
+      "genre_ids": [27, 878],
+      "id": 10002,
+      "original_language": "en",
+      "original_title": "The Thing from Another World",
+      "overview": "A U.S. Air Force crew and scientists find an alien craft buried in the Arctic ice.",
+      "popularity": 10.226,
+      "poster_path": "/oqXqkrI1nv0OEtDq5rZPZmjQNL5.jpg",
+      "release_date": "1951-04-27",
+      "title": "The Thing from Another World",
+      "video": false,
+      "vote_average": 6.6,
+      "vote_count": 612
+    },
+    {
+      "adult": false,
+      "backdrop_path": null,
+      "genre_ids": [27, 35],
+      "id": 45991,
+      "original_language": "en",
+      "original_title": "The Thing with Two Heads",
+      "overview": "A dying racist surgeon has his head transplanted onto the body of a death row inmate.",
+      "popularity": 8.003,
+      "poster_path": "/wVLNqVPPqs4HK9o2Xb6CMQ9dmOD.jpg",
+      "release_date": "1972-07-01",
+      "title": "The Thing with Two Heads",
+      "video": false,
+      "vote_average": 4.6,
+      "vote_count": 103
+    }
+  ],
+  "total_pages": 1,
+  "total_results": 4
+}

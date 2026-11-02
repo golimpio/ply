@@ -213,15 +213,9 @@ func TestExternalSubtitles(t *testing.T) {
 func TestMigrationAddsForcedColumnToExistingDatabase(t *testing.T) {
 	// A database created by M1-M4 has migration 1 only: opening it with this
 	// version must add the column and keep the data.
-	s, path := openTemp(t)
 	ctx := context.Background()
-	id, _ := s.UpsertItem(ctx, movie("/media/a.mp4", "A"), nil)
-	if _, err := s.db.Exec(`ALTER TABLE subtitles_external DROP COLUMN forced`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.db.Exec(`DELETE FROM schema_version WHERE version = 2`); err != nil {
-		t.Fatal(err)
-	}
+	s, path := openAtVersion(t, 1)
+	id := insertOldItem(t, s, "/media/a.mp4", "A")
 	if _, err := s.db.Exec(`INSERT INTO subtitles_external (item_id, path, language, format) VALUES (?, '/media/a.srt', '', 'srt')`, id); err != nil {
 		t.Fatal(err)
 	}

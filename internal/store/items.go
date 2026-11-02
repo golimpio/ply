@@ -34,6 +34,17 @@ type Item struct {
 	Bitrate     int64
 	AddedAt     int64 // unix seconds
 	UpdatedAt   int64
+
+	// Metadata (M6). Written by the metadata methods, never by UpsertItem.
+	TitleID       int64 // movies: the matched title; 0 = none
+	MatchState    string
+	NeedsReview   bool
+	LocalPoster   string // absolute path of sidecar artwork; "" = none
+	LocalBackdrop string
+	LocalThumb    string
+
+	// Fingerprint is computed by the scanner and written by UpsertItem.
+	Fingerprint string
 }
 
 // Entry is an item with its streams. GetEntry also fills External (sidecar
@@ -71,7 +82,8 @@ type Show struct {
 }
 
 const itemCols = `id, kind, title, year, show, season, episode, path, root, size, mtime,
-	container, duration_sec, bitrate, added_at, updated_at`
+	container, duration_sec, bitrate, added_at, updated_at, title_id, match_state, needs_review,
+	local_poster, local_backdrop, local_thumb, fingerprint`
 
 const streamCols = `idx, type, codec, codec_tag, profile, width, height, pix_fmt, color_transfer,
 	channels, language, title, is_default, forced, dovi`
@@ -79,10 +91,15 @@ const streamCols = `idx, type, codec, codec_tag, profile, width, height, pix_fmt
 type scanner interface{ Scan(dest ...any) error }
 
 func scanItem(sc scanner) (Item, error) {
-	var it Item
+	var (
+		it      Item
+		titleID sql.NullInt64
+	)
 	err := sc.Scan(&it.ID, &it.Kind, &it.Title, &it.Year, &it.Show, &it.Season, &it.Episode,
 		&it.Path, &it.Root, &it.Size, &it.MTime, &it.Container, &it.DurationSec, &it.Bitrate,
-		&it.AddedAt, &it.UpdatedAt)
+		&it.AddedAt, &it.UpdatedAt, &titleID, &it.MatchState, &it.NeedsReview,
+		&it.LocalPoster, &it.LocalBackdrop, &it.LocalThumb, &it.Fingerprint)
+	it.TitleID = titleID.Int64
 	return it, err
 }
 
@@ -107,17 +124,18 @@ func (s *Store) UpsertItem(ctx context.Context, it *Item, streams []probe.Stream
 	var id int64
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO items (kind, title, year, show, season, episode, path, root, size, mtime,
-			container, duration_sec, bitrate, added_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			container, duration_sec, bitrate, added_at, updated_at, fingerprint)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (path) DO UPDATE SET
 			kind = excluded.kind, title = excluded.title, year = excluded.year,
 			show = excluded.show, season = excluded.season, episode = excluded.episode,
 			root = excluded.root, size = excluded.size, mtime = excluded.mtime,
 			container = excluded.container, duration_sec = excluded.duration_sec,
-			bitrate = excluded.bitrate, updated_at = excluded.updated_at
+			bitrate = excluded.bitrate, updated_at = excluded.updated_at,
+			fingerprint = excluded.fingerprint
 		RETURNING id`,
 		it.Kind, it.Title, it.Year, it.Show, it.Season, it.Episode, it.Path, it.Root, it.Size, it.MTime,
-		it.Container, it.DurationSec, it.Bitrate, now, now).Scan(&id)
+		it.Container, it.DurationSec, it.Bitrate, now, now, it.Fingerprint).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -229,8 +247,7 @@ func listItems(ctx context.Context, q queryer, f ListFilter) ([]Entry, error) {
 
 	// The pool has one connection: finish reading each result set before
 	// starting the next query.
-	items, err := queryItems(ctx, q, `SELECT i.id, i.kind, i.title, i.year, i.show, i.season, i.episode,
-			i.path, i.root, i.size, i.mtime, i.container, i.duration_sec, i.bitrate, i.added_at, i.updated_at
+	items, err := queryItems(ctx, q, `SELECT `+prefixed("i.", itemCols)+`
 		FROM items i`+clause+`
 		ORDER BY i.kind DESC,
 			LOWER(CASE i.kind WHEN 'movie' THEN i.title ELSE i.show END),

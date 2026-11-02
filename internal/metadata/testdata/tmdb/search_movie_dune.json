@@ -1,0 +1,55 @@
+{
+  "page": 1,
+  "results": [
+    {
+      "adult": false,
+      "backdrop_path": "/jYEW5xZkZk2WTrdbMGAPFuBqbDc.jpg",
+      "genre_ids": [878, 12],
+      "id": 438631,
+      "original_language": "en",
+      "original_title": "Dune",
+      "overview": "Paul Atreides, a brilliant and gifted young man born into a great destiny beyond his understanding, must travel to the most dangerous planet in the universe.",
+      "popularity": 110.0,
+      "poster_path": "/d5NXSklXo0qyIYkgV94XAgMIckC.jpg",
+      "release_date": "2021-09-15",
+      "title": "Dune",
+      "video": false,
+      "vote_average": 7.8,
+      "vote_count": 11500
+    },
+    {
+      "adult": false,
+      "backdrop_path": "/ofFfUgyNZR3gOgwQ0L1XJTjaWHL.jpg",
+      "genre_ids": [878, 12],
+      "id": 841,
+      "original_language": "en",
+      "original_title": "Dune",
+      "overview": "In the year 10,191, the world is at war for control of the desert planet Arrakis.",
+      "popularity": 30.0,
+      "poster_path": "/8MGY5kWWNuh6RzKtbPaYGUoKl1x.jpg",
+      "release_date": "1984-12-14",
+      "title": "Dune",
+      "video": false,
+      "vote_average": 6.2,
+      "vote_count": 2900
+    },
+    {
+      "adult": false,
+      "backdrop_path": "/xOMo8BRK7PfcJv9JCnx7s5hj0PX.jpg",
+      "genre_ids": [878, 12],
+      "id": 693134,
+      "original_language": "en",
+      "original_title": "Dune: Part Two",
+      "overview": "Follow the mythic journey of Paul Atreides as he unites with Chani and the Fremen.",
+      "popularity": 130.0,
+      "poster_path": "/1pdfLvkbY9ohJlCjQH2CZjjYVvJ.jpg",
+      "release_date": "2024-02-27",
+      "title": "Dune: Part Two",
+      "video": false,
+      "vote_average": 8.2,
+      "vote_count": 6800
+    }
+  ],
+  "total_pages": 1,
+  "total_results": 3
+}

@@ -1,0 +1,55 @@
+{
+  "page": 1,
+  "results": [
+    {
+      "adult": false,
+      "backdrop_path": "/ve72VxNqjGM69Uky4WTo2bK6rfq.jpg",
+      "genre_ids": [878, 9648],
+      "id": 62,
+      "original_language": "en",
+      "original_title": "2001: A Space Odyssey",
+      "overview": "Humanity finds a mysterious object buried beneath the lunar surface and sets off to find its origins with the help of HAL 9000, the world's most advanced super computer.",
+      "popularity": 38.206,
+      "poster_path": "/ve72VxNqjGM69Uky4WTo2bK6rfq.jpg",
+      "release_date": "1968-04-02",
+      "title": "2001: A Space Odyssey",
+      "video": false,
+      "vote_average": 8.0,
+      "vote_count": 11690
+    },
+    {
+      "adult": false,
+      "backdrop_path": "/d9QG6vvA5GLEXGnbpPj7XVQmfKR.jpg",
+      "genre_ids": [878, 9648],
+      "id": 2001,
+      "original_language": "en",
+      "original_title": "2010: The Year We Make Contact",
+      "overview": "Nine years after the Discovery mission, a joint American-Soviet crew heads to Jupiter to find out what happened.",
+      "popularity": 14.131,
+      "poster_path": "/pkfLUQSXlpC5E2ZZiBPpeVTiKXc.jpg",
+      "release_date": "1984-12-07",
+      "title": "2010: The Year We Make Contact",
+      "video": false,
+      "vote_average": 6.7,
+      "vote_count": 1389
+    },
+    {
+      "adult": false,
+      "backdrop_path": null,
+      "genre_ids": [99],
+      "id": 76112,
+      "original_language": "en",
+      "original_title": "The Making of 2001: A Space Odyssey",
+      "overview": "A documentary on the making of Kubrick's film.",
+      "popularity": 4.012,
+      "poster_path": null,
+      "release_date": "2007-10-30",
+      "title": "The Making of 2001: A Space Odyssey",
+      "video": false,
+      "vote_average": 6.8,
+      "vote_count": 12
+    }
+  ],
+  "total_pages": 1,
+  "total_results": 3
+}

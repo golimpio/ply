@@ -1,0 +1,39 @@
+{
+  "page": 1,
+  "results": [
+    {
+      "adult": false,
+      "backdrop_path": "/jPlbTgpzm0HnaCIM1wa3sRmVhJz.jpg",
+      "genre_ids": [35, 10749],
+      "id": 194,
+      "original_language": "fr",
+      "original_title": "Le Fabuleux Destin d'Amélie Poulain",
+      "overview": "At a tiny Parisian café, the adorable yet painfully shy Amélie accidentally discovers a gift for helping others.",
+      "popularity": 40.121,
+      "poster_path": "/nSxDa3M9aMvGVLoItzWTepQ5h5d.jpg",
+      "release_date": "2001-04-25",
+      "title": "Amélie",
+      "video": false,
+      "vote_average": 7.8,
+      "vote_count": 9890
+    },
+    {
+      "adult": false,
+      "backdrop_path": "/8cJvk7rAm0Q4tXdOpDs3QvLuTZ9.jpg",
+      "genre_ids": [18, 36],
+      "id": 11250,
+      "original_language": "en",
+      "original_title": "Amelia",
+      "overview": "The story of Amelia Earhart, the first woman to fly solo across the Atlantic.",
+      "popularity": 10.4,
+      "poster_path": "/b0vP1rh44WG6HOjs0LjpDFVbOEK.jpg",
+      "release_date": "2009-10-23",
+      "title": "Amelia",
+      "video": false,
+      "vote_average": 5.8,
+      "vote_count": 520
+    }
+  ],
+  "total_pages": 1,
+  "total_results": 2
+}
