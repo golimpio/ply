@@ -249,6 +249,21 @@ func TestKilledServerLeavesNoFFmpeg(t *testing.T) {
 		pid, _ = strconv.Atoi(strings.Fields(p[0])[0])
 		return true
 	})
+	// ps lists the fake as soon as it is exec'd, while the shell is still
+	// starting up. Crashing the server then proves nothing: an orphan that has
+	// not got going yet can die with its working directory. Wait until it has
+	// run (logged its start) and is producing fragments, so that only the next
+	// ply's cleanup can end it.
+	waitUntil(t, "ffmpeg to log its start", 10*time.Second, func() bool { return f.starts()[0] != "" })
+	waitUntil(t, "ffmpeg to produce a fragment", 10*time.Second, func() bool {
+		g, _ := filepath.Glob(filepath.Join(root, "*", "*", "gop*.m4s"))
+		return len(g) > 0
+	})
+	// The pid file is what the next ply goes by (a positive control for the
+	// "never written" mutant).
+	if g, _ := filepath.Glob(filepath.Join(root, "*", "*", pidFile)); len(g) != 1 {
+		t.Fatalf("setup: pid files = %v, want one", g)
+	}
 
 	// The crash. The orphan is still there: this is the bug's starting point.
 	if err := helper.Process.Kill(); err != nil {

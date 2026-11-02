@@ -106,15 +106,59 @@ it('a track switch keeps the position through a stream that never starts', () =>
 
 // W4: the back/forward cache.
 it('after pagehide tears the stream down, pageshow can restart from the saved position', () => {
-  const { v, p } = setup();
+  const { v, p, sent } = setup();
   p.begin(0);
   v.load('hls', 0);
   v.currentTime = 40;
   p.update();
   p.report(true);
+  expect(sent, 'the report made while leaving asks for keepalive, so that it outlives the page').toEqual([[40, 3600, true]]);
   p.end(); // pagehide -> leave()
   v.unload();
   expect(p.position()).toBe(40);
+});
+
+// The sender decides what keepalive means (fetch's keepalive); Progress only has to hand it over as asked.
+it('keepalive is passed on exactly as asked: off by default, on when leaving', () => {
+  const { v, p, sent } = setup();
+  p.begin(0);
+  v.load('hls', 0);
+  v.currentTime = 12;
+  p.update();
+  p.report(); // the ticker
+  v.currentTime = 13;
+  p.report(true); // pagehide, or the page being hidden
+  v.currentTime = 14;
+  p.report(false);
+  v.currentTime = 15;
+  p.report();
+  expect(sent).toEqual([
+    [12, 3600, false],
+    [13, 3600, true],
+    [14, 3600, false],
+    [15, 3600, false],
+  ]);
+});
+
+// With the target at 45 s a stream counts as having got there from 42 s (ARRIVED = 3 s before it:
+// hls.js lands on a keyframe, a seek is not exact), and not a moment earlier.
+it.each([
+  [0, false],
+  [10, false],
+  [41, false],
+  [41.9, false],
+  [42, true],
+  [43, true],
+  [45, true],
+  [46.5, true],
+])('a stream meant to start at 45 s that sits at %f s is armed: %s', (at, armed) => {
+  const { v, p, sent } = setup();
+  p.begin(45);
+  v.load('hls', at);
+  p.update();
+  p.report();
+  expect(sent).toEqual(armed ? [[at, 3600, false]] : []);
+  expect(p.position(), 'the next stream starts where this one is, once it counts, else at the target').toBe(armed ? at : 45);
 });
 
 it('a start from the beginning reports as soon as the stream is up', () => {

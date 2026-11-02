@@ -206,8 +206,14 @@ describe('response shapes', () => {
   });
 
   it('answers undefined for 204', async () => {
+    // Through a call that does not swallow errors: an empty body must not reach res.json().
     stubFetch(new Response(null, { status: 204 }));
-    expect(await m.api.deleteSession('s/1')).toBeUndefined();
+    await expect(m.api.putProgress(1, 5, 60)).resolves.toBeUndefined();
+  });
+
+  it('answers null where the server does', async () => {
+    stubFetch(json(null));
+    await expect(m.api.putProgress(1, 5, 60)).resolves.toBeNull();
   });
 
   it('escapes the session id in the URL', async () => {
@@ -215,5 +221,116 @@ describe('response shapes', () => {
     await m.api.deleteSession('a/b c');
     expect((fetchFn.mock.calls[0] as unknown as FetchCall)[0]).toBe('/api/sessions/a%2Fb%20c');
     expect((fetchFn.mock.calls[0] as unknown as FetchCall)[1].method).toBe('DELETE');
+  });
+});
+
+describe('putProgress', () => {
+  it('sends the position and the duration to the item', async () => {
+    const fetchFn = stubFetch(json({ positionSec: 42.5, watched: false }));
+    const res = await m.api.putProgress(7, 42.5, 3600);
+    const [path, init] = fetchFn.mock.calls[0] as unknown as FetchCall;
+    expect(path).toBe('/api/items/7/progress');
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(init.body as string)).toEqual({ positionSec: 42.5, durationSec: 3600 });
+    expect((init.headers as Record<string, string>)['Content-Type']).toBe('application/json');
+    expect(res).toEqual({ positionSec: 42.5, watched: false });
+  });
+
+  it('asks for keepalive only when told to (a report made while the page unloads)', async () => {
+    const fetchFn = stubFetch(json(null));
+    await m.api.putProgress(7, 1, 2);
+    await m.api.putProgress(7, 1, 2, false);
+    await m.api.putProgress(7, 1, 2, true);
+    const keepalive = fetchFn.mock.calls.map((c) => (c[1] as RequestInit).keepalive);
+    expect(keepalive).toEqual([false, false, true]);
+  });
+
+  it('sends the bearer token like any other call', async () => {
+    m.setToken('s3cret');
+    const fetchFn = stubFetch(json(null));
+    await m.api.putProgress(7, 1, 2);
+    expect(headersOf(fetchFn).Authorization).toBe('Bearer s3cret');
+  });
+});
+
+describe('deleteSession', () => {
+  it('outlives the page: keepalive', async () => {
+    const fetchFn = stubFetch(new Response(null, { status: 204 }));
+    await m.api.deleteSession('s1');
+    expect((fetchFn.mock.calls[0] as unknown as FetchCall)[1].keepalive).toBe(true);
+  });
+
+  it('is best effort: a failure is not the caller\'s problem', async () => {
+    stubFetch(new TypeError('Failed to fetch'));
+    await expect(m.api.deleteSession('s1')).resolves.toBeUndefined();
+    stubFetch(json({ error: 'no such session' }, 404));
+    await expect(m.api.deleteSession('s1')).resolves.toBeUndefined();
+  });
+});
+
+describe('item', () => {
+  const bare = { id: 5, title: 'T', playback: { method: 'remux', reasons: ['container'], url: '', startSec: 0 } };
+
+  it('asks for the item, with the playback target when given', async () => {
+    const fetchFn = stubFetch(json(bare));
+    await m.api.item(5);
+    await m.api.item(5, 'browser');
+    expect(fetchFn.mock.calls.map((c) => c[0])).toEqual(['/api/items/5', '/api/items/5?target=browser']);
+  });
+
+  it('turns the nulls Go sends for empty lists into arrays', async () => {
+    stubFetch(json({ ...bare, streams: null, subtitles: null, playback: { ...bare.playback, reasons: null } }));
+    const d = await m.api.item(5);
+    expect(d.streams).toEqual([]);
+    expect(d.subtitles).toEqual([]);
+    expect(d.playback.reasons).toEqual([]);
+  });
+
+  it('keeps what the server sent', async () => {
+    const streams = [{ index: 1, type: 'audio', codec: 'aac' }];
+    const subtitles = [{ key: '2', format: 'subrip', image: false }];
+    stubFetch(json({ ...bare, streams, subtitles }));
+    expect(await m.api.item(5)).toEqual({ ...bare, streams, subtitles });
+  });
+
+  it('copes with an answer that has no playback decision', async () => {
+    stubFetch(json({ id: 5, streams: null, subtitles: null }));
+    const d = await m.api.item(5);
+    expect(d.playback).toBeUndefined();
+    expect(d.streams).toEqual([]);
+  });
+
+  it('releases a session the server opened just to describe the decision', async () => {
+    const fetchFn = stubFetch(json({ ...bare, playback: { ...bare.playback, sessionId: 'oops/1' } }));
+    await m.api.item(5);
+    const calls = fetchFn.mock.calls as unknown as FetchCall[];
+    expect(calls.map((c) => [c[1].method ?? 'GET', c[0]])).toEqual([
+      ['GET', '/api/items/5'],
+      ['DELETE', '/api/sessions/oops%2F1'],
+    ]);
+    expect(calls[1][1].keepalive).toBe(true);
+  });
+
+  it('asks for nothing more when there is no session', async () => {
+    const fetchFn = stubFetch(json(bare));
+    await m.api.item(5);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('playback', () => {
+  const decision = { method: 'direct', videoAction: 'copy', audioAction: 'copy', audioIndex: 1 };
+
+  it('fills in what Go leaves out: no reasons, no url, no start', async () => {
+    stubFetch(json({ ...decision, reasons: null, url: null }));
+    expect(await m.api.playback(1, {})).toEqual({ ...decision, reasons: [], url: '', startSec: 0 });
+    stubFetch(json(decision));
+    expect(await m.api.playback(1, {})).toEqual({ ...decision, reasons: [], url: '', startSec: 0 });
+  });
+
+  it('keeps what the server did send', async () => {
+    const full = { ...decision, reasons: ['why'], url: '/api/sessions/s1/index.m3u8', sessionId: 's1', startSec: 12.5 };
+    stubFetch(json(full));
+    expect(await m.api.playback(1, { startSec: 12.5 })).toEqual(full);
   });
 });

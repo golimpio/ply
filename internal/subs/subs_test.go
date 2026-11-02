@@ -352,15 +352,40 @@ func TestCloseStopsConversionsInProgress(t *testing.T) {
 		t.Fatalf("setup: processes %d and %d are not both running", leader, helper)
 	}
 
+	t.Cleanup(func() { // whatever a failing test leaves behind (the fake sleeps for 300 s); the helper is in the leader's group
+		_ = syscall.Kill(-leader, syscall.SIGKILL)
+	})
+
+	// In a goroutine, so that a Close that never cancels fails here instead of
+	// hanging the test for as long as the conversion runs.
+	closed := make(chan struct{})
 	start := time.Now()
-	g.Close()
+	go func() { g.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not return: it does not cancel the conversion in progress")
+	}
 	if d := time.Since(start); d > 2*time.Second {
 		t.Errorf("Close took %v", d)
 	}
-	waitFor(t, "ffmpeg and its helper to be gone", func() bool { return !alive(leader) && !alive(helper) })
-	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
-		t.Errorf("temp file left behind: %v", err)
+	// No polling from here on: Close waits for the conversions, so when it
+	// returns the conversion is over, its ffmpeg has been waited for and its
+	// half-written file is gone.
+	g.mu.Lock()
+	inflight := len(g.inflight)
+	g.mu.Unlock()
+	if inflight != 0 {
+		t.Errorf("%d conversions still in flight after Close returned", inflight)
 	}
+	if alive(leader) {
+		t.Errorf("ffmpeg (pid %d) still running after Close returned", leader)
+	}
+	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
+		t.Errorf("temp file left behind after Close returned: %v", err)
+	}
+	// The helper is a grandchild, reaped by init some moments after it is killed.
+	waitFor(t, "ffmpeg's helper to be gone", func() bool { return !alive(helper) })
 	select {
 	case err := <-pathErr:
 		if err == nil || errors.Is(err, ErrConvert) {

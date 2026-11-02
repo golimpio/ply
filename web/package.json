@@ -8,7 +8,7 @@
     "build": "vite build",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
-    "e2e": "node e2e/player-controls.mjs",
+    "e2e": "node e2e/player-wiring.mjs && node e2e/player-controls.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

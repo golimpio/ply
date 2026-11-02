@@ -13,16 +13,21 @@ interface Browser {
   mse?: (mime: string) => boolean;
   /** The same through the older ManagedMediaSource (iPhone Safari). */
   managed?: (mime: string) => boolean;
-  /** What <video>.canPlayType says: 'probably' for true, '' for false. */
-  canPlay?: (mime: string) => boolean;
+  /** What <video>.canPlayType says: 'probably' for true, '' for false, or 'maybe' (a bare container, in Chrome). */
+  canPlay?: (mime: string) => boolean | 'maybe';
 }
 
 /** The profile of a browser that answers like `b`. browserProfile caches, so the module is loaded afresh. */
 async function profileOf(b: Browser): Promise<Profile> {
   vi.resetModules();
+  delete win.MediaSource;
+  delete win.ManagedMediaSource;
   if (b.mse) win.MediaSource = { isTypeSupported: b.mse };
   if (b.managed) win.ManagedMediaSource = { isTypeSupported: b.managed };
-  vi.spyOn(HTMLMediaElement.prototype, 'canPlayType').mockImplementation((mime) => (b.canPlay?.(mime) ? 'probably' : ''));
+  vi.spyOn(HTMLMediaElement.prototype, 'canPlayType').mockImplementation((mime) => {
+    const r = b.canPlay?.(mime);
+    return r === 'maybe' ? 'maybe' : r ? 'probably' : '';
+  });
   return (await import('./profile')).browserProfile();
 }
 
@@ -125,6 +130,70 @@ describe('browserProfile', () => {
     });
     expect(p.videoCodecs).toEqual(['vp9', 'av1']);
     expect(p.audioCodecs).toEqual(['opus', 'flac']);
+  });
+
+  // The exact strings the player asks about. A different profile or level is a different question,
+  // and the browser would answer it differently: the substring checks above would not notice.
+  const ASKED = [
+    ['videoCodecs', 'h264', 'video/mp4; codecs="avc1.640028"'],
+    ['videoCodecs', 'hevc', 'video/mp4; codecs="hvc1.1.6.L120.90"'],
+    ['videoCodecs', 'vp9', 'video/webm; codecs="vp09.00.10.08"'],
+    ['videoCodecs', 'vp9', 'video/mp4; codecs="vp09.00.10.08"'],
+    ['videoCodecs', 'av1', 'video/mp4; codecs="av01.0.05M.08"'],
+    ['videoCodecs', 'av1', 'video/webm; codecs="av01.0.05M.08"'],
+    ['audioCodecs', 'aac', 'audio/mp4; codecs="mp4a.40.2"'],
+    ['audioCodecs', 'mp3', 'audio/mpeg'],
+    ['audioCodecs', 'mp3', 'audio/mp4; codecs="mp3"'],
+    ['audioCodecs', 'opus', 'audio/webm; codecs="opus"'],
+    ['audioCodecs', 'opus', 'audio/mp4; codecs="opus"'],
+    ['audioCodecs', 'flac', 'audio/mp4; codecs="flac"'],
+    ['audioCodecs', 'flac', 'audio/flac'],
+    ['audioCodecs', 'ac3', 'audio/mp4; codecs="ac-3"'],
+    ['audioCodecs', 'eac3', 'audio/mp4; codecs="ec-3"'],
+  ] as const;
+
+  describe.each([
+    ['Media Source', (mime: string): Browser => ({ mse: exact(mime) })],
+    ['canPlayType', (mime: string): Browser => ({ canPlay: exact(mime) })],
+  ])('asked of %s', (_, answeringOnly) => {
+    it.each(ASKED)('%s: %s is claimed for %s, and nothing else is', async (field, codec, mime) => {
+      const p = await profileOf(answeringOnly(mime));
+      expect(p[field]).toEqual([codec]);
+      expect(field === 'videoCodecs' ? p.audioCodecs : p.videoCodecs).toEqual([]);
+      expect(p.containers).toEqual([]);
+      expect(p.requireHvc1).toBe(codec === 'hevc');
+    });
+  });
+
+  it.each([
+    ['mp4', 'video/mp4'],
+    ['webm', 'video/webm'],
+    ['mov', 'video/quicktime'],
+  ])('the %s container is canPlayType(%s) and nothing else', async (container, mime) => {
+    const p = await profileOf({ canPlay: exact(mime) });
+    expect(p.containers).toEqual([container]);
+    expect(p.videoCodecs).toEqual([]);
+    expect(p.audioCodecs).toEqual([]);
+  });
+
+  it('takes the containers from canPlayType alone: Media Source says nothing about files', async () => {
+    const p = await profileOf({ mse: everything, canPlay: nothing });
+    expect(p.videoCodecs.length, 'control: Media Source did say yes to the codecs').toBeGreaterThan(0);
+    expect(p.containers).toEqual([]);
+    expect((await profileOf({ mse: nothing, canPlay: exact('video/mp4') })).containers).toEqual(['mp4']);
+  });
+
+  it("counts canPlayType's 'maybe' as a yes (all Chrome says of a bare container)", async () => {
+    const p = await profileOf({ canPlay: (m) => (m === 'video/mp4' ? 'maybe' : false) });
+    expect(p.containers).toEqual(['mp4']);
+  });
+
+  it('prefers MediaSource to ManagedMediaSource where there are both', async () => {
+    const both = await profileOf({ mse: only('avc1'), managed: only('hvc1') });
+    expect(both.videoCodecs).toEqual(['h264']);
+    expect(both.requireHvc1).toBe(false);
+    // Control: ManagedMediaSource is consulted at all, and answers differently.
+    expect((await profileOf({ managed: only('hvc1') })).videoCodecs).toEqual(['hevc']);
   });
 
   it('is measured once', async () => {
