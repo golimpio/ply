@@ -65,6 +65,31 @@ describe('showsOf', () => {
   });
 });
 
+describe('byAdded, applyProgress, and what counts as a show', () => {
+  it('sorts newest first', () => {
+    const a = { ...movie('A'), addedAt: 10 };
+    const b = { ...movie('B'), addedAt: 30 };
+    const c = { ...movie('C'), addedAt: 20 };
+    expect([a, b, c].sort(lib.byAdded).map((m) => m.title)).toEqual(['B', 'C', 'A']);
+  });
+
+  it('writes a progress report into the cached item, and only that one', async () => {
+    const a = movie('A');
+    const b = movie('B');
+    api.items.mockResolvedValueOnce([a, b]);
+    await lib.ensureLibrary();
+    lib.applyProgress(a.id, { positionSec: 42, watched: false });
+    expect(lib.findItem(a.id)?.progress).toEqual({ positionSec: 42, watched: false });
+    expect(lib.findItem(b.id)?.progress).toBeUndefined();
+    lib.applyProgress(9999, { positionSec: 1, watched: false }); // not in the library: nothing happens
+  });
+
+  it('a film with a show name is still not a show', () => {
+    const odd = { ...movie('Odd'), show: 'Odd' };
+    expect(lib.showsOf([odd, ep('Real', 1, 1)]).map((s) => s.show)).toEqual(['Real']);
+  });
+});
+
 describe('byTitle', () => {
   it('sorts numbers by value and ignores case', () => {
     const sorted = [movie('Movie 10'), movie('Movie 2'), movie('movie 1')].sort(lib.byTitle);

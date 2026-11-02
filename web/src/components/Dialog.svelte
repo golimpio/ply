@@ -13,6 +13,10 @@
   }: { open: boolean; title: string; wide?: boolean; children: Snippet; footer?: Snippet } = $props();
 
   let dialog = $state<HTMLDialogElement>();
+  // A click on the backdrop closes it, but only one that also began there: a
+  // text selection dragged out of an input and let go outside must not close
+  // the dialog (and lose what was typed).
+  let downOnBackdrop = false;
 
   $effect(() => {
     if (!dialog) return;
@@ -26,8 +30,10 @@
   class:wide
   aria-labelledby="dialog-title"
   onclose={() => (open = false)}
+  onpointerdown={(e) => (downOnBackdrop = e.target === dialog)}
   onclick={(e) => {
-    if (e.target === dialog) open = false; // a click on the backdrop
+    if (downOnBackdrop && e.target === dialog) open = false;
+    downOnBackdrop = false;
   }}
 >
   {#if open}

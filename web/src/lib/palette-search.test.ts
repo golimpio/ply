@@ -92,3 +92,18 @@ describe('matchGenres', () => {
     expect(names('a', 2)).toHaveLength(2);
   });
 });
+
+describe('matchGenres: limit and order', () => {
+  const genres: GenreCount[] = [
+    { id: 1, name: 'Animation', count: 3 },
+    { id: 2, name: 'Action', count: 12 },
+    { id: 3, name: 'Adventure', count: 7 },
+    { id: 4, name: 'Family', count: 2 },
+    { id: 5, name: 'Fantasy', count: 5 },
+  ];
+  it('gives at most four by default, best match first', () => {
+    expect(matchGenres(genres, 'a')).toHaveLength(4);
+    expect(matchGenres(genres, 'action')[0].name).toBe('Action');
+    expect(matchGenres(genres, 'fan')[0].name).toBe('Fantasy');
+  });
+});

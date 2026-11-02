@@ -2,7 +2,7 @@
   import type { ItemSummary } from '../lib/api';
   import { formatDuration, hdrLabel, resolutionLabel } from '../lib/format';
   import { byAdded, byTitle, ensureLibrary, library } from '../lib/library.svelte';
-  import { groupByTitle, prefersPosters, type TitleGroup } from '../lib/meta';
+  import { filmPasses, groupByTitle, prefersPosters, type TitleGroup } from '../lib/meta';
   import { href, type LibraryView } from '../lib/router.svelte';
   import { app } from '../lib/state.svelte';
   import LibraryControls from '../components/LibraryControls.svelte';
@@ -24,15 +24,11 @@
 
   // One card per film: its files (4K and 1080p, say) are versions of it.
   const all = $derived(groupByTitle(library.items.filter((i) => i.kind === 'movie')));
-  // A filter keeps a film when any of its versions passes.
-  const passes = (i: ItemSummary) =>
-    (!view.filters.includes('4k') || resolutionLabel(i.width, i.height) === '4K') &&
-    (!view.filters.includes('hdr') || hdrLabel(i.hdr) !== '') &&
-    (!view.filters.includes('unwatched') || !i.progress?.watched);
+  // See filmPasses: 4K/HDR when any version is; watched when any version was.
+  const is4k = (i: ItemSummary) => resolutionLabel(i.width, i.height) === '4K';
+  const isHdr = (i: ItemSummary) => hdrLabel(i.hdr) !== '';
   const shown = $derived(
-    all
-      .filter((g: TitleGroup) => g.versions.some(passes))
-      .sort((a, b) => order[view.sort](a.item, b.item)),
+    all.filter((g) => filmPasses(g, { is4k, isHdr, filters: view.filters })).sort((a, b) => order[view.sort](a.item, b.item)),
   );
   const posters = $derived(prefersPosters(all.map((g) => g.item)));
 

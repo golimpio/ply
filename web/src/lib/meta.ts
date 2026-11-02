@@ -201,6 +201,36 @@ export function groupByTitle(items: ItemSummary[]): TitleGroup[] {
   return [...groups.values()];
 }
 
+/**
+ * The first item of each film in list (files matched to one title), in order:
+ * the newest version when list is newest first, the one played last in
+ * Continue. Episodes and unmatched files all stay.
+ */
+export function onePerTitle(list: ItemSummary[]): ItemSummary[] {
+  const seen = new Set<number>();
+  return list.filter((i) => i.kind !== 'movie' || !i.titleId || (!seen.has(i.titleId) && !!seen.add(i.titleId)));
+}
+
+/** The Movies page's filters, applied to a whole film. */
+export interface FilmFilter {
+  is4k: (i: ItemSummary) => boolean;
+  isHdr: (i: ItemSummary) => boolean;
+  filters: string[];
+}
+
+/**
+ * Whether a film passes the filters: 4K and HDR when any version is; Unwatched
+ * when no version was watched to the end (a film seen in 1080p that also has a
+ * 4K file is a watched film).
+ */
+export function filmPasses(g: TitleGroup, f: FilmFilter): boolean {
+  return (
+    (!f.filters.includes('4k') || g.versions.some(f.is4k)) &&
+    (!f.filters.includes('hdr') || g.versions.some(f.isHdr)) &&
+    (!f.filters.includes('unwatched') || !g.versions.some((v) => v.progress?.watched))
+  );
+}
+
 /** A short label telling versions apart: "4K HDR10, MKV", "1080p, MP4". */
 export function versionLabel(i: ItemSummary): string {
   const h = i.height || 0;

@@ -198,3 +198,16 @@ describe('lifeSpan', () => {
     expect(lifeSpan(undefined, undefined)).toBe('');
   });
 });
+
+describe('dates: month lengths', () => {
+  it('30-day months end on the 30th, and February follows the leap rule', () => {
+    expect(formatDate('2023-04-30')).toBe('30 April 2023');
+    expect(formatDate('2023-04-31')).toBe(''); // April has 30 days
+    expect(formatDate('2023-06-31')).toBe('');
+    expect(formatDate('2023-09-31')).toBe('');
+    expect(formatDate('2023-11-31')).toBe('');
+    expect(formatDate('2023-05-31')).toBe('31 May 2023');
+    expect(formatDate('2024-02-29')).toBe('29 February 2024');
+    expect(formatDate('2023-02-29')).toBe('');
+  });
+});

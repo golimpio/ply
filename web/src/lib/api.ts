@@ -483,18 +483,33 @@ export function imageSrcset(rel: string | null | undefined, sizes: Exclude<Image
   return sizes.map((sz) => `${imageUrl(rel, sz)} ${IMAGE_SIZES[sz]}w`).join(', ');
 }
 
+/** What the "fix match" box was given: an id, and the kind of title when the link says so. */
+export interface MatchInput {
+  ref: MatchRef;
+  /** From a themoviedb.org /movie/ or /tv/ link; absent for IMDb ids and tmdb:N. */
+  kind?: TitleKind;
+}
+
 /**
  * Reads what a person pastes into the "fix match" box: a themoviedb.org movie or tv URL, an
- * imdb.com title URL, an IMDb id (tt0133093) or a bare TMDB id. null when it is none of those.
+ * imdb.com title URL, an IMDb id (tt0133093), or a TMDB id said as such ("tmdb:603", "tmdb 603").
+ * A bare number is not an id: it is a title to search for ("1917", "300", "24"). null when the
+ * input is none of those.
  */
-export function parseMatchRef(input: string): MatchRef | null {
+export function parseMatchInput(input: string): MatchInput | null {
   const s = input.trim();
   const imdb = /(?:^|[^A-Za-z0-9])(tt\d{7,8})(?![A-Za-z0-9])/i.exec(s);
-  if (imdb && (/imdb\.com/i.test(s) || /^tt\d{7,8}$/i.test(s))) return { imdbId: imdb[1].toLowerCase() };
-  const tmdb = /themoviedb\.org\/(?:movie|tv)\/(\d{1,10})(?!\d)/i.exec(s);
-  if (tmdb) return { tmdbId: Number(tmdb[1]) };
-  if (/^\d{1,10}$/.test(s) && Number(s) > 0) return { tmdbId: Number(s) };
+  if (imdb && (/imdb\.com/i.test(s) || /^tt\d{7,8}$/i.test(s))) return { ref: { imdbId: imdb[1].toLowerCase() } };
+  const url = /themoviedb\.org\/(movie|tv)\/(\d{1,10})(?!\d)/i.exec(s);
+  if (url) return { ref: { tmdbId: Number(url[2]) }, kind: url[1].toLowerCase() === 'tv' ? 'series' : 'movie' };
+  const tagged = /^tmdb(?:\s*:\s*|\s+)(\d{1,10})$/i.exec(s);
+  if (tagged && Number(tagged[1]) > 0) return { ref: { tmdbId: Number(tagged[1]) } };
   return null;
+}
+
+/** The id in what was pasted into the "fix match" box (see parseMatchInput), or null. */
+export function parseMatchRef(input: string): MatchRef | null {
+  return parseMatchInput(input)?.ref ?? null;
 }
 
 // ---- transport -------------------------------------------------------------

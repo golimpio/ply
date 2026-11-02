@@ -10,9 +10,25 @@
     void app.libraryVersion;
     return api.settings();
   });
+  // While matching runs, the status is asked for again every few seconds; when
+  // it settles, the rest of the page (and the library) is refreshed once.
+  let pollTick = $state(0);
   const status = resource(() => {
     void app.libraryVersion;
+    void pollTick;
     return api.metadataStatus();
+  });
+  const matching = $derived(!!status.data && status.data.enabled && (status.data.running || status.data.pending > 0));
+  let wasMatching = false;
+  $effect(() => {
+    if (!matching) {
+      if (wasMatching) app.libraryVersion++; // done: posters, the review list and counts changed
+      wasMatching = false;
+      return;
+    }
+    wasMatching = true;
+    const t = setInterval(() => pollTick++, 3000);
+    return () => clearInterval(t);
   });
   const review = resource(() => {
     void app.libraryVersion;
@@ -57,8 +73,13 @@
     saving = true;
     message = null;
     try {
-      await api.saveSettings(update);
-      message = { ok: true, text: done };
+      const s = await api.saveSettings(update);
+      // With lookups switched off nothing is sent to TMDB, the key included:
+      // it is stored as it is and checked once lookups are on again.
+      const unchecked = !!update.tmdbKey && s.tmdbKeyChecked === false;
+      message = unchecked
+        ? { ok: true, text: 'Saved, not checked: online lookups are switched off. The key is checked when they are on.' }
+        : { ok: true, text: done };
       key = '';
       app.libraryVersion++; // lookups may start (or stop): refresh this page and what every page shows
     } catch (e) {
@@ -88,12 +109,20 @@
 
   // The "fix" dialog for one row of the review list.
   let fixing = $state(false);
-  let fix = $state<{ kind: TitleKind; itemId?: number; show?: string; query: string; year?: number }>({
+  let fix = $state<{ kind: TitleKind; itemId?: number; show?: string; query: string; year?: number; matched: boolean }>({
     kind: 'movie',
     query: '',
+    matched: false,
   });
   function openFix(r: ReviewEntry) {
-    fix = { kind: r.kind, itemId: r.itemId, show: r.show, query: r.kind === 'series' ? r.show || r.title : r.title, year: r.year || undefined };
+    fix = {
+      kind: r.kind,
+      itemId: r.itemId,
+      show: r.show,
+      query: r.kind === 'series' ? r.show || r.title : r.title,
+      year: r.year || undefined,
+      matched: r.matchState !== 'unmatched', // nothing to remove from one that has no match
+    };
     fixing = true;
   }
 
@@ -287,7 +316,15 @@
   </footer>
 </div>
 
-<FixMatch bind:open={fixing} kind={fix.kind} itemId={fix.itemId} show={fix.show} query={fix.query} year={fix.year} matched />
+<FixMatch
+  bind:open={fixing}
+  kind={fix.kind}
+  itemId={fix.itemId}
+  show={fix.show}
+  query={fix.query}
+  year={fix.year}
+  matched={fix.matched}
+/>
 
 <style>
   .settings {

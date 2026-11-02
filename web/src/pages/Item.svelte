@@ -21,6 +21,7 @@
   import EditTitle from '../components/EditTitle.svelte';
   import FixMatch from '../components/FixMatch.svelte';
   import Hero from '../components/Hero.svelte';
+  import HeroTitle from '../components/HeroTitle.svelte';
   import Icon from '../components/Icon.svelte';
   import Menu from '../components/Menu.svelte';
   import PersonCard from '../components/PersonCard.svelte';
@@ -152,8 +153,7 @@
     {#if isEpisode && item.show}
       <a class="show link" href={href.show(item.show, item.season)}>{meta?.title || item.show}</a>
     {/if}
-    <h1 class:sr-only={!!logo}>{title}</h1>
-    {#if logo}<img class="logo" src={logo} alt="" />{/if}
+    <HeroTitle {title} {logo} />
     {#if meta?.tagline && !isEpisode}<p class="tagline">{meta.tagline}</p>{/if}
     <div class="meta">
       {#if isEpisode}<span>{episodeLabel(item.season, item.episode)}</span>{/if}

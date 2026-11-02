@@ -7,6 +7,7 @@
     airLabel,
     groupByTitle,
     logoSrc,
+    onePerTitle,
     posterImg,
     prefersPosters,
     showWideImg,
@@ -19,6 +20,7 @@
   import { artOf, progressOf } from '../lib/ui-types';
   import Badges from '../components/Badges.svelte';
   import Hero from '../components/Hero.svelte';
+  import HeroTitle from '../components/HeroTitle.svelte';
   import Icon from '../components/Icon.svelte';
   import MediaCard from '../components/MediaCard.svelte';
   import Rail from '../components/Rail.svelte';
@@ -99,7 +101,10 @@
   );
 
   const items = $derived(library.items);
-  const recent = $derived([...items].sort(byAdded).slice(0, 24));
+  // One card per film: its newest version in Recently added, and in Continue
+  // the version played last (the server lists the most recent first).
+  const recent = $derived(onePerTitle([...items].sort(byAdded)).slice(0, 24));
+  const continuing = $derived(onePerTitle(continueItems));
   const movies = $derived(groupByTitle(items.filter((i) => i.kind === 'movie')).sort((a, b) => byTitle(a.item, b.item)));
   const shows = $derived(showsOf(items, library.shows).sort((a, b) => b.latestAddedAt - a.latestAddedAt));
   const moviePosters = $derived(prefersPosters(movies.map((g) => g.item)));
@@ -149,8 +154,7 @@
 {:else}
   {#if feature}
     <Hero item={feature} label={cardTitle(feature)} tall>
-      <h1 class:sr-only={!!featureLogo}>{cardTitle(feature)}</h1>
-      {#if featureLogo}<img class="logo" src={featureLogo} alt="" />{/if}
+      <HeroTitle title={cardTitle(feature)} logo={featureLogo} />
       <div class="meta">
         {#if isEpisode(feature)}<span>{episodeLabel(feature.season, feature.episode)}</span>{/if}
         {#if feature.year}<span>{feature.year}</span>{/if}
@@ -182,7 +186,7 @@
       </aside>
     {/if}
 
-    <Rail title="Continue watching" items={continueItems} key={(i) => i.id}>
+    <Rail title="Continue watching" items={continuing} key={(i) => i.id}>
       {#snippet card(i: ItemSummary)}
         <MediaCard item={i} href={href.play(i.id, i.progress?.positionSec ?? 0)} title={cardTitle(i)} sub={cardSub(i)} />
       {/snippet}

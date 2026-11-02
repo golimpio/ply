@@ -3,8 +3,12 @@ import type { ItemSummary } from './api';
 import {
   airLabel,
   backdropImg,
+  CREDIT_LINES,
   crewWith,
+  filmPasses,
   groupByTitle,
+  logoSrc,
+  onePerTitle,
   posterImg,
   prefersPosters,
   ratingLabel,
@@ -130,6 +134,38 @@ describe('labels', () => {
     expect(yearSpan(undefined)).toBe('');
   });
 
+  it('versions change name at 700, 1000, 1400 and 2000 lines', () => {
+    const label = (height: number) => versionLabel(item({ height, hdr: false, container: '' }));
+    expect([699, 700, 999, 1000, 1399, 1400, 1999, 2000].map(label)).toEqual([
+      '699p', '720p', '720p', '1080p', '1080p', '1440p', '1440p', '4K',
+    ]);
+    expect(label(0)).toBe('');
+  });
+
+  it("a show's years: the release date wins over the fallback year", () => {
+    expect(yearSpan({ releaseDate: '2001-05-01', status: '' }, 1999)).toBe('2001');
+  });
+
+  it('a logo is asked for at w500', () => {
+    expect(logoSrc({ logo: '/api/images/tmdb/original/l.png' })).toContain('/w500/l.png');
+    expect(logoSrc({})).toBe('');
+  });
+
+  it('air dates count calendar days, across a daylight-saving change', () => {
+    // Whatever the zone, the day before a 23- or 25-hour day is still "Tomorrow" and two days on
+    // is not; the dates span both the March and the October/November changes.
+    for (const [from, next, after] of [
+      [new Date(2026, 2, 7, 23, 50), '2026-03-08', '2026-03-09'],
+      [new Date(2026, 9, 3, 23, 50), '2026-10-04', '2026-10-05'],
+      [new Date(2026, 9, 24, 23, 50), '2026-10-25', '2026-10-26'],
+      [new Date(2026, 10, 0, 23, 50), '2026-11-01', '2026-11-02'],
+    ] as const) {
+      expect(airLabel(next, from)).toBe('Tomorrow');
+      expect(airLabel(after, from)).not.toBe('Tomorrow');
+      expect(airLabel(after, from)).not.toBe('Today');
+    }
+  });
+
   it('versions say resolution, HDR and container', () => {
     expect(versionLabel(item({ height: 2160, hdr: 'hdr10', container: 'mkv' }))).toBe('4K HDR10, MKV');
     expect(versionLabel(item({ height: 1080, hdr: false, container: 'mp4' }))).toBe('1080p, MP4');
@@ -146,10 +182,51 @@ describe('crewWith', () => {
       { personId: 3, name: 'C', job: 'Director' },
     ],
   };
+  it('a novel the film is based on is a writing credit', () => {
+    const writers = CREDIT_LINES.find((l) => l.label === 'Writer')!;
+    expect(crewWith({ crew: [{ personId: 9, name: 'P. K. Dick', job: 'Novel' }] }, writers.jobs).map((c) => c.personId)).toEqual([9]);
+  });
+
   it('lists each person once, in the order of the jobs asked for', () => {
     expect(crewWith(meta, ['Screenplay', 'Writer']).map((c) => c.personId)).toEqual([2, 1]);
     expect(crewWith(meta, ['Director']).map((c) => c.name)).toEqual(['C']);
     expect(crewWith(undefined, ['Director'])).toEqual([]);
+  });
+});
+
+describe('onePerTitle', () => {
+  it('keeps the first file of each film, and every episode and unmatched file', () => {
+    const list = [
+      item({ id: 1, titleId: 7 }),
+      item({ id: 2, kind: 'episode', titleId: 7 }),
+      item({ id: 3, titleId: 7 }),
+      item({ id: 4 }),
+      item({ id: 5 }),
+      item({ id: 6, titleId: 8 }),
+    ];
+    expect(onePerTitle(list).map((i) => i.id)).toEqual([1, 2, 4, 5, 6]);
+  });
+});
+
+describe('filmPasses', () => {
+  const is4k = (i: ItemSummary) => i.height >= 2000;
+  const isHdr = (i: ItemSummary) => !!i.hdr;
+  const film = (...v: Partial<ItemSummary>[]) => ({ key: 'k', item: item(v[0]), versions: v.map((o) => item(o)) });
+  const passes = (g: ReturnType<typeof film>, ...filters: string[]) => filmPasses(g, { is4k, isHdr, filters });
+
+  it('4K and HDR pass when any version is', () => {
+    const g = film({ height: 1080 }, { height: 2160, hdr: 'hdr10' });
+    expect(passes(g, '4k')).toBe(true);
+    expect(passes(g, 'hdr')).toBe(true);
+    expect(passes(film({ height: 1080 }), '4k')).toBe(false);
+    expect(passes(film({ height: 1080 }), 'hdr')).toBe(false);
+    expect(passes(film({ height: 1080 }))).toBe(true);
+  });
+
+  it('a film with any version watched to the end is not unwatched', () => {
+    const seen = film({ height: 1080, progress: { positionSec: 6000, watched: true } }, { height: 2160 });
+    expect(passes(seen, 'unwatched')).toBe(false);
+    expect(passes(film({ height: 2160, progress: { positionSec: 60, watched: false } }), 'unwatched')).toBe(true);
   });
 });
 
@@ -163,6 +240,12 @@ describe('groupByTitle', () => {
     const g = groupByTitle([a, b, c, d, e]);
     expect(g.map((x) => x.versions.map((v) => v.id))).toEqual([[2, 1], [3], [4], [5]]);
     expect(g[0].item.id).toBe(2); // the sharpest
+  });
+
+  it('a version at 0 seconds is not started', () => {
+    const a = item({ id: 1, titleId: 9, height: 2160 });
+    const b = item({ id: 2, titleId: 9, height: 1080, progress: { positionSec: 0, watched: false } });
+    expect(groupByTitle([a, b])[0].item.id).toBe(1);
   });
 
   it('a started version is the one a card opens', () => {

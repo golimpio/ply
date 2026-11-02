@@ -14,6 +14,7 @@
   import EditTitle from '../components/EditTitle.svelte';
   import FixMatch from '../components/FixMatch.svelte';
   import Hero from '../components/Hero.svelte';
+  import HeroTitle from '../components/HeroTitle.svelte';
   import Icon from '../components/Icon.svelte';
   import Menu from '../components/Menu.svelte';
   import PersonCard from '../components/PersonCard.svelte';
@@ -115,8 +116,7 @@
   </div>
 {:else}
   <Hero item={entry.cover} img={backdropOf(summary) ?? undefined} label={show} landing>
-    <h1 class:sr-only={!!logo}>{meta?.title || show}</h1>
-    {#if logo}<img class="logo" src={logo} alt="" />{/if}
+    <HeroTitle title={meta?.title || show} {logo} />
     <div class="meta">
       {#if years}<span>{years}</span>{/if}
       {#if meta?.certification}<span class="cert">{meta.certification}</span>{/if}

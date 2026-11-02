@@ -88,8 +88,17 @@ describe('imageSrcset', () => {
 
 describe('parseMatchRef', () => {
   const cases: [string, unknown][] = [
-    ['603', { tmdbId: 603 }],
-    ['  603  ', { tmdbId: 603 }],
+    // A bare number is a title ("1917", "300", "24"), searched like any other: never an id.
+    ['603', null],
+    ['1917', null],
+    ['  24  ', null],
+    ['tmdb:603', { tmdbId: 603 }],
+    ['TMDB: 603', { tmdbId: 603 }],
+    ['tmdb 603', { tmdbId: 603 }],
+    ['tmdb:0', null],
+    ['tmdb:', null],
+    ['tmdb603', null],
+    ['my tmdb 603', null],
     ['https://www.themoviedb.org/movie/603', { tmdbId: 603 }],
     ['https://www.themoviedb.org/movie/603-the-matrix?language=en-US', { tmdbId: 603 }],
     ['themoviedb.org/tv/1396-breaking-bad', { tmdbId: 1396 }],
@@ -109,12 +118,23 @@ describe('parseMatchRef', () => {
     ['https://www.themoviedb.org/person/6384', null],
     ['https://example.com/movie/603', null],
     ['12345678901', null],
+    // An IMDb id inside other text counts only on imdb.com (or alone).
+    ['https://example.com/title/tt0133093/', null],
+    ['see tt0133093 there', null],
   ];
   for (const [input, want] of cases) {
     it(`reads ${JSON.stringify(input)}`, () => {
       expect(m.parseMatchRef(input)).toEqual(want);
     });
   }
+
+  it('says which kind of title a themoviedb.org link is, and nothing for the others', () => {
+    expect(m.parseMatchInput('https://www.themoviedb.org/movie/603')).toEqual({ ref: { tmdbId: 603 }, kind: 'movie' });
+    expect(m.parseMatchInput('themoviedb.org/TV/1396-breaking-bad')).toEqual({ ref: { tmdbId: 1396 }, kind: 'series' });
+    expect(m.parseMatchInput('tmdb:603')).toEqual({ ref: { tmdbId: 603 } });
+    expect(m.parseMatchInput('tt0133093')).toEqual({ ref: { imdbId: 'tt0133093' } });
+    expect(m.parseMatchInput('1917')).toBeNull();
+  });
 });
 
 describe('metadata requests', () => {

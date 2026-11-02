@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { api, ApiError, imageUrl, parseMatchRef, type MatchCandidate, type MatchRef, type TitleKind } from '../lib/api';
+  import { api, ApiError, imageUrl, parseMatchInput, type MatchCandidate, type MatchRef, type TitleKind } from '../lib/api';
   import { href } from '../lib/router.svelte';
   import { app } from '../lib/state.svelte';
   import Dialog from './Dialog.svelte';
@@ -35,11 +35,19 @@
   let busy = $state(false);
   let error = $state('');
   let offline = $state(false);
+  let input = $state<HTMLInputElement>();
+  // Each search takes a number; an answer is shown only while its number is
+  // the latest, so a slow answer for an earlier query (or an earlier opening
+  // of the dialog, for another film) can never be clicked.
+  let searchSeq = 0;
 
   // Each opening starts from what the file says, and searches for it. Only
   // `open` is a dependency: typing, or a library refresh, must not re-run it.
   $effect(() => {
-    if (!open) return;
+    if (!open) {
+      searchSeq++; // answers still on their way belong to a closed dialog
+      return;
+    }
     untrack(() => {
       query = initialQuery;
       year = initialYear ? String(initialYear) : '';
@@ -47,12 +55,20 @@
       searched = false;
       error = '';
       offline = false;
+      busy = false; // a search cut off by closing never cleared it
       void search();
     });
+    // The search box, not Close, takes the focus (after showModal has placed it).
+    const t = setTimeout(() => input?.focus(), 0);
+    return () => clearTimeout(t);
   });
 
-  const pasted = $derived(parseMatchRef(query));
+  const pasted = $derived(parseMatchInput(query));
   const what = $derived(kind === 'movie' ? 'film' : 'show');
+  // A themoviedb.org link to the other kind of title (a show's link in a film's dialog).
+  const wrongKind = $derived(!!pasted?.kind && pasted.kind !== kind);
+  // A bare number is searched as a title ("1917"); it may also be a TMDB id.
+  const numeric = $derived(/^\d{1,10}$/.test(query.trim()) && Number(query.trim()) > 0 ? Number(query.trim()) : 0);
 
   function explain(e: unknown): string {
     if (e instanceof ApiError && e.status === 409) {
@@ -67,17 +83,22 @@
     e?.preventDefault();
     const q = query.trim();
     if (!q || pasted) return;
+    const mine = ++searchSeq;
     busy = true;
     error = '';
+    results = [];
     try {
       const y = Number(year);
-      results = await api.searchMetadata(kind, q, Number.isInteger(y) && y > 1800 ? y : undefined);
+      const found = await api.searchMetadata(kind, q, Number.isInteger(y) && y > 1800 ? y : undefined);
+      if (mine !== searchSeq) return;
+      results = found;
       searched = true;
     } catch (err) {
+      if (mine !== searchSeq) return;
       error = explain(err);
       results = [];
     } finally {
-      busy = false;
+      if (mine === searchSeq) busy = false;
     }
   }
 
@@ -116,7 +137,7 @@
   <form class="search" onsubmit={search}>
     <label class="q">
       <span class="sr-only">Title, or a TMDB or IMDb link</span>
-      <input bind:value={query} type="search" placeholder="Title, or a TMDB or IMDb link" autocomplete="off" />
+      <input bind:this={input} bind:value={query} type="search" placeholder="Title, or a TMDB or IMDb link" autocomplete="off" />
     </label>
     <label class="y">
       <span class="sr-only">Year</span>
@@ -125,12 +146,16 @@
     <button class="btn" disabled={busy || !query.trim() || !!pasted}>Search</button>
   </form>
 
-  {#if pasted}
+  {#if pasted && wrongKind}
+    <p class="error" role="alert">
+      That is a link to a {pasted.kind === 'series' ? 'show' : 'film'}; this needs a {what}.
+    </p>
+  {:else if pasted}
     <div class="pasted">
       <p>
-        {'imdbId' in pasted ? `IMDb ${pasted.imdbId}` : `TMDB ${what} ${pasted.tmdbId}`}
+        {'imdbId' in pasted.ref ? `IMDb ${pasted.ref.imdbId}` : `TMDB ${what} ${pasted.ref.tmdbId}`}
       </p>
-      <button class="btn primary" disabled={busy} onclick={() => apply(pasted)}>Use this {what}</button>
+      <button class="btn primary" disabled={busy} onclick={() => apply(pasted.ref)}>Use this {what}</button>
     </div>
   {/if}
 
@@ -162,6 +187,12 @@
         {/if}
       {/each}
     </ul>
+    {#if numeric && searched && !busy}
+      <p class="by-id muted">
+        Or is {numeric} the {what}’s TMDB id?
+        <button class="link-btn" disabled={busy} onclick={() => apply({ tmdbId: numeric })}>Use TMDB id {numeric}</button>
+      </p>
+    {/if}
   {/if}
 
   {#snippet footer()}
@@ -271,6 +302,21 @@
   }
   .none {
     padding: 1rem 0.5rem;
+  }
+  .by-id {
+    margin: 0.75rem 0.5rem 0;
+    font-size: 0.9rem;
+  }
+  .link-btn {
+    padding: 0;
+    font: inherit;
+    color: var(--text);
+    background: none;
+    border: 0;
+    text-decoration: underline;
+    text-decoration-color: color-mix(in oklab, var(--tint) 70%, transparent);
+    text-underline-offset: 0.2em;
+    cursor: pointer;
   }
   @media (max-width: 600px) {
     .search {
