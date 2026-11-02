@@ -50,10 +50,12 @@ type root struct {
 	path string // configured spelling: absolute and clean
 
 	// Run's goroutine only:
-	info     os.FileInfo // the root when it was watched; nil when it was not found
-	missing  bool        // not found (or unreadable) at the last look: look again
-	logged   bool        // the watch failure was logged; stay quiet until it works
-	hopeless bool        // too many directories: looking again can only give the same answer
+	info     os.FileInfo   // the root when it was watched; nil when it was not found
+	missing  bool          // not found (or unreadable) at the last look: look again
+	logged   bool          // the watch failure was logged; stay quiet until it works
+	hopeless bool          // too many directories: looking again can only give the same answer
+	backoff  time.Duration // watches failed: wait this long before trying again (doubles, capped)
+	retryAt  time.Time
 }
 
 // stamp is what a directory snapshot keeps of a file.
@@ -81,6 +83,7 @@ type Watcher struct {
 	quiet   time.Duration // after the last event, before scanning
 	maxWait time.Duration // after the first pending event, at most
 	retry   time.Duration // before scanning again a directory with files still settling
+	now     func() time.Time
 	recheck time.Duration // between looks at the roots themselves
 	maxDirs int           // directories the process may watch; <0 is no limit
 
@@ -119,6 +122,7 @@ func New(sc Scanner, roots []string, log *slog.Logger) *Watcher {
 		recheck:   time.Minute,
 		maxDirs:   dirLimit(),
 		mkBackend: newBackend,
+		now:       time.Now,
 		dirs:      map[string]int{},
 		snaps:     map[string]map[string]stamp{},
 		pending:   map[string]library.Dir{},
@@ -421,7 +425,8 @@ func (w *Watcher) recheckRoots(ctx context.Context) {
 			}
 			continue
 		}
-		if r.missing || (!w.watching(i) && !r.hopeless) || !os.SameFile(r.info, fi) {
+		retry := !w.watching(i) && !r.hopeless && !w.now().Before(r.retryAt)
+		if r.missing || retry || !os.SameFile(r.info, fi) {
 			w.dropTree(r.path)
 			if w.setupRoot(ctx, i) {
 				w.queue(library.Dir{Path: r.path, Recursive: true})
@@ -451,7 +456,7 @@ func (w *Watcher) setupRoot(ctx context.Context, i int) bool {
 		}
 		return false
 	}
-	r.logged = false
+	r.logged, r.backoff, r.retryAt = false, 0, time.Time{}
 	w.setStatus(i, true, "")
 	w.mu.Lock()
 	n := w.status[i].Dirs
@@ -480,6 +485,10 @@ func (w *Watcher) failRoot(i int, err error) {
 	r := w.roots[i]
 	w.dropTree(r.path)
 	r.hopeless = errors.Is(err, errTooManyDirs)
+	// A limit (inotify watches, descriptors) is not raised every minute: wait
+	// longer each time, up to an hour, before walking the tree again.
+	r.backoff = min(max(2*r.backoff, w.recheck), maxRootBackoff)
+	r.retryAt = w.now().Add(r.backoff)
 	msg := describe(err)
 	w.setStatus(i, false, msg)
 	if !r.logged {
@@ -647,6 +656,7 @@ func (w *Watcher) scanLoop(ctx context.Context) {
 	timer := time.NewTimer(time.Hour)
 	timer.Stop()
 	defer timer.Stop()
+	var failDelay time.Duration // after scans that could not run
 	for {
 		batch, next := w.take(time.Now())
 		if len(batch) > 0 {
@@ -656,6 +666,14 @@ func (w *Watcher) scanLoop(ctx context.Context) {
 			}
 			if err != nil {
 				w.log.Warn("scan after file changes", "dirs", len(batch), "err", err)
+			}
+			if errors.Is(err, library.ErrNotScanned) {
+				// Nothing was looked at (the library could not be read): try the
+				// same directories again later, waiting longer each time.
+				failDelay = min(max(2*failDelay, w.retry), maxScanBackoff)
+				w.deferFor(batch, failDelay)
+			} else {
+				failDelay = 0
 			}
 			w.deferDirs(res.Deferred)
 			continue
@@ -721,15 +739,30 @@ func (w *Watcher) take(now time.Time) (batch []library.Dir, next time.Time) {
 	return batch, time.Time{}
 }
 
+// Backoff caps: retrying a root whose watches failed, and a partial scan that
+// could not run.
+const (
+	maxRootBackoff = time.Hour
+	maxScanBackoff = 5 * time.Minute
+)
+
 // deferDirs schedules dirs, which had files still settling, for another scan.
-func (w *Watcher) deferDirs(dirs []library.Dir) {
+func (w *Watcher) deferDirs(dirs []library.Dir) { w.deferFor(dirs, w.retry) }
+
+// deferFor schedules dirs for another scan after delay, merging their flags
+// with any already scheduled.
+func (w *Watcher) deferFor(dirs []library.Dir, delay time.Duration) {
 	if len(dirs) == 0 {
 		return
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	due := time.Now().Add(w.retry)
+	due := time.Now().Add(delay)
 	for _, d := range dirs {
+		if cur, ok := w.deferred[d.Path]; ok {
+			d.Recursive = d.Recursive || cur.dir.Recursive
+			d.Sidecars = d.Sidecars || cur.dir.Sidecars
+		}
 		w.deferred[d.Path] = deferredDir{dir: d, due: due}
 	}
 }

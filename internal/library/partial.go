@@ -26,10 +26,19 @@ type Dir struct {
 	Sidecars bool
 }
 
+// ErrNotScanned marks a ScanDirs error that kept the scan from running at all
+// (the library could not be read): nothing was looked at, so the directories
+// should be scanned again later. Other errors leave a partial scan done as
+// far as it could go.
+var ErrNotScanned = errors.New("partial scan did not run")
+
 // Result says what ScanDirs did.
 type Result struct {
-	Added    []int64 // items created, or moved to a new path (same id)
-	Deferred []Dir   // directories with files still settling: scan them again after the settle time
+	Added []int64 // items created, or moved to a new path (same id)
+	// Deferred lists directories to scan again after the settle time: they
+	// hold files still settling, or written within the last minute (a copy
+	// that stalled, or on darwin a write that made no directory event).
+	Deferred []Dir
 }
 
 // ScanDirs scans part of the library: the video files in dirs, with the same
@@ -53,7 +62,7 @@ func (s *Scanner) ScanDirs(ctx context.Context, dirs []Dir) (Result, error) {
 	start := time.Now()
 	states, err := s.store.FileStates(ctx)
 	if err != nil {
-		return Result{}, fmt.Errorf("load library state: %w", err)
+		return Result{}, fmt.Errorf("%w: load library state: %w", ErrNotScanned, err)
 	}
 	p := s.newPass(states)
 	claimant := func(path string) string {
@@ -103,7 +112,10 @@ func (s *Scanner) ScanDirs(ctx context.Context, dirs []Dir) (Result, error) {
 		res.Deferred = append(res.Deferred, Dir{Path: dir})
 	}
 	slices.SortFunc(res.Deferred, func(a, b Dir) int { return strings.Compare(a.Path, b.Path) })
+	// Moved items too: their sidecar artwork, if any, is somewhere else now.
 	sidecarIDs := p.itemsUnder(sidecarDirs)
+	sidecarIDs = append(sidecarIDs, p.moved...)
+	slices.Sort(sidecarIDs)
 
 	if p.sum.indexed.Load() > 0 || p.sum.moved > 0 || p.sum.removed.Load() > 0 {
 		s.log.Info("partial scan complete", "dirs", len(scopes), "indexed", p.sum.indexed.Load(),
@@ -149,9 +161,13 @@ func (p *pass) itemsUnder(dirs []string) []int64 {
 	if len(dirs) == 0 {
 		return nil
 	}
+	added := make(map[int64]bool, len(p.added))
+	for _, id := range p.added {
+		added[id] = true
+	}
 	var ids []int64
 	for path, st := range p.states {
-		if slices.Contains(p.added, st.ID) {
+		if added[st.ID] {
 			continue
 		}
 		if slices.ContainsFunc(dirs, func(d string) bool { return within(d, path) }) {

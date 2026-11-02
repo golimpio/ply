@@ -3,6 +3,7 @@ package watch
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -516,6 +517,124 @@ func TestScanErrorsAreNotFatal(t *testing.T) {
 	waitFor(t, 5*time.Second, "its log line", func() bool { return lb.count("probe failed") == 1 })
 	fb.ev <- event{a, "y.mkv", opCreate}
 	waitFor(t, 5*time.Second, "the next scan", func() bool { return sc.count() == 2 })
+}
+
+// Queuing a directory twice keeps every flag either asked for; so does
+// scheduling it twice for later.
+func TestQueueMergesFlags(t *testing.T) {
+	root := t.TempDir()
+	w, _, _, _ := newUnit(t, root)
+	w.queue(library.Dir{Path: root, Recursive: true})
+	w.queue(library.Dir{Path: root, Sidecars: true})
+	w.queue(library.Dir{Path: root})
+	if got, want := drain(w), []library.Dir{{Path: root, Recursive: true, Sidecars: true}}; !slices.Equal(got, want) {
+		t.Fatalf("queued %v, want %v", got, want)
+	}
+	w.deferFor([]library.Dir{{Path: root, Sidecars: true}}, 0)
+	w.deferFor([]library.Dir{{Path: root, Recursive: true}}, 0)
+	if got, want := drain(w), []library.Dir{{Path: root, Recursive: true, Sidecars: true}}; !slices.Equal(got, want) {
+		t.Fatalf("deferred %v, want %v", got, want)
+	}
+}
+
+// A root inside another root that disappears gets the outer root scanned, so
+// its files, if they moved, keep their items.
+func TestNestedRootGoneQueuesTheOuterRoot(t *testing.T) {
+	outer := t.TempDir()
+	inner := filepath.Join(outer, "inner")
+	mkdirs(t, outer, "inner/a", "b")
+	w, fb, _, _ := newUnit(t, outer, inner)
+	setup(t, w, fb)
+	drain(w)
+	if err := os.RemoveAll(inner); err != nil {
+		t.Fatal(err)
+	}
+	w.handle(context.Background(), event{dir: inner, op: opDirGone})
+	if got := drain(w); !slices.Contains(got, library.Dir{Path: outer, Recursive: true}) {
+		t.Fatalf("queued %v, want the outer root, recursive", got)
+	}
+	if st := w.Status()[1]; st.Watching || st.Error != rootNotFound {
+		t.Fatalf("inner root status %+v, want not found", st)
+	}
+}
+
+// A root whose watches failed on a limit is not walked again at every
+// recheck: the wait doubles, and the first try that works resets it.
+func TestFailedRootBacksOff(t *testing.T) {
+	root := t.TempDir()
+	mkdirs(t, root, "a")
+	w, fb, _, _ := newUnit(t, root)
+	w.recheck = time.Minute
+	now := time.Now()
+	w.now = func() time.Time { return now }
+	failing := true
+	fb.addErr = func(dir string) error {
+		if failing {
+			return &os.PathError{Op: "add", Path: dir, Err: syscall.ENOSPC}
+		}
+		return nil
+	}
+	setup(t, w, fb)
+	tries := func() int { return fb.addCalls(root) }
+	if tries() != 1 || w.Status()[0].Watching {
+		t.Fatalf("setup: %d tries, status %+v", tries(), w.Status()[0])
+	}
+	at := func(d time.Duration) int {
+		now = now.Add(d)
+		w.recheckRoots(context.Background())
+		return tries()
+	}
+	if n := at(30 * time.Second); n != 1 {
+		t.Fatalf("tried again after 30s (%d tries), want to wait a minute", n)
+	}
+	if n := at(31 * time.Second); n != 2 {
+		t.Fatalf("after a minute: %d tries, want 2", n)
+	}
+	if n := at(61 * time.Second); n != 2 {
+		t.Fatalf("a minute after the second failure: %d tries, want the wait doubled to 2m", n)
+	}
+	if n := at(60 * time.Second); n != 3 {
+		t.Fatalf("two minutes after it: %d tries, want 3", n)
+	}
+	failing = false
+	if n := at(4*time.Minute + time.Second); n != 4 || !w.Status()[0].Watching {
+		t.Fatalf("limit gone: %d tries, status %+v; want watching", n, w.Status()[0])
+	}
+	if r := w.roots[0]; r.backoff != 0 {
+		t.Fatalf("backoff %v after a success, want reset", r.backoff)
+	}
+}
+
+// A partial scan that could not run (ErrNotScanned) is tried again with the
+// same directories; one that ran with errors is not.
+func TestScanThatDidNotRunIsRetried(t *testing.T) {
+	root := t.TempDir()
+	mkdirs(t, root, "a", "b")
+	a, b := filepath.Join(root, "a"), filepath.Join(root, "b")
+	w, fb, sc, _ := newUnit(t, root)
+	sc.fn = func(_ context.Context, n int, dirs []library.Dir) (library.Result, error) {
+		switch {
+		case n == 1:
+			return library.Result{}, fmt.Errorf("%w: database is locked", library.ErrNotScanned)
+		case slices.ContainsFunc(dirs, func(d library.Dir) bool { return d.Path == b }):
+			return library.Result{}, errors.New("1 errors while walking")
+		}
+		return library.Result{}, nil
+	}
+	start(t, w)
+	fb.ev <- event{a, "x.mkv", opCreate}
+	waitFor(t, 5*time.Second, "the retry", func() bool { return sc.count() >= 2 })
+	if c := sc.snapshot()[1]; !slices.Equal(dirsOf(c), []string{a}) {
+		t.Fatalf("retry scanned %v, want %s", dirsOf(c), a)
+	}
+
+	fb.ev <- event{b, "y.mkv", opCreate}
+	waitFor(t, 5*time.Second, "b's scan", func() bool { return sc.sawPath(b) })
+	n := sc.count()
+	time.Sleep(10 * w.retry)
+	if sc.count() != n {
+		t.Fatalf("a scan that ran (with walk errors) was retried: %v", sc.snapshot())
+	}
 }
 
 func TestWatchLimits(t *testing.T) {

@@ -45,6 +45,16 @@ const (
 var errBackendClosed = errors.New("watch backend closed")
 
 func newKqueue() (backend, error) {
+	b, err := openKqueue()
+	if err != nil {
+		return nil, err
+	}
+	go b.loop()
+	return b, nil
+}
+
+// openKqueue makes the backend without starting its loop (tests start it).
+func openKqueue() (*kqueueBackend, error) {
 	kq, err := syscall.Kqueue()
 	if err != nil {
 		return nil, fmt.Errorf("kqueue: %w", err)
@@ -81,7 +91,6 @@ func newKqueue() (backend, error) {
 		b.closeFds()
 		return nil, fmt.Errorf("kqueue: %w", err)
 	}
-	go b.loop()
 	return b, nil
 }
 

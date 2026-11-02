@@ -176,6 +176,45 @@ func TestKqueueReplacedDirectoryGetsANewWatch(t *testing.T) {
 	expect(t, b, event{dir: d, op: opWrite})
 }
 
+// When add finds the path watched but naming another directory now (its
+// watch has not reported dirGone yet), the old descriptor is closed.
+func TestKqueueAddReplacesAWatchWhoseDirectoryChanged(t *testing.T) {
+	root := t.TempDir()
+	mkdirs(t, root, "d")
+	d := filepath.Join(root, "d")
+	b, err := openKqueue() // no loop yet: no event can close the old watch first
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		go b.loop()
+		b.close()
+	})
+	if err := b.add(d); err != nil {
+		t.Fatal(err)
+	}
+	before := openFDs(t)
+	if err := b.add(d); err != nil { // control: the same directory again
+		t.Fatal(err)
+	}
+	if got := openFDs(t); got != before {
+		t.Fatalf("re-adding the same directory: %d descriptors, want %d", got, before)
+	}
+	if err := os.Rename(d, d+".old"); err != nil {
+		t.Fatal(err)
+	}
+	mkdirs(t, root, "d")
+	if err := b.add(d); err != nil {
+		t.Fatal(err)
+	}
+	if got := openFDs(t); got != before {
+		t.Fatalf("%d descriptors, want %d: the old directory's descriptor was kept", got, before)
+	}
+	if n := len(b.byFd); n != 1 {
+		t.Fatalf("%d watches, want 1", n)
+	}
+}
+
 func TestKqueueAddErrors(t *testing.T) {
 	root := t.TempDir()
 	b := newTestKqueue(t)

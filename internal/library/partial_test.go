@@ -468,8 +468,12 @@ func TestSidecarsHook(t *testing.T) {
 	s.OnAdded(func(ids []int64) { added = ids })
 	scanDirs(t, s, Dir{Path: show, Sidecars: true}, Dir{Path: filepath.Join(show, "Season 2")})
 
-	if want := []int64{idOf(t, st, e1)}; !slices.Equal(sidecars, want) {
-		t.Errorf("sidecars = %v, want %v (the show's episodes, not the movie, not the new or moved one)", sidecars, want)
+	// The moved episode is reported too: its sidecar artwork is wherever it went.
+	wantSide := []int64{idOf(t, st, e1), idOf(t, st, renamed)}
+	slices.Sort(wantSide)
+	if !slices.Equal(sidecars, wantSide) {
+		t.Errorf("sidecars = %v, want %v (the show's episodes and the moved one; not the movie, not the new one)",
+			sidecars, wantSide)
 	}
 	want := []int64{idOf(t, st, e3), idOf(t, st, renamed)}
 	slices.Sort(want)
