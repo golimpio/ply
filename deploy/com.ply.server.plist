@@ -39,8 +39,11 @@
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <!-- Standard, not Background: launchd applies the background policy (low CPU,
+         throttled disk I/O) to the job and every child it starts, playback
+         ffmpeg included. ply demotes its own background work instead. -->
     <key>ProcessType</key>
-    <string>Background</string>
+    <string>Standard</string>
 
     <key>StandardOutPath</key>
     <string>/Users/YOUR_USER/Library/Logs/ply.log</string>

@@ -20,8 +20,11 @@ ExecStart=/usr/local/bin/ply -addr :8420 -media %h/Videos
 # ExecStart=/usr/local/bin/ply -addr :8420 -media %h/Videos -token CHANGE_ME
 Restart=on-failure
 RestartSec=3
-# The scanner and ffprobe should not starve interactive work.
-Nice=5
+# No Nice= here: it would slow playback ffmpeg too. ply lowers the priority
+# of its own background work (scans, probes, extraction) instead.
+# Stopping the unit kills every process in its cgroup, so no ffmpeg outlives
+# ply, even one ply started in a process group of its own.
+KillMode=control-group
 
 [Install]
 WantedBy=default.target
