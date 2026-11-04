@@ -202,17 +202,25 @@ type Candidate struct {
 	Score         float64 `json:"score"`
 }
 
+// ReviewEpisode is an episode of a show in the review list that the scanner flagged
+// (its file name has no episode number): the item's id and its file.
+type ReviewEpisode struct {
+	ID   int64  `json:"id"`
+	Path string `json:"path"`
+}
+
 // ReviewEntry is an entry of GET /api/metadata/review.
 type ReviewEntry struct {
-	Kind        string     `json:"kind"` // movie | series
-	ItemID      *int64     `json:"itemId,omitempty"`
-	Show        string     `json:"show,omitempty"`
-	Title       string     `json:"title"`
-	Year        int        `json:"year"`
-	MatchState  string     `json:"matchState"`
-	NeedsReview bool       `json:"needsReview"`
-	Score       float64    `json:"score"`
-	Candidate   *TitleCard `json:"candidate,omitempty"`
+	Kind        string          `json:"kind"` // movie | series
+	ItemID      *int64          `json:"itemId,omitempty"`
+	Show        string          `json:"show,omitempty"`
+	Title       string          `json:"title"`
+	Year        int             `json:"year"`
+	MatchState  string          `json:"matchState"`
+	NeedsReview bool            `json:"needsReview"`
+	Score       float64         `json:"score"`
+	Candidate   *TitleCard      `json:"candidate,omitempty"`
+	Episodes    []ReviewEpisode `json:"episodes,omitempty"` // a show's flagged episodes
 }
 
 // SettingsView is GET /api/settings. The key itself is never in it.

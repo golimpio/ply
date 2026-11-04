@@ -48,10 +48,11 @@ type Result struct {
 // moved between directories keeps its id when both directories are in the same
 // call (or the old file is otherwise known to be gone). Directories outside the
 // configured roots, or inside a hidden one, are ignored. It waits for a scan
-// that is already running.
+// that is already running; the roots are looked at again once it is its turn,
+// so that a folder removed meanwhile (DropRoot) is not scanned.
 func (s *Scanner) ScanDirs(ctx context.Context, dirs []Dir) (Result, error) {
-	scopes, sidecarDirs := s.scopes(dirs)
-	if len(scopes) == 0 && len(sidecarDirs) == 0 {
+	roots, _ := s.snapshot()
+	if scopes, sidecarDirs := s.scopes(roots, dirs, true); len(scopes) == 0 && len(sidecarDirs) == 0 {
 		return Result{}, nil
 	}
 	if err := s.acquire(ctx); err != nil {
@@ -59,19 +60,25 @@ func (s *Scanner) ScanDirs(ctx context.Context, dirs []Dir) (Result, error) {
 	}
 	defer s.release()
 
+	roots, retired := s.snapshot()
+	scopes, sidecarDirs := s.scopes(roots, dirs, false)
+	if len(scopes) == 0 && len(sidecarDirs) == 0 {
+		return Result{}, nil
+	}
 	start := time.Now()
 	states, err := s.store.FileStates(ctx)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: load library state: %w", ErrNotScanned, err)
 	}
 	s.loadMounts(ctx)
-	p := s.newPass(states)
+	p := s.newPass(states, roots, retired)
+	p.loadArchived(ctx)
 	defer p.saveMounts(ctx)
 	claimant := func(path string) string {
 		if root, ok := p.owners[path]; ok {
 			return root
 		}
-		return s.firstRoot(path)
+		return p.firstRoot(path)
 	}
 
 	var (
@@ -102,12 +109,23 @@ func (s *Scanner) ScanDirs(ctx context.Context, dirs []Dir) (Result, error) {
 		errs = append(errs, p.pairMoves(ctx))
 	}
 	errs = append(errs, p.indexAll(ctx)...)
+	p.restoreExisting(ctx)
 	if err := ctx.Err(); err != nil {
+		// What was indexed before the end is not lost: the worker is told.
+		s.notify(slices.Concat(p.added, p.reparsed), nil)
 		return Result{}, errors.Join(append(errs, err)...)
 	}
 	for _, d := range clean {
 		errs = append(errs, p.removeIn(ctx, d))
 	}
+	// A root scanned whole (its scope is the root itself) and without trouble.
+	var scanned []string
+	for _, d := range clean {
+		if p.configured(d.Path) && !p.failed[d.Path] && !p.left(d.Path) {
+			scanned = append(scanned, d.Path)
+		}
+	}
+	errs = append(errs, p.finishRoots(ctx, scanned)...)
 
 	res := Result{Added: p.added}
 	for dir, recursive := range p.deferred {
@@ -124,7 +142,8 @@ func (s *Scanner) ScanDirs(ctx context.Context, dirs []Dir) (Result, error) {
 			"moved", p.sum.moved, "removed", p.sum.removed.Load(),
 			"duration", time.Since(start).Round(time.Millisecond))
 	}
-	s.notify(res.Added, sidecarIDs)
+	s.notify(slices.Concat(res.Added, p.reparsed), sidecarIDs)
+	s.reportMatches(ctx)
 	return res, errors.Join(errs...)
 }
 
@@ -132,18 +151,20 @@ func (s *Scanner) ScanDirs(ctx context.Context, dirs []Dir) (Result, error) {
 // alone the configured roots in scope that turned up nothing.
 func (p *pass) removeIn(ctx context.Context, d Dir) error {
 	protected := map[string]bool{}
-	for _, root := range p.s.roots {
+	for _, r := range p.roots {
+		root := r.Path
 		if root != d.Path && !(d.Recursive && within(d.Path, root)) {
 			continue
 		}
 		if n := p.rowsOf(root); p.seenBy[root] == 0 && n > 0 {
 			protected[root] = true
+			p.failed[root] = true
 			p.s.log.Warn("no video files found, but indexed items came from this root; "+
 				"refusing to remove them (is the volume mounted?)", "root", root, "items", n)
 		}
 	}
 	err := p.removeMissing(ctx, func(path string, st store.FileState) bool {
-		if !p.s.configured(st.Root) || protected[st.Root] {
+		if !p.configured(st.Root) || protected[st.Root] || p.left(st.Root) {
 			return false
 		}
 		if d.Recursive {
@@ -183,25 +204,30 @@ func (p *pass) itemsUnder(dirs []string) []int64 {
 // scopes validates and merges dirs: it drops directories outside the
 // configured roots or inside a hidden directory, scans a root recursively, and
 // drops a directory already covered by a recursive one. It also returns the
-// directories whose sidecars changed.
-func (s *Scanner) scopes(dirs []Dir) (scopes []Dir, sidecarDirs []string) {
+// directories whose sidecars changed. quiet leaves out the warnings (for a first
+// look that is repeated later).
+func (s *Scanner) scopes(roots []Root, dirs []Dir, quiet bool) (scopes []Dir, sidecarDirs []string) {
 	byPath := map[string]Dir{}
 	for _, d := range dirs {
 		d.Path = filepath.Clean(d.Path)
 		if !filepath.IsAbs(d.Path) {
-			s.log.Warn("partial scan: ignoring a relative directory", "dir", d.Path)
+			if !quiet {
+				s.log.Warn("partial scan: ignoring a relative directory", "dir", d.Path)
+			}
 			continue
 		}
 		reachable := false
-		for _, root := range s.roots {
-			if d.Path == root {
+		for _, r := range roots {
+			if d.Path == r.Path {
 				d.Recursive, reachable = true, true
-			} else if reaches(root, d.Path) {
+			} else if reaches(r.Path, d.Path) {
 				reachable = true
 			}
 		}
 		if !reachable {
-			s.log.Warn("partial scan: ignoring a directory outside the media roots", "dir", d.Path)
+			if !quiet {
+				s.log.Warn("partial scan: ignoring a directory outside the media roots", "dir", d.Path)
+			}
 			continue
 		}
 		if d.Sidecars && !slices.Contains(sidecarDirs, d.Path) {
@@ -232,10 +258,10 @@ func (s *Scanner) scopes(dirs []Dir) (scopes []Dir, sidecarDirs []string) {
 
 // firstRoot is the first configured root that reaches path, the one a full
 // scan would let index it, or "".
-func (s *Scanner) firstRoot(path string) string {
-	for _, root := range s.roots {
-		if reaches(root, path) {
-			return root
+func (p *pass) firstRoot(path string) string {
+	for _, r := range p.roots {
+		if reaches(r.Path, path) {
+			return r.Path
 		}
 	}
 	return ""

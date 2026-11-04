@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"sync"
 	"syscall"
 	"time"
@@ -108,11 +110,24 @@ func run() error {
 		subGen = nil
 	}
 
-	if len(cfg.Media) == 0 {
-		log.Warn("no -media roots given; the library will stay empty")
+	// The library folders: the ones on the command line, saved so that the web
+	// page lists them, and the ones added from that page in earlier runs.
+	flagRoots := make([]library.Root, len(cfg.Roots))
+	for i, r := range cfg.Roots {
+		flagRoots[i] = library.Root{Path: r.Path, Kind: r.Kind}
+	}
+	// A folder typed on the command line for the first time may have items from before
+	// types existed, to be read again once the scanner has its roots (rereadPending
+	// below): it is noted before the folder is saved, and forgotten when it is done.
+	roots, before, err := prepareFolders(ctx, st, flagRoots, log)
+	if err != nil {
+		return fmt.Errorf("library folders: %w", err)
+	}
+	if len(roots) == 0 {
+		log.Warn("no library folders yet; add one in Settings (or start ply with -movies, -shows or -media)")
 	}
 	prober := probe.FFprobe{Bin: cfg.FFprobe, Niceness: scanNice}
-	scanner := library.NewScanner(ctx, st, prober, cfg.Media, log)
+	scanner := library.NewScanner(ctx, st, prober, rootPaths(roots), log)
 	scanner.SetSettle(library.DefaultSettle)
 
 	// Metadata: the TMDB key and switches (flags, environment, the settings
@@ -136,9 +151,41 @@ func run() error {
 	})
 	scanner.OnAdded(func([]int64) { worker.Notify() })
 	scanner.OnSidecarsChanged(worker.NotifySidecars)
+	// A folder that was removed and added back, or whose type was changed and
+	// changed back: the manual matches its files had are applied again, in the
+	// background (a scan does not wait for TMDB).
+	restorer := newMatchRestorer(st, worker, log)
+	scanner.OnRestoreMatch(restorer.add)
+	// The archived matches are applied only while online lookups are on; the scanner
+	// reports them again when they come on (checked every few seconds, below).
+	scanner.SetMatchGate(func() bool { return settings.Resolve(ctx).Online() })
+	// The scanner gets the folders' types last, with its settle time and its hooks
+	// in place: first the types they had before this start's flags, which it takes
+	// as the ones its items were read with, then the ones they have now. A type that
+	// a flag changed is read again (the scanner does it in the background); a
+	// folder it had no type for, a -media folder, reads nothing again: ply does not
+	// restructure a library on its own. A type a flag gives a folder that was not
+	// saved yet may be on items from before types existed: those are read again too
+	// (the log says how many items change).
+	scanner.SetRoots(previousRoots(roots, before))
+	scanner.SetRoots(roots)
+	rereadPending(ctx, st, scanner, log)
 
-	var bg sync.WaitGroup // the scanner loop, the watcher and the worker
-	bg.Add(2)
+	var bg sync.WaitGroup // the scanner loop, the watcher, the worker, the match restorer and the lookups check
+	bg.Add(4)
+	go func() {
+		defer bg.Done()
+		t := time.NewTicker(10 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				scanner.ReportMatchesIfDue(ctx)
+			}
+		}
+	}()
 	go func() {
 		defer bg.Done()
 		scanner.Run(ctx, cfg.ScanInterval)
@@ -147,14 +194,29 @@ func run() error {
 		defer bg.Done()
 		worker.Run(ctx)
 	}()
+	go func() {
+		defer bg.Done()
+		restorer.run(ctx)
+	}()
+	// The watcher runs even with no folders, for the ones added later.
 	var watcher *watch.Watcher
-	if cfg.Watch && len(cfg.Media) > 0 {
-		watcher = watch.New(scanner, cfg.Media, log)
+	if cfg.Watch {
+		watcher = watch.New(scanner, rootPaths(roots), log)
 		bg.Add(1)
 		go func() {
 			defer bg.Done()
 			watcher.Run(ctx)
 		}()
+	}
+	// Called by the API after every change to the folders, with its lock held: it
+	// must not block. The scanner scans a new folder and reads a changed one again
+	// in the background.
+	setRoots := func(roots []library.Root) {
+		scanner.SetRoots(roots)
+		if watcher != nil {
+			watcher.SetRoots(rootPaths(roots))
+		}
+		log.Info("library folders changed", "folders", rootPaths(roots))
 	}
 
 	apiOpts := api.Options{
@@ -165,6 +227,13 @@ func run() error {
 		Name:    cfg.Name,
 		Version: version,
 		Token:   cfg.Token,
+
+		FlagFolders: flagRoots,
+		SetRoots:    setRoots,
+		// DropRoot waits for a scan that is running and holds the scan semaphore while
+		// it archives and removes the folder's items.
+		DropRoot: scanner.DropRoot,
+		LastScan: scanner.LastScan,
 
 		AllowedHosts: cfg.AllowHosts,
 		Logger:       log,
@@ -195,7 +264,7 @@ func run() error {
 		log.Warn("mDNS advertisement unavailable", "err", err)
 	}
 	log.Info("ply listening", "ffmpeg", ffmpegBin, "version", version, "name", cfg.Name, "id", id, "data", cfg.Data,
-		"auth", cfg.Token != "", "media", cfg.Media)
+		"auth", cfg.Token != "", "media", rootPaths(roots))
 	for _, u := range discovery.URLs(ln.Addr()) {
 		log.Info("reachable at", "url", u)
 	}
@@ -228,6 +297,136 @@ func run() error {
 	scanner.Wait()
 	images.Close() // a download that was under way
 	return serveFailure
+}
+
+// storedKinds are the types the saved folders have, by path: what the last run left,
+// before this start's flags change any of them.
+func storedKinds(ctx context.Context, st *store.Store) (map[string]string, error) {
+	rows, err := st.Folders(ctx)
+	if err != nil {
+		return nil, err
+	}
+	kinds := make(map[string]string, len(rows))
+	for _, f := range rows {
+		kinds[f.Path] = f.Kind
+	}
+	return kinds, nil
+}
+
+// firstTyped are the folders given a type on the command line that were not saved
+// before this start: if they have items, an earlier version read those without a
+// type, and the type given is a choice the items follow (Scanner.Reread). A saved
+// folder that a flag gave another type is read again by the change itself.
+func firstTyped(flags []library.Root, before map[string]string) []string {
+	var out []string
+	for _, r := range flags {
+		if _, saved := before[r.Path]; !saved && r.Kind != "" {
+			out = append(out, r.Path)
+		}
+	}
+	return out
+}
+
+// previousRoots is roots with the types they had before this start: those in
+// before, the rest as they are (a folder that was not saved has no earlier type to
+// differ from, so SetRoots reads nothing again; firstTyped names the ones a flag
+// types for the first time, which are read again by Scanner.Reread).
+func previousRoots(roots []library.Root, before map[string]string) []library.Root {
+	out := make([]library.Root, len(roots))
+	for i, r := range roots {
+		if kind, ok := before[r.Path]; ok {
+			r.Kind = kind
+		}
+		out[i] = r
+	}
+	return out
+}
+
+// startupRoots saves the folders given on the command line (-movies and
+// -shows set the type, -media keeps the saved one) and returns the active roots:
+// those folders, then the ones saved from the web page. A -media folder with no
+// saved type comes back with Kind "": the scanner guesses it on its first scan.
+func startupRoots(ctx context.Context, st *store.Store, flags []library.Root, log *slog.Logger) ([]library.Root, error) {
+	for _, r := range flags {
+		_, changed, err := st.UpsertFlagFolder(ctx, r.Path, r.Kind, "")
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", r.Path, err)
+		}
+		if changed {
+			// The scanner reads the folder's items again (SetRoots at start).
+			log.Info("the type of a folder changed on the command line; its files will be read again",
+				"folder", r.Path, "kind", r.Kind)
+		}
+	}
+	rows, err := st.Folders(ctx)
+	if err != nil {
+		return nil, err
+	}
+	saved := make([]library.Root, len(rows))
+	for i, f := range rows {
+		saved[i] = library.Root{Path: f.Path, Kind: f.Kind}
+	}
+	noteFormerFlags(ctx, st, flags, rows, log)
+	roots := library.MergeRoots(flags, saved)
+	for _, p := range overlappingPairs(roots, flags) {
+		log.Warn("two library folders overlap; a file is indexed under only one of them", "folder", p[0], "other", p[1])
+	}
+	return roots, nil
+}
+
+// flagFoldersKey is the setting that remembers which folders the last start was
+// given on the command line: whether a folder came from the command line is not
+// saved with the folder, since it is per run (docs/M7-FOLDERS.md).
+const flagFoldersKey = "flag_folders"
+
+// noteFormerFlags says so, once, for each folder that was on the command line at
+// the last start and is not now: it stays in the library, as one of the folders
+// added in Settings, and Settings can remove it.
+func noteFormerFlags(ctx context.Context, st *store.Store, flags []library.Root, saved []store.Folder, log *slog.Logger) {
+	now := rootPaths(flags)
+	var before []string
+	if v, ok, err := st.GetSetting(ctx, flagFoldersKey); err != nil {
+		log.Warn("reading the folders of the last start", "err", err)
+	} else if ok {
+		json.Unmarshal([]byte(v), &before) // an unreadable list is as if there was none
+	}
+	for _, p := range before {
+		if !slices.Contains(now, p) && slices.ContainsFunc(saved, func(f store.Folder) bool { return f.Path == p }) {
+			log.Warn("a folder that was given on the command line before is now kept as a Settings folder", "folder", p)
+		}
+	}
+	b, _ := json.Marshal(now)
+	if err := st.SetSetting(ctx, flagFoldersKey, string(b)); err != nil {
+		log.Warn("saving the command-line folders", "err", err)
+	}
+}
+
+// overlappingPairs lists the pairs of roots where one is or holds the other, as
+// directories (through symlinks too, as the API refuses them), except pairs that
+// are both on the command line: those keep nesting as they always did.
+func overlappingPairs(roots, flags []library.Root) [][2]string {
+	onFlags := map[string]bool{}
+	for _, f := range flags {
+		onFlags[f.Path] = true
+	}
+	var pairs [][2]string
+	for i, a := range roots {
+		for _, b := range roots[i+1:] {
+			if library.Overlap(a.Path, b.Path) && !(onFlags[a.Path] && onFlags[b.Path]) {
+				pairs = append(pairs, [2]string{a.Path, b.Path})
+			}
+		}
+	}
+	return pairs
+}
+
+// rootPaths are the paths of roots.
+func rootPaths(roots []library.Root) []string {
+	paths := make([]string, len(roots))
+	for i, r := range roots {
+		paths[i] = r.Path
+	}
+	return paths
 }
 
 // afterScans does the housekeeping each time a scan finishes: it wakes the

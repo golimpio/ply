@@ -151,8 +151,17 @@ Design:
 ## Target architecture
 
 ### Store: read pool + single writer
-- Two `*sql.DB` on the same file: `ro` (`SetMaxOpenConns(NumCPU)`) and `rw` (1). Add `synchronous=NORMAL`.
-- Write batches capped at ~500 rows per tx (`DeleteItems`, `ArchiveAndDeleteRoot`, `SetParsed`, `removeMissing`).
+- Two `*sql.DB` on the same file (done, `internal/store`): `ro` (`SetMaxOpenConns(min(NumCPU, 4))`, at least 2, all
+  kept idle) and `rw` (1, `_txlock=immediate`). `ro` is `query_only`, not `mode=ro`: `mode=ro` measured twice as slow
+  on a WAL database (3,000-item `ListItems`: 55 ms against 30 ms, and 4 readers at once 101 ms against 38 ms).
+  Both have `synchronous=NORMAL`. With NORMAL in WAL mode a commit does not wait for the disk: a crash of ply loses
+  nothing, but a power cut rolls back every commit since the last checkpoint, which SQLite makes only at 1,000 WAL
+  pages (days, for a person's writes), and that would take the TMDB key, folders and manual matches with it. So a
+  `PRAGMA wal_checkpoint(PASSIVE)` follows an interactive write within 2 s (the first one starts the timer; later
+  ones do not move it) and any write once the writer has been idle for 30 s.
+- Write batches capped at ~500 rows per tx (`DeleteItems`, `ArchiveAndDeleteRoot`, `SetParsed`, `PruneMetadata`
+  (50 titles per round: each cascades), `ReleasePending`, `RequeueUnmatched`; `removeMissing` calls `DeleteItems`).
+  A bulk write is no longer all-or-nothing: after an error the earlier batches stay, and calling again continues.
 - Metadata commits per title.
 - A small writer-priority lock: tier 1/2 writes (progress, settings, manual match, folder add) go first; tier-3
   writers yield between chunks.

@@ -229,7 +229,7 @@ type UpcomingShow struct {
 // Upcoming lists the library's series whose next episode airs on today
 // (YYYY-MM-DD) or later: soonest first, by name within a day, at most limit.
 func (s *Store) Upcoming(ctx context.Context, today string, limit int) ([]UpcomingShow, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.ro.QueryContext(ctx, `
 		SELECT t.next_episode_season, t.next_episode_number, t.next_episode_name, `+cardCols+`
 		FROM titles t`+cardJoins+`
 		WHERE `+cardInLibrary+` AND t.kind = 'series' AND t.next_air_date >= ?
@@ -358,7 +358,7 @@ func titleCredits(ctx context.Context, q queryer, titleID int64) (cast []CastMem
 // Genres lists the genres of the library's titles with how many titles each has,
 // by name. Genres without a title in the library are left out.
 func (s *Store) Genres(ctx context.Context) ([]GenreCount, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.ro.QueryContext(ctx, `
 		SELECT g.id, g.name, COUNT(*) FROM genres g
 		JOIN title_genres tg ON tg.genre_id = g.id JOIN titles t ON t.id = tg.title_id
 		WHERE `+libraryTitle+`
@@ -491,7 +491,7 @@ func (s *Store) GetPerson(ctx context.Context, id int64) (d PersonDetail, err er
 // deathday, place of birth, known for, IMDb id and, when not empty, the photo)
 // and marks the details fetched. It returns ErrNotFound for an unknown person.
 func (s *Store) SetPersonDetails(ctx context.Context, id int64, p Person, fetchedAt int64) error {
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.exec(ctx, prioHigh, `
 		UPDATE people SET biography = ?, birthday = ?, deathday = ?, place_of_birth = ?, known_for = ?,
 			imdb_id = ?, profile = CASE WHEN ? <> '' THEN ? ELSE profile END, fetched_at = ?
 		WHERE id = ?`,
@@ -514,7 +514,7 @@ func (s *Store) SearchPeople(ctx context.Context, q string, limit int) ([]Person
 		return nil, nil
 	}
 	esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(q)
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.ro.QueryContext(ctx, `
 		SELECT p.id, p.name, p.profile, p.known_for FROM people p
 		WHERE p.name LIKE ? ESCAPE '\'
 			AND EXISTS (SELECT 1 FROM credits c JOIN titles t ON t.id = c.title_id
@@ -536,8 +536,16 @@ func (s *Store) SearchPeople(ctx context.Context, q string, limit int) ([]Person
 	return out, rows.Err()
 }
 
+// ReviewEpisode is an episode the scanner flagged: its file name has no episode
+// number, so it is episode 0 of its season.
+type ReviewEpisode struct {
+	ID   int64
+	Path string
+}
+
 // ReviewEntry is a movie or show that needs a person's attention: nothing
-// matched, or a match the scorer was not sure about.
+// matched, a match the scorer was not sure about, or (a show) an episode whose
+// name has no episode number.
 type ReviewEntry struct {
 	Kind        string // KindMovie | KindSeries
 	ItemID      int64  // movies
@@ -548,21 +556,26 @@ type ReviewEntry struct {
 	NeedsReview bool
 	Score       float64
 	Candidate   *TitleCard // the title it is linked to, if any
+	// Episodes are the show's flagged episodes, which are why it needs review when
+	// its match does not.
+	Episodes []ReviewEpisode
 }
 
-// ReviewList returns the movies and shows that are unmatched or need review,
-// unmatched first, then by title.
+// ReviewList returns the movies and shows that are unmatched or need review (a
+// show also does when one of its episodes is flagged), unmatched first, then by
+// title.
 func (s *Store) ReviewList(ctx context.Context) (list []ReviewEntry, err error) {
 	err = s.snapshot(ctx, func(q queryer) error {
 		rows, err := q.QueryContext(ctx, `
 			SELECT 'movie', id, '', title, year, match_state, needs_review, match_score, COALESCE(title_id, 0)
 			FROM items WHERE kind = 'movie' AND (match_state = 'unmatched' OR needs_review = 1)
 			UNION ALL
-			SELECT 'series', 0, sm.show, sm.show, 0, sm.match_state, sm.needs_review, sm.match_score,
-				COALESCE(sm.title_id, 0)
-			FROM series_matches sm
-			WHERE (sm.match_state = 'unmatched' OR sm.needs_review = 1)
-				AND EXISTS (SELECT 1 FROM items e WHERE e.kind = 'episode' AND e.show = sm.show)`)
+			SELECT 'series', 0, e.show, e.show, 0, COALESCE(sm.match_state, 'pending'),
+				COALESCE(sm.needs_review, 0) = 1 OR e.flagged = 1, COALESCE(sm.match_score, 0), COALESCE(sm.title_id, 0)
+			FROM (SELECT show, MAX(needs_review) AS flagged FROM items WHERE kind = 'episode' GROUP BY show) e
+			LEFT JOIN series_matches sm ON sm.show = e.show
+			WHERE COALESCE(sm.match_state, 'pending') = 'unmatched' OR COALESCE(sm.needs_review, 0) = 1
+				OR e.flagged = 1`)
 		if err != nil {
 			return err
 		}
@@ -587,7 +600,35 @@ func (s *Store) ReviewList(ctx context.Context) (list []ReviewEntry, err error) 
 		if err := rows.Err(); err != nil {
 			return err
 		}
-		rows.Close() // before the next query: the pool has one connection
+		rows.Close()
+
+		// The episodes the scanner flagged, with the show they are in.
+		flagged, err := q.QueryContext(ctx, `
+			SELECT show, id, path FROM items WHERE kind = 'episode' AND needs_review = 1 ORDER BY show, path`)
+		if err != nil {
+			return err
+		}
+		defer flagged.Close()
+		byShow := map[string][]ReviewEpisode{}
+		for flagged.Next() {
+			var (
+				show string
+				ep   ReviewEpisode
+			)
+			if err := flagged.Scan(&show, &ep.ID, &ep.Path); err != nil {
+				return err
+			}
+			byShow[show] = append(byShow[show], ep)
+		}
+		if err := flagged.Err(); err != nil {
+			return err
+		}
+		flagged.Close()
+		for i := range list {
+			if list[i].Kind == KindSeries {
+				list[i].Episodes = byShow[list[i].Show]
+			}
+		}
 
 		cards, err := cardsByID(ctx, q, titleIDs)
 		if err != nil {
@@ -617,7 +658,7 @@ func (s *Store) ReviewList(ctx context.Context) (list []ReviewEntry, err error) 
 
 // Seasons returns the stored seasons of a show with their stored episode counts.
 func (s *Store) Seasons(ctx context.Context, titleID int64) ([]Season, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.ro.QueryContext(ctx, `
 		SELECT se.season, se.name, se.overview, se.poster, se.air_date,
 			(SELECT COUNT(*) FROM episodes e WHERE e.title_id = se.title_id AND e.season = se.season)
 		FROM seasons se WHERE se.title_id = ? ORDER BY se.season`, titleID)
@@ -638,7 +679,7 @@ func (s *Store) Seasons(ctx context.Context, titleID int64) ([]Season, error) {
 
 // Episodes returns every stored episode of a show, by season and number.
 func (s *Store) Episodes(ctx context.Context, titleID int64) ([]Episode, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.ro.QueryContext(ctx, `
 		SELECT season, episode, name, overview, air_date, runtime_min, still, rating
 		FROM episodes WHERE title_id = ? ORDER BY season, episode`, titleID)
 	if err != nil {
@@ -659,7 +700,7 @@ func (s *Store) Episodes(ctx context.Context, titleID int64) ([]Episode, error) 
 // GetEpisode returns one stored episode, or ErrNotFound.
 func (s *Store) GetEpisode(ctx context.Context, titleID int64, season, episode int) (Episode, error) {
 	var e Episode
-	err := s.db.QueryRowContext(ctx, `
+	err := s.ro.QueryRowContext(ctx, `
 		SELECT season, episode, name, overview, air_date, runtime_min, still, rating
 		FROM episodes WHERE title_id = ? AND season = ? AND episode = ?`, titleID, season, episode).
 		Scan(&e.Season, &e.Number, &e.Name, &e.Overview, &e.AirDate, &e.RuntimeMin, &e.Still, &e.Rating)
@@ -672,7 +713,7 @@ func (s *Store) GetEpisode(ctx context.Context, titleID int64, season, episode i
 // SeasonsNeedingFetch returns the seasons that have episode files in the
 // library, linked to the show title, and no stored episodes yet.
 func (s *Store) SeasonsNeedingFetch(ctx context.Context, titleID int64) ([]int, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.ro.QueryContext(ctx, `
 		SELECT DISTINCT i.season FROM series_matches sm JOIN items i ON i.kind = 'episode' AND i.show = sm.show
 		WHERE sm.title_id = ?
 			AND NOT EXISTS (SELECT 1 FROM episodes e WHERE e.title_id = sm.title_id AND e.season = i.season)

@@ -55,7 +55,7 @@ func (s *Store) SetItemMatch(ctx context.Context, itemID int64, m Match) error {
 	if err := m.validate(); err != nil {
 		return err
 	}
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.exec(ctx, prioHigh, `
 		UPDATE items SET title_id = ?, match_state = ?, needs_review = ?, match_score = ?,
 			match_attempts = ?, next_attempt_at = ?
 		WHERE id = ?`,
@@ -75,7 +75,7 @@ func (s *Store) SetSeriesMatch(ctx context.Context, show string, m Match) error 
 	if err := m.validate(); err != nil {
 		return err
 	}
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.exec(ctx, prioHigh, `
 		INSERT INTO series_matches (show, title_id, match_state, needs_review, match_score,
 			match_attempts, next_attempt_at)
 		SELECT ?, ?, ?, ?, ?, ?, ? WHERE `+hasEpisodes+`
@@ -98,7 +98,7 @@ const hasEpisodes = `EXISTS (SELECT 1 FROM items WHERE kind = 'episode' AND show
 // DeferItemMatch records a failed attempt that should be retried: the item
 // stays as it is, its attempts go up by one and it is due again at next.
 func (s *Store) DeferItemMatch(ctx context.Context, itemID int64, next int64) error {
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.exec(ctx, prioLow, `
 		UPDATE items SET match_attempts = match_attempts + 1, next_attempt_at = ? WHERE id = ?`, next, itemID)
 	if err != nil {
 		return err
@@ -111,7 +111,7 @@ func (s *Store) DeferItemMatch(ctx context.Context, itemID int64, next int64) er
 
 // DeferSeriesMatch is DeferItemMatch for a show.
 func (s *Store) DeferSeriesMatch(ctx context.Context, show string, next int64) error {
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.exec(ctx, prioLow, `
 		INSERT INTO series_matches (show, match_attempts, next_attempt_at) SELECT ?, 1, ? WHERE `+hasEpisodes+`
 		ON CONFLICT (show) DO UPDATE SET match_attempts = match_attempts + 1,
 			next_attempt_at = excluded.next_attempt_at`, show, next, show)
@@ -127,7 +127,7 @@ func (s *Store) DeferSeriesMatch(ctx context.Context, show string, next int64) e
 // DueItems returns up to limit movies that are pending with next_attempt_at at
 // or before now, oldest first.
 func (s *Store) DueItems(ctx context.Context, now int64, limit int) ([]DueItem, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.ro.QueryContext(ctx, `
 		SELECT `+itemCols+`, match_attempts FROM items
 		WHERE kind = 'movie' AND match_state = 'pending' AND next_attempt_at <= ?
 		ORDER BY next_attempt_at, id LIMIT ?`, now, limit)
@@ -154,7 +154,7 @@ func (s *Store) DueItems(ctx context.Context, now int64, limit int) ([]DueItem, 
 // DueSeries returns up to limit shows that are due for matching: pending with
 // next_attempt_at at or before now, or with no series_matches row yet.
 func (s *Store) DueSeries(ctx context.Context, now int64, limit int) ([]DueSeries, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.ro.QueryContext(ctx, `
 		SELECT e.show, COALESCE(sm.match_attempts, 0),
 			(SELECT path FROM items WHERE kind = 'episode' AND show = e.show ORDER BY id LIMIT 1)
 		FROM (SELECT DISTINCT show FROM items WHERE kind = 'episode' AND show <> '') e
@@ -179,7 +179,7 @@ func (s *Store) DueSeries(ctx context.Context, now int64, limit int) ([]DueSerie
 // GetSeriesMatch returns the show's row, or ErrNotFound when it has none (a
 // show nobody has looked at yet).
 func (s *Store) GetSeriesMatch(ctx context.Context, show string) (SeriesMatch, error) {
-	sm, err := scanSeriesMatch(s.db.QueryRowContext(ctx, `SELECT `+seriesCols+` FROM series_matches WHERE show = ?`, show))
+	sm, err := scanSeriesMatch(s.ro.QueryRowContext(ctx, `SELECT `+seriesCols+` FROM series_matches WHERE show = ?`, show))
 	if errors.Is(err, sql.ErrNoRows) {
 		return SeriesMatch{}, ErrNotFound
 	}
@@ -188,7 +188,7 @@ func (s *Store) GetSeriesMatch(ctx context.Context, show string) (SeriesMatch, e
 
 // SeriesMatches returns every show's row keyed by show name.
 func (s *Store) SeriesMatches(ctx context.Context) (map[string]SeriesMatch, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+seriesCols+` FROM series_matches`)
+	rows, err := s.ro.QueryContext(ctx, `SELECT `+seriesCols+` FROM series_matches`)
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +225,8 @@ type MatchCounts struct {
 	NeedsReview int
 }
 
-// CountMatches counts movies and shows (shows with episodes only) by state.
+// CountMatches counts movies and shows (shows with episodes only) by state. A
+// show needs review when its match does or one of its episodes is flagged.
 func (s *Store) CountMatches(ctx context.Context) (c MatchCounts, err error) {
 	err = s.snapshot(ctx, func(q queryer) error {
 		for _, query := range []string{
@@ -238,8 +239,8 @@ func (s *Store) CountMatches(ctx context.Context) (c MatchCounts, err error) {
 			`SELECT
 				COALESCE(SUM(sm.show IS NULL OR sm.match_state = 'pending'), 0),
 				COALESCE(SUM(sm.match_state = 'unmatched'), 0),
-				COALESCE(SUM(sm.needs_review), 0)
-			FROM (SELECT DISTINCT show FROM items WHERE kind = 'episode' AND show <> '') e
+				COALESCE(SUM(COALESCE(sm.needs_review, 0) = 1 OR e.flagged = 1), 0)
+			FROM (SELECT show, MAX(needs_review) AS flagged FROM items WHERE kind = 'episode' AND show <> '' GROUP BY show) e
 			LEFT JOIN series_matches sm ON sm.show = e.show`,
 		} {
 			var p, u, r int
@@ -265,58 +266,55 @@ type Art struct {
 // SetItemArt records the item's sidecar artwork (absolute paths). An unchanged
 // record is not written. It returns ErrNotFound for an unknown item.
 func (s *Store) SetItemArt(ctx context.Context, itemID int64, a Art) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
+	return s.write(ctx, prioLow, func(tx *sql.Tx) error {
+		var cur Art
+		err := tx.QueryRowContext(ctx, `SELECT local_poster, local_backdrop, local_thumb FROM items WHERE id = ?`,
+			itemID).Scan(&cur.Poster, &cur.Backdrop, &cur.Thumb)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		// The scanner reports sidecar files only: no poster from it is not a reason
+		// to forget the cover the metadata worker found inside the file.
+		if a.Poster == "" && strings.HasPrefix(cur.Poster, EmbeddedPrefix) {
+			a.Poster = cur.Poster
+		}
+		if cur == a {
+			return nil
+		}
+		_, err = tx.ExecContext(ctx, `
+			UPDATE items SET local_poster = ?, local_backdrop = ?, local_thumb = ? WHERE id = ?`,
+			a.Poster, a.Backdrop, a.Thumb, itemID)
 		return err
-	}
-	defer tx.Rollback()
-	var cur Art
-	err = tx.QueryRowContext(ctx, `SELECT local_poster, local_backdrop, local_thumb FROM items WHERE id = ?`,
-		itemID).Scan(&cur.Poster, &cur.Backdrop, &cur.Thumb)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
-	}
-	if err != nil {
-		return err
-	}
-	// The scanner reports sidecar files only: no poster from it is not a reason
-	// to forget the cover the metadata worker found inside the file.
-	if a.Poster == "" && strings.HasPrefix(cur.Poster, EmbeddedPrefix) {
-		a.Poster = cur.Poster
-	}
-	if cur == a {
-		return nil
-	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE items SET local_poster = ?, local_backdrop = ?, local_thumb = ? WHERE id = ?`,
-		a.Poster, a.Backdrop, a.Thumb, itemID); err != nil {
-		return err
-	}
-	return tx.Commit()
+	})
 }
 
 // SetSeriesArt records a show's folder artwork, creating its series_matches row
 // when it has none. It returns ErrNotFound for a show without episodes.
 func (s *Store) SetSeriesArt(ctx context.Context, show string, a Art) error {
-	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO series_matches (show, local_poster, local_backdrop) SELECT ?, ?, ? WHERE `+hasEpisodes+`
-		ON CONFLICT (show) DO UPDATE SET local_poster = excluded.local_poster,
-			local_backdrop = excluded.local_backdrop
-		WHERE local_poster <> excluded.local_poster OR local_backdrop <> excluded.local_backdrop`,
-		show, a.Poster, a.Backdrop, show)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		// Either unchanged or no such show: tell them apart.
-		var one int
-		err := s.db.QueryRowContext(ctx, `SELECT 1 FROM series_matches WHERE show = ?`, show).Scan(&one)
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
+	return s.write(ctx, prioLow, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `
+			INSERT INTO series_matches (show, local_poster, local_backdrop) SELECT ?, ?, ? WHERE `+hasEpisodes+`
+			ON CONFLICT (show) DO UPDATE SET local_poster = excluded.local_poster,
+				local_backdrop = excluded.local_backdrop
+			WHERE local_poster <> excluded.local_poster OR local_backdrop <> excluded.local_backdrop`,
+			show, a.Poster, a.Backdrop, show)
+		if err != nil {
+			return err
 		}
-		return err
-	}
-	return nil
+		if n, _ := res.RowsAffected(); n == 0 {
+			// Either unchanged or no such show: tell them apart.
+			var one int
+			err := tx.QueryRowContext(ctx, `SELECT 1 FROM series_matches WHERE show = ?`, show).Scan(&one)
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		return nil
+	})
 }
 
 // Kinds of owner of local artwork, as in "local:<kind>:<id>:<slot>".
@@ -345,7 +343,7 @@ func (s *Store) LocalArt(ctx context.Context, kind string, id int64, slot string
 		return "", ErrNotFound
 	}
 	var path string
-	err := s.db.QueryRowContext(ctx, query, id).Scan(&path)
+	err := s.ro.QueryRowContext(ctx, query, id).Scan(&path)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && path == "") {
 		return "", ErrNotFound
 	}

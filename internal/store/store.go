@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,9 +26,22 @@ var migrationFS embed.FS
 var ErrNotFound = errors.New("store: not found")
 
 // Store is a SQLite-backed library store. All methods are safe for
-// concurrent use; the underlying pool has a single connection.
+// concurrent use.
+//
+// It holds two pools on one database file. The file is in WAL mode, so readers
+// and the writer do not block each other: rw has the one connection that writes,
+// ro has several that only read. Reads (ListItems, GetEntry, Continue, ...) run
+// on ro and never wait for a write. Writes run on rw through s.write, one at a
+// time, the ones a person is waiting for ahead of the background ones (see
+// writerLock), and the big ones in chunks (see writeChunk). A checkpoint follows
+// the interactive ones (see checkpointer).
 type Store struct {
-	db       *sql.DB
+	rw       *sql.DB
+	ro       *sql.DB
+	wl       writerLock
+	ck       checkpointer
+	bg       context.Context // ends at Close: what the store does on its own stops with it
+	stopBG   context.CancelFunc
 	warnings []string
 }
 
@@ -59,23 +73,28 @@ func open(path string, chmod func(string, os.FileMode) error) (*Store, error) {
 	} else if !errors.Is(err, os.ErrExist) {
 		return nil, fmt.Errorf("create %s: %w", abs, err)
 	}
-	db, err := sql.Open("sqlite", dsn(abs))
+	rw, err := sql.Open("sqlite", dsn(abs))
 	if err != nil {
 		return nil, err
 	}
-	// One connection: SQLite serialises writers anyway, and it keeps
-	// per-connection pragmas (foreign_keys) trivially consistent.
-	db.SetMaxOpenConns(1)
+	// One writer connection: SQLite has one writer anyway, and Store.write
+	// queues the callers in front of it by priority.
+	rw.SetMaxOpenConns(1)
+	rw.SetMaxIdleConns(1)
 
-	s := &Store{db: db}
+	s := &Store{rw: rw}
 	ctx := context.Background()
-	if err := db.PingContext(ctx); err != nil {
-		db.Close()
+	if err := rw.PingContext(ctx); err != nil {
+		rw.Close()
 		return nil, fmt.Errorf("open %s: %w", abs, err)
 	}
 	if err := s.migrate(ctx); err != nil {
-		db.Close()
+		rw.Close()
 		return nil, fmt.Errorf("migrate %s: %w", abs, err)
+	}
+	if err := s.stampSince(ctx); err != nil {
+		rw.Close()
+		return nil, fmt.Errorf("open %s: %w", abs, err)
 	}
 	// The TMDB key is in here. A database an earlier version left readable is
 	// closed up now.
@@ -89,14 +108,14 @@ func open(path string, chmod func(string, os.FileMode) error) (*Store, error) {
 			// through: EPERM also means "someone else's file", and that is no
 			// place for the key.
 			if err := ownFile(abs + suffix); err != nil {
-				db.Close()
+				rw.Close()
 				return nil, err
 			}
 			if unsupported == nil {
 				unsupported = err
 			}
 		default:
-			db.Close()
+			rw.Close()
 			return nil, err
 		}
 	}
@@ -104,8 +123,34 @@ func open(path string, chmod func(string, os.FileMode) error) (*Store, error) {
 		s.warnings = append(s.warnings, fmt.Sprintf("cannot make the database files owner-only (%v): the filesystem "+
 			"may not support permissions; keep the data directory %s private, it holds the TMDB key", unsupported, filepath.Dir(abs)))
 	}
+
+	// The readers come last: the database exists, is migrated, and its files are
+	// closed up. They only read what the writer has made.
+	ro, err := sql.Open("sqlite", roDSN(abs))
+	if err != nil {
+		rw.Close()
+		return nil, err
+	}
+	s.bg, s.stopBG = context.WithCancel(context.Background())
+	n := readConns()
+	ro.SetMaxOpenConns(n)
+	ro.SetMaxIdleConns(n) // keep them: a new connection runs its pragmas again
+	if err := ro.PingContext(ctx); err != nil {
+		ro.Close()
+		rw.Close()
+		s.stopBG()
+		return nil, fmt.Errorf("open %s read-only: %w", abs, err)
+	}
+	s.ro = ro
+	s.ck.start(s.checkpoint)
 	return s, nil
 }
+
+// readConns is the size of the read pool: a connection per CPU up to four, and at
+// least two so that a long read does not make every other one wait. Four is
+// where more readers stop paying (BenchmarkListItemsReaders), and each connection
+// keeps a page cache of its own.
+func readConns() int { return max(2, min(runtime.NumCPU(), 4)) }
 
 // ownFile returns an error unless path is a regular file owned by this user
 // (or is not there: nothing to protect).
@@ -147,12 +192,14 @@ type queryer interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-// snapshot runs a multi-query read in one transaction, so that it sees one
-// committed state. Without it a row deleted between two of the queries comes
-// back with its streams, sidecars or progress missing. The pool has a single
-// connection: fn must use q, never s.db.
+// snapshot runs a multi-query read in one read transaction on a reader
+// connection, so that it sees one committed state, whatever the writer does
+// meanwhile. Without it a row deleted between two of the queries comes back with
+// its streams, sidecars or progress missing. fn must use q, never s.ro: the
+// pool is finite, and a read that waits for a second connection while holding
+// the first can deadlock with its peers.
 func (s *Store) snapshot(ctx context.Context, fn func(q queryer) error) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.ro.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -160,26 +207,56 @@ func (s *Store) snapshot(ctx context.Context, fn func(q queryer) error) error {
 	return fn(tx)
 }
 
-// Close closes the database.
-func (s *Store) Close() error { return s.db.Close() }
-
-// dsn builds the SQLite URI for an absolute path. The path is URL-escaped
-// (the macOS default data dir contains a space).
-func dsn(abs string) string {
-	u := url.URL{
-		Scheme:   "file",
-		Path:     abs,
-		RawQuery: "_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)",
+// Close closes both pools; the checkpointer stops first. Whichever connection
+// closes last checkpoints the WAL and removes its file (the readers are not
+// read-only files, only query_only), so the order of the two is only tidy.
+func (s *Store) Close() error {
+	s.ck.stop()
+	if s.stopBG != nil {
+		s.stopBG()
 	}
+	var roErr error
+	if s.ro != nil {
+		roErr = s.ro.Close()
+	}
+	return errors.Join(roErr, s.rw.Close())
+}
+
+// pragmas every connection of both pools gets, through the DSN: a pool that opens
+// a new connection (the readers do, up to readConns) runs them again. busy_timeout
+// first, so that the others wait for a lock rather than fail. synchronous=NORMAL
+// does not corrupt the file in WAL mode, but a commit then does not wait for the
+// disk: a crash of ply loses nothing, a power cut can take back what was
+// committed since the last checkpoint (see checkpointer, which bounds that).
+const pragmas = "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=synchronous(NORMAL)"
+
+// dsn builds the SQLite URI of the writer connection for an absolute path. The
+// path is URL-escaped (the macOS default data dir contains a space). Its
+// transactions begin immediate: they take the write lock at once, so that a
+// transaction that reads and then writes never fails at the upgrade.
+func dsn(abs string) string { return dsnWith(abs, "_txlock=immediate") }
+
+// roDSN is dsn for the readers: query_only makes SQLite refuse any write on the
+// connection, so a write routed to a reader fails instead of racing the writer.
+//
+// It is not mode=ro. That is stricter (no pragma turns it off) but, measured with
+// this driver on a WAL database, it makes reads about twice as slow and keeps
+// readers from scaling: ListItems on 3,000 items takes 30 ms with query_only and
+// 55 ms with mode=ro, and with 4 readers at once 38 ms against 101 ms
+// (BenchmarkListItemsReaders).
+func roDSN(abs string) string { return dsnWith(abs, "_pragma=query_only(1)") }
+
+func dsnWith(abs, extra string) string {
+	u := url.URL{Scheme: "file", Path: abs, RawQuery: pragmas + "&" + extra}
 	return u.String()
 }
 
 func (s *Store) migrate(ctx context.Context) error {
-	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`); err != nil {
+	if _, err := s.rw.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`); err != nil {
 		return err
 	}
 	var current int
-	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_version`).Scan(&current); err != nil {
+	if err := s.rw.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_version`).Scan(&current); err != nil {
 		return err
 	}
 	entries, err := migrationFS.ReadDir("migrations")
@@ -207,8 +284,10 @@ func (s *Store) migrate(ctx context.Context) error {
 	return nil
 }
 
+// applyMigration runs on the writer connection without the writer lock: Open
+// calls it before anything else can reach the store.
 func (s *Store) applyMigration(ctx context.Context, version int, body string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}

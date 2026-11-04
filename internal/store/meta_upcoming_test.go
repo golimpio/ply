@@ -201,13 +201,13 @@ func TestMigration004KeepsExistingData(t *testing.T) {
 	ctx := context.Background()
 	old, path := openAtVersion(t, 3) // M6 as first shipped
 	// Positive control: version 3 has the air date and not the episode.
-	if cols := columns(t, old.db, "titles"); !slices.Contains(cols, "next_air_date") || slices.Contains(cols, "next_episode_name") {
+	if cols := columns(t, old.rw, "titles"); !slices.Contains(cols, "next_air_date") || slices.Contains(cols, "next_episode_name") {
 		t.Fatalf("version 3 titles columns: %v", cols)
 	}
 	now := int64(1_700_000_000)
 	exec := func(q string, args ...any) sql.Result {
 		t.Helper()
-		res, err := old.db.Exec(q, args...)
+		res, err := old.rw.Exec(q, args...)
 		if err != nil {
 			t.Fatalf("%s: %v", q, err)
 		}
@@ -259,7 +259,7 @@ func TestMigration004KeepsExistingData(t *testing.T) {
 	}
 
 	var versions []int
-	rows, err := s.db.Query(`SELECT version FROM schema_version ORDER BY version`)
+	rows, err := s.rw.Query(`SELECT version FROM schema_version ORDER BY version`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,15 +269,15 @@ func TestMigration004KeepsExistingData(t *testing.T) {
 		versions = append(versions, v)
 	}
 	rows.Close()
-	if !slices.Equal(versions, []int{1, 2, 3, 4}) {
-		t.Errorf("schema_version = %v, want [1 2 3 4]", versions)
+	if !slices.Equal(versions, []int{1, 2, 3, 4, 5, 6}) {
+		t.Errorf("schema_version = %v, want [1 2 3 4 5 6]", versions)
 	}
 	var violations int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_foreign_key_check`).Scan(&violations); err != nil || violations != 0 {
+	if err := s.rw.QueryRow(`SELECT COUNT(*) FROM pragma_foreign_key_check`).Scan(&violations); err != nil || violations != 0 {
 		t.Errorf("foreign key violations after upgrade: %d, %v", violations, err)
 	}
 	for _, c := range []string{"next_episode_season", "next_episode_number", "next_episode_name"} {
-		if !slices.Contains(columns(t, s.db, "titles"), c) {
+		if !slices.Contains(columns(t, s.rw, "titles"), c) {
 			t.Errorf("titles has no column %s", c)
 		}
 	}

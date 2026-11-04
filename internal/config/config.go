@@ -16,11 +16,23 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"ply/internal/library"
 )
+
+// RootFlag is a library folder given on the command line.
+type RootFlag struct {
+	Path string // absolute, cleaned
+	Kind string // library.KindMovies (-movies), library.KindShows (-shows), or "" (-media: not known yet)
+}
 
 // Config is the fully resolved server configuration.
 type Config struct {
-	Media        []string // absolute, cleaned, de-duplicated media roots
+	// Roots are the folders given with -media, -movies and -shows: absolute,
+	// cleaned, de-duplicated, in the order given.
+	Roots []RootFlag
+	// Media is the path of every entry of Roots, whatever its type.
+	Media        []string
 	Addr         string
 	Data         string // absolute data directory
 	Token        string
@@ -126,16 +138,46 @@ func validHWAccel(v string) bool {
 // DBPath is the SQLite database file inside the data directory.
 func (c Config) DBPath() string { return filepath.Join(c.Data, "ply.db") }
 
-type stringList []string
+// rootList collects the values of -media, -movies or -shows into one list shared
+// by the three, which keeps the order they were given in.
+type rootList struct {
+	kind string
+	into *[]RootFlag
+}
 
-func (l *stringList) String() string { return strings.Join(*l, ",") }
+func (l rootList) String() string { return "" }
 
-func (l *stringList) Set(v string) error {
+func (l rootList) Set(v string) error {
 	if v == "" {
 		return errors.New("empty path")
 	}
-	*l = append(*l, v)
+	*l.into = append(*l.into, RootFlag{Path: v, Kind: l.kind})
 	return nil
+}
+
+// resolveRoots makes the paths absolute and drops repeats. A folder named twice
+// with the same type, or once with a type and once with -media, is one folder
+// of that type; named with two types it is an error.
+func resolveRoots(given []RootFlag) ([]RootFlag, error) {
+	var out []RootFlag
+	at := map[string]int{}
+	for _, g := range given {
+		abs, err := filepath.Abs(g.Path)
+		if err != nil {
+			return nil, fmt.Errorf("media root %q: %w", g.Path, err)
+		}
+		i, seen := at[abs]
+		switch {
+		case !seen:
+			at[abs] = len(out)
+			out = append(out, RootFlag{Path: abs, Kind: g.Kind})
+		case g.Kind != "" && out[i].Kind != "" && g.Kind != out[i].Kind:
+			return nil, fmt.Errorf("%s is given as both %s and %s folder", abs, out[i].Kind, g.Kind)
+		case g.Kind != "":
+			out[i].Kind = g.Kind
+		}
+	}
+	return out, nil
 }
 
 // Parse parses args (without the program name). Usage and flag errors are
@@ -148,12 +190,14 @@ func Parse(args []string, out io.Writer) (Config, error) {
 
 	var (
 		c     Config
-		media stringList
+		given []RootFlag
 		data  string
 	)
 	fs := flag.NewFlagSet("ply", flag.ContinueOnError)
 	fs.SetOutput(out)
-	fs.Var(&media, "media", "media root directory (repeatable)")
+	fs.Var(rootList{"", &given}, "media", "media folder of either type: movies or shows is guessed from its files, and can be changed in Settings (repeatable)")
+	fs.Var(rootList{library.KindMovies, &given}, "movies", "folder of movies (repeatable); its type cannot be changed in Settings")
+	fs.Var(rootList{library.KindShows, &given}, "shows", "folder of TV shows (repeatable); its type cannot be changed in Settings")
 	fs.StringVar(&c.Addr, "addr", ":8420", "listen address (:0 picks a free port)")
 	fs.StringVar(&data, "data", "", "data directory (default: per-user application data dir)")
 	fs.StringVar(&c.Token, "token", "", "require this token for /api (Bearer header or ?token=)")
@@ -219,16 +263,11 @@ func Parse(args []string, out io.Writer) (Config, error) {
 	c.TMDBKey = strings.TrimSpace(c.TMDBKey)
 	c.TMDBKeyEnv = strings.TrimSpace(c.TMDBKeyEnv)
 
-	seen := map[string]bool{}
-	for _, m := range media {
-		abs, err := filepath.Abs(m)
-		if err != nil {
-			return Config{}, fmt.Errorf("media root %q: %w", m, err)
-		}
-		if !seen[abs] {
-			seen[abs] = true
-			c.Media = append(c.Media, abs)
-		}
+	if c.Roots, err = resolveRoots(given); err != nil {
+		return Config{}, err
+	}
+	for _, r := range c.Roots {
+		c.Media = append(c.Media, r.Path)
 	}
 
 	if c.Data, err = DataDir(data); err != nil {

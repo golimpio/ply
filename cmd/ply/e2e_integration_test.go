@@ -61,7 +61,10 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatalf("the data dir should not exist before the first start: %v", err)
 	}
 
-	p := startPly(t, base, bin, tmp, "-media", media, "-addr", "127.0.0.1:0", "-data", data,
+	// A folder has one type (docs/M7-FOLDERS.md): a mixed library is a movies folder and
+	// a shows folder, not one -media folder, which would be guessed as one of them.
+	p := startPly(t, base, bin, tmp, "-movies", filepath.Join(media, "Movies"), "-shows", filepath.Join(media, "Shows"),
+		"-addr", "127.0.0.1:0", "-data", data,
 		"-token", e2eToken, "-name", e2eName, "-scan-interval", "0", "-hwaccel", "none")
 	c := &client{t: t, base: p.waitForURL(), http: &http.Client{Timeout: 60 * time.Second}}
 	bearer := map[string]string{"Authorization": "Bearer " + e2eToken}
@@ -357,6 +360,10 @@ func startPly(t *testing.T, base, bin, tmp string, args ...string) *ply {
 	t.Helper()
 	p := &ply{t: t, log: &logSink{url: make(chan string, 1)}, exited: make(chan struct{})}
 	p.cmd = exec.Command(bin, args...)
+	// Its own process group: the cleanup below kills the groups of whatever still
+	// mentions the test's directories, and ply's must not be the runner's (a failing
+	// test would kill go test, and the shell it was started from, with it).
+	p.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	p.cmd.Env = append(os.Environ(), "TMPDIR="+tmp)
 	p.cmd.Stdout, p.cmd.Stderr = p.log, p.log
 	// A leaked grandchild holding the log pipe must not hang the test.

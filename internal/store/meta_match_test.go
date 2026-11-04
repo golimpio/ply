@@ -81,7 +81,7 @@ func TestSetItemMatchAndDueItems(t *testing.T) {
 		t.Errorf("matched item: %+v", e.Item)
 	}
 	row := func(id int64) (score float64, attempts int, next int64) {
-		s.db.QueryRow(`SELECT match_score, match_attempts, next_attempt_at FROM items WHERE id = ?`, id).Scan(&score, &attempts, &next)
+		s.rw.QueryRow(`SELECT match_score, match_attempts, next_attempt_at FROM items WHERE id = ?`, id).Scan(&score, &attempts, &next)
 		return
 	}
 	if score, attempts, next := row(later); score != 0 || attempts != 2 || next != 1000 {
@@ -132,7 +132,7 @@ func TestSetItemMatchAndDueItems(t *testing.T) {
 
 	// A title that goes away leaves its items unlinked, not deleted.
 	set(matched, Match{TitleID: titleID, State: MatchMatched})
-	if _, err := s.db.Exec(`DELETE FROM titles WHERE id = ?`, titleID); err != nil {
+	if _, err := s.rw.Exec(`DELETE FROM titles WHERE id = ?`, titleID); err != nil {
 		t.Fatal(err)
 	}
 	if e, err = s.GetEntry(ctx, matched); err != nil || e.TitleID != 0 {
@@ -260,7 +260,7 @@ func TestCountMatchesAndReviewList(t *testing.T) {
 	s.SetSeriesMatch(ctx, "Ccc", Match{State: MatchUnmatched})
 	s.SetSeriesMatch(ctx, "Ddd", Match{TitleID: other, State: MatchMatched, Score: 1})
 	// A row for a show whose episodes are gone is not counted or listed.
-	s.db.Exec(`INSERT INTO series_matches (show, match_state) VALUES ('Vanished', 'unmatched')`)
+	s.rw.Exec(`INSERT INTO series_matches (show, match_state) VALUES ('Vanished', 'unmatched')`)
 
 	c, err := s.CountMatches(ctx)
 	if err != nil {
@@ -326,7 +326,7 @@ func TestSidecarArtwork(t *testing.T) {
 	s.UpsertItem(ctx, episode("/m/Show/S01E01.mkv", "Show", 1, 1), nil)
 	changes := func() int64 {
 		var n int64
-		s.db.QueryRow(`SELECT total_changes()`).Scan(&n)
+		s.rw.QueryRow(`SELECT total_changes()`).Scan(&n)
 		return n
 	}
 

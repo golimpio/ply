@@ -13,7 +13,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"ply/internal/art"
@@ -67,12 +69,35 @@ type Options struct {
 	// always accepts (a public name behind a reverse proxy, say). An entry that
 	// starts with "." accepts every name under it.
 	AllowedHosts []string
+
+	// Library folders (M7, docs/M7-FOLDERS.md). FlagFolders are the ones given on
+	// the command line (Kind is "" for -media): they are listed as set at startup
+	// and cannot be removed here.
+	FlagFolders []library.Root
+	// SetRoots is called, after every change, with the active roots (the flag
+	// folders and the saved ones) so that the scanner and the watcher follow; nil
+	// means nobody needs telling. The API calls it with its folders lock held,
+	// because the order of the calls is the order of the changes (a removal calls
+	// it before DropRoot): it must not block. It sets the roots and schedules the
+	// scan of the new ones; it does not wait for it.
+	SetRoots func(roots []library.Root)
+	// DropRoot removes a folder's items, archiving what a person made of them
+	// unless forget is set, and returns how many it removed. It may wait for a
+	// running scan. nil means Store.ArchiveAndDeleteRoot, which is for tests: the
+	// scanner's own DropRoot is the one that is safe against a running scan.
+	DropRoot func(ctx context.Context, path string, forget bool) (int, error)
+	// LastScan says when a folder was last scanned whole, without trouble (the
+	// scanner's LastScan); the zero time means not since the server started. nil
+	// reports 0 (unknown) for every folder.
+	LastScan func(root string) time.Time
 }
 
 // Server is the HTTP handler for the whole application.
 type Server struct {
 	Options
 	handler http.Handler
+
+	foldersMu sync.Mutex // one change to the folders at a time: the checks and the write are one step
 }
 
 // New builds the server. The returned value is an http.Handler.
@@ -120,6 +145,11 @@ func New(o Options) *Server {
 	mux.HandleFunc("PUT /api/settings", s.handlePutSettings)
 	mux.HandleFunc("POST /api/scan", s.handleScanStart)
 	mux.HandleFunc("GET /api/scan", s.handleScanStatus)
+	mux.HandleFunc("GET /api/folders", s.handleFolders)
+	mux.HandleFunc("POST /api/folders", s.handleAddFolder)
+	mux.HandleFunc("PATCH /api/folders/{id}", s.handlePatchFolder)
+	mux.HandleFunc("DELETE /api/folders/{id}", s.handleDeleteFolder)
+	mux.HandleFunc("GET /api/fs", s.handleFS)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
 	})
@@ -132,14 +162,52 @@ func New(o Options) *Server {
 // ServeHTTP implements http.Handler.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.handler.ServeHTTP(w, r) }
 
-// middleware applies CORS to everything, answers only names this server is
-// known by, keeps other sites from changing anything and, when token is set,
+// middleware applies CORS to everything but the private endpoints, answers only
+// names this server is known by, keeps other sites from changing anything,
+// keeps them from touching the private endpoints at all and, when token is set,
 // requires it for /api/* except /api/info.
 //
 // No layer wraps the ResponseWriter, so http.ServeContent still sees the
 // server's own writer (io.ReaderFrom for sendfile, http.Flusher).
 func middleware(next http.Handler, token string, hosts []string) http.Handler {
-	return cors(knownHosts(sameOriginWrites(requireToken(next, token), token), hosts))
+	return cors(knownHosts(sameOriginWrites(sameSiteOnly(requireToken(next, token)), token), hosts))
+}
+
+// private reports whether the path is one of the endpoints that show or change
+// the folders ply serves: /api/folders and /api/fs, which lists the server's
+// directories. They are for the server's own pages and for native clients, never
+// for a page of another site, whatever the token.
+func private(urlPath string) bool {
+	p := path.Clean(urlPath)
+	for _, root := range []string{"/api/folders", "/api/fs"} {
+		if p == root || strings.HasPrefix(p, root+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// sameSiteOnly answers 403 to a request for a private endpoint that a browser
+// marks as coming from another site: Sec-Fetch-Site: cross-site, or an Origin
+// that is not this server's. Requests with neither header (curl, native
+// clients) and the server's own pages pass. CORS never opens these endpoints
+// (see cors), so a page of another site could not read the answer; this keeps
+// it from causing it, and from trying a token it found.
+func sameSiteOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if private(r.URL.Path) {
+			if strings.EqualFold(r.Header.Get("Sec-Fetch-Site"), "cross-site") {
+				writeError(w, http.StatusForbidden, "cross-site request refused (Sec-Fetch-Site: cross-site)")
+				return
+			}
+			if origin := r.Header.Get("Origin"); origin != "" && !sameOrigin(origin, r) {
+				writeError(w, http.StatusForbidden, fmt.Sprintf("cross-origin request refused (Origin %s does not match Host %s; "+
+					"a reverse proxy must pass the original Host header)", origin, r.Host))
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // knownHosts refuses a request whose Host is a name ply doesn't know. That
@@ -225,8 +293,16 @@ func sameOrigin(origin string, r *http.Request) bool {
 	return strings.EqualFold(origin, scheme+"://"+r.Host)
 }
 
+// cors opens the API to every origin (the media, the artwork and Cast need it),
+// except for the private endpoints: they get no Access-Control-* header on any
+// response, preflight included, so a browser never lets another site's script
+// use them.
 func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if private(r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
 		h := w.Header()
 		h.Set("Access-Control-Allow-Origin", "*")
 		h.Set("Access-Control-Allow-Headers", "Range, Authorization, Content-Type")

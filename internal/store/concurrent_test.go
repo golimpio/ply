@@ -161,7 +161,7 @@ func TestConcurrentUseKeepsEveryWriteAtomic(t *testing.T) {
 	}
 	for _, table := range []string{"streams", "progress"} {
 		var rows int
-		if err := s.db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&rows); err != nil {
+		if err := s.rw.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&rows); err != nil {
 			t.Fatal(err)
 		}
 		want := nItems * len(videoAudio)
@@ -184,7 +184,7 @@ func TestFailedMigrationLeavesNothingBehind(t *testing.T) {
 	tableExists := func(name string) bool {
 		t.Helper()
 		var n int
-		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, name).Scan(&n); err != nil {
+		if err := s.rw.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, name).Scan(&n); err != nil {
 			t.Fatalf("a failed migration left the store unusable: %v", err)
 		}
 		return n > 0
@@ -192,7 +192,7 @@ func TestFailedMigrationLeavesNothingBehind(t *testing.T) {
 	maxVersion := func() int {
 		t.Helper()
 		var v int
-		if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_version`).Scan(&v); err != nil {
+		if err := s.rw.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_version`).Scan(&v); err != nil {
 			t.Fatalf("a failed migration left the store unusable: %v", err)
 		}
 		return v

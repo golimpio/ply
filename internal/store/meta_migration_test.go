@@ -25,7 +25,7 @@ func openAtVersion(t *testing.T, n int) (*Store, string) {
 		t.Fatal(err)
 	}
 	db.SetMaxOpenConns(1)
-	s := &Store{db: db}
+	s := &Store{rw: db}
 	t.Cleanup(func() { s.Close() })
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `CREATE TABLE schema_version (version INTEGER NOT NULL)`); err != nil {
@@ -63,7 +63,7 @@ func openAtVersion(t *testing.T, n int) (*Store, string) {
 // insertOldItem inserts an item with the columns migrations 1 and 2 know.
 func insertOldItem(t *testing.T, s *Store, path, title string) int64 {
 	t.Helper()
-	res, err := s.db.Exec(`
+	res, err := s.rw.Exec(`
 		INSERT INTO items (kind, title, year, path, root, size, mtime, container, duration_sec, bitrate, added_at, updated_at)
 		VALUES ('movie', ?, 2020, ?, '/media', 100, 1700000000000000000, 'mp4', 7200.5, 5000, 10, 20)`, title, path)
 	if err != nil {
@@ -95,7 +95,7 @@ func TestMigration003KeepsExistingData(t *testing.T) {
 	ctx := context.Background()
 	old, path := openAtVersion(t, 2) // M1-M5 schema
 	movieID := insertOldItem(t, old, "/media/Old Movie (2020).mp4", "Old Movie")
-	res, err := old.db.Exec(`
+	res, err := old.rw.Exec(`
 		INSERT INTO items (kind, title, year, show, season, episode, path, root, size, mtime, added_at, updated_at)
 		VALUES ('episode', 'Pilot', 0, 'Old Show', 1, 1, '/media/Old Show/S01E01.mkv', '/media', 10, 5, 10, 20)`)
 	if err != nil {
@@ -108,12 +108,12 @@ func TestMigration003KeepsExistingData(t *testing.T) {
 		`INSERT INTO progress (item_id, position_sec, duration_sec, watched, updated_at) VALUES (` + strconv.FormatInt(movieID, 10) + `, 600, 7200, 0, 99)`,
 		`INSERT INTO keyframes (item_id, times) VALUES (` + strconv.FormatInt(movieID, 10) + `, x'0000000000000000')`,
 	} {
-		if _, err := old.db.Exec(q); err != nil {
+		if _, err := old.rw.Exec(q); err != nil {
 			t.Fatalf("%s: %v", q, err)
 		}
 	}
 	// Positive control: the old schema has none of the new columns.
-	if cols := columns(t, old.db, "items"); slices.Contains(cols, "match_state") || slices.Contains(cols, "fingerprint") {
+	if cols := columns(t, old.rw, "items"); slices.Contains(cols, "match_state") || slices.Contains(cols, "fingerprint") {
 		t.Fatalf("version 2 items columns already have the M6 ones: %v", cols)
 	}
 	if err := old.Close(); err != nil {
@@ -168,7 +168,7 @@ func TestMigration003KeepsExistingData(t *testing.T) {
 	}
 
 	var versions []int
-	rows, err := s.db.Query(`SELECT version FROM schema_version ORDER BY version`)
+	rows, err := s.rw.Query(`SELECT version FROM schema_version ORDER BY version`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,11 +178,11 @@ func TestMigration003KeepsExistingData(t *testing.T) {
 		versions = append(versions, v)
 	}
 	rows.Close()
-	if !slices.Equal(versions, []int{1, 2, 3, 4}) {
-		t.Errorf("schema_version = %v, want [1 2 3 4]", versions)
+	if !slices.Equal(versions, []int{1, 2, 3, 4, 5, 6}) {
+		t.Errorf("schema_version = %v, want [1 2 3 4 5 6]", versions)
 	}
 	var violations int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_foreign_key_check`).Scan(&violations); err != nil || violations != 0 {
+	if err := s.rw.QueryRow(`SELECT COUNT(*) FROM pragma_foreign_key_check`).Scan(&violations); err != nil || violations != 0 {
 		t.Errorf("foreign key violations after upgrade: %d, %v", violations, err)
 	}
 }
@@ -208,7 +208,7 @@ func TestMigration003Schema(t *testing.T) {
 		"collections":  {"id", "tmdb_id", "name", "overview", "poster", "backdrop"},
 		"settings":     {"key", "value"},
 	} {
-		got := columns(t, s.db, table)
+		got := columns(t, s.rw, table)
 		for _, c := range want {
 			if !slices.Contains(got, c) {
 				t.Errorf("%s has no column %s (columns: %v)", table, c, got)
@@ -222,15 +222,15 @@ func TestMigration003Schema(t *testing.T) {
 		"credits_person": "person_id", "title_genres_genre": "genre_id", "titles_collection": "collection_id",
 		"people_name": "name",
 	} {
-		cols := indexColumns(t, s.db, index)
+		cols := indexColumns(t, s.rw, index)
 		if len(cols) == 0 || cols[0] != want {
 			t.Errorf("index %s columns = %v, want it to start with %s", index, cols, want)
 		}
 	}
-	if cols := indexColumns(t, s.db, "items_match"); !slices.Equal(cols, []string{"match_state", "next_attempt_at"}) {
+	if cols := indexColumns(t, s.rw, "items_match"); !slices.Equal(cols, []string{"match_state", "next_attempt_at"}) {
 		t.Errorf("items_match = %v", cols)
 	}
-	if cols := indexColumns(t, s.db, "items_fingerprint"); !slices.Equal(cols, []string{"size", "fingerprint"}) {
+	if cols := indexColumns(t, s.rw, "items_fingerprint"); !slices.Equal(cols, []string{"size", "fingerprint"}) {
 		t.Errorf("items_fingerprint = %v", cols)
 	}
 }

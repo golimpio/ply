@@ -5,11 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"time"
+	"unicode/utf8"
 )
 
 // GetSetting returns the stored value of key; ok is false when there is none.
 func (s *Store) GetSetting(ctx context.Context, key string) (value string, ok bool, err error) {
-	err = s.db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, key).Scan(&value)
+	err = s.ro.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, key).Scan(&value)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}
@@ -18,7 +19,7 @@ func (s *Store) GetSetting(ctx context.Context, key string) (value string, ok bo
 
 // SetSetting stores value under key, replacing any earlier value.
 func (s *Store) SetSetting(ctx context.Context, key, value string) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.exec(ctx, prioHigh, `
 		INSERT INTO settings (key, value) VALUES (?, ?)
 		ON CONFLICT (key) DO UPDATE SET value = excluded.value`, key, value)
 	return err
@@ -26,8 +27,27 @@ func (s *Store) SetSetting(ctx context.Context, key, value string) error {
 
 // DeleteSetting removes key; a key that is not there is not an error.
 func (s *Store) DeleteSetting(ctx context.Context, key string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM settings WHERE key = ?`, key)
+	_, err := s.exec(ctx, prioHigh, `DELETE FROM settings WHERE key = ?`, key)
 	return err
+}
+
+// SettingsWithPrefix returns the stored settings whose key starts with prefix, by key.
+func (s *Store) SettingsWithPrefix(ctx context.Context, prefix string) (map[string]string, error) {
+	rows, err := s.ro.QueryContext(ctx, `SELECT key, value FROM settings WHERE substr(key, 1, ?) = ?`,
+		utf8.RuneCountInString(prefix), prefix) // substr counts characters
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		out[k] = v
+	}
+	return out, rows.Err()
 }
 
 // PruneResult counts what PruneMetadata removed.
@@ -39,43 +59,78 @@ type PruneResult struct {
 	Genres      int
 }
 
-// PruneMetadata removes metadata nothing refers to any more, in one
-// transaction: shows without episodes, titles no movie file or show links to,
-// then the people without credits, collections without titles and genres
-// without titles that this leaves behind.
+// PruneMetadata removes metadata nothing refers to any more: shows without
+// episodes, titles no movie file or show links to, then the people without
+// credits, collections without titles and genres without titles that this
+// leaves behind.
+//
+// One round is one transaction that takes up to writeChunk rows from each step
+// (titleChunk titles: each one takes its credits, seasons and episodes with it).
+// When a step has more, another round follows, until a round finds fewer than
+// that everywhere: a prune after a big removal is done in chunks, not in one
+// transaction. Each round leaves the database consistent (the steps run in order
+// inside it), so an error after some rounds leaves a partial prune, and the
+// result returned with the error counts what those rounds removed; calling again
+// finishes it.
 func (s *Store) PruneMetadata(ctx context.Context) (PruneResult, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return PruneResult{}, err
-	}
-	defer tx.Rollback()
-
 	var r PruneResult
-	// Order matters: each step can orphan the rows of the next.
-	for _, step := range []struct {
-		n     *int
-		query string
-	}{
-		{&r.Series, `DELETE FROM series_matches WHERE NOT EXISTS (
-			SELECT 1 FROM items WHERE kind = 'episode' AND show = series_matches.show)`},
-		{&r.Titles, `DELETE FROM titles WHERE NOT EXISTS (SELECT 1 FROM items WHERE title_id = titles.id)
-			AND NOT EXISTS (SELECT 1 FROM series_matches WHERE title_id = titles.id)`},
-		{&r.People, `DELETE FROM people WHERE NOT EXISTS (SELECT 1 FROM credits WHERE person_id = people.id)`},
-		{&r.Collections, `DELETE FROM collections WHERE NOT EXISTS (
-			SELECT 1 FROM titles WHERE collection_id = collections.id)`},
-		{&r.Genres, `DELETE FROM genres WHERE NOT EXISTS (SELECT 1 FROM title_genres WHERE genre_id = genres.id)`},
-	} {
-		res, err := tx.ExecContext(ctx, step.query)
+	for {
+		var round PruneResult // counted into r only once the round has committed
+		more := false
+		err := s.write(ctx, prioLow, func(tx *sql.Tx) error {
+			// Order matters: each step can orphan the rows of the next. The
+			// conditions are on x, the row looked at.
+			for _, step := range []struct {
+				n     *int
+				table string
+				where string
+				limit int
+			}{
+				{&round.Series, "series_matches", `NOT EXISTS (
+					SELECT 1 FROM items WHERE kind = 'episode' AND show = x.show)`, writeChunk},
+				{&round.Titles, "titles", `NOT EXISTS (SELECT 1 FROM items WHERE title_id = x.id)
+					AND NOT EXISTS (SELECT 1 FROM series_matches WHERE title_id = x.id)`, titleChunk},
+				{&round.People, "people", `NOT EXISTS (SELECT 1 FROM credits WHERE person_id = x.id)`, writeChunk},
+				{&round.Collections, "collections", `NOT EXISTS (SELECT 1 FROM titles WHERE collection_id = x.id)`, writeChunk},
+				{&round.Genres, "genres", `NOT EXISTS (SELECT 1 FROM title_genres WHERE genre_id = x.id)`, writeChunk},
+			} {
+				n, err := deleteSome(ctx, tx, step.table, step.where, step.limit)
+				if err != nil {
+					return err
+				}
+				*step.n = n
+				more = more || n == step.limit
+			}
+			return nil
+		})
 		if err != nil {
-			return PruneResult{}, err
+			return r, err
 		}
-		n, _ := res.RowsAffected()
-		*step.n = int(n)
+		r.Series += round.Series
+		r.Titles += round.Titles
+		r.People += round.People
+		r.Collections += round.Collections
+		r.Genres += round.Genres
+		if !more {
+			return r, nil
+		}
 	}
-	if err := tx.Commit(); err != nil {
-		return PruneResult{}, err
+}
+
+// titleChunk is the most titles a prune round removes: a title cascades to its
+// credits, seasons, episodes and genre links, a hundred rows or several thousand.
+const titleChunk = 50
+
+// deleteSome deletes up to limit rows of table that satisfy where (written in
+// terms of x, the table), lowest rowid first, and returns how many.
+func deleteSome(ctx context.Context, tx *sql.Tx, table, where string, limit int) (int, error) {
+	res, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE rowid IN (
+		SELECT x.rowid FROM `+table+` x WHERE `+where+` ORDER BY x.rowid LIMIT ?)`, limit)
+	if err != nil {
+		return 0, err
 	}
-	return r, nil
+	n, _ := res.RowsAffected()
+	return int(n), nil
 }
 
 // Refresh ages: how old a title's data may get before it is fetched again.
@@ -121,7 +176,7 @@ func (s *Store) dueTitles(ctx context.Context, now time.Time, limit int, byAge b
 		args = append([]any{now.Add(-RecentMovieWindow).Format("2006-01-02"),
 			now.Add(-RefreshActiveAge).Unix(), now.Add(-RefreshIdleAge).Unix()}, args...)
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.ro.QueryContext(ctx, `
 		SELECT `+prefixed("t.", titleCols)+` FROM titles t
 		WHERE t.tmdb_id IS NOT NULL AND `+libraryTitle+` AND (`+cond+`)
 		ORDER BY t.fetched_at, t.id LIMIT ?`, append(args, limit)...)
@@ -151,7 +206,7 @@ type TitleRef struct {
 // LibraryTitleRefs returns every title of the library that has a TMDB id, for
 // intersecting with a changes feed.
 func (s *Store) LibraryTitleRefs(ctx context.Context) ([]TitleRef, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.ro.QueryContext(ctx, `
 		SELECT t.id, t.kind, t.tmdb_id, t.locked FROM titles t
 		WHERE t.tmdb_id IS NOT NULL AND `+libraryTitle+` ORDER BY t.id`)
 	if err != nil {

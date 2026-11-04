@@ -315,6 +315,8 @@ export interface ReviewEntry {
   needsReview: boolean;
   score: number;
   candidate?: TitleCard;
+  /** A show's episodes the scanner flagged: their file names have no episode number. */
+  episodes?: { id: number; path: string }[];
 }
 
 export interface MetadataStatus {

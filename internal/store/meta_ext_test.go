@@ -110,7 +110,7 @@ func TestReleasePendingAndRequeueUnmatched(t *testing.T) {
 		t.Fatal(err)
 	}
 	next := func(id int64) (n int64) {
-		s.db.QueryRow(`SELECT next_attempt_at FROM items WHERE id = ?`, id).Scan(&n)
+		s.rw.QueryRow(`SELECT next_attempt_at FROM items WHERE id = ?`, id).Scan(&n)
 		return
 	}
 	if next(waiting) != 0 || next(matched) != 9999 || next(lost) != 9999 {
@@ -123,7 +123,7 @@ func TestReleasePendingAndRequeueUnmatched(t *testing.T) {
 		t.Errorf("an unmatched show was released: %+v", sm)
 	}
 	var attempts int
-	s.db.QueryRow(`SELECT match_attempts FROM items WHERE id = ?`, waiting).Scan(&attempts)
+	s.rw.QueryRow(`SELECT match_attempts FROM items WHERE id = ?`, waiting).Scan(&attempts)
 	if attempts != 3 {
 		t.Errorf("ReleasePending reset attempts to %d", attempts)
 	}
@@ -205,7 +205,7 @@ func TestEmbeddedCover(t *testing.T) {
 	}
 	noPoster := tmdbMovie(1, "With", 2000)
 	noPoster.Poster = ""
-	if _, err := s.db.Exec(`UPDATE titles SET poster = '' WHERE id = ?`, titleID); err != nil {
+	if _, err := s.rw.Exec(`UPDATE titles SET poster = '' WHERE id = ?`, titleID); err != nil {
 		t.Fatal(err)
 	}
 	cards, _ = s.TitleCards(ctx, []int64{titleID})

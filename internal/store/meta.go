@@ -187,16 +187,13 @@ func nullInt(v int64) any {
 // collection, seasons and episodes in one transaction and returns the title id.
 // Genres and credits are replaced; seasons are replaced only for the ones given.
 func (s *Store) UpsertTitle(ctx context.Context, in *TitleInput) (int64, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	var id int64
+	err := s.write(ctx, prioLow, func(tx *sql.Tx) error {
+		var err error
+		id, err = upsertTitleTx(ctx, tx, in)
+		return err
+	})
 	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-	id, err := upsertTitleTx(ctx, tx, in)
-	if err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
 	return id, nil
@@ -475,7 +472,7 @@ func setSeasons(ctx context.Context, tx *sql.Tx, titleID int64, seasons []Season
 
 // GetTitle returns the title row, or ErrNotFound.
 func (s *Store) GetTitle(ctx context.Context, id int64) (Title, error) {
-	t, err := scanTitle(s.db.QueryRowContext(ctx, `SELECT `+titleCols+` FROM titles WHERE id = ?`, id))
+	t, err := scanTitle(s.ro.QueryRowContext(ctx, `SELECT `+titleCols+` FROM titles WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Title{}, ErrNotFound
 	}
@@ -494,7 +491,7 @@ type TitlePatch struct {
 // PatchTitle applies a user edit and locks the title, so that a refresh keeps
 // the edited text. It returns ErrNotFound for an unknown id.
 func (s *Store) PatchTitle(ctx context.Context, id int64, p TitlePatch) error {
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.exec(ctx, prioHigh, `
 		UPDATE titles SET
 			title      = COALESCE(?, title),
 			sort_title = COALESCE(?, sort_title),

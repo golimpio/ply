@@ -112,9 +112,11 @@ func (v *metaView) apply(sum *ItemSummary, e store.Entry) {
 	if e.Kind == store.KindEpisode {
 		var ok bool
 		show, ok = v.series[e.Show]
-		sum.MatchState, sum.NeedsReview = store.MatchPending, false
+		// An episode is as matched as its show; it needs review when the show's match
+		// does, or when its own name has no episode number (the scanner flags it).
+		sum.MatchState, sum.NeedsReview = store.MatchPending, e.NeedsReview
 		if ok {
-			sum.MatchState, sum.NeedsReview = show.State, show.NeedsReview
+			sum.MatchState, sum.NeedsReview = show.State, show.NeedsReview || e.NeedsReview
 		}
 	}
 	b, ok := v.briefs[titleID]

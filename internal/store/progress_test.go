@@ -216,7 +216,7 @@ func TestMigrationAddsForcedColumnToExistingDatabase(t *testing.T) {
 	ctx := context.Background()
 	s, path := openAtVersion(t, 1)
 	id := insertOldItem(t, s, "/media/a.mp4", "A")
-	if _, err := s.db.Exec(`INSERT INTO subtitles_external (item_id, path, language, format) VALUES (?, '/media/a.srt', '', 'srt')`, id); err != nil {
+	if _, err := s.rw.Exec(`INSERT INTO subtitles_external (item_id, path, language, format) VALUES (?, '/media/a.srt', '', 'srt')`, id); err != nil {
 		t.Fatal(err)
 	}
 	s.Close()

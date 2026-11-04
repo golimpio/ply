@@ -13,7 +13,7 @@ import (
 func count(t *testing.T, s *Store, table string) int {
 	t.Helper()
 	var n int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
+	if err := s.rw.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
 		t.Fatalf("count %s: %v", table, err)
 	}
 	return n
@@ -342,7 +342,7 @@ func TestNFOOnlyTitles(t *testing.T) {
 		t.Errorf("nfo title: %+v", row)
 	}
 	var ids []int64
-	rows, _ := s.db.Query(`SELECT id FROM genres ORDER BY id`)
+	rows, _ := s.rw.Query(`SELECT id FROM genres ORDER BY id`)
 	for rows.Next() {
 		var gid int64
 		rows.Scan(&gid)
@@ -426,7 +426,7 @@ func TestPeopleAndGenresAreSharedAcrossTitles(t *testing.T) {
 		t.Errorf("people = %d, want Keanu, two Same Names, Pat", n)
 	}
 	var profile string
-	s.db.QueryRow(`SELECT profile FROM people WHERE tmdb_id = 6384`).Scan(&profile)
+	s.rw.QueryRow(`SELECT profile FROM people WHERE tmdb_id = 6384`).Scan(&profile)
 	if profile != "tmdb:/pr6384.jpg" {
 		t.Errorf("profile = %q; a credit without a photo must not erase it", profile)
 	}
@@ -434,7 +434,7 @@ func TestPeopleAndGenresAreSharedAcrossTitles(t *testing.T) {
 		t.Errorf("genres = %d, want 1", n)
 	}
 	var ord int
-	s.db.QueryRow(`SELECT ord FROM credits WHERE job = 'Producer'`).Scan(&ord)
+	s.rw.QueryRow(`SELECT ord FROM credits WHERE job = 'Producer'`).Scan(&ord)
 	if n := count(t, s, "credits"); n != 2+3 || ord != 3 {
 		t.Errorf("credits = %d (ord of Pat %d), want 5 with the first Pat credit kept", n, ord)
 	}
@@ -445,7 +445,7 @@ func TestPeopleAndGenresAreSharedAcrossTitles(t *testing.T) {
 		t.Fatal(err)
 	}
 	var name string
-	s.db.QueryRow(`SELECT name FROM genres WHERE id = 28`).Scan(&name)
+	s.rw.QueryRow(`SELECT name FROM genres WHERE id = 28`).Scan(&name)
 	if name != "Action & Adventure" || count(t, s, "genres") != 1 {
 		t.Errorf("genre 28 = %q (%d genres)", name, count(t, s, "genres"))
 	}
@@ -611,9 +611,9 @@ func TestListFiltersGenresCollectionsAndPeople(t *testing.T) {
 		return out
 	}
 	var collectionID, actionID, keanuID int64
-	s.db.QueryRow(`SELECT id FROM collections WHERE tmdb_id = 2344`).Scan(&collectionID)
-	s.db.QueryRow(`SELECT id FROM genres WHERE name = 'Action'`).Scan(&actionID)
-	s.db.QueryRow(`SELECT id FROM people WHERE tmdb_id = 6384`).Scan(&keanuID)
+	s.rw.QueryRow(`SELECT id FROM collections WHERE tmdb_id = 2344`).Scan(&collectionID)
+	s.rw.QueryRow(`SELECT id FROM genres WHERE name = 'Action'`).Scan(&actionID)
+	s.rw.QueryRow(`SELECT id FROM people WHERE tmdb_id = 6384`).Scan(&keanuID)
 
 	// By sort title: "The Matrix" files under M, and "Matrix Reloaded, The" before "Matrix, The".
 	if got, want := ids(TitleFilter{}), []int64{westernID, reloadedID, matrixID, prequelID}; !slices.Equal(got, want) {
@@ -686,7 +686,7 @@ func TestListFiltersGenresCollectionsAndPeople(t *testing.T) {
 		t.Errorf("credit = %+v", pc)
 	}
 	var onlyGhost int64
-	s.db.QueryRow(`SELECT id FROM people WHERE tmdb_id = 77`).Scan(&onlyGhost)
+	s.rw.QueryRow(`SELECT id FROM people WHERE tmdb_id = 77`).Scan(&onlyGhost)
 	if p, err = s.GetPerson(ctx, onlyGhost); err != nil || p.Name != "Only In Ghost" || len(p.Credits) != 0 {
 		t.Errorf("a person with no library credits = %+v, %v; want the person and no credits", p, err)
 	}
@@ -733,7 +733,7 @@ func TestSetPersonDetails(t *testing.T) {
 	ctx := context.Background()
 	addMovie(t, s, "/media/a.mkv", fullMatrix())
 	var id int64
-	s.db.QueryRow(`SELECT id FROM people WHERE tmdb_id = 6384`).Scan(&id)
+	s.rw.QueryRow(`SELECT id FROM people WHERE tmdb_id = 6384`).Scan(&id)
 
 	err := s.SetPersonDetails(ctx, id, Person{Biography: "bio", Birthday: "1964-09-02", PlaceOfBirth: "Beirut", KnownFor: "Acting", IMDbID: "nm0000206"}, 1234)
 	if err != nil {

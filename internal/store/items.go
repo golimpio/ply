@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -35,7 +36,8 @@ type Item struct {
 	AddedAt     int64 // unix seconds
 	UpdatedAt   int64
 
-	// Metadata (M6). Written by the metadata methods, never by UpsertItem.
+	// Metadata (M6). Written by the metadata methods, never by UpsertItem, except
+	// NeedsReview, which UpsertItem sets on a row it creates.
 	TitleID       int64 // movies: the matched title; 0 = none
 	MatchState    string
 	NeedsReview   bool
@@ -113,32 +115,47 @@ func scanStream(sc scanner) (probe.Stream, error) {
 
 // UpsertItem inserts the item, or updates the existing row with the same Path
 // (keeping its id and added_at), and replaces its streams. It returns the id.
+// A new row takes everything of it. An existing row takes only what the file is
+// (root, size, mtime, container, duration, bitrate, fingerprint, streams): what the
+// path says about it, and the flag NeedsReview, are kept, for SetParsed and the
+// matcher to change.
 func (s *Store) UpsertItem(ctx context.Context, it *Item, streams []probe.Stream) (int64, error) {
-	now := time.Now().Unix()
-	tx, err := s.db.BeginTx(ctx, nil)
+	var id int64
+	err := s.write(ctx, prioLow, func(tx *sql.Tx) error {
+		var err error
+		id, err = upsertItemTx(ctx, tx, it, streams, time.Now().Unix())
+		return err
+	})
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	it.ID = id
+	return id, nil
+}
 
+func upsertItemTx(ctx context.Context, tx *sql.Tx, it *Item, streams []probe.Stream, now int64) (int64, error) {
 	var id int64
-	err = tx.QueryRowContext(ctx, `
+	err := tx.QueryRowContext(ctx, `
 		INSERT INTO items (kind, title, year, show, season, episode, path, root, size, mtime,
-			container, duration_sec, bitrate, added_at, updated_at, fingerprint)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			container, duration_sec, bitrate, added_at, updated_at, fingerprint, needs_review)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (path) DO UPDATE SET
+			-- What the path says (kind, title, year, show, season, episode) is not here
+			-- either: the path of a row that exists has not changed, and what it says is
+			-- read again by SetParsed when its folder's type changes (and by MoveItem when
+			-- the file moves). A file re-encoded in place stays the item it was, whatever
+			-- type its folder is guessed to have since.
 			-- title_id, match_state, needs_review, match_*, next_attempt_at and the
 			-- local_* art are deliberately not here: a file that changed is still the
 			-- same movie, and its match, its fix and its edits survive a re-index.
-			kind = excluded.kind, title = excluded.title, year = excluded.year,
-			show = excluded.show, season = excluded.season, episode = excluded.episode,
+			-- (The insert above is the only write of needs_review.)
 			root = excluded.root, size = excluded.size, mtime = excluded.mtime,
 			container = excluded.container, duration_sec = excluded.duration_sec,
 			bitrate = excluded.bitrate, updated_at = excluded.updated_at,
 			fingerprint = excluded.fingerprint
 		RETURNING id`,
 		it.Kind, it.Title, it.Year, it.Show, it.Season, it.Episode, it.Path, it.Root, it.Size, it.MTime,
-		it.Container, it.DurationSec, it.Bitrate, now, now, it.Fingerprint).Scan(&id)
+		it.Container, it.DurationSec, it.Bitrate, now, now, it.Fingerprint, it.NeedsReview).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -161,10 +178,6 @@ func (s *Store) UpsertItem(ctx context.Context, it *Item, streams []probe.Stream
 			return 0, err
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	it.ID = id
 	return id, nil
 }
 
@@ -248,8 +261,6 @@ func listItems(ctx context.Context, q queryer, f ListFilter) ([]Entry, error) {
 		clause = " WHERE " + strings.Join(where, " AND ")
 	}
 
-	// The pool has one connection: finish reading each result set before
-	// starting the next query.
 	items, err := queryItems(ctx, q, `SELECT `+prefixed("i.", itemCols)+`
 		FROM items i`+clause+`
 		ORDER BY i.kind DESC,
@@ -288,7 +299,7 @@ func listItems(ctx context.Context, q queryer, f ListFilter) ([]Entry, error) {
 		}
 	}
 	err = rows.Err()
-	rows.Close() // before the next query: the pool has one connection
+	rows.Close()
 	if err != nil {
 		return nil, err
 	}
@@ -332,7 +343,7 @@ func prefixed(prefix, cols string) string {
 // Shows lists shows (episodes grouped by show name, ordered by name) with
 // their seasons.
 func (s *Store) Shows(ctx context.Context) ([]Show, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.ro.QueryContext(ctx, `
 		SELECT show, season, COUNT(*) FROM items WHERE kind = 'episode'
 		GROUP BY show, season ORDER BY LOWER(show), show, season`)
 	if err != nil {
@@ -359,72 +370,77 @@ func (s *Store) Shows(ctx context.Context) ([]Show, error) {
 	return shows, rows.Err()
 }
 
-// FileStates returns every item's change-detection state keyed by raw path.
-func (s *Store) FileStates(ctx context.Context) (map[string]FileState, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT path, id, root, size, mtime FROM items`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close() // idempotent: also closed explicitly below
-	states := map[string]FileState{}
-	for rows.Next() {
-		var (
-			path string
-			st   FileState
-		)
-		if err := rows.Scan(&path, &st.ID, &st.Root, &st.Size, &st.MTime); err != nil {
-			return nil, err
+// FileStates returns every item's change-detection state keyed by raw path, with
+// the sidecars of the same snapshot.
+func (s *Store) FileStates(ctx context.Context) (states map[string]FileState, err error) {
+	err = s.snapshot(ctx, func(q queryer) error {
+		rows, err := q.QueryContext(ctx, `SELECT path, id, root, size, mtime FROM items`)
+		if err != nil {
+			return err
 		}
-		states[path] = st
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	rows.Close()
-
-	subs, err := s.allExternalSubtitles(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for path, st := range states {
-		if list, ok := subs[st.ID]; ok {
-			st.Subs = list
+		defer rows.Close() // idempotent: also closed explicitly below
+		states = map[string]FileState{}
+		for rows.Next() {
+			var (
+				path string
+				st   FileState
+			)
+			if err := rows.Scan(&path, &st.ID, &st.Root, &st.Size, &st.MTime); err != nil {
+				return err
+			}
 			states[path] = st
 		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows.Close()
+
+		subs, err := allExternalSubtitles(ctx, q)
+		if err != nil {
+			return err
+		}
+		for path, st := range states {
+			if list, ok := subs[st.ID]; ok {
+				st.Subs = list
+				states[path] = st
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return states, nil
 }
 
 // DeleteItems removes the items (and, by cascade, their streams and
-// dependent rows).
+// dependent rows), writeChunk at a time, one transaction each, so that nobody
+// waits for the writer through a big delete. After an error the chunks before
+// the failing one stay deleted; calling again with the same ids finishes the job.
 func (s *Store) DeleteItems(ctx context.Context, ids []int64) error {
-	if len(ids) == 0 {
-		return nil
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	for _, id := range ids {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM items WHERE id = ?`, id); err != nil {
+	for chunk := range slices.Chunk(ids, writeChunk) {
+		err := s.write(ctx, prioLow, func(tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, `DELETE FROM items WHERE id IN (`+placeholders(len(chunk))+`)`, idArgs(chunk)...)
+			return err
+		})
+		if err != nil {
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 // SetItemRoot records which configured media root the item belongs to,
 // without touching anything else (the scanner uses it when a file is found
 // under a different root than the one it was indexed with).
 func (s *Store) SetItemRoot(ctx context.Context, id int64, root string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE items SET root = ? WHERE id = ?`, root, id)
+	_, err := s.exec(ctx, prioLow, `UPDATE items SET root = ? WHERE id = ?`, root, id)
 	return err
 }
 
 // CountItems returns the number of items in the library.
 func (s *Store) CountItems(ctx context.Context) (int, error) {
 	var n int
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM items`).Scan(&n)
+	err := s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM items`).Scan(&n)
 	return n, err
 }

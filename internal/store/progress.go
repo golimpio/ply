@@ -46,11 +46,11 @@ func IsWatched(positionSec, durationSec float64) bool {
 func (s *Store) SetProgress(ctx context.Context, itemID int64, positionSec, durationSec float64) (*Progress, error) {
 	watched := IsWatched(positionSec, durationSec)
 	if positionSec < NotStartedSec && !watched {
-		_, err := s.db.ExecContext(ctx, `DELETE FROM progress WHERE item_id = ?`, itemID)
+		_, err := s.exec(ctx, prioHigh, `DELETE FROM progress WHERE item_id = ?`, itemID)
 		return nil, err
 	}
 	p := Progress{PositionSec: positionSec, DurationSec: durationSec, Watched: watched, UpdatedAt: time.Now().UnixNano()}
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.exec(ctx, prioHigh, `
 		INSERT INTO progress (item_id, position_sec, duration_sec, watched, updated_at)
 		SELECT id, ?, ?, ?, ? FROM items WHERE id = ?
 		ON CONFLICT (item_id) DO UPDATE SET position_sec = excluded.position_sec,
@@ -89,7 +89,7 @@ func (s *Store) Continue(ctx context.Context, limit int) (entries []Entry, err e
 			rows.Close()
 			return err
 		}
-		rows.Close() // the pool has one connection: finish before the next query
+		rows.Close()
 
 		entries = make([]Entry, 0, len(ids))
 		for _, id := range ids {

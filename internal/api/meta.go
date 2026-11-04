@@ -646,6 +646,9 @@ func (s *Server) handleReview(w http.ResponseWriter, r *http.Request) {
 		if e.ItemID != 0 {
 			out[i].ItemID = ptr(e.ItemID)
 		}
+		for _, ep := range e.Episodes {
+			out[i].Episodes = append(out[i].Episodes, ReviewEpisode{ID: ep.ID, Path: ep.Path})
+		}
 		if e.Candidate != nil {
 			c := s.titleCard(*e.Candidate)
 			out[i].Candidate = &c

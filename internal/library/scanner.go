@@ -60,13 +60,19 @@ type Scanner struct {
 	ctx     context.Context // bounds background scans started by Trigger
 	store   *store.Store
 	prober  Prober
-	roots   []string
 	workers int
 	log     *slog.Logger
 	settle  time.Duration
 	now     func() time.Time
 
-	sem      chan struct{} // one pass at a time, full or partial
+	// The media roots (see SetRoots). A pass works on a copy taken when it starts.
+	rootMu   sync.Mutex // guards roots, managed, retired and lastScan
+	roots    []Root
+	managed  bool                 // SetRoots was called: untyped roots are guessed (see guessKind)
+	retired  map[string]bool      // roots taken out whose items are yet to be dropped (see removeOrphans)
+	lastScan map[string]time.Time // root -> when a scan last covered all of it
+
+	sem      chan struct{} // one pass at a time, full or partial; DropRoot and the re-parse take it too
 	full     atomic.Bool   // a full scan is running or waiting for its turn
 	wg       sync.WaitGroup
 	fpCursor int64 // fingerprint backfill: the last item id done (guarded by sem)
@@ -82,17 +88,31 @@ type Scanner struct {
 	hookMu     sync.Mutex
 	onAdded    func(ids []int64)
 	onSidecars func(ids []int64)
+	onRestore  func(itemID, tmdbID int64, kind string)
+	matchGate  func() bool // nil, or says whether archived matches can be applied now
+	gated      atomic.Bool // a report was held back because the gate was closed
+
+	// restoreArchived gives a file's archive row back (Store.RestoreArchived); tests
+	// replace it to count the calls.
+	restoreArchived func(ctx context.Context, itemID int64, path string, size int64) (tmdbID int64, kind string, ok bool, err error)
 }
 
 // NewScanner returns a scanner for roots, which must be absolute and clean.
-// ctx bounds scans started by Trigger. The settle time starts at zero (files
-// are indexed however recently they changed); the server sets DefaultSettle.
+// They have no type yet: files are read as ParseName does, until SetRoots gives
+// the folders their types. ctx bounds the scans the scanner starts itself
+// (Trigger, SetRoots). The settle time starts at zero (files are indexed however
+// recently they changed); the server sets DefaultSettle.
 func NewScanner(ctx context.Context, st *store.Store, p Prober, roots []string, log *slog.Logger) *Scanner {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Scanner{ctx: ctx, store: st, prober: p, roots: roots, workers: defaultWorkers, log: log,
-		now: time.Now, sem: make(chan struct{}, 1), devOf: deviceOf}
+	s := &Scanner{ctx: ctx, store: st, prober: p, workers: defaultWorkers, log: log,
+		now: time.Now, sem: make(chan struct{}, 1), devOf: deviceOf, restoreArchived: st.RestoreArchived,
+		retired: map[string]bool{}, lastScan: map[string]time.Time{}}
+	for _, r := range roots {
+		s.roots = append(s.roots, Root{Path: r})
+	}
+	return s
 }
 
 // SetSettle sets how long a new or changed file must go unmodified before it
@@ -102,8 +122,10 @@ func NewScanner(ctx context.Context, st *store.Store, p Prober, roots []string, 
 func (s *Scanner) SetSettle(d time.Duration) { s.settle = d }
 
 // OnAdded registers fn to be called after each scan that created items or
-// moved existing ones to a new path, with their ids. fn runs on the scanning
-// goroutine: it must return quickly and must not start a scan.
+// moved existing ones to a new path, with their ids, and after items were read
+// again because their folder got a type (SetRoots, the guess): they are pending
+// again and want matching. fn runs on the scanning goroutine: it must return
+// quickly and must not start a scan.
 func (s *Scanner) OnAdded(fn func(ids []int64)) {
 	s.hookMu.Lock()
 	s.onAdded = fn
@@ -121,6 +143,22 @@ func (s *Scanner) OnSidecarsChanged(fn func(ids []int64)) {
 	s.hookMu.Unlock()
 }
 
+// OnRestoreMatch registers fn to be called, after each scan and after items were
+// read again, for every manual match the archive of a removed folder (or of a
+// type change) keeps for an item that is in the library and has no manual match
+// yet: the item, the TMDB id the person had chosen, and the kind of that title
+// (store.KindMovie, or store.KindSeries for the item's show). The progress is
+// already back; applying the match is up to fn (the worker's MatchMovie or
+// MatchShow), and when it has, it calls Store.ForgetArchivedMatch with the item's
+// path. One that is not forgotten (no TMDB key, no network) is reported again
+// after the next scan, so a match is never lost for want of an answer. Same rules
+// as OnAdded; a show with many files is reported once per file.
+func (s *Scanner) OnRestoreMatch(fn func(itemID, tmdbID int64, kind string)) {
+	s.hookMu.Lock()
+	s.onRestore = fn
+	s.hookMu.Unlock()
+}
+
 func (s *Scanner) notify(added, sidecars []int64) {
 	s.hookMu.Lock()
 	onAdded, onSidecars := s.onAdded, s.onSidecars
@@ -130,6 +168,52 @@ func (s *Scanner) notify(added, sidecars []int64) {
 	}
 	if len(sidecars) > 0 && onSidecars != nil {
 		onSidecars(sidecars)
+	}
+}
+
+// SetMatchGate sets a function that says whether the archived matches can be
+// applied now (online lookups are on). While it says no, OnRestoreMatch hears of
+// nothing: there is nothing it could do, and the matches wait in the archive. Call
+// ReportMatchesIfDue now and then to report them once it says yes.
+func (s *Scanner) SetMatchGate(ok func() bool) {
+	s.hookMu.Lock()
+	s.matchGate = ok
+	s.hookMu.Unlock()
+}
+
+// ReportMatchesIfDue reports the archived matches that a closed gate held back, if
+// it is open now. It is cheap when nothing was held back.
+func (s *Scanner) ReportMatchesIfDue(ctx context.Context) {
+	if s.gated.Load() {
+		s.gated.Store(false)
+		s.reportMatches(ctx) // puts the flag back if the gate is still closed
+	}
+}
+
+// reportMatches tells the OnRestoreMatch hook about the archived manual matches
+// that are due (Store.PendingMatches). Run at the end of every pass and of every
+// re-reading, it is what keeps a match from being lost: restoring a file does
+// not use its match up, only applying it does.
+func (s *Scanner) reportMatches(ctx context.Context) {
+	s.hookMu.Lock()
+	fn, gate := s.onRestore, s.matchGate
+	s.hookMu.Unlock()
+	if fn == nil || ctx.Err() != nil {
+		return
+	}
+	if gate != nil && !gate() {
+		s.gated.Store(true) // ReportMatchesIfDue reports them when the gate opens
+		return
+	}
+	list, err := s.store.PendingMatches(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			s.log.Warn("listing the manual matches waiting to be applied", "err", err)
+		}
+		return
+	}
+	for _, m := range list {
+		fn(m.ItemID, m.TMDBID, m.Kind)
 	}
 }
 
@@ -202,7 +286,9 @@ func (s *Scanner) Run(ctx context.Context, interval time.Duration) {
 	}
 }
 
-// Wait blocks until scans started by Trigger have finished.
+// Wait blocks until the work the scanner started itself has finished: the scans
+// started by Trigger, and what SetRoots started (the scan of a new folder, the
+// re-reading of items).
 func (s *Scanner) Wait() { s.wg.Wait() }
 
 // Status returns the current scanner state.
@@ -238,7 +324,9 @@ func (s *Scanner) run(ctx context.Context) error {
 		err = fmt.Errorf("load library state: %w", err)
 	} else {
 		s.loadMounts(ctx)
-		p = s.newPass(states)
+		roots, retired := s.snapshot()
+		p = s.newPass(states, roots, retired)
+		p.loadArchived(ctx)
 		err = s.scanAll(ctx, p)
 		p.saveMounts(ctx)
 	}
@@ -256,7 +344,10 @@ func (s *Scanner) run(ctx context.Context) error {
 	if p != nil {
 		s.log.Info("scan complete", "indexed", p.sum.indexed.Load(), "moved", p.sum.moved,
 			"removed", p.sum.removed.Load(), "duration", end.Sub(start).Round(time.Millisecond))
-		s.notify(p.added, p.moved) // a moved item's sidecar artwork is somewhere else now
+		// A moved item's sidecar artwork is somewhere else now. Re-read items are
+		// pending again, like new ones.
+		s.notify(slices.Concat(p.added, p.reparsed), p.moved)
+		s.reportMatches(ctx)
 	}
 	return err
 }
@@ -284,7 +375,19 @@ type pass struct {
 	listing  dirNames
 	added    []int64 // created or moved
 	moved    []int64
+	reparsed []int64 // read again after a folder got its type (the guess)
 	sum      summary
+
+	archived    map[string]bool // paths whose archive row holds progress to give back
+	restoreOnly []restoreJob    // unchanged rows that have such an archive row
+	// skipped are the roots whose files the pass left alone because they were taken out
+	// (DropRoot is waiting for the pass). Their rows were not looked at: whatever became
+	// of the root since, a file of it that was not seen is not a file that is gone.
+	skipped map[string]bool
+
+	roots   []Root            // the configured roots, as of the start of the pass
+	kinds   map[string]string // root path -> its type ("" until a -media folder is guessed)
+	retired map[string]bool   // see Scanner.retired
 
 	available map[string]bool            // root -> mounted and non-empty (move pairing)
 	failed    map[string]bool            // roots that did not scan cleanly
@@ -307,8 +410,13 @@ const futureSkew = time.Minute
 // writes to a file make no directory event.
 const recheckWindow = time.Minute
 
-func (s *Scanner) newPass(states map[string]store.FileState) *pass {
-	p := &pass{s: s, states: states, owners: map[string]string{}, now: s.now(),
+func (s *Scanner) newPass(states map[string]store.FileState, roots []Root, retired map[string]bool) *pass {
+	kinds := make(map[string]string, len(roots))
+	for _, r := range roots {
+		kinds[r.Path] = r.Kind
+	}
+	p := &pass{s: s, states: states, owners: map[string]string{}, now: s.now(), roots: roots, kinds: kinds, retired: retired,
+		archived: map[string]bool{}, skipped: map[string]bool{},
 		seen: map[string]struct{}{}, seenBy: map[string]int{}, deferred: map[string]bool{},
 		settling: map[int64]bool{}, available: map[string]bool{}, failed: map[string]bool{},
 		names: map[string]map[string]bool{}, devs: map[string]uint64{}, down: map[string]bool{}}
@@ -317,22 +425,34 @@ func (s *Scanner) newPass(states map[string]store.FileState) *pass {
 	// first one to reach the file takes it, so a file is probed once and does
 	// not move between roots from scan to scan.
 	for path, st := range states {
-		if s.configured(st.Root) && within(st.Root, path) {
+		if p.configured(st.Root) && within(st.Root, path) {
 			p.owners[path] = st.Root
 		}
 	}
 	return p
 }
 
+// configured reports whether root is one of the roots this pass works on.
+func (p *pass) configured(root string) bool {
+	_, ok := p.kinds[root]
+	return ok
+}
+
+// left reports whether the pass left the files of root alone: it was taken out
+// (DropRoot is waiting), now or earlier in the pass. What the pass did not see of it
+// says nothing about the files, so it removes nothing of it and notes no scan of it.
+func (p *pass) left(root string) bool { return p.skipped[root] || p.s.rootRetired(root) }
+
 func (s *Scanner) scanAll(ctx context.Context, p *pass) error {
 	var (
 		errs   []error
 		walked []string // roots whose walk was clean: eligible for removals
 	)
-	for _, root := range s.roots {
+	for _, r := range p.roots {
 		if ctx.Err() != nil {
 			break
 		}
+		root := r.Path
 		walkErrors, err := p.walkRoot(ctx, root)
 		switch {
 		case err != nil:
@@ -349,6 +469,7 @@ func (s *Scanner) scanAll(ctx context.Context, p *pass) error {
 		errs = append(errs, p.pairMoves(ctx))
 	}
 	errs = append(errs, p.indexAll(ctx)...)
+	p.restoreExisting(ctx)
 	if err := ctx.Err(); err != nil {
 		if !errors.Is(errors.Join(errs...), err) {
 			errs = append(errs, err)
@@ -356,6 +477,9 @@ func (s *Scanner) scanAll(ctx context.Context, p *pass) error {
 		return errors.Join(errs...)
 	}
 	for _, root := range walked {
+		if p.left(root) {
+			continue // taken out meanwhile (DropRoot): the files it skipped are not gone
+		}
 		if n := p.rowsOf(root); p.seenBy[root] == 0 && n > 0 {
 			// Looks like an unmounted volume: its mountpoint is an empty directory.
 			errs = append(errs, fmt.Errorf("root %s: no video files found, but %d indexed items came from it; "+
@@ -368,18 +492,22 @@ func (s *Scanner) scanAll(ctx context.Context, p *pass) error {
 			p.failed[root] = true
 		}
 	}
-	var failed []string
-	for _, root := range s.roots {
-		if p.failed[root] {
-			failed = append(failed, root)
+	var (
+		failed  []string
+		scanned []string // roots seen whole, with nothing wrong
+	)
+	for _, r := range p.roots {
+		if p.failed[r.Path] {
+			failed = append(failed, r.Path)
+		} else if slices.Contains(walked, r.Path) && !p.left(r.Path) {
+			scanned = append(scanned, r.Path)
 		}
 	}
-	errs = append(errs, s.removeOrphans(ctx, p.states, failed, &p.sum))
+	errs = append(errs, p.removeOrphans(ctx, failed))
+	errs = append(errs, p.finishRoots(ctx, scanned)...)
 	p.backfill(ctx)
 	return errors.Join(errs...)
 }
-
-func (s *Scanner) configured(root string) bool { return slices.Contains(s.roots, root) }
 
 // within reports whether path is inside root.
 func within(root, path string) bool {
@@ -392,11 +520,17 @@ func within(root, path string) bool {
 // those whose file is positively gone: an item that can still be reached stays
 // until somebody decides otherwise. Files inside a root that failed to scan
 // are left alone too: that root may be the one about to take them over.
-func (s *Scanner) removeOrphans(ctx context.Context, states map[string]store.FileState, failed []string,
-	sum *summary) error {
+//
+// The rows of a root that was just taken out (p.retired: SetRoots or DropRoot
+// did it, and DropRoot has yet to drop its items) are never removed here: DropRoot
+// is the only thing that removes them, because it archives what a person made of
+// them first, and a scan that gets in between must not undo that with files that
+// happen to be gone (an unmounted disk, say).
+func (p *pass) removeOrphans(ctx context.Context, failed []string) error {
 	var gone []int64
-	for path, st := range states {
-		if s.configured(st.Root) || slices.ContainsFunc(failed, func(r string) bool { return within(r, path) }) {
+	for path, st := range p.states {
+		if p.configured(st.Root) || p.retired[st.Root] ||
+			slices.ContainsFunc(failed, func(r string) bool { return within(r, path) }) {
 			continue
 		}
 		if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
@@ -406,20 +540,22 @@ func (s *Scanner) removeOrphans(ctx context.Context, states map[string]store.Fil
 	if len(gone) == 0 {
 		return nil
 	}
-	if err := s.store.DeleteItems(ctx, gone); err != nil {
+	if err := p.s.store.DeleteItems(ctx, gone); err != nil {
 		return fmt.Errorf("remove items of unconfigured roots: %w", err)
 	}
-	sum.removed.Add(int64(len(gone)))
-	s.log.Info("removed missing files of roots that are no longer configured", "count", len(gone))
+	p.sum.removed.Add(int64(len(gone)))
+	p.s.log.Info("removed missing files of roots that are no longer configured", "count", len(gone))
 	return nil
 }
 
 type job struct {
 	path, root string
+	kind       string // the root's type when the pass began
 	size       int64
 	mtime      int64
 	subs       []store.ExternalSubtitle // sidecar subtitles found next to path
 	isNew      bool                     // no row has this path yet
+	archived   bool                     // the archive of a removed folder holds progress for this path
 	fp         string                   // content fingerprint, if already read
 }
 
@@ -508,6 +644,10 @@ func (p *pass) visit(ctx context.Context, path string, d fs.DirEntry, claimant f
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if r := claimant(path); r != "" && p.s.rootRetired(r) {
+		p.skipped[r] = true
+		return nil // DropRoot is waiting for this pass: do not look at the folder any more
+	}
 	info, err := os.Stat(path) // follows file symlinks
 	if err != nil {
 		switch {
@@ -567,6 +707,9 @@ func (p *pass) visit(ctx context.Context, path string, d fs.DirEntry, claimant f
 				p.states[path] = st
 			}
 		}
+		if p.archived[path] {
+			p.restoreOnly = append(p.restoreOnly, restoreJob{id: st.ID, path: path, size: info.Size()})
+		}
 		return nil
 	}
 	if p.s.settle > 0 && age > -futureSkew && age < p.s.settle {
@@ -583,7 +726,8 @@ func (p *pass) visit(ctx context.Context, path string, d fs.DirEntry, claimant f
 		// it is unchanged and not looked at again.
 		p.recheck(filepath.Dir(path), false)
 	}
-	p.work = append(p.work, job{path: path, root: root, size: info.Size(), mtime: mtime, subs: subs, isNew: !indexed})
+	p.work = append(p.work, job{path: path, root: root, kind: p.kinds[root], size: info.Size(), mtime: mtime,
+		subs: subs, isNew: !indexed, archived: p.archived[path]})
 	return nil
 }
 
@@ -1040,6 +1184,12 @@ func (p *pass) indexAll(ctx context.Context) []error {
 		go func() {
 			defer wg.Done()
 			for j := range jobs {
+				if p.s.rootRetired(j.root) {
+					mu.Lock()
+					p.skipped[j.root] = true
+					mu.Unlock()
+					continue // DropRoot is waiting for this pass: leave the folder's files alone
+				}
 				id, err := p.s.index(ctx, j)
 				mu.Lock()
 				switch {
@@ -1072,10 +1222,10 @@ feed:
 	}
 	close(jobs)
 	wg.Wait()
-	for _, root := range p.s.roots {
-		if f := failures[root]; f != nil {
-			errs = append(errs, fmt.Errorf("root %s: %d files could not be probed, first: %w", root, f.n, f.first))
-			p.failed[root] = true
+	for _, r := range p.roots {
+		if f := failures[r.Path]; f != nil {
+			errs = append(errs, fmt.Errorf("root %s: %d files could not be probed, first: %w", r.Path, f.n, f.first))
+			p.failed[r.Path] = true
 		}
 	}
 	return errs
@@ -1091,25 +1241,29 @@ func isProbeError(err error) bool {
 	return errors.As(err, &pe)
 }
 
-// itemFor is the row for j as far as its path tells: kind, names and numbers.
+// itemFor is the row for j as far as its path tells: kind, names and numbers,
+// read the way its root's type says (ParseNameIn).
 func itemFor(j job) store.Item {
-	p := ParseName(j.path)
+	p := ParseNameIn(Root{Path: j.root, Kind: j.kind}, j.path)
 	return store.Item{
-		Kind:    p.Kind,
-		Title:   p.Title,
-		Year:    p.Year,
-		Show:    p.Show,
-		Season:  p.Season,
-		Episode: p.Episode,
-		Path:    j.path,
-		Root:    j.root,
-		Size:    j.size,
-		MTime:   j.mtime,
+		Kind:        p.Kind,
+		Title:       p.Title,
+		Year:        p.Year,
+		Show:        p.Show,
+		Season:      p.Season,
+		Episode:     p.Episode,
+		NeedsReview: p.NeedsReview,
+		Path:        j.path,
+		Root:        j.root,
+		Size:        j.size,
+		MTime:       j.mtime,
 	}
 }
 
 // index probes one file and upserts it, returning its id. Files without a
-// video stream are skipped silently (id 0).
+// video stream are skipped silently (id 0). A file with a row of progress in
+// the archive of a removed folder (j.archived) gets it back at once; its manual
+// match, if it had one, waits in the archive for reportMatches.
 func (s *Scanner) index(ctx context.Context, j job) (int64, error) {
 	res, err := s.prober.Probe(ctx, j.path)
 	if err != nil {
@@ -1137,7 +1291,59 @@ func (s *Scanner) index(ctx context.Context, j job) (int64, error) {
 	if err := s.store.SetExternalSubtitles(ctx, id, j.subs); err != nil {
 		s.log.Warn("store subtitles", "path", j.path, "err", err)
 	}
+	if j.archived {
+		s.restore(ctx, id, j.path, j.size)
+	}
 	return id, nil
+}
+
+// restore gives the row id what ArchiveAndDeleteRoot kept of the file at path
+// (RestoreArchived). A failure is logged, not returned: the file is indexed, and
+// a scan must not fail for want of a progress mark. The archive row stays, so the
+// next scan tries again (restoreExisting).
+func (s *Scanner) restore(ctx context.Context, id int64, path string, size int64) {
+	_, _, ok, err := s.restoreArchived(ctx, id, path, size)
+	if err != nil {
+		s.log.Warn("restore what a removed folder kept of this file", "path", path, "err", err)
+		return
+	}
+	if ok {
+		s.log.Info("restored what a removed folder kept of this file", "path", path, "id", id)
+	}
+}
+
+// restoreJob is a row that is in the library as it should be, whose archive row
+// still has progress to give back.
+type restoreJob struct {
+	id   int64
+	path string
+	size int64
+}
+
+// loadArchived reads which paths have progress waiting in the archive: only files
+// like these are worth the write of a restore.
+func (p *pass) loadArchived(ctx context.Context) {
+	m, err := p.s.store.ArchivedProgress(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			p.s.log.Warn("listing the progress waiting in the archive", "err", err)
+		}
+		return
+	}
+	p.archived = m
+}
+
+// restoreExisting gives the progress back to rows that were in the library and
+// unchanged (the process ended between the indexing of the file and its restore).
+// A row that moved is not one of them: its archive row belongs to the old file at
+// that path, and MoveItem has dropped it.
+func (p *pass) restoreExisting(ctx context.Context) {
+	for _, j := range p.restoreOnly {
+		if ctx.Err() != nil {
+			return
+		}
+		p.s.restore(ctx, j.id, j.path, j.size)
+	}
 }
 
 func hasVideo(streams []probe.Stream) bool {

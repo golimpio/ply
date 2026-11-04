@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"slices"
 )
 
@@ -14,34 +15,40 @@ type ExternalSubtitle struct {
 }
 
 // SetExternalSubtitles replaces the item's sidecar subtitles. Unchanged lists
-// are not written, so a rescan of an untouched library does not write at all.
+// are not written, so a rescan of an untouched library does not write at all (and
+// does not wait for the writer: the first look is a read).
 func (s *Store) SetExternalSubtitles(ctx context.Context, itemID int64, subs []ExternalSubtitle) error {
-	current, err := externalSubtitles(ctx, s.db, itemID)
+	subs = slices.Clone(subs)
+	sortSubtitles(subs)
+	current, err := externalSubtitles(ctx, s.ro, itemID)
 	if err != nil {
 		return err
 	}
-	subs = slices.Clone(subs)
-	sortSubtitles(subs)
 	if slices.Equal(current, subs) {
 		return nil
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM subtitles_external WHERE item_id = ?`, itemID); err != nil {
-		return err
-	}
-	for _, sub := range subs {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO subtitles_external (item_id, path, language, format, forced)
-			SELECT id, ?, ?, ?, ? FROM items WHERE id = ?`,
-			sub.Path, sub.Language, sub.Format, sub.Forced, itemID); err != nil {
+	return s.write(ctx, prioLow, func(tx *sql.Tx) error {
+		// Looked at again where nothing can write between the look and the change.
+		current, err := externalSubtitles(ctx, tx, itemID)
+		if err != nil {
 			return err
 		}
-	}
-	return tx.Commit()
+		if slices.Equal(current, subs) {
+			return nil
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM subtitles_external WHERE item_id = ?`, itemID); err != nil {
+			return err
+		}
+		for _, sub := range subs {
+			if _, err := tx.ExecContext(ctx, `
+				INSERT INTO subtitles_external (item_id, path, language, format, forced)
+				SELECT id, ?, ?, ?, ? FROM items WHERE id = ?`,
+				sub.Path, sub.Language, sub.Format, sub.Forced, itemID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func sortSubtitles(subs []ExternalSubtitle) {
@@ -57,8 +64,8 @@ func sortSubtitles(subs []ExternalSubtitle) {
 }
 
 // allExternalSubtitles returns every item's sidecars, each list ordered by path.
-func (s *Store) allExternalSubtitles(ctx context.Context) (map[int64][]ExternalSubtitle, error) {
-	rows, err := s.db.QueryContext(ctx, `
+func allExternalSubtitles(ctx context.Context, q queryer) (map[int64][]ExternalSubtitle, error) {
+	rows, err := q.QueryContext(ctx, `
 		SELECT item_id, path, language, format, forced FROM subtitles_external ORDER BY item_id, path`)
 	if err != nil {
 		return nil, err

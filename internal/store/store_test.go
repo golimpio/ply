@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"ply/internal/probe"
 )
@@ -21,6 +22,9 @@ func openTemp(t *testing.T) (*Store, string) {
 	if err != nil {
 		t.Fatalf("Open(%q): %v", path, err)
 	}
+	// No checkpoint of its own in the middle of a test, which counts what takes the
+	// writer; the tests of the checkpointer ask for theirs.
+	s.ck.setDelays(time.Hour, time.Hour)
 	t.Cleanup(func() { s.Close() })
 	return s, path
 }
@@ -71,7 +75,7 @@ func TestMigrationsAreIdempotentAndVersioned(t *testing.T) {
 	}
 	defer s2.Close()
 	var versions int
-	if err := s2.db.QueryRow(`SELECT COUNT(*) FROM schema_version`).Scan(&versions); err != nil {
+	if err := s2.rw.QueryRow(`SELECT COUNT(*) FROM schema_version`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
 	// One row per migration file, not one more per Open.
@@ -87,7 +91,7 @@ func TestMigrationsAreIdempotentAndVersioned(t *testing.T) {
 	}
 	for _, table := range []string{"items", "streams", "subtitles_external", "progress", "keyframes"} {
 		var name string
-		err := s2.db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name)
+		err := s2.rw.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name)
 		if err != nil {
 			t.Errorf("table %s missing: %v", table, err)
 		}
@@ -97,11 +101,11 @@ func TestMigrationsAreIdempotentAndVersioned(t *testing.T) {
 func TestPragmasApplied(t *testing.T) {
 	s, _ := openTemp(t)
 	var mode string
-	if err := s.db.QueryRow(`PRAGMA journal_mode`).Scan(&mode); err != nil || mode != "wal" {
+	if err := s.rw.QueryRow(`PRAGMA journal_mode`).Scan(&mode); err != nil || mode != "wal" {
 		t.Errorf("journal_mode = %q, %v; want wal", mode, err)
 	}
 	var fk int
-	if err := s.db.QueryRow(`PRAGMA foreign_keys`).Scan(&fk); err != nil || fk != 1 {
+	if err := s.rw.QueryRow(`PRAGMA foreign_keys`).Scan(&fk); err != nil || fk != 1 {
 		t.Errorf("foreign_keys = %d, %v; want 1", fk, err)
 	}
 }
@@ -144,7 +148,7 @@ func TestUpsertSamePathUpdatesInPlace(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Pretend the row was added long ago so we can tell added_at is kept.
-	if _, err := s.db.Exec(`UPDATE items SET added_at = 1, updated_at = 1 WHERE id = ?`, id); err != nil {
+	if _, err := s.rw.Exec(`UPDATE items SET added_at = 1, updated_at = 1 WHERE id = ?`, id); err != nil {
 		t.Fatal(err)
 	}
 
@@ -166,7 +170,7 @@ func TestUpsertSamePathUpdatesInPlace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if e.Title != "New" || e.Size != 999 {
+	if e.Title != "Old" || e.Size != 999 { // what the file is changes; what its path says does not (SetParsed does that)
 		t.Errorf("item not updated: %+v", e.Item)
 	}
 	if e.AddedAt != 1 {
@@ -230,7 +234,7 @@ func TestDeleteItemsCascades(t *testing.T) {
 		`INSERT INTO keyframes (item_id, times) VALUES (?, x'00')`,
 		`INSERT INTO subtitles_external (item_id, path, format) VALUES (?, 'x.srt', 'srt')`,
 	} {
-		if _, err := s.db.Exec(q, gone); err != nil {
+		if _, err := s.rw.Exec(q, gone); err != nil {
 			t.Fatalf("%s: %v", q, err)
 		}
 	}
@@ -242,7 +246,7 @@ func TestDeleteItemsCascades(t *testing.T) {
 			col = "id"
 		}
 		var n int
-		if err := s.db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE `+col+` = ?`, id).Scan(&n); err != nil {
+		if err := s.rw.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE `+col+` = ?`, id).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		return n

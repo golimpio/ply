@@ -12,7 +12,7 @@ import (
 // file, ascending) of an item. ok is false when none are cached.
 func (s *Store) Keyframes(ctx context.Context, itemID int64) (times []float64, ok bool, err error) {
 	var blob []byte
-	err = s.db.QueryRowContext(ctx, `SELECT times FROM keyframes WHERE item_id = ?`, itemID).Scan(&blob)
+	err = s.ro.QueryRowContext(ctx, `SELECT times FROM keyframes WHERE item_id = ?`, itemID).Scan(&blob)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
 	}
@@ -36,7 +36,7 @@ func (s *Store) SetKeyframes(ctx context.Context, itemID int64, times []float64)
 	for i, t := range times {
 		binary.LittleEndian.PutUint64(blob[i*8:], math.Float64bits(t))
 	}
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.exec(ctx, prioHigh, `
 		INSERT INTO keyframes (item_id, times) SELECT id, ? FROM items WHERE id = ?
 		ON CONFLICT (item_id) DO UPDATE SET times = excluded.times`, blob, itemID)
 	if err != nil {

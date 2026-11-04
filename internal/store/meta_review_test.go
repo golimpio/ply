@@ -211,7 +211,7 @@ func TestReindexKeepsTheMatchAndTheEdits(t *testing.T) {
 	if m, _ := s.GetItemMatch(ctx, id); m.Score != 0.7 || m.Attempts != 2 || m.NextAttemptAt != 99 {
 		t.Errorf("a re-index reset the matching bookkeeping: %+v", m)
 	}
-	if e.Fingerprint != "new" || e.Size != 999 || e.Title != "A renamed by the parser" {
+	if e.Fingerprint != "new" || e.Size != 999 || e.Title != "A" { // the file's columns, not what its path says
 		t.Errorf("the file's own columns were not updated: %+v", e.Item)
 	}
 	if title, _ := s.GetTitle(ctx, titleID); title.Title != "My Title" || !title.Locked {
@@ -226,7 +226,7 @@ func TestACreditNeverTouchesAPersonsFetchedDetails(t *testing.T) {
 	first.Credits = []Credit{castCredit(6384, "Keanu Reeves", "Neo", 0)}
 	addMovie(t, s, "/m/a.mkv", first)
 	var pid int64
-	s.db.QueryRow(`SELECT id FROM people WHERE tmdb_id = 6384`).Scan(&pid)
+	s.rw.QueryRow(`SELECT id FROM people WHERE tmdb_id = 6384`).Scan(&pid)
 	if err := s.SetPersonDetails(ctx, pid, Person{Biography: "Canadian actor.", Birthday: "1964-09-02", PlaceOfBirth: "Beirut",
 		KnownFor: "Acting", IMDbID: "nm0000206"}, 12345); err != nil {
 		t.Fatal(err)
@@ -257,14 +257,14 @@ func TestACreditNeverTouchesAPersonsFetchedDetails(t *testing.T) {
 		t.Fatal(err)
 	}
 	var bob int64
-	s.db.QueryRow(`SELECT id FROM people WHERE name = 'Uncle Bob'`).Scan(&bob)
-	s.db.Exec(`UPDATE people SET biography = 'a bio', fetched_at = 7 WHERE id = ?`, bob)
+	s.rw.QueryRow(`SELECT id FROM people WHERE name = 'Uncle Bob'`).Scan(&bob)
+	s.rw.Exec(`UPDATE people SET biography = 'a bio', fetched_at = 7 WHERE id = ?`, bob)
 	nfo.ID = 0
 	if _, err := s.UpsertTitle(ctx, &TitleInput{Title: Title{Kind: KindMovie, Title: "Home 2"}, Credits: nfo.Credits}); err != nil {
 		t.Fatal(err)
 	}
 	var bio string
-	s.db.QueryRow(`SELECT biography FROM people WHERE id = ?`, bob).Scan(&bio)
+	s.rw.QueryRow(`SELECT biography FROM people WHERE id = ?`, bob).Scan(&bio)
 	if bio != "a bio" {
 		t.Errorf("an NFO person's biography = %q", bio)
 	}
@@ -281,7 +281,7 @@ func TestOnlyShowsWithEpisodesAreInTheLibrary(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A show row that points at the title, but no episode file exists.
-	if _, err := s.db.Exec(`INSERT INTO series_matches (show, title_id, match_state) VALUES ('Ghost Show', ?, 'matched')`, titleID); err != nil {
+	if _, err := s.rw.Exec(`INSERT INTO series_matches (show, title_id, match_state) VALUES ('Ghost Show', ?, 'matched')`, titleID); err != nil {
 		t.Fatal(err)
 	}
 	inLibrary := func() (bool, bool, bool, bool) {

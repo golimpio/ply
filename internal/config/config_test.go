@@ -6,9 +6,12 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"ply/internal/library"
 )
 
 func TestParseDefaults(t *testing.T) {
@@ -274,5 +277,109 @@ func TestWatchFlag(t *testing.T) {
 	c, err = Parse([]string{"-data", t.TempDir(), "-watch=false"}, &bytes.Buffer{})
 	if err != nil || c.Watch {
 		t.Errorf("-watch=false: %+v, %v", c.Watch, err)
+	}
+}
+
+func TestParseRootsKeepKindAndOrder(t *testing.T) {
+	dir := t.TempDir()
+	c, err := Parse([]string{"-data", dir,
+		"-shows", "/tv", "-media", "/mixed", "-movies", "/films", "-shows", "/tv2/"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []RootFlag{
+		{"/tv", library.KindShows}, {"/mixed", ""}, {"/films", library.KindMovies}, {"/tv2", library.KindShows},
+	}
+	if !slices.Equal(c.Roots, want) {
+		t.Errorf("Roots = %v, want %v", c.Roots, want)
+	}
+	// Media still lists every folder, for callers that do not care about types.
+	if wantMedia := []string{"/tv", "/mixed", "/films", "/tv2"}; !slices.Equal(c.Media, wantMedia) {
+		t.Errorf("Media = %v, want %v", c.Media, wantMedia)
+	}
+	// -media alone is what it always was.
+	c, err = Parse([]string{"-data", dir, "-media", "/a", "-media", "/b"}, &bytes.Buffer{})
+	if err != nil || !slices.Equal(c.Roots, []RootFlag{{"/a", ""}, {"/b", ""}}) || !slices.Equal(c.Media, []string{"/a", "/b"}) {
+		t.Errorf("-media only: %v, %v, %v", c.Roots, c.Media, err)
+	}
+}
+
+func TestParseRootsAbsoluteCleanedDeduped(t *testing.T) {
+	dir := t.TempDir()
+	wd, _ := os.Getwd()
+	c, err := Parse([]string{"-data", dir,
+		"-movies", "films", "-movies", dir + "/films2/", "-movies", "films", "-movies", dir + "/x/../films2",
+		"-shows", "tv/./a", "-shows", "tv/a"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []RootFlag{
+		{filepath.Join(wd, "films"), library.KindMovies}, {filepath.Join(dir, "films2"), library.KindMovies},
+		{filepath.Join(wd, "tv", "a"), library.KindShows},
+	}
+	if !slices.Equal(c.Roots, want) {
+		t.Errorf("Roots = %v, want %v", c.Roots, want)
+	}
+}
+
+// A folder named with a type and with -media is one folder, of that type,
+// whichever came first.
+func TestParseRootsMediaAndATypeAreOneFolder(t *testing.T) {
+	for name, args := range map[string][]string{
+		"type first":  {"-movies", "/a", "-media", "/a"},
+		"media first": {"-media", "/a", "-movies", "/a"},
+		"twice":       {"-media", "/a", "-movies", "/a", "-media", "/a", "-movies", "/a/"},
+	} {
+		c, err := Parse(append([]string{"-data", t.TempDir()}, args...), &bytes.Buffer{})
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if want := []RootFlag{{"/a", library.KindMovies}}; !slices.Equal(c.Roots, want) {
+			t.Errorf("%s: Roots = %v, want %v", name, c.Roots, want)
+		}
+	}
+}
+
+func TestParseRootsOfTwoKindsIsAnError(t *testing.T) {
+	for name, args := range map[string][]string{
+		"movies then shows":  {"-movies", "/a", "-shows", "/a"},
+		"shows then movies":  {"-shows", "/a", "-movies", "/a"},
+		"cleaned the same":   {"-shows", "/a/b/..", "-movies", "/a/"},
+		"relative":           {"-shows", "a", "-movies", "./a"},
+		"with media between": {"-shows", "/a", "-media", "/a", "-movies", "/a"},
+	} {
+		var out bytes.Buffer
+		_, err := Parse(append([]string{"-data", t.TempDir()}, args...), &out)
+		if err == nil || !strings.Contains(err.Error(), "movies") || !strings.Contains(err.Error(), "shows") {
+			t.Errorf("%s: err = %v, want one naming both types", name, err)
+		}
+	}
+	// Control: different folders are fine.
+	if _, err := Parse([]string{"-data", t.TempDir(), "-shows", "/a", "-movies", "/b"}, &bytes.Buffer{}); err != nil {
+		t.Errorf("control: %v", err)
+	}
+	for _, flag := range []string{"-movies", "-shows"} {
+		if _, err := Parse([]string{"-data", t.TempDir(), flag, ""}, &bytes.Buffer{}); err == nil {
+			t.Errorf("%s with an empty path was accepted", flag)
+		}
+	}
+}
+
+func TestParseNoRoots(t *testing.T) {
+	c, err := Parse([]string{"-data", t.TempDir()}, &bytes.Buffer{})
+	if err != nil || len(c.Roots) != 0 || len(c.Media) != 0 {
+		t.Errorf("no folders = %v, %v, %v; want none and no error (ply starts empty)", c.Roots, c.Media, err)
+	}
+}
+
+func TestUsageListsTheFolderFlags(t *testing.T) {
+	var out bytes.Buffer
+	if _, err := Parse([]string{"-h"}, &out); !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("-h = %v", err)
+	}
+	for _, f := range []string{"-media", "-movies", "-shows"} {
+		if !strings.Contains(out.String(), f) {
+			t.Errorf("usage does not list %s:\n%s", f, out.String())
+		}
 	}
 }

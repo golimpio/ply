@@ -105,6 +105,8 @@ type Watcher struct {
 	ready    bool      // scan the pending set without waiting
 	deferred map[string]deferredDir
 	wake     chan struct{}
+	want     []string      // roots asked for by SetRoots, not applied yet (nil: none)
+	rootsC   chan struct{} // SetRoots was called
 }
 
 // New returns a watcher for roots, which must be absolute and clean, as the
@@ -128,12 +130,139 @@ func New(sc Scanner, roots []string, log *slog.Logger) *Watcher {
 		pending:   map[string]library.Dir{},
 		deferred:  map[string]deferredDir{},
 		wake:      make(chan struct{}, 1),
+		rootsC:    make(chan struct{}, 1),
 	}
 	for _, p := range roots {
 		w.roots = append(w.roots, &root{path: p})
 		w.status = append(w.status, RootStatus{Root: p})
 	}
 	return w
+}
+
+// SetRoots replaces the media roots, which must be absolute and clean, as the
+// scanner has them. It is safe to call at any time, before or during Run, which
+// applies it on its own goroutine: a dropped root loses its watches and the
+// directories queued under it, a new one is watched. Scanning a new root is the
+// scanner's job, not the watcher's.
+func (w *Watcher) SetRoots(paths []string) {
+	want := []string{}
+	for _, p := range paths {
+		if !slices.Contains(want, p) {
+			want = append(want, p)
+		}
+	}
+	w.mu.Lock()
+	w.want = want
+	w.mu.Unlock()
+	select {
+	case w.rootsC <- struct{}{}:
+	default:
+	}
+}
+
+// takeRoots returns the roots SetRoots asked for since the last call, or nil.
+func (w *Watcher) takeRoots() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	r := w.want
+	w.want = nil
+	return r
+}
+
+// reroot makes paths the roots, on Run's goroutine. down, when not empty, is
+// why nothing can be watched (the backend failed or stopped): a new root gets
+// it as its status instead of watches. Before Run has a backend only the list
+// changes.
+func (w *Watcher) reroot(ctx context.Context, paths []string, down string) {
+	old := w.roots
+	kept := map[string]int{} // path -> index in old
+	for i, r := range old {
+		if slices.Contains(paths, r.path) {
+			kept[r.path] = i
+		}
+	}
+	var dropped []int
+	for i, r := range old {
+		if _, ok := kept[r.path]; !ok {
+			dropped = append(dropped, i)
+		}
+	}
+	// Nested roots share watches (a directory has one owner, the root that got
+	// there first): when a dropped root and a kept one nest, every root is
+	// watched afresh. Roots from the web UI never nest, so this is rare.
+	overlap := false
+	for _, i := range dropped {
+		for p := range kept {
+			overlap = overlap || within(old[i].path, p) || within(p, old[i].path)
+		}
+	}
+	live := w.be != nil && down == ""
+	if live && overlap {
+		for _, r := range old {
+			w.dropTree(r.path)
+		}
+	} else if w.be != nil {
+		gone := map[int]bool{}
+		for _, i := range dropped {
+			gone[i] = true
+		}
+		for d, owner := range w.dirs {
+			if gone[owner] {
+				w.be.remove(d)
+				delete(w.dirs, d)
+				delete(w.snaps, d)
+			}
+		}
+	}
+
+	roots := make([]*root, len(paths))
+	remap := map[int]int{} // old index -> new
+	var added []int
+	w.mu.Lock()
+	status := make([]RootStatus, len(paths))
+	for j, p := range paths {
+		if i, ok := kept[p]; ok {
+			roots[j], status[j], remap[i] = old[i], w.status[i], j
+		} else {
+			roots[j], status[j] = &root{path: p}, RootStatus{Root: p}
+			added = append(added, j)
+		}
+	}
+	for d, owner := range w.dirs {
+		w.dirs[d] = remap[owner]
+	}
+	w.roots, w.status = roots, status
+	// What was queued under a dropped root is out of the scanner's reach now.
+	for p := range w.pending {
+		if !w.inRoots(p) {
+			delete(w.pending, p)
+		}
+	}
+	for p := range w.deferred {
+		if !w.inRoots(p) {
+			delete(w.deferred, p)
+		}
+	}
+	w.mu.Unlock()
+
+	if len(added) > 0 || len(dropped) > 0 {
+		w.log.Info("media roots changed", "roots", len(paths), "added", len(added), "dropped", len(dropped))
+	}
+	switch {
+	case down != "":
+		for _, j := range added {
+			w.setStatus(j, false, down)
+		}
+	case w.be == nil:
+	case overlap:
+		for j := range w.roots {
+			w.setupRoot(ctx, j)
+		}
+	default:
+		for _, j := range added {
+			w.setupRoot(ctx, j)
+		}
+	}
 }
 
 // Status reports, in the order of the roots, whether each is being watched.
@@ -148,14 +277,26 @@ func (w *Watcher) Status() []RootStatus {
 // partial scans and keeps an eye on the roots themselves; no goroutine or
 // descriptor outlives it.
 func (w *Watcher) Run(ctx context.Context) {
+	if paths := w.takeRoots(); paths != nil {
+		w.reroot(ctx, paths, "") // no backend yet: only the list changes
+	}
 	be, err := w.mkBackend()
 	if err != nil {
 		w.log.Error("file watching is off; relying on periodic scans", "err", err)
+		down := "cannot watch: " + err.Error()
 		for i := range w.roots {
-			w.setStatus(i, false, "cannot watch: "+err.Error())
+			w.setStatus(i, false, down)
 		}
-		<-ctx.Done()
-		return
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-w.rootsC:
+				if paths := w.takeRoots(); paths != nil {
+					w.reroot(ctx, paths, down)
+				}
+			}
+		}
 	}
 	w.use(be)
 
@@ -176,17 +317,23 @@ func (w *Watcher) Run(ctx context.Context) {
 	tick := time.NewTicker(w.recheck)
 	defer tick.Stop()
 	events, errs, recheckC := be.events(), be.errors(), tick.C
+	down := "" // why nothing is watched any more
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-w.rootsC:
+			if paths := w.takeRoots(); paths != nil {
+				w.reroot(ctx, paths, down)
+			}
 		case ev, ok := <-events:
 			if !ok {
 				// The backend broke (it only closes its channels in close).
 				w.log.Error("file watching stopped; relying on periodic scans")
+				down = "file watcher stopped"
 				for i, r := range w.roots {
 					w.dropTree(r.path)
-					w.setStatus(i, false, "file watcher stopped")
+					w.setStatus(i, false, down)
 				}
 				events, errs, recheckC = nil, nil, nil
 				continue

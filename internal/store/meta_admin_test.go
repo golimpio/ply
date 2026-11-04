@@ -86,12 +86,12 @@ func buildPruneFixture(t *testing.T, s *Store) pruneFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`INSERT INTO series_matches (show, title_id, match_state) VALUES ('Dead Show', ?, 'matched')`, deadTitle); err != nil {
+	if _, err := s.rw.Exec(`INSERT INTO series_matches (show, title_id, match_state) VALUES ('Dead Show', ?, 'matched')`, deadTitle); err != nil {
 		t.Fatal(err)
 	}
 
 	person := func(tmdb int64) (id int64) {
-		s.db.QueryRow(`SELECT id FROM people WHERE tmdb_id = ?`, tmdb).Scan(&id)
+		s.rw.QueryRow(`SELECT id FROM people WHERE tmdb_id = ?`, tmdb).Scan(&id)
 		return
 	}
 	f.sharedPerson, f.onlyGone, f.onlyOrph = person(1), person(2), person(3)
@@ -101,7 +101,7 @@ func buildPruneFixture(t *testing.T, s *Store) pruneFixture {
 func exists(t *testing.T, s *Store, table string, id int64) bool {
 	t.Helper()
 	var n int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE id = ?`, id).Scan(&n); err != nil {
+	if err := s.rw.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE id = ?`, id).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n > 0
@@ -197,7 +197,7 @@ func TestPruneMetadataIsOneTransaction(t *testing.T) {
 	f := buildPruneFixture(t, s)
 
 	// The last step fails: the earlier ones must not stay done.
-	if _, err := s.db.Exec(`CREATE TRIGGER no_genre_prune BEFORE DELETE ON genres
+	if _, err := s.rw.Exec(`CREATE TRIGGER no_genre_prune BEFORE DELETE ON genres
 		BEGIN SELECT RAISE(ABORT, 'refused'); END`); err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +209,7 @@ func TestPruneMetadataIsOneTransaction(t *testing.T) {
 	}
 
 	// Positive control: without the trigger the same data is pruned.
-	if _, err := s.db.Exec(`DROP TRIGGER no_genre_prune`); err != nil {
+	if _, err := s.rw.Exec(`DROP TRIGGER no_genre_prune`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.PruneMetadata(ctx); err != nil {
