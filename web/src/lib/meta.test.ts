@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ItemSummary } from './api';
+import type { ItemSummary, MetadataStatus } from './api';
 import {
   airLabel,
   backdropImg,
@@ -7,6 +7,7 @@ import {
   crewWith,
   filmPasses,
   groupByTitle,
+  isMatching,
   logoSrc,
   onePerTitle,
   posterImg,
@@ -82,6 +83,7 @@ describe('pictures', () => {
     expect(titleHref({ kind: 'movie', itemId: 4, title: 'X' })).toBe('#/item/4');
     expect(titleHref({ kind: 'series', show: 'Lost', title: 'LOST' })).toBe('#/shows/Lost');
     expect(titleHref({ kind: 'series', title: 'Dark' })).toBe('#/shows/Dark');
+    expect(titleHref({ kind: 'movie', title: 'X' })).toBe('#/movies'); // no file to open: the list
   });
 
   it('lists turn to posters only when most of them have one', () => {
@@ -208,6 +210,27 @@ describe('onePerTitle', () => {
   });
 });
 
+describe('isMatching', () => {
+  const st = (over: Partial<MetadataStatus> = {}) => ({ enabled: true, keySet: true, running: false, pending: 0, ...over });
+
+  it('is on while a pass runs or titles wait, with lookups on and a key', () => {
+    expect(isMatching(st({ running: true }))).toBe(true);
+    expect(isMatching(st({ pending: 3 }))).toBe(true);
+    expect(isMatching(st())).toBe(false);
+  });
+
+  it('is off with no key, however long the queue: it never drains, and a pass only reads local files', () => {
+    expect(isMatching(st({ keySet: false, pending: 3 }))).toBe(false);
+    expect(isMatching(st({ keySet: false, running: true }))).toBe(false);
+  });
+
+  it('is off with lookups off, and before the status has arrived', () => {
+    expect(isMatching(st({ enabled: false, running: true, pending: 3 }))).toBe(false);
+    expect(isMatching(undefined)).toBe(false);
+    expect(isMatching(null)).toBe(false);
+  });
+});
+
 describe('filmPasses', () => {
   const is4k = (i: ItemSummary) => i.height >= 2000;
   const isHdr = (i: ItemSummary) => !!i.hdr;
@@ -221,6 +244,24 @@ describe('filmPasses', () => {
     expect(passes(film({ height: 1080 }), '4k')).toBe(false);
     expect(passes(film({ height: 1080 }), 'hdr')).toBe(false);
     expect(passes(film({ height: 1080 }))).toBe(true);
+  });
+
+  it('4K and HDR together need one version that is both', () => {
+    const split = film({ height: 2160 }, { height: 1080, hdr: 'hdr10' }); // 4K SDR beside 1080p HDR
+    expect(passes(split, '4k')).toBe(true);
+    expect(passes(split, 'hdr')).toBe(true);
+    expect(passes(split, '4k', 'hdr')).toBe(false);
+    expect(passes(film({ height: 1080 }, { height: 2160, hdr: 'hdr10' }), '4k', 'hdr')).toBe(true);
+    expect(passes(film({ height: 2160, hdr: 'dv' }), '4k', 'hdr')).toBe(true);
+    expect(passes(film({ height: 1080, hdr: 'hdr10' }), '4k', 'hdr')).toBe(false);
+  });
+
+  it('the filters are all asked of a film: 4K and HDR from one version, Unwatched from none', () => {
+    const watched = { positionSec: 7000, watched: true };
+    const both = film({ height: 2160, hdr: 'hdr10' }, { height: 1080, progress: watched });
+    expect(passes(both, '4k', 'hdr')).toBe(true);
+    expect(passes(both, '4k', 'hdr', 'unwatched')).toBe(false);
+    expect(passes(film({ height: 2160, hdr: 'hdr10' }), '4k', 'hdr', 'unwatched')).toBe(true);
   });
 
   it('a film with any version watched to the end is not unwatched', () => {
@@ -240,6 +281,22 @@ describe('groupByTitle', () => {
     const g = groupByTitle([a, b, c, d, e]);
     expect(g.map((x) => x.versions.map((v) => v.id))).toEqual([[2, 1], [3], [4], [5]]);
     expect(g[0].item.id).toBe(2); // the sharpest
+  });
+
+  it('between equal versions the first file is the one a card opens, and versions are listed by id', () => {
+    const later = item({ id: 5, titleId: 9, height: 1080 });
+    const earlier = item({ id: 2, titleId: 9, height: 1080 });
+    const g = groupByTitle([later, earlier])[0];
+    expect(g.item.id).toBe(5);
+    expect(g.versions.map((v) => v.id)).toEqual([2, 5]);
+  });
+
+  it('of two started versions the sharper one is the one a card opens', () => {
+    const started = { positionSec: 300, watched: false };
+    const a = item({ id: 1, titleId: 9, height: 1080, progress: started });
+    const b = item({ id: 2, titleId: 9, height: 2160, progress: started });
+    expect(groupByTitle([a, b])[0].item.id).toBe(2);
+    expect(groupByTitle([b, a])[0].item.id).toBe(2);
   });
 
   it('a version at 0 seconds is not started', () => {

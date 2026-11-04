@@ -102,6 +102,15 @@
     }
   }
 
+  // Chrome clears a type="search" box with the first Escape, and only the second reaches the
+  // dialog: take the key before the box does, so one press closes. An Escape that cancels an
+  // input-method composition (Japanese, Chinese) is the input method's.
+  function closeOnEscape(e: KeyboardEvent) {
+    if (e.key !== 'Escape' || e.isComposing) return;
+    e.preventDefault();
+    open = false;
+  }
+
   async function apply(ref: MatchRef) {
     busy = true;
     error = '';
@@ -137,7 +146,14 @@
   <form class="search" onsubmit={search}>
     <label class="q">
       <span class="sr-only">Title, or a TMDB or IMDb link</span>
-      <input bind:this={input} bind:value={query} type="search" placeholder="Title, or a TMDB or IMDb link" autocomplete="off" />
+      <input
+        bind:this={input}
+        bind:value={query}
+        type="search"
+        placeholder="Title, or a TMDB or IMDb link"
+        autocomplete="off"
+        onkeydown={closeOnEscape}
+      />
     </label>
     <label class="y">
       <span class="sr-only">Year</span>

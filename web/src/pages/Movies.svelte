@@ -24,7 +24,7 @@
 
   // One card per film: its files (4K and 1080p, say) are versions of it.
   const all = $derived(groupByTitle(library.items.filter((i) => i.kind === 'movie')));
-  // See filmPasses: 4K/HDR when any version is; watched when any version was.
+  // See filmPasses: 4K or HDR when any version is, both when one version is; watched when any version was.
   const is4k = (i: ItemSummary) => resolutionLabel(i.width, i.height) === '4K';
   const isHdr = (i: ItemSummary) => hdrLabel(i.hdr) !== '';
   const shown = $derived(

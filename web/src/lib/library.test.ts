@@ -52,6 +52,14 @@ describe('showsOf', () => {
     expect(b.latestAddedAt).toBe(50);
   });
 
+  it('counts an episode with no season as season 0, and covers it like a special', () => {
+    const loose = { ...ep('C', 1, 1), season: undefined };
+    const first = ep('C', 2, 1);
+    const c = lib.showsOf([loose, first])[0];
+    expect(c.seasons).toEqual([0, 2]);
+    expect(c.cover).toBe(first);
+  });
+
   it('uses a special as the cover when a show has nothing else', () => {
     const only = ep('Extras', 0, 3);
     expect(lib.showsOf([ep('Extras', 0, 4), only])[0].cover).toBe(only);

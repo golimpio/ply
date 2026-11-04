@@ -106,4 +106,15 @@ describe('matchGenres: limit and order', () => {
     expect(matchGenres(genres, 'action')[0].name).toBe('Action');
     expect(matchGenres(genres, 'fan')[0].name).toBe('Fantasy');
   });
+
+  it('puts a word that starts with the query before one that holds it later, whatever the given order', () => {
+    const g = (id: number, name: string) => ({ id, name, count: 1 });
+    expect(matchGenres([g(1, 'Science Fiction'), g(2, 'Fiction')], 'fic').map((x) => x.name)).toEqual(['Fiction', 'Science Fiction']);
+  });
+
+  it('keeps the given order (the biggest genre first) between equal matches', () => {
+    const g = (id: number, name: string) => ({ id, name, count: 1 });
+    expect(matchGenres([g(2, 'Dramedy'), g(1, 'Drama')], 'dram').map((x) => x.name)).toEqual(['Dramedy', 'Drama']);
+    expect(matchGenres([g(1, 'Drama'), g(2, 'Dramedy')], 'dram').map((x) => x.name)).toEqual(['Drama', 'Dramedy']);
+  });
 });

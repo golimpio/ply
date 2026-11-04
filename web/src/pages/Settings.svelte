@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api, ApiError, imageUrl, type ReviewEntry, type TitleKind } from '../lib/api';
+  import { isMatching } from '../lib/meta';
   import { href } from '../lib/router.svelte';
   import { resource } from '../lib/resource.svelte';
   import { app, rescan, scan } from '../lib/state.svelte';
@@ -18,7 +19,7 @@
     void pollTick;
     return api.metadataStatus();
   });
-  const matching = $derived(!!status.data && status.data.enabled && (status.data.running || status.data.pending > 0));
+  const matching = $derived(isMatching(status.data));
   let wasMatching = false;
   $effect(() => {
     if (!matching) {
@@ -224,7 +225,9 @@
         <p>
           {#if !m.enabled}
             Matching is off.
-          {:else if m.running || m.pending}
+          {:else if !m.keySet}
+            No TMDB key, so only local .nfo files and artwork are used.
+          {:else if matching}
             Matching {plural(m.pending, 'title')}…
           {:else}
             Everything has been looked up.
@@ -233,7 +236,8 @@
         </p>
         {#if m.lastError}<p class="error">{m.lastError}</p>{/if}
         <div class="buttons">
-          <button class="btn" onclick={refreshAll} disabled={!m.enabled}>Refresh all details</button>
+          <!-- With no key the server only re-reads the local files of unmatched titles: nothing to refresh. -->
+          <button class="btn" onclick={refreshAll} disabled={!m.enabled || !m.keySet}>Refresh all details</button>
           <button class="btn" onclick={rescan} disabled={scan.running}>{scan.running ? 'Scanning…' : 'Scan the library now'}</button>
         </div>
         {#if refreshNote}<p class="muted" role="status">{refreshNote}</p>{/if}

@@ -1,7 +1,7 @@
 // What the pages show of the M6 metadata: which picture goes where, and the
 // small labels around it. Every helper copes with the metadata being absent
 // (no TMDB key, nothing matched yet): the frame grab and the file name stand in.
-import { imageSrcset, imageUrl, mediaUrl, type CrewMember, type ItemSummary, type TitleCard, type TitleDetail } from './api';
+import { imageSrcset, imageUrl, mediaUrl, type CrewMember, type ItemSummary, type MetadataStatus, type TitleCard, type TitleDetail } from './api';
 import { href } from './router.svelte';
 import { artOf } from './ui-types';
 
@@ -219,16 +219,25 @@ export interface FilmFilter {
 }
 
 /**
- * Whether a film passes the filters: 4K and HDR when any version is; Unwatched
- * when no version was watched to the end (a film seen in 1080p that also has a
- * 4K file is a watched film).
+ * Whether a film passes the filters: 4K or HDR when any version is, both when one version is both
+ * (a 4K SDR file beside a 1080p HDR one is neither 4K HDR); Unwatched when no version was watched to
+ * the end (a film seen in 1080p that also has a 4K file is a watched film).
  */
 export function filmPasses(g: TitleGroup, f: FilmFilter): boolean {
+  const picture = [f.filters.includes('4k') ? f.is4k : null, f.filters.includes('hdr') ? f.isHdr : null].filter((p) => p !== null);
   return (
-    (!f.filters.includes('4k') || g.versions.some(f.is4k)) &&
-    (!f.filters.includes('hdr') || g.versions.some(f.isHdr)) &&
+    (!picture.length || g.versions.some((v) => picture.every((p) => p(v)))) &&
     (!f.filters.includes('unwatched') || !g.versions.some((v) => v.progress?.watched))
   );
+}
+
+/**
+ * Whether titles are being looked up on TMDB: lookups are on, there is a key to make them with, and
+ * a pass is running or titles are waiting. With no key (or lookups off) the queue never drains and
+ * `running` only means a pass over the local files, so none of it is "matching".
+ */
+export function isMatching(s: Pick<MetadataStatus, 'enabled' | 'keySet' | 'running' | 'pending'> | undefined | null): boolean {
+  return !!s && s.enabled && s.keySet && (s.running || s.pending > 0);
 }
 
 /** A short label telling versions apart: "4K HDR10, MKV", "1080p, MP4". */
