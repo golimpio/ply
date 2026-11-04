@@ -61,3 +61,19 @@ exec = ['go', 'build', '-o', 'bin/ply', './cmd/ply']
 name = 'ply-build'
 timeout = '10m0s'
 working_dir = ''
+
+[[command]]
+allow_writes = true
+deny_network = false
+exec = ['npm', 'test']
+name = 'web-test'
+timeout = '10m0s'
+working_dir = 'web'
+
+[[command]]
+allow_writes = true
+deny_network = false
+exec = ['make', 'e2e-web']
+name = 'web-e2e'
+timeout = '15m0s'
+working_dir = ''

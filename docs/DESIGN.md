@@ -6,13 +6,9 @@ Google Cast SDK) that consumes the same API — design the API so it drops in un
 
 ## Working rules (all agents)
 
-- Workspace: `/Users/gilberto/Projects/ply`. Git repo exists. **Do not commit** — the orchestrator commits.
-- **Use plumb MCP tools for everything** they cover: `session_start` first, `read_file` → `edit_file`/`write_file`
-  (pass `expected_mtime`/`expected_sha` from the read), `search_in_files`, `find_files`, `file_outline`,
-  `diagnostics`, `git` (read-only for you). Build/test via `run_task` (`language: "go"`, slots `build`, `test`, `e2e`;
-  `e2e` = `-tags=integration`) and `run_command` (`go-tidy`, `go-vet`, `go-test-race`, `go-test-integration`,
-  `web-install`, `web-build`, `web-check`, `ply-build`). Native tools only where plumb has no equivalent.
-  Any plumb friction/bug: report it with `tool_feedback` (one line, concrete) and carry on.
+- **Read `AGENTS.md` first.** Its rule 1, above every other, is to always use plumb MCP. Its other rules
+  cover the public repo, reviews, mutants and positive controls.
+- Workspace: `/Users/gilberto/Projects/ply`. Do not commit unless you are the agent that commits for this task.
 - No background processes left running. Temp fixtures in `t.TempDir()` or the scratchpad.
 - Absence assertions need a positive control (e.g. "item deleted" test first asserts it existed).
 - Keep code idiomatic, small packages, comments only where non-obvious. stdlib first.
