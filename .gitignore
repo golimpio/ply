@@ -1,8 +1,40 @@
-bin/
-web/node_modules/
-web/dist/*
-!web/dist/.gitkeep
+# Go build and test output
+/bin/
+*.test
+*.prof
+/coverage/
+/coverage.out
+
+# Web dependencies, build output, and test reports
+/web/node_modules/
+/web/dist/*
+!/web/dist/.gitkeep
+/web/coverage/
+/web/playwright-report/
+/web/test-results/
+*.tsbuildinfo
+npm-debug.log*
+
+# Local environment files (keep shareable templates)
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+
+# Local SQLite databases and journals
 *.db
 *.db-shm
 *.db-wal
-.playwright-mcp/
+*.db-journal
+
+# Local agent state and browser artifacts
+/.plumb/memories/
+/.playwright-mcp/
+
+# macOS and editor temporary files
+.DS_Store
+._*
+*.swp
+*.swo
+*~
