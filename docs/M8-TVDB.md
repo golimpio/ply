@@ -93,7 +93,20 @@ This builds on M6 (docs/M6-METADATA.md). Only what differs is written here.
 - The TVDB client is built first, in new files only (`tvdb.go`, `tvdb_types.go`, `tvdb_test.go`, testdata),
   while M7 lands. Everything else waits for M7, because both touch the store, the API and main.
 
+## Key editing (the user asked)
+Settings lets the user **edit both keys, TMDB and TVDB**, in the same way:
+- See whether a key is set and where it comes from (flag, environment, settings, built in).
+- Replace it (it is checked before it is stored).
+- Remove a stored key.
+- Test it.
+
+A key from a flag or the environment can't be edited in the UI, and the card says so. TMDB already works this way
+(M6). TVDB copies it, and adds the optional PIN.
+
+**Checked 2026-11-04:** the user's TVDB key logs in **without a PIN**. Search and episodes both
+return 200. So the PIN is optional: send it only when one is set. The key is never written to the repo, which is
+public. It goes in the settings table through the UI, or in `PLY_TVDB_KEY`.
+
 ## Needs the user
-- A TVDB **project key**, registered at thetvdb.com under API Information, for ply, on the user-supported model.
-- The user's own **subscriber PIN**.
+- ~~A TVDB project key~~: received, and it works without a PIN.
 - Until both arrive, everything is tested against a fake TVDB server (fixtures in testdata).
