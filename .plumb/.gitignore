@@ -6,3 +6,7 @@ topology.db-shm
 collab.db
 collab.db-wal
 collab.db-shm
+# plumb memory index (durable; rebuilt from memories/*.md; do not commit)
+memory.db
+memory.db-wal
+memory.db-shm
