@@ -1,0 +1,16 @@
+{
+  "status": "success",
+  "data": [
+    {
+      "series": {
+        "id": 81189,
+        "name": "Breaking Bad",
+        "slug": "breaking-bad",
+        "image": "https://artworks.thetvdb.com/banners/posters/81189-10.jpg",
+        "firstAired": "2008-01-20",
+        "year": "2008",
+        "status": {"id": 2, "name": "Ended"}
+      }
+    }
+  ]
+}

@@ -637,6 +637,11 @@ func TestBackoffSchedule(t *testing.T) {
 		{"retry-after shorter than the backoff", retry, 5, 6 * time.Hour},
 		{"wrapped", fmt.Errorf("fetching: %w", retry), 3, 3 * time.Hour},
 		{"transient without a retry-after", &Error{Transient: true, Status: 503}, 4, 2 * time.Hour},
+		// A server that asks for days is not believed: the longest backoff is the limit.
+		{"absurd retry-after", &Error{Transient: true, Status: 429, RetryAfter: 1000 * time.Hour}, 1, 6 * time.Hour},
+		{"absurd retry-after, wrapped", fmt.Errorf("x: %w", &Error{Transient: true, Status: 429, RetryAfter: time.Duration(1 << 62)}), 2, 6 * time.Hour},
+		{"retry-after at the limit", &Error{Transient: true, Status: 429, RetryAfter: 6 * time.Hour}, 1, 6 * time.Hour},
+		{"retry-after just over the backoff", &Error{Transient: true, Status: 429, RetryAfter: 5*time.Minute + time.Second}, 2, 5*time.Minute + time.Second},
 	} {
 		if got := RetryDelay(tc.err, tc.failures); got != tc.want {
 			t.Errorf("%s: RetryDelay = %v, want %v", tc.name, got, tc.want)
@@ -651,6 +656,19 @@ func TestRetryAfterParsing(t *testing.T) {
 		"-5": 2 * time.Second,
 		now.Add(9 * time.Second).Format(http.TimeFormat): 9 * time.Second,
 		now.Add(-time.Minute).Format(http.TimeFormat):    0,
+		// Nothing is believed past an hour, and the numbers that used to overflow a
+		// Duration (9223372037 seconds is more than int64 nanoseconds) are cut before
+		// they are multiplied.
+		"3600": time.Hour, "3601": time.Hour, "86400": time.Hour, "9000000000": time.Hour,
+		"9223372036": time.Hour, "9223372037": time.Hour, "99999999999": time.Hour,
+		"9223372036854775807": time.Hour, "9223372036854775808": time.Hour, "99999999999999999999999": time.Hour,
+		"+5":                   5 * time.Second,
+		"-9223372036854775808": 2 * time.Second, "-99999999999999999999999": 2 * time.Second, "1e3": 2 * time.Second, "0x10": 2 * time.Second,
+		now.Add(30 * time.Minute).Format(http.TimeFormat):        30 * time.Minute,
+		now.Add(time.Hour).Format(http.TimeFormat):               time.Hour,
+		now.Add(time.Hour + time.Second).Format(http.TimeFormat): time.Hour,
+		now.Add(24 * time.Hour).Format(http.TimeFormat):          time.Hour,
+		"Fri, 31 Dec 9999 23:59:59 GMT":                          time.Hour,
 	} {
 		if got := retryAfter(in, now); got != want {
 			t.Errorf("retryAfter(%q) = %v, want %v", in, got, want)

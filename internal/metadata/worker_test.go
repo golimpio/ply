@@ -366,6 +366,80 @@ func TestWorkerHonoursRetryAfterOverTheBackoff(t *testing.T) {
 	}
 }
 
+// A show that TVDB answers 403 for (it is for subscribers only) is a final
+// failure of that show alone, not a refused key: it is put off with the usual
+// backoff, the pass goes on, and the shows after it are matched. A 403 that does
+// refuse the key or PIN ends the pass, as a refused TMDB key does.
+func TestWorkerCarriesOnPastARecordTVDBForbids(t *testing.T) {
+	// "A Forbidden Show" is the first the worker takes (fresh shows go by name), so
+	// a pass that ended on it would leave the other two untouched.
+	setup := func(forbid error) *wenv {
+		e := newWEnv(t)
+		e.withBreakingBad()
+		wire := breakingBad()
+		wire.TMDBID, wire.Title.Title = 1438, "The Wire"
+		e.fake.SeriesSearch["the wire"] = []metadata.Candidate{{TMDBID: 1438, Title: "The Wire", OriginalTitle: "The Wire", Year: 2002, Popularity: 100}}
+		e.fake.Shows[1438] = wire
+		e.fake.Hook = func(_ context.Context, call string) error {
+			if strings.Contains(call, "Forbidden Show") {
+				return forbid
+			}
+			return nil
+		}
+		e.addEpisode("A Forbidden Show", 1, 1)
+		e.addEpisode("Breaking Bad", 1, 1)
+		e.addEpisode("The Wire", 1, 1)
+		return e
+	}
+
+	record := &metadata.TVDBError{Op: "GET /search", Status: 403, Message: "series is for subscribers"}
+	if metadata.IsUnauthorized(record) || metadata.IsTransient(record) || metadata.IsNotFound(record) {
+		t.Errorf("a 403 about a record: IsUnauthorized %v IsTransient %v IsNotFound %v; it must be a final failure that is none of them",
+			metadata.IsUnauthorized(record), metadata.IsTransient(record), metadata.IsNotFound(record))
+	}
+	e := setup(record)
+	start := e.clock.Now()
+	e.once()
+	for show, tmdb := range map[string]int64{"Breaking Bad": 1396, "The Wire": 1438} {
+		if sm := e.series(show); sm.State != store.MatchMatched || sm.TitleID == 0 || e.title(sm.TitleID).TMDBID != tmdb {
+			t.Errorf("%s after a forbidden show: %+v; the pass should have gone on", show, sm)
+		}
+	}
+	sm := e.series("A Forbidden Show")
+	if sm.State != store.MatchPending || sm.TitleID != 0 || sm.Attempts != 1 || sm.NextAttemptAt != start.Add(time.Minute).Unix() {
+		t.Errorf("the forbidden show: %+v; want it pending, put off by the first backoff (1m) and not unmatched", sm.Match)
+	}
+	if n := e.fake.Count(`SearchSeries("A Forbidden Show"`); n != 1 {
+		t.Errorf("%d searches for the forbidden show in one pass, want 1", n)
+	}
+
+	// Its next turn comes after the delay, and the delay grows as for any failure.
+	e.clock.Advance(time.Minute + time.Second)
+	again := e.clock.Now()
+	e.once()
+	if sm := e.series("A Forbidden Show"); sm.State != store.MatchPending || sm.Attempts != 2 || sm.NextAttemptAt != again.Add(5*time.Minute).Unix() {
+		t.Errorf("the forbidden show on its second turn: %+v; want 2 attempts and 5m (the second backoff)", sm.Match)
+	}
+	if n := e.fake.Count(`SearchSeries("A Forbidden Show"`); n != 2 {
+		t.Errorf("%d searches for the forbidden show after two passes, want 2", n)
+	}
+
+	// Control: the 403 that says the key or PIN was rejected ends the pass at the
+	// first show and leaves the rest alone.
+	refused := &metadata.TVDBError{Op: "POST /login", Status: 403, Message: "TVDB rejected the key or PIN"}
+	if !metadata.IsUnauthorized(refused) {
+		t.Fatal("a 403 refusing the key is not unauthorized")
+	}
+	r := setup(refused)
+	r.once()
+	if n := r.fake.Count("SearchSeries"); n != 1 {
+		t.Errorf("%d searches after a refused key, want 1: the pass ends on it", n)
+	}
+	if st := r.w.Status(r.ctx); !strings.Contains(st.LastError, "TVDB rejected the key or PIN") {
+		t.Errorf("status last error = %q", st.LastError)
+	}
+}
+
 func TestWorkerStopsWhenTheKeyIsRefused(t *testing.T) {
 	e := newWEnv(t)
 	e.withMatrix()

@@ -1,0 +1,187 @@
+{
+  "status": "success",
+  "data": {
+    "series": {
+      "id": 71663,
+      "name": "The Simpsons",
+      "slug": "the-simpsons",
+      "image": "https://artworks.thetvdb.com/banners/posters/71663-15.jpg",
+      "nameTranslations": [
+        "eng",
+        "ces",
+        "spa",
+        "hun",
+        "deu",
+        "fra",
+        "pol",
+        "nld",
+        "ita",
+        "pt",
+        "por",
+        "swe",
+        "fin",
+        "kor",
+        "lav",
+        "tur",
+        "hrv",
+        "zhtw",
+        "ara",
+        "slk",
+        "bul",
+        "ukr",
+        "srp",
+        "dan",
+        "jpn",
+        "fas",
+        "rus",
+        "heb"
+      ],
+      "overviewTranslations": [
+        "eng",
+        "ces",
+        "spa",
+        "hun",
+        "deu",
+        "fra",
+        "pol",
+        "nld",
+        "ita",
+        "pt",
+        "por",
+        "swe",
+        "fin",
+        "kor",
+        "tur",
+        "hrv",
+        "zhtw",
+        "ara",
+        "ukr",
+        "srp",
+        "dan",
+        "rus",
+        "heb"
+      ],
+      "aliases": [
+        {
+          "language": "kor",
+          "name": "심슨"
+        },
+        {
+          "language": "ara",
+          "name": "ذا سيمبسونز"
+        }
+      ],
+      "firstAired": "1989-12-17",
+      "lastAired": "2027-01-03",
+      "nextAired": "2026-11-08",
+      "score": 4941708,
+      "status": {
+        "id": 1,
+        "name": "Continuing",
+        "recordType": "series",
+        "keepUpdated": true
+      },
+      "originalCountry": "usa",
+      "originalLanguage": "eng",
+      "defaultSeasonType": 1,
+      "isOrderRandomized": false,
+      "lastUpdated": "2026-11-04 07:46:11",
+      "averageRuntime": 24,
+      "episodes": null,
+      "overview": "Set in Springfield, the average American town, the show focuses on the antics and everyday adventures of the Simpson family; Homer, Marge, Bart, Lisa and Maggie, as well as a virtual cast of thousands. Since the beginning, the series has been a pop culture icon, attracting hundreds of celebrities to guest star. The show has also made name for itself in its fearless satirical take on politics, media and American life in general.",
+      "year": "1989"
+    },
+    "episodes": [
+      {
+        "id": 4350173,
+        "seriesId": 71663,
+        "name": "Good Night",
+        "aired": "1987-04-19",
+        "runtime": 2,
+        "nameTranslations": [
+          "eng",
+          "fra",
+          "spa"
+        ],
+        "overview": "Good Night was the first ever Simpsons short to air on The Tracey Ullman Show. The five main family members - Homer, Marge, Bart, Lisa, and Maggie - were first introduced in this short. Homer and Marge attempt to calm their children to sleep, with the opposite results. \r\n\r\nMaggie can be heard saying \"good night.\" She rarely talks throughout the run of the series.",
+        "overviewTranslations": [
+          "eng",
+          "spa"
+        ],
+        "image": "https://artworks.thetvdb.com/banners/episodes/71663/4350173.jpg",
+        "imageType": 12,
+        "isMovie": 0,
+        "seasons": null,
+        "number": 1,
+        "absoluteNumber": 0,
+        "seasonNumber": 0,
+        "lastUpdated": "2026-06-18 10:09:56",
+        "finaleType": null,
+        "airsBeforeSeason": 1,
+        "airsBeforeEpisode": 1,
+        "year": "1987"
+      },
+      {
+        "id": 4350174,
+        "seriesId": 71663,
+        "name": "Watching TV",
+        "aired": "1987-05-03",
+        "runtime": 1,
+        "nameTranslations": [
+          "eng",
+          "fra"
+        ],
+        "overview": "Bart and Lisa quarrel during commercial breaks over what channel they'll watch. Repeatedly Maggie comes up to the television and changes the channel. Later Homer is saying some speech about family matters then stops when the show comes back on.\r\n\r\nA piece of music from the Tracey Ullman show plays at one part or another during the short.",
+        "overviewTranslations": [
+          "eng"
+        ],
+        "image": "https://artworks.thetvdb.com/banners/episodes/71663/4350174.jpg",
+        "imageType": 12,
+        "isMovie": 0,
+        "seasons": null,
+        "number": 2,
+        "absoluteNumber": 0,
+        "seasonNumber": 0,
+        "lastUpdated": "2026-06-18 10:09:50",
+        "finaleType": null,
+        "airsBeforeSeason": 1,
+        "airsBeforeEpisode": 1,
+        "year": "1987"
+      },
+      {
+        "id": 4350175,
+        "seriesId": 71663,
+        "name": "Jumping Bart",
+        "aired": "1987-05-10",
+        "runtime": 1,
+        "nameTranslations": [
+          "eng",
+          "fra"
+        ],
+        "overview": "Homer makes several attempts to have Bart jump into his arms. Each time Bart jumps Homer is distracted and fails to catch him. \r\n\r\nTowards the end of the episode boxing gloves are delivered, presumably the ones used in the episode Punching Bag.",
+        "overviewTranslations": [
+          "eng"
+        ],
+        "image": "https://artworks.thetvdb.com/banners/episodes/71663/4350175.jpg",
+        "imageType": 12,
+        "isMovie": 0,
+        "seasons": null,
+        "number": 3,
+        "absoluteNumber": 0,
+        "seasonNumber": 0,
+        "lastUpdated": "2026-06-18 10:09:44",
+        "finaleType": null,
+        "airsBeforeSeason": 1,
+        "airsBeforeEpisode": 1,
+        "year": "1987"
+      }
+    ]
+  },
+  "links": {
+    "prev": null,
+    "self": "https://api4.thetvdb.com/v4/series/71663/episodes/default?page=0",
+    "next": "https://api4.thetvdb.com/v4/series/71663/episodes/default?page=1",
+    "total_items": 890,
+    "page_size": 500
+  }
+}

@@ -1,0 +1,621 @@
+{
+  "status": "success",
+  "data": {
+    "id": 81189,
+    "name": "Breaking Bad",
+    "slug": "breaking-bad",
+    "image": "https://artworks.thetvdb.com/banners/posters/81189-10.jpg",
+    "nameTranslations": [
+      "ces",
+      "dan",
+      "deu",
+      "ell",
+      "eng",
+      "fin",
+      "fra",
+      "heb",
+      "hun",
+      "ita",
+      "kor",
+      "nld",
+      "pol",
+      "por",
+      "rus",
+      "spa",
+      "swe",
+      "tur",
+      "zho",
+      "est",
+      "pt",
+      "hrv",
+      "lit",
+      "ara",
+      "srp",
+      "ukr",
+      "ron"
+    ],
+    "overviewTranslations": [
+      "ces",
+      "dan",
+      "deu",
+      "ell",
+      "eng",
+      "fin",
+      "fra",
+      "heb",
+      "hun",
+      "ita",
+      "nld",
+      "pol",
+      "por",
+      "rus",
+      "spa",
+      "swe",
+      "tur",
+      "zho",
+      "pt",
+      "hrv",
+      "lit",
+      "ara",
+      "srp",
+      "ukr",
+      "ron"
+    ],
+    "aliases": [
+      {
+        "language": "zho",
+        "name": "絕命毒師"
+      },
+      {
+        "language": "eng",
+        "name": "Breaking Bad: Original Minisodes"
+      }
+    ],
+    "firstAired": "2008-01-20",
+    "lastAired": "2013-09-29",
+    "nextAired": "",
+    "score": 3776757,
+    "status": {
+      "id": 2,
+      "name": "Ended",
+      "recordType": "series",
+      "keepUpdated": false
+    },
+    "originalCountry": "usa",
+    "originalLanguage": "eng",
+    "defaultSeasonType": 1,
+    "isOrderRandomized": false,
+    "lastUpdated": "2026-10-31 15:54:50",
+    "averageRuntime": 48,
+    "episodes": null,
+    "overview": "When Walter White, a chemistry teacher, is diagnosed with Stage III cancer and given a prognosis of two years left to live, he chooses to enter a dangerous world of drugs and crime with the intent to secure his family's financial security.",
+    "year": "2008",
+    "artworks": [
+      {
+        "id": 913598,
+        "image": "https://artworks.thetvdb.com/banners/posters/81189-10.jpg",
+        "thumbnail": "https://artworks.thetvdb.com/banners/posters/81189-10_t.jpg",
+        "language": "eng",
+        "type": 2,
+        "score": 100142,
+        "width": 680,
+        "height": 1000,
+        "includesText": true,
+        "thumbnailWidth": 0,
+        "thumbnailHeight": 0,
+        "updatedAt": 0,
+        "status": {
+          "id": 0,
+          "name": null
+        },
+        "tagOptions": null
+      },
+      {
+        "id": 406321,
+        "image": "https://artworks.thetvdb.com/banners/fanart/original/81189-21.jpg",
+        "thumbnail": "https://artworks.thetvdb.com/banners/fanart/original/81189-21_t.jpg",
+        "language": null,
+        "type": 3,
+        "score": 100044,
+        "width": 1920,
+        "height": 1080,
+        "includesText": false,
+        "thumbnailWidth": 0,
+        "thumbnailHeight": 0,
+        "updatedAt": 0,
+        "status": {
+          "id": 0,
+          "name": null
+        },
+        "tagOptions": null
+      },
+      {
+        "id": 964434,
+        "image": "https://artworks.thetvdb.com/banners/graphical/81189-g26.jpg",
+        "thumbnail": "https://artworks.thetvdb.com/banners/graphical/81189-g26_t.jpg",
+        "language": "por",
+        "type": 1,
+        "score": 4,
+        "width": 758,
+        "height": 140,
+        "includesText": true,
+        "thumbnailWidth": 0,
+        "thumbnailHeight": 0,
+        "updatedAt": 0,
+        "status": {
+          "id": 0,
+          "name": null
+        },
+        "tagOptions": null
+      },
+      {
+        "id": 919663,
+        "image": "https://artworks.thetvdb.com/banners/graphical/81189-g21.jpg",
+        "thumbnail": "https://artworks.thetvdb.com/banners/graphical/81189-g21_t.jpg",
+        "language": "eng",
+        "type": 1,
+        "score": 100022,
+        "width": 758,
+        "height": 140,
+        "includesText": true,
+        "thumbnailWidth": 0,
+        "thumbnailHeight": 0,
+        "updatedAt": 0,
+        "status": {
+          "id": 0,
+          "name": null
+        },
+        "tagOptions": null
+      }
+    ],
+    "companies": [
+      {
+        "id": 389,
+        "name": "AMC",
+        "slug": "amc",
+        "nameTranslations": [
+          "eng"
+        ],
+        "overviewTranslations": [],
+        "aliases": [],
+        "country": "usa",
+        "primaryCompanyType": 1,
+        "activeDate": null,
+        "inactiveDate": null,
+        "companyType": {
+          "companyTypeId": 1,
+          "companyTypeName": "Network"
+        },
+        "parentCompany": {
+          "id": null,
+          "name": null,
+          "relation": {
+            "id": null,
+            "typeName": null
+          }
+        },
+        "tagOptions": null
+      }
+    ],
+    "originalNetwork": {
+      "id": 389,
+      "name": "AMC",
+      "slug": "amc",
+      "nameTranslations": [
+        "eng"
+      ],
+      "overviewTranslations": [],
+      "aliases": [],
+      "country": "usa",
+      "primaryCompanyType": 1,
+      "activeDate": null,
+      "inactiveDate": null,
+      "companyType": {
+        "companyTypeId": 1,
+        "companyTypeName": "Network"
+      },
+      "parentCompany": {
+        "id": null,
+        "name": null,
+        "relation": {
+          "id": null,
+          "typeName": null
+        }
+      },
+      "tagOptions": [
+        {
+          "id": 494,
+          "tag": 24,
+          "tagName": "Company Type",
+          "name": "Premium Cable",
+          "helpText": "Subscription based premium networks. Examples: HBO, Starz, Showtime"
+        }
+      ]
+    },
+    "latestNetwork": {
+      "id": 389,
+      "name": "AMC",
+      "slug": "amc",
+      "nameTranslations": [
+        "eng"
+      ],
+      "overviewTranslations": [],
+      "aliases": [],
+      "country": "usa",
+      "primaryCompanyType": 1,
+      "activeDate": null,
+      "inactiveDate": null,
+      "companyType": {
+        "companyTypeId": 1,
+        "companyTypeName": "Network"
+      },
+      "parentCompany": {
+        "id": null,
+        "name": null,
+        "relation": {
+          "id": null,
+          "typeName": null
+        }
+      },
+      "tagOptions": [
+        {
+          "id": 494,
+          "tag": 24,
+          "tagName": "Company Type",
+          "name": "Premium Cable",
+          "helpText": "Subscription based premium networks. Examples: HBO, Starz, Showtime"
+        }
+      ]
+    },
+    "genres": [
+      {
+        "id": 12,
+        "name": "Drama",
+        "slug": "drama"
+      },
+      {
+        "id": 14,
+        "name": "Crime",
+        "slug": "crime"
+      },
+      {
+        "id": 24,
+        "name": "Thriller",
+        "slug": "thriller"
+      },
+      {
+        "id": 26,
+        "name": "Western",
+        "slug": "western"
+      }
+    ],
+    "trailers": [],
+    "lists": [],
+    "remoteIds": [
+      {
+        "id": "tt0903747",
+        "type": 2,
+        "sourceName": "IMDB"
+      },
+      {
+        "id": "https://www.amc.com/shows/breaking-bad",
+        "type": 4,
+        "sourceName": "Official Website"
+      },
+      {
+        "id": "1396",
+        "type": 12,
+        "sourceName": "TheMovieDB.com"
+      },
+      {
+        "id": "EP01009396",
+        "type": 3,
+        "sourceName": "TMS (Zap2It)"
+      }
+    ],
+    "characters": [
+      {
+        "id": 64178859,
+        "name": "Skyler White",
+        "peopleId": 269404,
+        "seriesId": 81189,
+        "series": null,
+        "movie": null,
+        "movieId": null,
+        "episodeId": null,
+        "type": 3,
+        "image": "https://artworks.thetvdb.com/banners/actors/75476.jpg",
+        "sort": 2,
+        "isFeatured": true,
+        "url": "https://thetvdb.com/people/269404-anna-gunn",
+        "nameTranslations": null,
+        "overviewTranslations": null,
+        "aliases": null,
+        "peopleType": "Actor",
+        "personName": "Anna Gunn",
+        "tagOptions": null,
+        "personImgURL": "https://artworks.thetvdb.com/banners/v4/actor/269404/photo/61138b8f549b0.jpg"
+      },
+      {
+        "id": 64178863,
+        "name": "Jesse Pinkman",
+        "peopleId": 275750,
+        "seriesId": 81189,
+        "series": null,
+        "movie": null,
+        "movieId": null,
+        "episodeId": null,
+        "type": 3,
+        "image": "https://artworks.thetvdb.com/banners/actors/75477.jpg",
+        "sort": 3,
+        "isFeatured": true,
+        "url": "https://thetvdb.com/people/275750-aaron-paul",
+        "nameTranslations": null,
+        "overviewTranslations": null,
+        "aliases": null,
+        "peopleType": "Actor",
+        "personName": "Aaron Paul",
+        "tagOptions": null,
+        "personImgURL": "https://artworks.thetvdb.com/banners/person/275750/primary.jpg"
+      },
+      {
+        "id": 64178867,
+        "name": "Hank Schrader",
+        "peopleId": 248280,
+        "seriesId": 81189,
+        "series": null,
+        "movie": null,
+        "movieId": null,
+        "episodeId": null,
+        "type": 3,
+        "image": "https://artworks.thetvdb.com/banners/actors/75478.jpg",
+        "sort": 4,
+        "isFeatured": true,
+        "url": "https://thetvdb.com/people/248280-dean-norris",
+        "nameTranslations": null,
+        "overviewTranslations": null,
+        "aliases": null,
+        "peopleType": "Actor",
+        "personName": "Dean Norris",
+        "tagOptions": null,
+        "personImgURL": "https://artworks.thetvdb.com/banners/v4/actor/248280/photo/64ed5a8bda865.jpg"
+      }
+    ],
+    "airsDays": {
+      "sunday": true,
+      "monday": false,
+      "tuesday": false,
+      "wednesday": false,
+      "thursday": false,
+      "friday": false,
+      "saturday": false
+    },
+    "airsTime": "21:00",
+    "seasons": [
+      {
+        "id": 439371,
+        "seriesId": 81189,
+        "type": {
+          "id": 1,
+          "name": "Aired Order",
+          "type": "official",
+          "alternateName": null
+        },
+        "number": 0,
+        "nameTranslations": [],
+        "overviewTranslations": [],
+        "image": "https://artworks.thetvdb.com/banners/seasons/81189-0.jpg",
+        "imageType": 7,
+        "companies": {
+          "studio": null,
+          "network": null,
+          "production": null,
+          "distributor": null,
+          "special_effects": null
+        },
+        "lastUpdated": "2026-07-17 01:19:03"
+      },
+      {
+        "id": 30272,
+        "seriesId": 81189,
+        "type": {
+          "id": 1,
+          "name": "Aired Order",
+          "type": "official",
+          "alternateName": null
+        },
+        "number": 1,
+        "nameTranslations": [],
+        "overviewTranslations": [
+          "pol,ell,deu,srp,fra,eng,hun,swe,rus,pt,por,tur"
+        ],
+        "image": "https://artworks.thetvdb.com/banners/seasons/81189-1-3.jpg",
+        "imageType": 7,
+        "companies": {
+          "studio": null,
+          "network": null,
+          "production": null,
+          "distributor": null,
+          "special_effects": null
+        },
+        "lastUpdated": "2026-10-28 08:46:22"
+      },
+      {
+        "id": 1726856,
+        "seriesId": 81189,
+        "type": {
+          "id": 2,
+          "name": "DVD Order",
+          "type": "dvd",
+          "alternateName": null
+        },
+        "number": 1,
+        "nameTranslations": [],
+        "overviewTranslations": [
+          "por,tur"
+        ],
+        "image": "https://artworks.thetvdb.com/banners/seasons/81189-1-10.jpg",
+        "imageType": 6,
+        "companies": {
+          "studio": null,
+          "network": null,
+          "production": null,
+          "distributor": null,
+          "special_effects": null
+        },
+        "lastUpdated": "2026-02-25 20:21:57"
+      },
+      {
+        "id": 1726854,
+        "seriesId": 81189,
+        "type": {
+          "id": 3,
+          "name": "Absolute Order",
+          "type": "absolute",
+          "alternateName": null
+        },
+        "number": 1,
+        "nameTranslations": [],
+        "overviewTranslations": [],
+        "companies": {
+          "studio": null,
+          "network": null,
+          "production": null,
+          "distributor": null,
+          "special_effects": null
+        },
+        "lastUpdated": "2026-02-25 20:21:58"
+      }
+    ],
+    "translations": {
+      "nameTranslations": [
+        {
+          "name": "Perníkový táta",
+          "language": "ces"
+        },
+        {
+          "name": "Breaking Bad",
+          "language": "eng",
+          "isPrimary": true
+        },
+        {
+          "name": "Breaking Bad",
+          "language": "fra"
+        },
+        {
+          "name": "Breaking Bad: Ruptura Total",
+          "language": "por"
+        },
+        {
+          "name": "Breaking Bad",
+          "language": "spa"
+        },
+        {
+          "name": "Breaking Bad",
+          "language": "pt"
+        },
+        {
+          "name": "Breaking Bad: Original Minisodes",
+          "isAlias": true,
+          "language": "eng"
+        },
+        {
+          "name": "Ruptura Total",
+          "isAlias": true,
+          "language": "por"
+        }
+      ],
+      "overviewTranslations": [
+        {
+          "overview": "Walter White žije spořádaný rodinný život. Všechno se změní, když se tento středoškolský učitel chemie dozví, že je smrtelně nemocný a zbývá mu jen kousek života...\r\n\r\nSeriál o středoškolském profesorovi, který tváří v tvář smrti sejde na šikmou plochu a začne vyrábět drogy, aby zabezpečil rodinu, pochází z dílny televize Sony Pictures. Stal se jedním z nejúspěšnějších seriálů poslední doby a skvěle ho hodnotí také kritika. Jeho atmosféra a žánrové spojení thrilleru, rodinného dramatu a černé komedie může některým divákům připomenout filmy Quentina Tarantina nebo bratří Coenů.",
+          "language": "ces"
+        },
+        {
+          "overview": "When Walter White, a chemistry teacher, is diagnosed with Stage III cancer and given a prognosis of two years left to live, he chooses to enter a dangerous world of drugs and crime with the intent to secure his family's financial security.",
+          "language": "eng",
+          "isPrimary": true
+        },
+        {
+          "overview": "La vie de Walter White, professeur de chimie dans un lycée, est bouleversée lorsqu'il apprend qu'il est atteint d'un cancer en phase terminale. Une nouvelle qui le sort de la torpeur de son quotidien et l'amène à prendre des mesures radicales pour anticiper l'avenir de sa famille.",
+          "language": "fra"
+        },
+        {
+          "overview": "Um professor do secundário com cancro do pulmão terminal junta-se a um ex-aluno para fabricar e vender metanfetaminas como forma de garantir o futuro da sua família.",
+          "language": "por"
+        },
+        {
+          "overview": "Tras cumplir 50 años, Walter White (Bryan Cranston), un profesor de química de un instituto de Albuquerque, Nuevo México, se entera de que tiene un cáncer de pulmón incurable. Casado con Skyler (Anna Gunn) y con un hijo discapacitado (RJ Mitte), la brutal noticia lo impulsa a dar un drástico cambio a su vida: decide, con la ayuda de un antiguo alumno (Aaron Paul), fabricar anfetaminas y ponerlas a la venta. Lo que pretende es liberar a su familia de problemas económicos cuando se produzca el fatal desenlace.",
+          "language": "spa"
+        },
+        {
+          "overview": "O drama \"Breaking Bad\" narra a história de Walter White (Bryan Cranston), um humilde professor de química que vê sua vida se transformar quando descobre ser portador de um câncer terminal. Com um passado brilhante como pesquisador, Walter amarga agora uma terrível situação financeira trabalhando como professor em uma escola de ensino médio. Com seu modesto salário sustenta a esposa Skyler (Anna Gunn) e seu filho Walter Jr. (RJ Mitte), que sofre de paralisia cerebral. Walter fica desesperado ao perceber que sua família irá passar necessidades após sua morte e decide que fará qualquer coisa para que eles não sofram com a falta de dinheiro. Impulsionado pelo medo e por desejo de oferecer dignidade à Skyler e Jr. ele começa a usar suas habilidades em química a favor do crime, montando um laboratório de drogas para financiar seus anseios. Com uma trama intensa e emocionante a série mostra que nesse enredo não existem vilões nem mocinhos.",
+          "language": "pt"
+        }
+      ],
+      "aliases": [
+        "絕命毒師",
+        "Breaking Bad: Original Minisodes",
+        "Breaking Bad - Reazioni collaterali",
+        "Ruptura Total",
+        "Во все тяжкие",
+        "Breaking Bad"
+      ]
+    },
+    "tags": [
+      {
+        "id": 182,
+        "tag": 31,
+        "tagName": "Geographic Location",
+        "name": "America / United States",
+        "helpText": null
+      },
+      {
+        "id": 191,
+        "tag": 31,
+        "tagName": "Geographic Location",
+        "name": "North America",
+        "helpText": null
+      }
+    ],
+    "contentRatings": [
+      {
+        "id": 567,
+        "name": "18",
+        "country": "gbr",
+        "description": "Restricted to ages 18 and older",
+        "contentType": "",
+        "order": 0,
+        "fullname": null
+      },
+      {
+        "id": 247,
+        "name": "TV-MA",
+        "country": "usa",
+        "description": "Not suitable for children and teens under 17",
+        "contentType": "",
+        "order": 0,
+        "fullname": null
+      }
+    ],
+    "seasonTypes": [
+      {
+        "id": 1,
+        "name": "Aired Order",
+        "type": "official",
+        "alternateName": null
+      },
+      {
+        "id": 2,
+        "name": "DVD Order",
+        "type": "dvd",
+        "alternateName": null
+      },
+      {
+        "id": 3,
+        "name": "Absolute Order",
+        "type": "absolute",
+        "alternateName": null
+      }
+    ]
+  }
+}

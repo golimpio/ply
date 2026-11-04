@@ -211,12 +211,12 @@ func IsUnauthorized(err error) bool {
 
 // RetryDelay is how long to wait before trying again after the failures-th
 // consecutive failure (1 for the first): Backoff, or longer when TMDB said how
-// long to stay away.
+// long to stay away, but never longer than the longest Backoff.
 func RetryDelay(err error, failures int) time.Duration {
 	d := Backoff(failures)
 	var e *Error
 	if errors.As(err, &e) && e.RetryAfter > d {
-		d = e.RetryAfter
+		d = min(e.RetryAfter, backoffSteps[len(backoffSteps)-1])
 	}
 	return d
 }
@@ -473,15 +473,25 @@ func (c *Client) message(body []byte) string {
 	return msg
 }
 
+// maxRetryAfter is the longest Retry-After that is believed. A server that asks
+// for more (or for so much that the number overflows a Duration) is asked again
+// in an hour; a pause of days would silence the client until it is restarted.
+const maxRetryAfter = time.Hour
+
 // retryAfter reads a Retry-After header: seconds, or an HTTP date. Missing or
-// unreadable means two seconds.
+// unreadable means two seconds, and nothing is longer than maxRetryAfter.
 func retryAfter(v string, now time.Time) time.Duration {
 	v = strings.TrimSpace(v)
-	if secs, err := strconv.Atoi(v); err == nil && secs >= 0 {
-		return time.Duration(secs) * time.Second
+	secs, err := strconv.ParseInt(v, 10, 64)
+	switch {
+	case err == nil && secs >= 0:
+		// Cut the number before it is multiplied: 9223372037 seconds overflows.
+		return time.Duration(min(secs, int64(maxRetryAfter/time.Second))) * time.Second
+	case errors.Is(err, strconv.ErrRange) && !strings.HasPrefix(v, "-"):
+		return maxRetryAfter // more seconds than there are int64s
 	}
 	if t, err := http.ParseTime(v); err == nil {
-		return max(t.Sub(now), 0)
+		return min(max(t.Sub(now), 0), maxRetryAfter)
 	}
 	return 2 * time.Second
 }

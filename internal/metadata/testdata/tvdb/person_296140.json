@@ -1,0 +1,22 @@
+{
+  "status": "success",
+  "data": {
+    "id": 296140,
+    "name": "Bryan Cranston",
+    "slug": "bryan-cranston",
+    "image": "https://artworks.thetvdb.com/banners/v4/actor/296140/photo/bryan.jpg",
+    "birth": "1956-03-07",
+    "death": null,
+    "birthPlace": "Hollywood, California, USA",
+    "gender": 1,
+    "biographies": [
+      {"biography": "Bryan Lee Cranston is an American actor.", "language": "eng"},
+      {"biography": "Bryan Lee Cranston e um ator americano.", "language": "por"}
+    ],
+    "remoteIds": [
+      {"id": "nm0186505", "type": 2, "sourceName": "IMDB"},
+      {"id": "17419", "type": 10, "sourceName": "TheMovieDB.com"}
+    ],
+    "characters": []
+  }
+}

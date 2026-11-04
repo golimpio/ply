@@ -1,0 +1,92 @@
+{
+  "status": "success",
+  "data": [
+    {
+      "objectID": "series-81189",
+      "aliases": [
+        "Breaking Bad: Original Minisodes",
+        "Breaking Bad - Reazioni collaterali"
+      ],
+      "country": "usa",
+      "id": "series-81189",
+      "image_url": "https://artworks.thetvdb.com/banners/posters/81189-10.jpg",
+      "name": "Breaking Bad",
+      "first_air_time": "2008-01-20",
+      "overview": "When Walter White, a chemistry teacher, is diagnosed with Stage III cancer and given a prognosis of two years left to live, he chooses to enter a dangerous world of drugs and crime with the intent to secure his family's financial security.",
+      "primary_language": "eng",
+      "primary_type": "series",
+      "status": "Ended",
+      "type": "series",
+      "tvdb_id": "81189",
+      "year": "2008",
+      "slug": "breaking-bad",
+      "overviews": {
+        "eng": "When Walter White, a chemistry teacher, is diagnosed with Stage III cancer and given a prognosis of two years left to live, he chooses to enter a dangerous world of drugs and crime with the intent to secure his family's financial security.",
+        "fra": "La vie de Walter White, professeur de chimie dans un lycée, est bouleversée lorsqu'il apprend qu'il est atteint d'un cancer en phase terminale. Une nouvelle qui le sort de la torpeur de son quotidien et l'amène à prendre des mesures radicales pour anticiper l'avenir de sa famille.",
+        "por": "Um professor do secundário com cancro do pulmão terminal junta-se a um ex-aluno para fabricar e vender metanfetaminas como forma de garantir o futuro da sua família.",
+        "pt": "O drama \"Breaking Bad\" narra a história de Walter White (Bryan Cranston), um humilde professor de química que vê sua vida se transformar quando descobre ser portador de um câncer terminal. Com um passado brilhante como pesquisador, Walter amarga agora uma terrível situação financeira trabalhando como professor em uma escola de ensino médio. Com seu modesto salário sustenta a esposa Skyler (Anna Gunn) e seu filho Walter Jr. (RJ Mitte), que sofre de paralisia cerebral. Walter fica desesperado ao perceber que sua família irá passar necessidades após sua morte e decide que fará qualquer coisa para que eles não sofram com a falta de dinheiro. Impulsionado pelo medo e por desejo de oferecer dignidade à Skyler e Jr. ele começa a usar suas habilidades em química a favor do crime, montando um laboratório de drogas para financiar seus anseios. Com uma trama intensa e emocionante a série mostra que nesse enredo não existem vilões nem mocinhos.",
+        "spa": "Tras cumplir 50 años, Walter White (Bryan Cranston), un profesor de química de un instituto de Albuquerque, Nuevo México, se entera de que tiene un cáncer de pulmón incurable. Casado con Skyler (Anna Gunn) y con un hijo discapacitado (RJ Mitte), la brutal noticia lo impulsa a dar un drástico cambio a su vida: decide, con la ayuda de un antiguo alumno (Aaron Paul), fabricar anfetaminas y ponerlas a la venta. Lo que pretende es liberar a su familia de problemas económicos cuando se produzca el fatal desenlace."
+      },
+      "translations": {
+        "eng": "Breaking Bad",
+        "fra": "Breaking Bad",
+        "por": "Breaking Bad: Ruptura Total",
+        "pt": "Breaking Bad",
+        "spa": "Breaking Bad"
+      },
+      "network": "AMC",
+      "remote_ids": [
+        {
+          "id": "tt0903747",
+          "type": 2,
+          "sourceName": "IMDB"
+        },
+        {
+          "id": "https://www.amc.com/shows/breaking-bad",
+          "type": 4,
+          "sourceName": "Official Website"
+        },
+        {
+          "id": "1396",
+          "type": 12,
+          "sourceName": "TheMovieDB.com"
+        },
+        {
+          "id": "EP01009396",
+          "type": 3,
+          "sourceName": "TMS (Zap2It)"
+        }
+      ],
+      "thumbnail": "https://artworks.thetvdb.com/banners/posters/81189-10_t.jpg"
+    },
+    {
+      "objectID": "series-357407",
+      "country": "usa",
+      "id": "series-357407",
+      "image_url": "https://artworks.thetvdb.com/banners/images/missing/series.jpg",
+      "name": "Baking Bad",
+      "primary_language": "deu",
+      "primary_type": "series",
+      "status": "Ended",
+      "type": "series",
+      "tvdb_id": "357407",
+      "slug": "baking-bad",
+      "translations": {},
+      "network": "Twitch",
+      "remote_ids": [
+        {
+          "id": "tt3808074",
+          "type": 2,
+          "sourceName": "IMDB"
+        }
+      ]
+    }
+  ],
+  "links": {
+    "prev": null,
+    "self": "https://api4.thetvdb.com/v4/search?query=breaking bad&type=series&limit=50&page=0",
+    "next": null,
+    "total_items": 9,
+    "page_size": 50
+  }
+}

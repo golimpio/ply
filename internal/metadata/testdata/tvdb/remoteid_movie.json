@@ -1,0 +1,6 @@
+{
+  "status": "success",
+  "data": [
+    {"movie": {"id": 9001, "name": "El Camino: A Breaking Bad Movie", "slug": "el-camino", "year": "2019", "image": "https://artworks.thetvdb.com/banners/movies/9001/posters/1.jpg"}}
+  ]
+}

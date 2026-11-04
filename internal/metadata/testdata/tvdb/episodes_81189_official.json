@@ -1,0 +1,185 @@
+{
+  "status": "success",
+  "data": {
+    "series": {
+      "id": 81189,
+      "name": "Breaking Bad",
+      "slug": "breaking-bad",
+      "image": "https://artworks.thetvdb.com/banners/posters/81189-10.jpg",
+      "nameTranslations": [
+        "ces",
+        "dan",
+        "deu",
+        "ell",
+        "eng",
+        "fin",
+        "fra",
+        "heb",
+        "hun",
+        "ita",
+        "kor",
+        "nld",
+        "pol",
+        "por",
+        "rus",
+        "spa",
+        "swe",
+        "tur",
+        "zho",
+        "est",
+        "pt",
+        "hrv",
+        "lit",
+        "ara",
+        "srp",
+        "ukr",
+        "ron"
+      ],
+      "overviewTranslations": [
+        "ces",
+        "dan",
+        "deu",
+        "ell",
+        "eng",
+        "fin",
+        "fra",
+        "heb",
+        "hun",
+        "ita",
+        "nld",
+        "pol",
+        "por",
+        "rus",
+        "spa",
+        "swe",
+        "tur",
+        "zho",
+        "pt",
+        "hrv",
+        "lit",
+        "ara",
+        "srp",
+        "ukr",
+        "ron"
+      ],
+      "aliases": [
+        {
+          "language": "zho",
+          "name": "絕命毒師"
+        },
+        {
+          "language": "eng",
+          "name": "Breaking Bad: Original Minisodes"
+        }
+      ],
+      "firstAired": "2008-01-20",
+      "lastAired": "2013-09-29",
+      "nextAired": "",
+      "score": 3776757,
+      "status": {
+        "id": 2,
+        "name": "Ended",
+        "recordType": "series",
+        "keepUpdated": false
+      },
+      "originalCountry": "usa",
+      "originalLanguage": "eng",
+      "defaultSeasonType": 1,
+      "isOrderRandomized": false,
+      "lastUpdated": "2026-10-31 15:54:50",
+      "averageRuntime": 48,
+      "episodes": null,
+      "overview": "When Walter White, a chemistry teacher, is diagnosed with Stage III cancer and given a prognosis of two years left to live, he chooses to enter a dangerous world of drugs and crime with the intent to secure his family's financial security.",
+      "year": "2008"
+    },
+    "episodes": [
+      {
+        "id": 3859781,
+        "seriesId": 81189,
+        "name": "Good Cop / Bad Cop",
+        "aired": "2009-02-17",
+        "runtime": 3,
+        "nameTranslations": [
+          "eng",
+          "fra"
+        ],
+        "overview": "Hank and Marie try to spice up their relationship on Valentine's Day.",
+        "overviewTranslations": [
+          "eng",
+          "fra"
+        ],
+        "image": "https://artworks.thetvdb.com/banners/episodes/81189/3859781.jpg",
+        "imageType": 11,
+        "isMovie": 0,
+        "seasons": null,
+        "number": 1,
+        "absoluteNumber": 0,
+        "seasonNumber": 0,
+        "lastUpdated": "2023-03-29 17:43:22",
+        "finaleType": null,
+        "airsBeforeSeason": 2,
+        "airsBeforeEpisode": 1,
+        "year": "2009"
+      },
+      {
+        "id": 3859791,
+        "seriesId": 81189,
+        "name": "Wedding Day",
+        "aired": "2009-02-17",
+        "runtime": 5,
+        "nameTranslations": [
+          "eng"
+        ],
+        "overview": "Walt and Hank have a talk before Hank gets married.",
+        "overviewTranslations": [
+          "eng"
+        ],
+        "image": "https://artworks.thetvdb.com/banners/episodes/81189/3859791.jpg",
+        "imageType": 11,
+        "isMovie": 0,
+        "seasons": null,
+        "number": 2,
+        "absoluteNumber": 0,
+        "seasonNumber": 0,
+        "lastUpdated": "2023-03-22 08:11:31",
+        "finaleType": null,
+        "airsBeforeSeason": 2,
+        "airsBeforeEpisode": 1,
+        "year": "2009"
+      },
+      {
+        "id": 9700129,
+        "seriesId": 81189,
+        "name": "Live Saul Cam",
+        "aired": "2010-02-12",
+        "runtime": 5,
+        "nameTranslations": [
+          "eng"
+        ],
+        "overview": "Surveillance camera footage showcasing what Saul does in his free time at his office, including receiving fellatio from a prostitute.",
+        "overviewTranslations": [
+          "eng"
+        ],
+        "image": null,
+        "imageType": null,
+        "isMovie": 0,
+        "seasons": null,
+        "number": 20,
+        "absoluteNumber": 0,
+        "seasonNumber": 0,
+        "lastUpdated": "2026-07-17 01:09:46",
+        "finaleType": null,
+        "airsBeforeSeason": 3,
+        "airsBeforeEpisode": 1,
+        "year": "2010"
+      }
+    ]
+  },
+  "links": {
+    "prev": null,
+    "self": "https://api4.thetvdb.com/v4/series/81189/episodes/official?page=0",
+    "next": null,
+    "total_items": 80,
+    "page_size": 500
+  }
+}
