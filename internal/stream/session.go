@@ -39,6 +39,14 @@ type Session struct {
 	closed   bool
 	fellBack bool // the GPU transcode failed and the software one took over
 
+	// guard is set while the plan comes from a container index (see planGuard).
+	// plan is replaced under mu if the index is refuted before any fragment has
+	// confirmed it; until the guard is final nothing reads it without mu.
+	// failure is why the session cannot go on: the index was found wrong after
+	// the player had its playlist.
+	guard   *planGuard
+	failure error
+
 	// Segment requests in progress: arrival number to segment. Only the newest
 	// one may replace a running ffmpeg (see ensureGOP).
 	reqSeq  uint64
@@ -61,6 +69,18 @@ type run struct {
 	stderr   *tailBuffer
 	paused   bool
 	replaced bool // stopped on purpose (seek or session end)
+
+	// What the planGuard has seen of this run: the video track of its init
+	// segment, how many of its fragments it has gone through (checked) and how
+	// many of those it compared with the plan and found right (agreed; the
+	// others were gone by the time it looked).
+	video   *fragVideo
+	checked int
+	agreed  int
+	// bias is how far the fragments of the run are from the scan's keyframe times,
+	// less the timeline offset, taken from the first one compared (haveBias).
+	bias     float64
+	haveBias bool
 }
 
 func (r *run) exited() bool {
@@ -93,17 +113,36 @@ func newSession(m *Manager, id, dir string, r Request, plan Plan) *Session {
 }
 
 // Plan returns the segment layout (read-only).
-func (s *Session) Plan() Plan { return s.plan }
+func (s *Session) Plan() Plan {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.plan
+}
 
 // Dir is the session's temp directory.
 func (s *Session) Dir() string { return s.dir }
 
 func (s *Session) touch() { s.lastUsed.Store(time.Now().UnixNano()) }
 
-// Playlist renders the VOD playlist; suffix is appended to every URI.
-func (s *Session) Playlist(suffix string) string {
+// Playlist renders the VOD playlist; suffix is appended to every URI. A plan
+// read from the container is confirmed first, against the first fragment
+// ffmpeg writes (which the player waits for anyway): if it is wrong the plan
+// is rebuilt from a scan before anybody has seen it, and that is waited for, as
+// long as ctx lasts (the wait is bounded anyway: a plan that no fragment has
+// confirmed is given up on after WaitTimeout, and the scan after ExtractTimeout).
+// It fails with ctx's error if the caller leaves (and then does nothing more to
+// the session), ErrClosed if the session is over, ErrTimeout if the scan took
+// longer than ExtractTimeout, and an error wrapping ErrIndex if the plan could
+// not be rebuilt or the session failed because of it.
+func (s *Session) Playlist(ctx context.Context, suffix string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	s.touch()
-	return s.plan.Playlist(suffix)
+	if err := s.awaitPlan(ctx); err != nil {
+		return "", err
+	}
+	return s.Plan().Playlist(suffix), nil
 }
 
 func (s *Session) gopPath(g int) string { return filepath.Join(s.dir, fmt.Sprintf(gopPattern, g)) }
@@ -294,6 +333,7 @@ func (s *Session) monitor() {
 			return
 		}
 		s.advanceLocked()
+		s.verifyLocked()
 		if r := s.run; r != nil && !r.exited() {
 			ahead := s.plan.SegmentOfGOP(min(r.next, len(s.plan.Keyframes)-1)) - s.lastSeg
 			switch throttle(ahead, r.paused, s.m.o.ThrottleHigh, s.m.o.ThrottleLow) {
@@ -436,6 +476,10 @@ func (s *Session) ensureGOP(ctx context.Context, g int, req uint64) error {
 			s.mu.Unlock()
 			return ErrClosed
 		}
+		if err := s.failure; err != nil {
+			s.mu.Unlock()
+			return err
+		}
 		s.advanceLocked()
 		r := s.run
 		switch {
@@ -454,7 +498,7 @@ func (s *Session) ensureGOP(ctx context.Context, g int, req uint64) error {
 				break
 			}
 			s.mu.Unlock()
-			return fmt.Errorf("ffmpeg did not produce segment data: %s", msg)
+			return ffmpegError{"segment data", msg}
 		case r == nil || r.exited():
 			if err := s.startRunLocked(g); err != nil {
 				s.mu.Unlock()
@@ -492,19 +536,28 @@ func (s *Session) ensureGOP(ctx context.Context, g int, req uint64) error {
 // OpenSegment returns segment idx once all its fragments are complete. The
 // caller closes it.
 func (s *Session) OpenSegment(ctx context.Context, idx int) (*Media, error) {
-	if idx < 0 || idx >= len(s.plan.Segments) {
+	if err := s.awaitPlan(ctx); err != nil {
+		return nil, err
+	}
+	plan := s.Plan() // under the lock, once: a plan being replaced is not read half way
+	if idx < 0 || idx >= len(plan.Segments) {
 		return nil, ErrNoSegment
 	}
 	s.touch()
 	req, end := s.beginRequest(idx)
 	defer end()
-	seg := s.plan.Segments[idx]
+	seg := plan.Segments[idx]
 
 	for attempt := 0; ; attempt++ {
 		for g := seg.First; g < seg.End; g++ {
 			if err := s.ensureGOP(ctx, g, req); err != nil {
 				return nil, err
 			}
+		}
+		// Nothing is served that has not been looked at: the monitor may not have
+		// got to the fragments that just landed.
+		if err := s.verified(); err != nil {
+			return nil, err
 		}
 		m, err := s.openGOPs(seg)
 		if err == nil {
@@ -548,6 +601,9 @@ type Media struct{ *pieces }
 // ffmpeg run that produced one; later runs write identical headers.
 func (s *Session) OpenInit(ctx context.Context) (io.ReadSeekCloser, error) {
 	s.touch()
+	if err := s.awaitPlan(ctx); err != nil {
+		return nil, err
+	}
 	timeout := time.NewTimer(s.m.o.WaitTimeout)
 	defer timeout.Stop()
 	poll := time.NewTicker(25 * time.Millisecond)
@@ -580,7 +636,7 @@ func (s *Session) OpenInit(ctx context.Context) (io.ReadSeekCloser, error) {
 					break
 				}
 				s.mu.Unlock()
-				return nil, fmt.Errorf("ffmpeg did not produce an init segment: %s", msg)
+				return nil, ffmpegError{"an init segment", msg}
 			case r == nil || r.exited():
 				if err := s.startRunLocked(s.plan.Segments[min(s.lastSeg, len(s.plan.Segments)-1)].First); err != nil {
 					s.mu.Unlock()

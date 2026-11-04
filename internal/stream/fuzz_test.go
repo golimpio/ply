@@ -1,12 +1,14 @@
 package stream
 
 import (
+	"context"
 	"encoding/binary"
 	"math"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // encodeFloats packs keyframe times the way FuzzNewPlan reads them.
@@ -238,5 +240,116 @@ func FuzzValidName(f *testing.F) {
 		if !ok || SegmentName(n) != s || len(s) != len("seg00000.m4s") {
 			t.Fatalf("ValidName accepted %q but it parses as %d, %v", s, n, ok)
 		}
+	})
+}
+
+// tinyMKV is a small Matroska file for fuzz seeds.
+func tinyMKV(mod func(*mkvFile)) []byte {
+	f := goodMKV(nil)
+	f.clusters, f.cues = f.clusters[:5], f.cues[:5]
+	for i := range f.clusters {
+		for j := range f.clusters[i].blocks {
+			f.clusters[i].blocks[j].size = 20
+		}
+	}
+	f.duration = 10000
+	if mod != nil {
+		mod(&f)
+	}
+	return f.build()
+}
+
+// tinyMP4 is a small MP4 file for fuzz seeds.
+func tinyMP4(mod func(v, a *mp4Trak)) []byte {
+	return goodMP4(func(v, a *mp4Trak) {
+		v.stts, v.stss, v.table = [][2]uint32{{240, 512}}, []uint32{1, 49, 97, 145, 193}, 0
+		a.stts, a.table = [][2]uint32{{470, 1024}}, 0
+		if mod != nil {
+			mod(v, a)
+		}
+	})
+}
+
+// fuzzIndexParser runs a keyframe index parser over data, then over a file of
+// pad*4096 more bytes that repeat it (a file the size of a film, that is only
+// ever read through the counting reader). Whatever the bytes, it must return,
+// stay inside the read limits, and give either an error or a usable index.
+func fuzzIndexParser(t *testing.T, data []byte, pad uint32, parse func(context.Context, *indexReader, int) ([]float64, error)) {
+	t.Helper()
+	for _, size := range []int64{int64(len(data)), int64(len(data)) + int64(pad)<<12} {
+		cr := &countingReaderAt{r: patternReader{prefix: data, pattern: data, size: size}}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		kf, err := parse(ctx, &indexReader{r: cr, size: size}, -1)
+		cancel()
+		if cr.bytes > indexByteBudget || cr.reads > indexReadBudget {
+			t.Fatalf("read %d bytes in %d reads (limits %d, %d)", cr.bytes, cr.reads, indexByteBudget, indexReadBudget)
+		}
+		if err != nil {
+			continue
+		}
+		if len(kf) == 0 || len(kf) > maxIndexKeyframes {
+			t.Fatalf("%d keyframes without an error", len(kf))
+		}
+		for i, k := range kf {
+			if math.IsNaN(k) || math.IsInf(k, 0) || k < 0 || i > 0 && k-kf[i-1] < 0.001 {
+				t.Fatalf("keyframe %d = %v after %v: not clean, ascending times", i, k, head(kf[max(i-1, 0):]))
+			}
+		}
+	}
+}
+
+// FuzzMatroskaKeyframes: no input makes the Matroska index reader panic, hang,
+// or read past its limits, however large the file claims to be.
+func FuzzMatroskaKeyframes(f *testing.F) {
+	for _, mod := range []func(*mkvFile){
+		nil,
+		func(f *mkvFile) { f.seek = false },
+		func(f *mkvFile) { f.seek, f.cuesFirst = false, true },
+		func(f *mkvFile) { f.tail = true },
+		func(f *mkvFile) { f.seek2 = true },
+		func(f *mkvFile) { f.unknownSegment, f.unknownCues, f.tagsAfterCues = true, true, true },
+		func(f *mkvFile) { f.clusters[0].unknown = true },
+		func(f *mkvFile) { f.clusters[0].blocks[0].group = true; shifted(1400)(f) },
+		ticks(500_000),
+		func(f *mkvFile) { f.segSize = []byte{0x01, 0x80, 0, 0, 0, 0, 0, 0} },
+		func(f *mkvFile) { f.cuesSize = []byte{0x01, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE} },
+		func(f *mkvFile) { f.cuesRaw = cat(ebmlIDBytes(idCuePoint), ebmlSizeBytes(1<<40)) },
+		func(f *mkvFile) { f.infoBody = elUint(idTimestampScale, 0) },
+	} {
+		data := tinyMKV(mod)
+		f.Add(data, uint32(0))
+		f.Add(data, uint32(1<<20)) // a file of 4 GiB made of it
+	}
+	f.Add(tinyMKV(nil)[:60], uint32(0))
+	f.Add([]byte{0x1A, 0x45, 0xDF, 0xA3, 0x80}, uint32(7))
+	f.Add([]byte{}, uint32(0))
+	f.Fuzz(func(t *testing.T, data []byte, pad uint32) {
+		fuzzIndexParser(t, data, pad, matroskaKeyframes)
+	})
+}
+
+// FuzzMP4Keyframes: the same for the MP4/MOV index reader.
+func FuzzMP4Keyframes(f *testing.F) {
+	big := make([]byte, 600)
+	for _, data := range [][]byte{
+		tinyMP4(nil),
+		tinyMP4(func(v, a *mp4Trak) { v.noStss = true }),
+		tinyMP4(func(v, a *mp4Trak) { v.co64 = true }),
+		tinyMP4(func(v, a *mp4Trak) { bframes(v); v.edits = []mp4Edit{{10000, 1024, 0}} }),
+		tinyMP4(func(v, a *mp4Trak) { v.edits = []mp4Edit{{500, -1, 0}, {10000, 0, 0}}; v.editVer, v.mdhdVer = 1, 1 }),
+		tinyMP4(func(v, a *mp4Trak) { v.sttsRaw = cat(u32(0xFFFFFFFF), u32(1), u32(512)) }),
+		tinyMP4(func(v, a *mp4Trak) { v.stssRaw = cat(u32(0xFFFFFFFF), u32(1)) }),
+		cat(ftyp, isoBox64("mdat", big), isoBox64("moov", moovOf(1000, nil, goodVideo())[8:])),
+		cat(ftyp, isoBox("moof"), isoBox("free")),
+		cat(ftyp, u32(1), []byte("moov"), u64(1<<62)),
+		cat(ftyp, u32(0xFFFFFFFF), []byte("moov")),
+	} {
+		f.Add(data, uint32(0))
+		f.Add(data, uint32(1<<20))
+	}
+	f.Add(tinyMP4(nil)[:100], uint32(0))
+	f.Add([]byte("\x00\x00\x00\x08ftyp"), uint32(3))
+	f.Fuzz(func(t *testing.T, data []byte, pad uint32) {
+		fuzzIndexParser(t, data, pad, mp4Keyframes)
 	})
 }

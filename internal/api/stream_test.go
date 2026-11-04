@@ -2,7 +2,10 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -187,7 +190,11 @@ func TestSessionNotFoundAndNames(t *testing.T) {
 		wantJSONError(t, e.get(base+"seg99999.m4s"), 404)
 	})
 	t.Run("segment not produced in time", func(t *testing.T) {
-		wantJSONError(t, e.get(base+"seg00000.m4s"), 504)
+		rec := e.get(base + "seg00000.m4s")
+		wantJSONError(t, rec, 504)
+		if !strings.Contains(rec.Body.String(), "segment not ready") {
+			t.Errorf("the 504 for a segment says %s", rec.Body.String())
+		}
 	})
 }
 
@@ -280,16 +287,71 @@ func TestSessionAuth(t *testing.T) {
 	wantStatus(t, e.do("DELETE", base+"?token=tok", nil, ""), 204)
 }
 
+// An ffmpeg that fails is a bad gateway: the server is fine, what it ran is not.
 func TestFFmpegFailureIsAServerError(t *testing.T) {
 	e := newEnv(t, "")
 	// The first exec of a fresh script can take a few hundred ms on macOS.
 	e.withStreams(fakeFFmpeg(t, "echo 'boom: bad input' >&2; exit 1"), func(o *stream.Options) { o.WaitTimeout = 10 * time.Second })
 	pb := e.startSession("", `{}`)
 	rec := e.get("/api/sessions/" + pb.SessionID + "/seg00000.m4s")
-	wantJSONError(t, rec, 500)
+	wantJSONError(t, rec, 502)
 	if strings.Contains(rec.Body.String(), "boom") {
 		t.Errorf("ffmpeg's stderr leaked to the client: %s", rec.Body.String())
 	}
+}
+
+// What a session's playlist, init segment and segments fail with, by status:
+// not there is 404, too slow 504, a stream the server could not make (ffmpeg
+// failing, a keyframe index that was wrong and could not be put right) 502, and
+// anything else 500. A client that has left gets nothing.
+func TestStreamErrorStatuses(t *testing.T) {
+	e := newEnv(t, "")
+	for _, c := range []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"no such segment", stream.ErrNoSegment, 404},
+		{"session closed", stream.ErrClosed, 404},
+		{"closed, wrapped", fmt.Errorf("playlist: %w", stream.ErrClosed), 404},
+		{"file gone", fs.ErrNotExist, 404},
+		{"timeout", stream.ErrTimeout, 504},
+		{"index wrong", fmt.Errorf("%w: scan failed", stream.ErrIndex), 502},
+		{"ffmpeg failed", fmt.Errorf("%w: boom", stream.ErrFFmpeg), 502},
+		{"anything else", errors.New("disk on fire"), 500},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			e.srv.streamError(rec, httptest.NewRequest("GET", "/api/sessions/x/index.m3u8", nil), c.err, "playlist")
+			wantJSONError(t, rec, c.want)
+			if c.want == 504 && !strings.Contains(rec.Body.String(), "playlist not ready") {
+				t.Errorf("the 504 for a playlist says %s", rec.Body.String())
+			}
+			if strings.Contains(rec.Body.String(), "boom") || strings.Contains(rec.Body.String(), "disk") || strings.Contains(rec.Body.String(), "scan failed") {
+				t.Errorf("the cause leaked to the client: %s", rec.Body.String())
+			}
+		})
+	}
+
+	t.Run("client gone", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		rec := httptest.NewRecorder()
+		e.srv.streamError(rec, httptest.NewRequest("GET", "/x", nil).WithContext(ctx), errors.New("context canceled"), "segment")
+		if rec.Body.Len() != 0 {
+			t.Errorf("answered a client that had left: %d %s", rec.Code, rec.Body.String())
+		}
+	})
+}
+
+// The playlist of a session that is gone is a 404, not an empty playlist.
+func TestPlaylistOfAGoneSession(t *testing.T) {
+	e := newEnv(t, "")
+	e.withStreams(fakeFFmpeg(t, "exec sleep 60"), nil)
+	pb := e.startSession("", `{}`)
+	wantStatus(t, e.get("/api/sessions/"+pb.SessionID+"/index.m3u8"), 200)
+	wantStatus(t, e.do("DELETE", "/api/sessions/"+pb.SessionID, nil, ""), 204)
+	wantJSONError(t, e.get("/api/sessions/"+pb.SessionID+"/index.m3u8"), 404)
 }
 
 func TestPlaybackWithoutStreaming(t *testing.T) {

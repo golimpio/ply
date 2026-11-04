@@ -322,7 +322,7 @@ func TestIdleTimeoutAndTouch(t *testing.T) {
 	// Requests keep it alive well past the timeout.
 	end := time.Now().Add(900 * time.Millisecond)
 	for time.Now().Before(end) {
-		s.Playlist("")
+		playlistOf(t, s)
 		time.Sleep(50 * time.Millisecond)
 	}
 	if m.Count() != 1 {
@@ -579,7 +579,7 @@ func TestTranscodeSessionHasEqualSegmentsAndExactSeeks(t *testing.T) {
 			t.Fatalf("segment %d = %+v: want one 6 s keyframe interval each", i, seg)
 		}
 	}
-	if pl := s.Playlist(""); strings.Count(pl, "#EXTINF:6.000,") != 200 || !strings.Contains(pl, "#EXT-X-TARGETDURATION:6\n") {
+	if pl := playlistOf(t, s); strings.Count(pl, "#EXTINF:6.000,") != 200 || !strings.Contains(pl, "#EXT-X-TARGETDURATION:6\n") {
 		t.Errorf("playlist: %.200s", pl)
 	}
 

@@ -241,8 +241,19 @@ func TestIrregularKeyframes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cache.writes != 1 || len(cache.kf[7]) != 11 {
-		t.Fatalf("keyframes cached: writes %d, %d times; want 1 write of 11 times", cache.writes, len(cache.kf[7]))
+	// The index of an mp4 comes from its sample tables, and is cached once the
+	// first fragments ffmpeg writes have agreed with it, which the playlist waits for.
+	playlistOf(t, s)
+	waitFor(t, "the keyframes to be cached", 5*time.Second, func() bool {
+		cache.mu.Lock()
+		defer cache.mu.Unlock()
+		return cache.writes == 1
+	})
+	cache.mu.Lock()
+	cached := len(cache.kf[7])
+	cache.mu.Unlock()
+	if cached != 11 {
+		t.Fatalf("keyframes cached: %d times; want 11", cached)
 	}
 	plan := s.Plan()
 	t.Logf("segments: %+v", plan.Segments)

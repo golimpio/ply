@@ -25,7 +25,20 @@ var (
 	ErrNoSegment = errors.New("stream: no such segment")
 	// ErrTimeout is returned when a segment is not produced in time.
 	ErrTimeout = errors.New("stream: timed out waiting for ffmpeg")
+	// ErrIndex is returned (wrapped) when the keyframe index of a file turned out
+	// not to be what the file has, and either could not be made again or was found
+	// out too late to: the session cannot go on. A new one scans the file.
+	ErrIndex = errors.New("stream: keyframe index disagrees with the file")
+	// ErrFFmpeg is what an error from ffmpeg not producing what was asked of it
+	// is (errors.Is).
+	ErrFFmpeg = errors.New("stream: ffmpeg failed")
 )
+
+// ffmpegError says what ffmpeg did not produce, and what it said.
+type ffmpegError struct{ what, msg string }
+
+func (e ffmpegError) Error() string        { return "ffmpeg did not produce " + e.what + ": " + e.msg }
+func (e ffmpegError) Is(target error) bool { return target == ErrFFmpeg }
 
 // KeyframeCache persists keyframe indexes between runs (store.Store).
 type KeyframeCache interface {
@@ -55,7 +68,8 @@ type Options struct {
 	WaitTimeout time.Duration
 	// Tick is the housekeeping interval (idle, throttle, pruning) [250ms].
 	Tick time.Duration
-	// ExtractTimeout bounds one keyframe scan [15m].
+	// ExtractTimeout bounds one keyframe scan [15m]; a file too big to be read in
+	// that time at scanRate gets what it needs (see scanTimeout).
 	ExtractTimeout time.Duration
 }
 
@@ -145,12 +159,18 @@ type Manager struct {
 
 	kfMu    sync.Mutex
 	kfCalls map[string]*kfCall
+	// Files whose container index disagreed with the stream (see planGuard), as
+	// they were then, and when: the scan is used for them for a day.
+	kfDistrust map[distrustKey]time.Time
+	kfLocks    map[string]*pathLock
+	clock      func() time.Time // time.Now; a test's
 }
 
 type kfCall struct {
-	done chan struct{}
-	kf   []float64
-	err  error
+	done   chan struct{}
+	kf     []float64
+	source string // "cache", or where keyframesVia got it
+	err    error
 }
 
 // NewManager prepares the temp area, removing what crashed predecessors left
@@ -170,6 +190,7 @@ func NewManager(o Options) (*Manager, error) {
 	return &Manager{
 		o: o, log: o.Logger, dir: dir, ctx: ctx, cancel: cancel,
 		sessions: map[string]*Session{}, kfCalls: map[string]*kfCall{},
+		kfDistrust: map[distrustKey]time.Time{}, kfLocks: map[string]*pathLock{}, clock: time.Now,
 	}, nil
 }
 
@@ -335,11 +356,12 @@ func (m *Manager) Create(ctx context.Context, r Request) (*Session, error) {
 	release := func() { m.mu.Lock(); m.reserved--; m.mu.Unlock() }
 
 	var kf []float64
+	var source string
 	var err error
 	if r.transcode() {
 		kf, err = uniformKeyframes(r.DurationSec, m.o.SegmentSec)
 	} else {
-		kf, err = m.keyframes(ctx, r)
+		kf, source, err = m.keyframes(ctx, r, false)
 	}
 	if err != nil {
 		release()
@@ -362,6 +384,11 @@ func (m *Manager) Create(ctx context.Context, r Request) (*Session, error) {
 		return nil, err
 	}
 	s := newSession(m, id, dir, r, plan)
+	if source == sourceCues || source == sourceSampleTable {
+		// Read from the container, not measured: checked against the first
+		// fragments ffmpeg writes before it is trusted or cached.
+		s.guard = newPlanGuard(kf, r.ItemID, time.Now().Add(m.o.WaitTimeout))
+	}
 
 	startSeg := plan.SegmentAt(r.StartSec)
 	s.lastSeg = startSeg
@@ -401,22 +428,44 @@ func uniformKeyframes(duration, sec float64) ([]float64, error) {
 	return kf, nil
 }
 
-// keyframes returns the keyframe index of the requested file, scanning it at
-// most once at a time per file.
-func (m *Manager) keyframes(ctx context.Context, r Request) ([]float64, error) {
-	if m.o.Cache != nil && r.ItemID > 0 {
+// keyframes returns the keyframe index of the requested file and where it came
+// from (sourceCues, sourceSampleTable, sourceScan, or "cache"), reading it at
+// most once at a time per file: from the index the container already has, or
+// by scanning the whole file when it has none, or when the index of this file
+// has been found wrong.
+//
+// Scans are cached. An index read from the container is not, yet: Create hands
+// it to a planGuard, which caches it once the first fragments have agreed with
+// it. Concurrent requests for a file share one read per kind (an index read, or
+// a scan), whatever the stream they want: the key is the path (a file with two
+// video streams gets the index of whichever asked first; the cache is per item
+// in any case).
+//
+// force is for a file whose index was found wrong, by a session that needs the
+// scan now: the cache is not read (what is in it is that index, or being
+// dropped) and the result is a scan's, never a read of the index another call
+// is making. The scan is the manager's, not the caller's: it is detached from
+// ctx (which only says how long to wait) and cached when it succeeds, for
+// whoever asks next.
+func (m *Manager) keyframes(ctx context.Context, r Request, force bool) ([]float64, string, error) {
+	scan := force || m.indexDistrusted(r.Path)
+	if !force && m.o.Cache != nil && r.ItemID > 0 {
 		if kf, ok, err := m.o.Cache.Keyframes(ctx, r.ItemID); err != nil {
 			m.log.Warn("keyframe cache read", "item", r.ItemID, "err", err)
 		} else if ok && len(kf) > 0 {
-			return kf, nil
+			return kf, "cache", nil
 		}
 	}
 
+	key := r.Path
+	if scan {
+		key += "\x00scan"
+	}
 	m.kfMu.Lock()
-	c, running := m.kfCalls[r.Path]
+	c, running := m.kfCalls[key]
 	if !running {
 		c = &kfCall{done: make(chan struct{})}
-		m.kfCalls[r.Path] = c
+		m.kfCalls[key] = c
 	}
 	m.kfMu.Unlock()
 
@@ -424,30 +473,163 @@ func (m *Manager) keyframes(ctx context.Context, r Request) ([]float64, error) {
 		go func() {
 			// Detached from the request: a client giving up must not waste
 			// the scan other waiters (and the cache) will use.
-			sctx, cancel := context.WithTimeout(m.ctx, m.o.ExtractTimeout)
+			var size int64
+			if fi, err := os.Stat(r.Path); err == nil {
+				size = fi.Size()
+			}
+			sctx, cancel := context.WithTimeout(m.ctx, scanTimeout(m.o.ExtractTimeout, size))
 			defer cancel()
 			start := time.Now()
-			c.kf, c.err = ExtractKeyframes(sctx, m.o.FFprobe, r.Path, m.o.ProbeNice)
+			var res keyframeResult
+			var err error
+			if scan {
+				res, err = keyframesScan(sctx, m.o.FFprobe, r.Path, m.o.ProbeNice)
+				res.skip = errIndexDistrusted
+			} else {
+				res, err = keyframesVia(sctx, m.o.FFprobe, r.Path, m.o.ProbeNice, r.VideoIndex)
+			}
+			c.kf, c.source, c.err = res.times, res.source, err
 			if c.err == nil {
-				m.log.Info("keyframe index built", "path", filepath.Base(r.Path), "keyframes", len(c.kf),
-					"took", time.Since(start).Round(time.Millisecond))
-				if m.o.Cache != nil && r.ItemID > 0 {
-					if err := m.o.Cache.SetKeyframes(sctx, r.ItemID, c.kf); err != nil {
-						m.log.Warn("keyframe cache write", "item", r.ItemID, "err", err)
-					}
+				m.logKeyframes(r.Path, res, time.Since(start))
+				if res.source == sourceScan {
+					m.cacheKeyframes(sctx, r.ItemID, c.kf)
 				}
 			}
 			m.kfMu.Lock()
-			delete(m.kfCalls, r.Path)
+			delete(m.kfCalls, key)
 			m.kfMu.Unlock()
 			close(c.done)
 		}()
 	}
 	select {
 	case <-c.done:
-		return c.kf, c.err
+		return c.kf, c.source, c.err
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, "", ctx.Err()
+	}
+}
+
+var errIndexDistrusted = errors.New("the container index disagreed with the stream")
+
+// cacheKeyframes stores the keyframes of an item, if there is a cache and an item.
+func (m *Manager) cacheKeyframes(ctx context.Context, itemID int64, kf []float64) {
+	if m.o.Cache == nil || itemID <= 0 {
+		return
+	}
+	if err := m.o.Cache.SetKeyframes(ctx, itemID, kf); err != nil {
+		m.log.Warn("keyframe cache write", "item", itemID, "err", err)
+	}
+}
+
+// A scan reads the whole file, and a share gives it a megabyte a second at the
+// worst: scanRate is what is assumed of it. The time allowed is whatever
+// ExtractTimeout is, or what the size of the file needs at that rate if that is
+// more, and a third of ExtractTimeout (5 minutes of its 15) on top for the rest;
+// never more than maxScanTimeout.
+const (
+	scanRate       = 1 << 20 // bytes a second
+	maxScanTimeout = 6 * time.Hour
+)
+
+// scanTimeout is how long the scan of a file of size bytes may take, where base
+// is Options.ExtractTimeout: with 15 minutes, 20 for a file of up to 900 MB,
+// 42 minutes for 2.2 GB, and 6 hours from some 21 GB on.
+func scanTimeout(base time.Duration, size int64) time.Duration {
+	need := time.Duration(size/scanRate) * time.Second
+	return max(base, min(max(base, need)+base/3, maxScanTimeout))
+}
+
+// distrustTTL is how long the index of a file stays distrusted.
+const distrustTTL = 24 * time.Hour
+
+// distrustKey is a file as it was when its index was found wrong: another size or
+// modification time is another file.
+type distrustKey struct {
+	path  string
+	size  int64
+	mtime int64 // ns
+}
+
+func distrustKeyOf(path string) distrustKey {
+	k := distrustKey{path: path}
+	if fi, err := os.Stat(path); err == nil {
+		k.size, k.mtime = fi.Size(), fi.ModTime().UnixNano()
+	}
+	return k
+}
+
+// distrustIndex makes the next reads of the keyframes of path scan the file, as
+// it is now, for distrustTTL.
+func (m *Manager) distrustIndex(path string) {
+	k := distrustKeyOf(path)
+	m.kfMu.Lock()
+	defer m.kfMu.Unlock()
+	for old := range m.kfDistrust { // the file as it was is gone
+		if old.path == path {
+			delete(m.kfDistrust, old)
+		}
+	}
+	m.kfDistrust[k] = m.clock()
+}
+
+// indexDistrusted reports whether the index of the file at path, as it is now,
+// was found wrong less than distrustTTL ago.
+func (m *Manager) indexDistrusted(path string) bool {
+	k := distrustKeyOf(path)
+	m.kfMu.Lock()
+	defer m.kfMu.Unlock()
+	at, ok := m.kfDistrust[k]
+	if ok && m.clock().Sub(at) >= distrustTTL {
+		delete(m.kfDistrust, k)
+		return false
+	}
+	return ok
+}
+
+// lockIndexCache serialises the writes to the cache of the keyframes of the file
+// at path that depend on whether its index is trusted: the write of an index a
+// session has confirmed (which looks first, inside the lock, whether another
+// found it wrong meanwhile) and the drop of one found wrong. Whichever session
+// does either, a dropped index is not written back after the drop. It returns
+// the unlock.
+func (m *Manager) lockIndexCache(path string) (unlock func()) {
+	m.kfMu.Lock()
+	l := m.kfLocks[path]
+	if l == nil {
+		l = &pathLock{}
+		m.kfLocks[path] = l
+	}
+	l.users++
+	m.kfMu.Unlock()
+	l.mu.Lock()
+	return func() {
+		l.mu.Unlock()
+		m.kfMu.Lock()
+		if l.users--; l.users == 0 {
+			delete(m.kfLocks, path)
+		}
+		m.kfMu.Unlock()
+	}
+}
+
+type pathLock struct {
+	mu    sync.Mutex
+	users int // under Manager.kfMu
+}
+
+// logKeyframes says how a keyframe index was obtained and how long it took.
+func (m *Manager) logKeyframes(path string, res keyframeResult, took time.Duration) {
+	attrs := []any{"path", filepath.Base(path), "keyframes", len(res.times), "took", took.Round(time.Millisecond)}
+	switch res.source {
+	case sourceCues:
+		m.log.Info("keyframe index read from cues", attrs...)
+	case sourceSampleTable:
+		m.log.Info("keyframe index read from sample table", attrs...)
+	default:
+		if res.skip != nil { // why the container's index was not used
+			attrs = append(attrs, "index_unusable", res.skip)
+		}
+		m.log.Info("keyframe index built by packet scan", attrs...)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/bits"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -206,15 +207,21 @@ func TestHLSEndToEnd(t *testing.T) {
 				if pb.Method != "remux" || pb.SessionID == "" || !strings.HasPrefix(pb.URL, "/api/sessions/"+pb.SessionID+"/index.m3u8") {
 					t.Fatalf("playback = %+v", pb)
 				}
-				if _, ok, _ := e.store.Keyframes(t.Context(), id); !ok {
-					t.Error("keyframes were not cached")
-				}
-
 				// The playlist URL is all a token-less player (AirPlay, Cast)
 				// has: it must work as given and so must every URI inside.
 				resp, b = e.do("GET", pb.URL, "", nil)
 				if resp.StatusCode != 200 {
 					t.Fatalf("GET playlist = %d: %s", resp.StatusCode, b)
+				}
+				// An index read from the container is cached once the first fragments
+				// ffmpeg writes have confirmed it, which the playlist waits for; the
+				// write itself is not waited for.
+				cached := false
+				for deadline := time.Now().Add(5 * time.Second); !cached && time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+					_, cached, _ = e.store.Keyframes(t.Context(), id)
+				}
+				if !cached {
+					t.Error("keyframes were not cached")
 				}
 				initURI, segs := parsePlaylist(t, string(b))
 				if len(segs) != 5 {
@@ -303,6 +310,141 @@ func TestStartSecResumesAtThatSegment(t *testing.T) {
 	first, _ := videoSpan(t, initBytes, seg)
 	if math.Abs(first-(segs[3].start+stream.TimelineOffset)) > 0.1 {
 		t.Errorf("segment 3 starts at %.3f, want %.3f", first, segs[3].start+stream.TimelineOffset)
+	}
+}
+
+// damageCues turns every other cue point of an mkv file, from the fifth on, into
+// a Void element of the same size: the file is as long as before and the cues
+// list the first keyframes right and then skip every other one. (The start of the
+// file does not show it; the first fragment ffmpeg writes does.)
+func damageCues(t *testing.T, in []byte) []byte {
+	t.Helper()
+	vint := func(b []byte) (int, int) {
+		n := bits.LeadingZeros8(b[0]) + 1
+		v := int(b[0]) & (1<<(8-n) - 1)
+		for i := 1; i < n; i++ {
+			v = v<<8 | int(b[i])
+		}
+		return v, n
+	}
+	out := append([]byte(nil), in...)
+	at := bytes.LastIndex(in, []byte{0x1C, 0x53, 0xBB, 0x6B}) // the Cues
+	if at < 0 {
+		t.Fatal("no Cues in the file")
+	}
+	size, n := vint(in[at+4:])
+	pos := at + 4 + n
+	for end, k := pos+size, 0; pos < end; {
+		id := in[pos]
+		child, cn := vint(in[pos+1:])
+		if id == 0xBB { // a cue point; the first child is the CRC-32
+			if k >= 4 && k%2 == 1 {
+				out[pos] = 0xEC
+			}
+			k++
+		}
+		pos += 1 + cn + child
+	}
+	return out
+}
+
+// The index in the cues of a file is wrong where the start of the file does not
+// show it. The first fragment does: the plan is rebuilt from a scan before the
+// client has the playlist, and if that cannot be done the client gets a 502, not
+// an empty playlist.
+func TestHLSPlaylistWithAWrongKeyframeIndex(t *testing.T) {
+	failing := filepath.Join(t.TempDir(), "ffprobe")
+	if err := os.WriteFile(failing, []byte("#!/bin/sh\necho scan failed >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	slow := filepath.Join(t.TempDir(), "ffprobe")
+	if err := os.WriteFile(slow, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name, ffprobe string
+		status        int
+		extract       time.Duration // Options.ExtractTimeout, if not the default
+	}{
+		{"the scan fails", failing, 502, 0},
+		{"the scan takes too long", slow, 504, 400 * time.Millisecond},
+		{"the scan works", "", 200, 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "media root", "Clip (2024).mkv")
+			makeClip(t, path, "-c:v", "libx264", "-preset", "ultrafast", "-g", "48", "-keyint_min", "48", "-sc_threshold", "0",
+				"-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "96k")
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, damageCues(t, data), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			st, err := store.Open(filepath.Join(t.TempDir(), "data dir", "ply.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { st.Close() })
+			sc := library.NewScanner(t.Context(), st, probe.FFprobe{}, []string{filepath.Dir(path)}, nil)
+			if err := sc.Scan(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			entries, err := st.ListItems(t.Context(), store.ListFilter{})
+			if err != nil || len(entries) != 1 {
+				t.Fatalf("scan found %d items, %v", len(entries), err)
+			}
+			mgr, err := stream.NewManager(stream.Options{TempRoot: t.TempDir(), Cache: st, FFprobe: c.ffprobe, Tick: 20 * time.Millisecond, ExtractTimeout: c.extract})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(mgr.Close)
+			ts := httptest.NewServer(New(Options{Store: st, Scanner: sc, ID: "it", Name: "it", Version: "test", Streams: mgr}))
+			t.Cleanup(ts.Close)
+			e := &e2e{t: t, ts: ts, store: st, mgr: mgr, client: ts.Client()}
+
+			// Starting at 20 s: the first fragment is a GOP of the damaged part.
+			resp, b := e.do("POST", fmt.Sprintf("/api/items/%d/playback", entries[0].ID), `{"startSec": 20}`, nil)
+			var pb Playback
+			if err := json.Unmarshal(b, &pb); err != nil || resp.StatusCode != 200 {
+				t.Fatalf("%d %s %v", resp.StatusCode, b, err)
+			}
+			resp, pl := e.do("GET", pb.URL, "", nil)
+			if resp.StatusCode != c.status {
+				t.Fatalf("playlist: %d %s, want %d", resp.StatusCode, pl, c.status)
+			}
+			if c.status != 200 {
+				if strings.Contains(string(pl), "scan failed") {
+					t.Errorf("what ffprobe said is in the answer: %s", pl)
+				}
+				if c.status == 504 && !strings.Contains(string(pl), "playlist not ready") {
+					t.Errorf("the 504 for a playlist says %s", pl)
+				}
+				resp, _ = e.do("GET", "/api/sessions/"+pb.SessionID+"/init.mp4", "", nil)
+				if resp.StatusCode != c.status {
+					t.Errorf("init segment: %d, want %d", resp.StatusCode, c.status)
+				}
+				if kf, _, _ := st.Keyframes(t.Context(), entries[0].ID); len(kf) != 0 {
+					t.Errorf("%d keyframes of a wrong index were cached", len(kf))
+				}
+				return
+			}
+			// The playlist is the scan's: the 15 keyframes are what was cached.
+			if _, segs := parsePlaylist(t, string(pl)); len(segs) == 0 {
+				t.Errorf("no segments in\n%s", pl)
+			}
+			deadline := time.Now().Add(5 * time.Second)
+			for {
+				kf, _, _ := st.Keyframes(t.Context(), entries[0].ID)
+				if len(kf) == 15 {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("%d keyframes cached, want the 15 of the scan", len(kf))
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+		})
 	}
 }
 

@@ -129,10 +129,39 @@ func (s *Server) handleSessionPlaylist(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The playlist waits for the plan to be settled (it can take a scan of the
+	// file), so it can fail: the status says how, before any of it is written.
+	playlist, err := sess.Playlist(r.Context(), s.uriSuffix())
+	if err != nil {
+		s.streamError(w, r, err, "playlist")
+		return
+	}
 	h := w.Header()
 	h.Set("Content-Type", "application/vnd.apple.mpegurl")
 	h.Set("Cache-Control", "no-cache")
-	fmt.Fprint(w, sess.Playlist(s.uriSuffix()))
+	fmt.Fprint(w, playlist)
+}
+
+// streamError answers a request to a session that failed: 404 for what is not
+// there (a segment out of range, a session that is gone), 504 for what took too
+// long, 502 for what the stream could not make (ffmpeg failed, or the keyframe
+// index of the file was wrong and a scan did not put it right), 500 for the
+// rest. Nothing is answered if the client left. what is what was asked for
+// ("playlist", "segment"), for the 504.
+func (s *Server) streamError(w http.ResponseWriter, r *http.Request, err error, what string) {
+	switch {
+	case r.Context().Err() != nil:
+		return // the player moved on
+	case errors.Is(err, stream.ErrNoSegment), errors.Is(err, stream.ErrClosed), errors.Is(err, fs.ErrNotExist):
+		writeError(w, http.StatusNotFound, "not found")
+	case errors.Is(err, stream.ErrTimeout):
+		writeError(w, http.StatusGatewayTimeout, what+" not ready")
+	case errors.Is(err, stream.ErrIndex), errors.Is(err, stream.ErrFFmpeg):
+		s.Logger.Error("stream failed", "method", r.Method, "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusBadGateway, "stream failed")
+	default:
+		s.internalError(w, r, err)
+	}
 }
 
 func (s *Server) handleSessionFile(w http.ResponseWriter, r *http.Request) {
@@ -159,18 +188,8 @@ func (s *Server) handleSessionFile(w http.ResponseWriter, r *http.Request) {
 			media = m
 		}
 	}
-	switch {
-	case err == nil:
-	case r.Context().Err() != nil:
-		return // the player moved on
-	case errors.Is(err, stream.ErrNoSegment), errors.Is(err, stream.ErrClosed), errors.Is(err, fs.ErrNotExist):
-		writeError(w, http.StatusNotFound, "not found")
-		return
-	case errors.Is(err, stream.ErrTimeout):
-		writeError(w, http.StatusGatewayTimeout, "segment not ready")
-		return
-	default:
-		s.internalError(w, r, err)
+	if err != nil {
+		s.streamError(w, r, err, "segment")
 		return
 	}
 	defer media.Close()
