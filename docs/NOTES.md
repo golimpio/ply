@@ -130,7 +130,7 @@ stop being true.
   is tested with a fake ffmpeg, but this host is a Mac. The chains follow the usual ffmpeg recipes
   (`scale_vaapi=format=nv12`, `vpp_qsv`, `scale_cuda`), and any failure falls back to software at runtime.
 - `-hwaccel auto|none|videotoolbox|vaapi|qsv|nvenc`; a forced encoder still has to pass the 1-frame test encode.
-  `-stream-idle` (default 60 s) replaces the old `PLY_STREAM_IDLE`; the variable now only changes the flag's
+  `-stream-idle` (default 60 s; since M9 a session whose player sends heartbeats is stopped 30 s after its last beat or request instead) replaces the old `PLY_STREAM_IDLE`; the variable now only changes the flag's
   default (tests and scripts), the flag wins.
 - Also decided: an H.264 stream with more than 8 bits (High 10) is never copied, on any built-in profile.
 

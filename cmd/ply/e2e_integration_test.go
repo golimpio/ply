@@ -49,7 +49,7 @@ func TestEndToEnd(t *testing.T) {
 	base := t.TempDir()
 	media := filepath.Join(base, "media root")
 	data := filepath.Join(base, "data dir", "ply data")
-	tmp := filepath.Join(base, "tmp") // TMPDIR of the server: where ply-sessions goes
+	tmp := filepath.Join(base, "tmp") // TMPDIR of the server: the sessions are not made there any more
 	if err := os.MkdirAll(tmp, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -237,9 +237,19 @@ func TestEndToEnd(t *testing.T) {
 			t.Errorf("ffmpeg %d runs in process group %d, want its own", f.pid, f.pgid)
 		}
 	}
-	sessions := filepath.Join(tmp, "ply-sessions", strconv.Itoa(p.pid))
+	// The session directories are in the data directory (TMPDIR differs between a terminal and
+	// launchd), and each running ffmpeg is in the registry there.
+	sessionsRoot := filepath.Join(data, "tmp", "sessions")
+	sessions := filepath.Join(sessionsRoot, strconv.Itoa(p.pid))
 	if dirs, _ := os.ReadDir(sessions); len(dirs) != 2 {
 		t.Fatalf("positive control: %s holds %d session dirs, want 2", sessions, len(dirs))
+	}
+	if left, _ := os.ReadDir(filepath.Join(tmp, "ply-sessions")); len(left) != 0 {
+		t.Errorf("the system temp dir holds %v: sessions belong in the data dir", left)
+	}
+	registry := filepath.Join(data, "sessions")
+	if files, _ := filepath.Glob(filepath.Join(registry, "*.json")); len(files) != len(ffmpegs) {
+		t.Fatalf("positive control: the registry holds %v for %d running ffmpeg", files, len(ffmpegs))
 	}
 	if found := mentioning(t, base); len(found) < 2 { // ply itself and the ffmpeg
 		t.Fatalf("positive control: the process scan finds %v for %s", found, base)
@@ -270,14 +280,24 @@ func TestEndToEnd(t *testing.T) {
 			t.Errorf("ffmpeg %d (group %d) survived ply", f.pid, f.pgid)
 		}
 	}
-	if left := mentioning(t, base); len(left) != 0 {
+	// (The reaper that watched an ffmpeg goes with it; give a dying process a moment to be gone.)
+	var left []procInfo
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if left = mentioning(t, base); len(left) == 0 {
+			break
+		}
+	}
+	if len(left) != 0 {
 		t.Errorf("processes still reference %s: %v", base, left)
 	}
 	if _, err := os.Stat(sessions); err == nil {
 		t.Errorf("session temp dir %s still exists", sessions)
 	}
-	if rest, _ := os.ReadDir(filepath.Join(tmp, "ply-sessions")); len(rest) != 0 {
-		t.Errorf("ply-sessions still holds %d entries", len(rest))
+	if rest, _ := os.ReadDir(sessionsRoot); len(rest) != 0 {
+		t.Errorf("%s still holds %d entries", sessionsRoot, len(rest))
+	}
+	if rest, _ := os.ReadDir(registry); len(rest) != 0 {
+		t.Errorf("the session registry %s still holds %d entries after a clean shutdown", registry, len(rest))
 	}
 }
 

@@ -159,10 +159,13 @@ func (s *Server) handlePlayback(w http.ResponseWriter, r *http.Request) {
 	}
 	d := decide(e, profile, opts)
 	pb := s.playbackFrom(e, d, req.StartSec)
-	if d.Method != playback.MethodDirect {
-		if !s.attachSession(w, r, e, d, profile, req.StartSec, &pb) {
+	if d.Method == playback.MethodDirect {
+		// Counted when the file is asked for; a full house is said now, with the list.
+		if !s.checkDirect(w, r, e) {
 			return
 		}
+	} else if !s.attachSession(w, r, e, d, profile, req.StartSec, &pb) {
+		return
 	}
 	writeJSON(w, http.StatusOK, pb)
 }
@@ -230,6 +233,13 @@ func contentType(container string) string {
 // handleFile serves the original file with Range support. The path comes from
 // the database only. http.ServeContent hands the *os.File to the connection
 // so the kernel can sendfile it.
+//
+// Every GET counts as a direct play of the item by this client, for as long as
+// the limit on plays is concerned: while it is being served (a player may read
+// the whole file over one connection, for hours) and stream.DirectTTL after the
+// last one ended; a client that is not counted yet is refused with a 503 when the
+// limit is reached. A HEAD asks about the file, it does not play it: it is not
+// counted, and not refused.
 func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	e, ok := s.loadEntry(w, r)
 	if !ok {
@@ -249,6 +259,13 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	if err != nil || !fi.Mode().IsRegular() {
 		writeError(w, http.StatusNotFound, "file not found")
 		return
+	}
+	if r.Method != http.MethodHead {
+		done, ok := s.admitDirect(w, r, e)
+		if !ok {
+			return
+		}
+		defer done()
 	}
 
 	h := w.Header()

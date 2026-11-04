@@ -17,6 +17,10 @@ func signalGroup(cmd *exec.Cmd, stop bool) error {
 
 func killStaleGroup(pgid int, program string) bool { return false }
 
+func killGroup(pgid int) bool { return false }
+
+func groupOf(pid int) int { return 0 }
+
 func ownedByUs(fi os.FileInfo) bool { return true }
 
 func setNice(pid, nice int) {}

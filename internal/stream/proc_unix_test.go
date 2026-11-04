@@ -270,6 +270,12 @@ func TestKilledServerLeavesNoFFmpeg(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = helper.Wait()
+	if runtime.GOOS == "linux" {
+		// There the kernel takes ffmpeg down with its parent (Pdeathsig): the orphan this
+		// test is about cannot exist, and the next ply has nothing to find.
+		waitUntil(t, "ffmpeg to die with its parent", 5*time.Second, func() bool { return !pidAlive(pid) })
+		return
+	}
 	time.Sleep(200 * time.Millisecond)
 	if !pidAlive(pid) {
 		t.Fatalf("setup: ffmpeg (pid %d) died with its parent; nothing to clean up", pid)

@@ -90,6 +90,12 @@ type Options struct {
 	// scanner's LastScan); the zero time means not since the server started. nil
 	// reports 0 (unknown) for every folder.
 	LastScan func(root string) time.Time
+
+	// The limits on plays given with -max-streams and -max-transcodes (or the
+	// environment variables that stand in for them); 0 means not given. A limit
+	// that was given cannot be changed through the settings. ApplyLimits makes the
+	// session manager follow them, the settings and the defaults.
+	MaxStreamsFlag, MaxTranscodesFlag int
 }
 
 // Server is the HTTP handler for the whole application.
@@ -128,6 +134,8 @@ func New(o Options) *Server {
 	mux.HandleFunc("GET /api/sessions/{sid}/index.m3u8", s.handleSessionPlaylist)
 	mux.HandleFunc("GET /api/sessions/{sid}/{file}", s.handleSessionFile)
 	mux.HandleFunc("DELETE /api/sessions/{sid}", s.handleSessionDelete)
+	mux.HandleFunc("GET /api/sessions", s.handleSessions)
+	mux.HandleFunc("POST /api/sessions/{sid}/heartbeat", s.handleSessionHeartbeat)
 	mux.HandleFunc("GET /api/people", s.handlePeople)
 	mux.HandleFunc("GET /api/people/{id}", s.handlePerson)
 	mux.HandleFunc("GET /api/genres", s.handleGenres)
@@ -142,7 +150,8 @@ func New(o Options) *Server {
 	mux.HandleFunc("GET /api/metadata/review", s.handleReview)
 	mux.HandleFunc("POST /api/metadata/refresh", s.handleRefreshAll)
 	mux.HandleFunc("GET /api/settings", s.handleSettings)
-	mux.HandleFunc("PUT /api/settings", s.handlePutSettings)
+	mux.HandleFunc("PATCH /api/settings", s.handlePatchSettings)
+	mux.HandleFunc("PUT /api/settings", s.handlePatchSettings) // what the settings page sends
 	mux.HandleFunc("POST /api/scan", s.handleScanStart)
 	mux.HandleFunc("GET /api/scan", s.handleScanStatus)
 	mux.HandleFunc("GET /api/folders", s.handleFolders)
@@ -175,8 +184,13 @@ func middleware(next http.Handler, token string, hosts []string) http.Handler {
 
 // private reports whether the path is one of the endpoints that show or change
 // the folders ply serves: /api/folders and /api/fs, which lists the server's
-// directories. They are for the server's own pages and for native clients, never
-// for a page of another site, whatever the token.
+// directories; or what is being watched and by whom: /api/sessions (titles and
+// the addresses of the clients), and the two calls that act on one session,
+// DELETE /api/sessions/{sid} and POST /api/sessions/{sid}/heartbeat. They are for
+// the server's own pages and for native clients, never for a page of another
+// site, whatever the token. The playlist and the segments of a session
+// (/api/sessions/{sid}/index.m3u8, /api/sessions/{sid}/seg00001.m4s) are not:
+// Cast and AirPlay receivers fetch them from another origin.
 func private(urlPath string) bool {
 	p := path.Clean(urlPath)
 	for _, root := range []string{"/api/folders", "/api/fs"} {
@@ -184,7 +198,24 @@ func private(urlPath string) bool {
 			return true
 		}
 	}
+	if p == "/api/sessions" {
+		return true
+	}
+	if rest, ok := strings.CutPrefix(p, "/api/sessions/"); ok {
+		sid, file, hasFile := strings.Cut(rest, "/")
+		return sid != "" && (!hasFile || file == "heartbeat")
+	}
 	return false
+}
+
+// crossSite reports whether a browser marks the request as coming from a page of
+// another site (see sameSiteOnly).
+func crossSite(r *http.Request) bool {
+	if strings.EqualFold(r.Header.Get("Sec-Fetch-Site"), "cross-site") {
+		return true
+	}
+	origin := r.Header.Get("Origin")
+	return origin != "" && !sameOrigin(origin, r)
 }
 
 // sameSiteOnly answers 403 to a request for a private endpoint that a browser

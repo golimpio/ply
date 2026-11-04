@@ -99,6 +99,8 @@ func (s *Session) awaitPlan(ctx context.Context) error {
 	if g == nil {
 		return nil
 	}
+	s.busy.Add(1) // a request waiting for the plan: the session is not idle (see idle)
+	defer s.busy.Add(-1)
 	poll := time.NewTicker(25 * time.Millisecond)
 	defer poll.Stop()
 	for {

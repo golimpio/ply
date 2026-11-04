@@ -268,9 +268,13 @@ func TestSessionLimit(t *testing.T) {
 	e.startSession("", `{}`)
 	e.startSession("", `{}`)
 	rec := e.do("POST", fmt.Sprintf("/api/items/%d/playback", e.mkv), nil, "{}")
-	wantJSONError(t, rec, 503)
-	if rec.Header().Get("Retry-After") == "" {
-		t.Error("503 without Retry-After")
+	wantStatus(t, rec, 503)
+	if rec.Header().Get("Retry-After") != "5" {
+		t.Errorf("503 with Retry-After %q, want 5", rec.Header().Get("Retry-After"))
+	}
+	// The error is still {"error": ...}, with what is using the limit beside it (plays_test.go).
+	if lr := decode[LimitReached](t, rec); lr.Error != "2 of 2 plays in use" || len(lr.Playing) != 2 {
+		t.Errorf("503 body = %s", rec.Body)
 	}
 }
 

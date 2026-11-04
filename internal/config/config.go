@@ -40,8 +40,13 @@ type Config struct {
 	ScanInterval time.Duration
 	FFprobe      string
 	FFmpeg       string
-	StreamIdle   time.Duration // a streaming session without requests this long is stopped
+	StreamIdle   time.Duration // a streaming session without a segment request or a heartbeat this long is stopped
 	HWAccel      string        // auto, none, or a hardware encoder family (see hwaccel.ValidMode)
+
+	// The limits on plays: -max-streams and -max-transcodes, or their environment
+	// variables. 0 means not given, and then the settings table, then the default,
+	// decide (internal/api: playLimits).
+	MaxStreams, MaxTranscodes int
 
 	Watch bool // -watch: pick up changes in the media folders within seconds
 
@@ -69,6 +74,8 @@ const (
 	TMDBURLEnv           = "PLY_TMDB_URL"
 	TMDBImageURLEnv      = "PLY_TMDB_IMAGE_URL"
 	AllowHostsEnv        = "PLY_ALLOW_HOSTS"
+	MaxStreamsEnv        = "PLY_MAX_STREAMS"
+	MaxTranscodesEnv     = "PLY_MAX_TRANSCODES"
 	DefaultMetadataLang  = "en-US"
 	DefaultMetadataEvery = 24 * time.Hour
 )
@@ -104,6 +111,12 @@ func envDuration(name string, def time.Duration) (time.Duration, error) {
 	return d, nil
 }
 
+// Bounds of the limits on plays, here and in the settings API.
+const (
+	MaxStreamsCeiling    = 32
+	MaxTranscodesCeiling = 16
+)
+
 func envString(name, def string) string {
 	if v := os.Getenv(name); v != "" {
 		return v
@@ -112,7 +125,9 @@ func envString(name, def string) string {
 }
 
 // DefaultStreamIdle is how long a streaming session may go without a request
-// before its ffmpeg is killed.
+// before its ffmpeg is killed. A session whose player sends heartbeats (every
+// 10 s, paused or not) is held to a shorter time, stream.DefaultBeatTimeout, since
+// it says plainly when it has gone.
 const DefaultStreamIdle = 60 * time.Second
 
 // StreamIdleEnv, when set to a Go duration, replaces the default of
@@ -213,7 +228,9 @@ func Parse(args []string, out io.Writer) (Config, error) {
 	fs.DurationVar(&c.ScanInterval, "scan-interval", 15*time.Minute, "periodic rescan interval (0 disables; a scan always runs at startup)")
 	fs.StringVar(&c.FFprobe, "ffprobe", "ffprobe", "ffprobe binary")
 	fs.StringVar(&c.FFmpeg, "ffmpeg", "ffmpeg", "ffmpeg binary")
-	fs.DurationVar(&c.StreamIdle, "stream-idle", defaultStreamIdle(), "stop a streaming session after this long without requests (env "+StreamIdleEnv+" sets the default)")
+	fs.DurationVar(&c.StreamIdle, "stream-idle", defaultStreamIdle(), "stop a streaming session after this long without requests, for a player that does not send heartbeats; one that does is stopped 30 s after its last beat or request (env "+StreamIdleEnv+" sets the default)")
+	fs.IntVar(&c.MaxStreams, "max-streams", 0, "most plays at once, direct plays included, 1 to 32 (default 4, or what Settings says; env "+MaxStreamsEnv+"). Given here, Settings cannot change it")
+	fs.IntVar(&c.MaxTranscodes, "max-transcodes", 0, "most transcodes at once, 1 to 16 (default 1 with a software encoder, 3 with a hardware one, or what Settings says; env "+MaxTranscodesEnv+"). Given here, Settings cannot change it")
 	fs.StringVar(&c.HWAccel, "hwaccel", "auto", "video encoder: auto (probe the GPU), none (libx264), videotoolbox, vaapi, qsv or nvenc")
 
 	envMetadata, err := envBool(MetadataEnv, true)
@@ -235,6 +252,9 @@ func Parse(args []string, out io.Writer) (Config, error) {
 		return Config{}, err
 	}
 	c.TMDBKeyEnv = os.Getenv(TMDBKeyEnv)
+	if err := c.parseLimits(fs); err != nil {
+		return Config{}, err
+	}
 	if len(c.AllowHosts) == 0 {
 		for _, h := range strings.Split(os.Getenv(AllowHostsEnv), ",") {
 			if h = strings.TrimSpace(h); h != "" {
@@ -274,6 +294,41 @@ func Parse(args []string, out io.Writer) (Config, error) {
 		return Config{}, err
 	}
 	return c, nil
+}
+
+// parseLimits settles -max-streams and -max-transcodes: the flag, else the
+// environment, else 0 (not given). A value that was given must be in range: a
+// limit must not turn into something else silently.
+func (c *Config) parseLimits(fs *flag.FlagSet) error {
+	given := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
+	for _, l := range []struct {
+		flag, env string
+		into      *int
+		ceiling   int
+	}{
+		{"max-streams", MaxStreamsEnv, &c.MaxStreams, MaxStreamsCeiling},
+		{"max-transcodes", MaxTranscodesEnv, &c.MaxTranscodes, MaxTranscodesCeiling},
+	} {
+		v, label := *l.into, fmt.Sprintf("-%s %d", l.flag, *l.into)
+		if !given[l.flag] {
+			raw := strings.TrimSpace(os.Getenv(l.env))
+			if raw == "" {
+				*l.into = 0
+				continue
+			}
+			n, err := strconv.Atoi(raw)
+			if err != nil {
+				return fmt.Errorf("%s=%q: want a whole number from 1 to %d", l.env, raw, l.ceiling)
+			}
+			v, label = n, fmt.Sprintf("%s=%d", l.env, n)
+		}
+		if v < 1 || v > l.ceiling {
+			return fmt.Errorf("%s: want a whole number from 1 to %d", label, l.ceiling)
+		}
+		*l.into = v
+	}
+	return nil
 }
 
 // usage prints the flags that are not hidden, as the flag package would.

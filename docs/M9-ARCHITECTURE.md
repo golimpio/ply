@@ -126,10 +126,20 @@ Design:
 2. Linux: `Pdeathsig = SIGKILL`, with the fork on a `LockOSThread` goroutine; `KillMode=control-group` in the unit.
 3. macOS: a `ply --reap <pgid> <ppid>` helper (same binary) that kqueue-watches ply (`EVFILT_PROC`/`NOTE_EXIT`) and
    kills the group when ply dies.
-4. Heartbeat: `POST /api/sessions/{sid}/keepalive` every 20 s while the tab lives (`{paused, position}`). The idle
-   rule becomes "no segment request and no heartbeat for 45-60 s". Pausing no longer kills; DELETE stays an
-   optimisation.
-5. A leak check in the manager's housekeeping tick: our pgids vs the running ffmpegs under our temp root.
+4. Heartbeat: `POST /api/sessions/{sid}/heartbeat` every 10 s while the tab lives (`{positionSec, paused}`; built).
+   The idle rule: a session that has had a heartbeat is stopped 30 s after its last beat or
+   segment request; one that never beat keeps `-stream-idle` (60 s), so a player without heartbeats (hls.js with its
+   40 s buffer, AVPlayer) is safe. A segment request being waited for is not idle. Pausing no longer kills; DELETE stays an optimisation.
+
+   **Built (steps 1 and 3 of the build order):** the registry, the startup sweep, the macOS reaper, `Pdeathsig`, the
+   leak check, the caps and `GET /api/sessions` are in; see `docs/DESIGN.md` (Streaming) for the behaviour and
+   `internal/stream/{play,registry,reap_darwin,proc_linux}.go` for the code. Found while testing: the kernel ends a
+   *stopped* orphaned process group with SIGHUP, so only a running ffmpeg outlives a killed ply; the reaper and the
+   registry matter for those.
+5. A leak check in the manager's housekeeping (every 5 s): the registry files vs the sessions; a registered group (pid
+   alive, started when the file says) that belongs to no session is killed. Not built, from the review, for later: a
+   maximum time for a paused session; a flag for the heartbeat window; the client address behind a reverse proxy
+   (`X-Forwarded-For`); counting a GPU session that fell back to software as a software transcode.
 6. Tests:
    - kill -9 a subprocess ply mid-transcode (plain, and SIGSTOPped), then start a new ply with a different TMPDIR:
      the group is dead within 2 s;

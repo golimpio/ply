@@ -48,6 +48,8 @@ func (s *Server) attachSession(w http.ResponseWriter, r *http.Request, e store.E
 		AudioIndex:  d.AudioIndex,
 		AudioCopy:   d.AudioAction == playback.ActionCopy,
 		StartSec:    startSec,
+		Title:       playTitle(e),
+		Client:      clientLabel(r),
 	}
 	if a, ok := playback.AudioStream(e.Streams, d.AudioIndex); ok && d.AudioIndex >= 0 {
 		req.AudioCodec = a.Codec
@@ -59,10 +61,10 @@ func (s *Server) attachSession(w http.ResponseWriter, r *http.Request, e store.E
 	}
 
 	sess, err := s.Streams.Create(r.Context(), req)
+	var limit *stream.LimitError
 	switch {
-	case errors.Is(err, stream.ErrTooManySessions):
-		w.Header().Set("Retry-After", "5")
-		writeError(w, http.StatusServiceUnavailable, "too many active streams")
+	case errors.As(err, &limit):
+		writeLimit(w, r, limit)
 		return false
 	case r.Context().Err() != nil:
 		return false // the client gave up (the keyframe scan may take a while)

@@ -318,6 +318,20 @@ func Static(info Info) *Detector {
 	return d
 }
 
+// Ready reports whether the probe has finished, that is, whether Info would
+// answer without waiting. A nil Detector is ready.
+func (d *Detector) Ready() bool {
+	if d == nil {
+		return true
+	}
+	select {
+	case <-d.done:
+		return true
+	default:
+		return false
+	}
+}
+
 // Info waits for the probe to finish and returns its result. A nil Detector
 // means software encoding with no known filters.
 func (d *Detector) Info() Info {

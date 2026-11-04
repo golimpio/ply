@@ -700,12 +700,16 @@ func (s *Server) handleMetadataSearch(w http.ResponseWriter, r *http.Request) {
 // ---- settings ----
 
 func (s *Server) settingsView(ctx context.Context) SettingsView {
-	if s.Settings == nil {
-		return SettingsView{Language: metadata.DefaultLanguage}
+	v := SettingsView{Language: metadata.DefaultLanguage}
+	if s.Settings != nil {
+		r := s.Settings.Resolve(ctx)
+		v = SettingsView{TMDBKeySet: r.KeySet(), TMDBKeySource: string(r.KeySource), MetadataEnabled: r.Enabled,
+			MetadataForcedOff: r.ForcedOff, Language: r.Language}
 	}
-	r := s.Settings.Resolve(ctx)
-	return SettingsView{TMDBKeySet: r.KeySet(), TMDBKeySource: string(r.KeySource), MetadataEnabled: r.Enabled,
-		MetadataForcedOff: r.ForcedOff, Language: r.Language}
+	l := s.playLimits(ctx)
+	v.MaxStreams, v.MaxStreamsSource = l.streams, l.streamsSource
+	v.MaxTranscodes, v.MaxTranscodesSource = l.transcodes, l.transcodesSource
+	return v
 }
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
@@ -716,36 +720,61 @@ type settingsRequest struct {
 	TMDBKey         *string `json:"tmdbKey"`
 	MetadataEnabled *bool   `json:"metadataEnabled"`
 	Language        *string `json:"language"`
+	MaxStreams      *int    `json:"maxStreams"`
+	MaxTranscodes   *int    `json:"maxTranscodes"`
 }
 
-func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
-	if s.Settings == nil {
-		writeError(w, http.StatusServiceUnavailable, "settings are not available")
-		return
-	}
+// handlePatchSettings is PATCH (and PUT) /api/settings: it changes the settings
+// that are in the body and leaves the others. Everything that can be checked
+// without side effects is, before anything is stored (the limits: range and
+// whether a flag fixed them; the shape of the body), so that a request that is
+// wrong in any of them changes nothing. What remains is the key, which only TMDB
+// can refuse, and that is why the metadata settings are stored first and the
+// limits second: a key TMDB refuses leaves the limits as they were, as a user
+// would expect, and the only way to have half of a request stored is for the
+// database to fail between the two writes (a 500; the metadata part stays). The
+// two cannot be one transaction: Settings.Update checks the key over the network.
+func (s *Server) handlePatchSettings(w http.ResponseWriter, r *http.Request) {
 	var req settingsRequest
 	if !decodeBody(w, r, &req) {
 		return
 	}
 	if req == (settingsRequest{}) {
-		writeError(w, http.StatusBadRequest, "give at least one of tmdbKey, metadataEnabled, language")
+		writeError(w, http.StatusBadRequest, "give at least one of tmdbKey, metadataEnabled, language, maxStreams, maxTranscodes")
 		return
 	}
-	err := s.Settings.Update(r.Context(), metadata.Update{Key: req.TMDBKey, Enabled: req.MetadataEnabled, Language: req.Language})
-	switch {
-	case err == nil:
-	case errors.Is(err, metadata.ErrInvalidSetting), errors.Is(err, metadata.ErrKeyRejected):
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	case errors.Is(err, metadata.ErrUnreachable):
-		writeError(w, http.StatusBadGateway, err.Error())
-		return
-	default:
-		s.internalError(w, r, err)
+	metadataChange := req.TMDBKey != nil || req.MetadataEnabled != nil || req.Language != nil
+	if metadataChange && s.Settings == nil {
+		writeError(w, http.StatusServiceUnavailable, "settings are not available")
 		return
 	}
-	if s.Metadata != nil {
-		s.Metadata.Reload() // a new key or language takes effect at once
+	if !s.checkLimitChange(r.Context(), w, req) {
+		return
+	}
+	if metadataChange {
+		err := s.Settings.Update(r.Context(), metadata.Update{Key: req.TMDBKey, Enabled: req.MetadataEnabled, Language: req.Language})
+		switch {
+		case err == nil:
+		case errors.Is(err, metadata.ErrInvalidSetting), errors.Is(err, metadata.ErrKeyRejected):
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		case errors.Is(err, metadata.ErrUnreachable):
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		default:
+			s.internalError(w, r, err)
+			return
+		}
+		if s.Metadata != nil {
+			s.Metadata.Reload() // a new key or language takes effect at once
+		}
+	}
+	if req.MaxStreams != nil || req.MaxTranscodes != nil {
+		if err := s.storeLimits(r.Context(), req); err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		s.ApplyLimits(r.Context())
 	}
 	view := s.settingsView(r.Context())
 	if req.TMDBKey != nil && strings.TrimSpace(*req.TMDBKey) != "" {

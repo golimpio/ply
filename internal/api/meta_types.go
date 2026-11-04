@@ -230,6 +230,13 @@ type SettingsView struct {
 	MetadataEnabled   bool   `json:"metadataEnabled"`
 	MetadataForcedOff bool   `json:"metadataForcedOff"` // -metadata=false: the switch cannot be turned on here
 	Language          string `json:"language"`
+	// The limits on plays (M9): all plays together, direct ones included, and the
+	// transcodes among them. The source is flag (the command line or the
+	// environment: cannot be changed here), settings or default.
+	MaxStreams          int    `json:"maxStreams"`
+	MaxTranscodes       int    `json:"maxTranscodes"`
+	MaxStreamsSource    string `json:"maxStreamsSource"`
+	MaxTranscodesSource string `json:"maxTranscodesSource"`
 	// TMDBKeyChecked is in the answer to a PUT that stored a key: whether the key was
 	// checked against TMDB. It was not with -metadata=false, when nothing may be sent.
 	TMDBKeyChecked *bool `json:"tmdbKeyChecked,omitempty"`

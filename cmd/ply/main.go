@@ -40,6 +40,11 @@ var version = "0.1.0"
 const scanNice = 10
 
 func main() {
+	// ply --reap <pgid> <ppid>: the helper that ply starts, on macOS, for every ffmpeg
+	// it runs (see stream.ReapMain). It takes no flags and starts no server.
+	if len(os.Args) > 1 && os.Args[1] == "--reap" {
+		os.Exit(stream.ReapMain(os.Args[2:]))
+	}
 	if err := run(); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return
@@ -86,9 +91,17 @@ func run() error {
 	// Probing the GPU takes a moment: do it in the background, playback
 	// requests wait for the result if they need it.
 	hw := hwaccel.Start(ctx, hwaccel.Options{FFmpeg: ffmpegBin, Mode: cfg.HWAccel, Logger: log})
+	// The reaper that guards each ffmpeg is this same program (macOS; see stream.Options.Reaper).
+	self, err := os.Executable()
+	if err != nil {
+		log.Warn("cannot find this program; ffmpeg will not be guarded by a reaper", "err", err)
+		self = ""
+	}
 	streams, err := stream.NewManager(stream.Options{
 		FFmpeg:      ffmpegBin,
 		FFprobe:     cfg.FFprobe,
+		Data:        cfg.Data,
+		Reaper:      self,
 		IdleTimeout: cfg.StreamIdle,
 		Cache:       st,
 		Logger:      log,
@@ -238,9 +251,12 @@ func run() error {
 		AllowedHosts: cfg.AllowHosts,
 		Logger:       log,
 		Streams:      streams,
-		HW:           hw,
-		Art:          artGen,
-		Subs:         subGen,
+
+		MaxStreamsFlag:    cfg.MaxStreams,
+		MaxTranscodesFlag: cfg.MaxTranscodes,
+		HW:                hw,
+		Art:               artGen,
+		Subs:              subGen,
 
 		Metadata: worker,
 		Settings: settings,
@@ -250,6 +266,9 @@ func run() error {
 		apiOpts.Watcher = watcher // a nil *Watcher in the interface would not be nil
 	}
 	handler := api.New(apiOpts)
+	// The limits on plays: the flags, then the settings, then the defaults; the default
+	// number of transcodes needs the answer of the GPU probe, which may still be running.
+	handler.ApplyLimitsWhenReady(ctx)
 	go afterScans(ctx, scanner, st, artGen, subGen, worker, log)
 	srv := &http.Server{
 		Handler:           handler,

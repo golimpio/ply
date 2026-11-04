@@ -156,7 +156,9 @@ no `Origin`. Reads keep CORS `*` (media, Cast); a preflight is answered as above
 | POST | `/api/scan` | 202 `{started:true}` or 409 if running |
 | GET | `/api/scan` | `{running, lastStarted, lastFinished, lastError, itemCount, watching:[{root, watching, dirs, error?}]}` (`watching` is `[]` when `-watch=false`) |
 | GET | `/api/sessions/{sid}/index.m3u8`, `/api/sessions/{sid}/{file}` | (M3) HLS playlist / init.mp4 / segments |
-| DELETE | `/api/sessions/{sid}` | (M3) stop session |
+| DELETE | `/api/sessions/{sid}` | (M3) stop session; 204 or 404. For a *direct play* id (below) it only drops the play from the count: ply cannot interrupt a client that reads the file, and its next range request counts again if there is room (else 503) |
+| GET | `/api/sessions` | (M9) **private** (like `/api/folders`, `/api/fs`; so are DELETE and the heartbeat below: no CORS headers, a cross-site `Origin` or `Sec-Fetch-Site` is refused with 403; the playlist and segments stay open for Cast) everything playing, oldest first: `[{id, sessionId, itemId, title, kind: transcode\|remux\|direct, client, startedAt, lastSeenAt, positionSec, paused}]` (`id` = `sessionId`; a direct play's is `d-…`; `client` = `"<ip> · <browser>"`; `positionSec` is the player's last heartbeat, else the start of the last segment it asked for) |
+| POST | `/api/sessions/{sid}/heartbeat` | (M9) `{positionSec?, paused?}` (empty body ok) → 204, or 404 if the session is gone. From its first heartbeat a session is stopped 30 s after its last beat or segment request (never later than `-stream-idle`); the player beats every 10 s, paused or not. A session that never beat keeps the old rule: `-stream-idle` (60 s) without a request. A direct play id can be beaten too |
 | GET | `/api/items/{id}/subtitles/{key}.vtt` | (M5) key = stream idx or `ext<N>` for sidecar; WebVTT |
 | PUT | `/api/items/{id}/progress` | (M5) `{positionSec, durationSec}`; watched when ≥ 90% |
 | GET | `/api/continue` | (M5) in-progress items, most recent first |
@@ -182,7 +184,7 @@ bad input → 400, TMDB unreachable → 502, lookups off (no key / `-metadata=fa
 | GET | `/api/metadata/search?kind=movie\|series&q=&year=` | `[{tmdbId, title, originalTitle?, year, overview?, poster?, score}]` best first |
 | GET | `/api/metadata/status` | `{enabled, keySet, running, pending, unmatched, needsReview, lastRefresh, lastError}` |
 | GET | `/api/metadata/review` | `[{kind, itemId?, show?, title, year, matchState, needsReview, score, candidate?}]` unmatched first |
-| GET, PUT | `/api/settings` | `{tmdbKeySet, tmdbKeySource: flag\|env\|settings\|default\|"", metadataEnabled, metadataForcedOff, language}`; PUT `{tmdbKey?, metadataEnabled?, language?}`: a new key is checked against TMDB (400 refused, 502 unreachable), `""` removes the stored key; **the key is never returned or logged** |
+| GET, PATCH (PUT too) | `/api/settings` | `{tmdbKeySet, tmdbKeySource: flag\|env\|settings\|default\|"", metadataEnabled, metadataForcedOff, language, maxStreams, maxTranscodes, maxStreamsSource, maxTranscodesSource: flag\|settings\|default}`; PATCH `{tmdbKey?, metadataEnabled?, language?, maxStreams?: 1..32, maxTranscodes?: 1..16}`: a new key is checked against TMDB (400 refused, 502 unreachable), `""` removes the stored key; a limit out of range → 400, one given by `-max-streams`/`-max-transcodes` (or `PLY_MAX_*`) → 409; everything is checked before anything is stored; limits apply at once; **the key is never returned or logged** |
 | GET | `/api/images/tmdb/{size}/{file}` | size ∈ `w92 w185 w342 w500 w780 w1280 original`, file `^[A-Za-z0-9_-]+\.(jpg\|png\|svg)$` else 400; downloaded once into `<data>/images`, `Cache-Control: public, max-age=31536000, immutable`; not available → 404 |
 | GET | `/api/images/local/{item\|series}/{id}/{poster\|backdrop\|thumb}` | sidecar art (path from the DB, must be a regular file whose bytes sniff as an image) or a cover extracted from the media file; `no-cache` |
 
@@ -212,7 +214,31 @@ Listen first (supports `:0`), then advertise `_ply._tcp` with the real port, TXT
 `name=<name>`. Log LAN IPv4 URLs at startup (never only localhost). Shutdown un-registers.
 
 ## Streaming (M3/M4)
-- `POST /playback` with method remux or transcode creates a session: temp dir under `os.TempDir()/ply-sessions/<pid>/<sid>`.
+- `POST /playback` with method remux or transcode creates a session: temp dir under `<data>/tmp/sessions/<pid>/<sid>`
+  (it was `os.TempDir()/ply-sessions`; that is still swept at start for one release).
+- **Limits on plays (M9)**: `-max-streams` (default 4, `PLY_MAX_STREAMS`) caps all plays, direct ones included;
+  `-max-transcodes` (default 1 with a software encoder, 3 with a hardware one, `PLY_MAX_TRANSCODES`) caps the
+  transcodes among them. Precedence flag > settings table (`playback.max_streams`, `playback.max_transcodes`) >
+  default; `Manager.SetLimits` applies a change live. A session being stopped does not count, so the player's own
+  stop-then-start never meets a 503 (a session that takes more than 10 s to stop does count again, so that an ffmpeg
+  that will not die cannot pile up unseen). A direct play is `(item, client IP, User-Agent)`: counted for as long as a
+  `/file` GET is being served (a player may read the whole film over one connection) and for 30 s after the last one
+  ended; a client that comes back to the item within 10 min of being forgotten is admitted even at the cap (it is
+  carrying on, not starting another play). A HEAD is neither counted nor refused. At the cap: 503, `Retry-After: 5`, `{error: "4 of 4 plays in use"\|
+  "1 of 1 transcodes in use", limit: streams\|transcodes, max, inUse, playing: [<GET /api/sessions entries>]}`. Nothing
+  is stopped to make room.
+- **Orphan-proof (M9)**: every running ffmpeg is recorded in `<data>/sessions/<sid>.json` (pid, process group, process
+  start time, item, session dir; written before `Create` returns, removed when ffmpeg has been waited for). At start a
+  new ply kills the groups the files name whose pid is alive *and* started when the file says (pid reuse is safe),
+  SIGCONT then SIGKILL, and removes their directories. A file is only believed if its pid is its pgid (ffmpeg leads
+  its group), and a group is never killed if it is ply's own; the registry directory is checked like the temp root
+  (a real directory of ours, mode 0700). Every 5 s the manager's housekeeping compares the registry with its sessions
+  and does the same for any registered group that belongs to none; it does not look for ffmpeg that is not in the
+  registry. On macOS ply starts a detached reaper per ffmpeg group, `<data>/ply-reaper --reap <pgid> <ppid>` (a link
+  to the same binary, so that `killall ply` does not take it too), that kqueue-watches ply and kills the group when
+  it dies, at once if ply is already gone when it starts; ply ends it when the ffmpeg ends. On Linux ffmpeg has
+  `Pdeathsig = SIGKILL`, with the fork on a locked OS thread. (A *stopped* orphaned group is also ended by the kernel,
+  which sends it SIGHUP: only a running one outlives ply.)
 - **Server-generated complete VOD playlist** (`#EXT-X-PLAYLIST-TYPE:VOD`, `#EXT-X-ENDLIST`, exact EXTINF) is returned
   immediately so players can seek anywhere. Segment boundaries come from a keyframe list, never from ffmpeg's own
   segmenter (which cuts differently after a restart):
@@ -227,8 +253,10 @@ Listen first (supports `:0`), then advertise `_ply._tcp` with the real port, TXT
   init segment is the same bytes across runs. See `docs/NOTES.md` for the ffmpeg details.
 - **Seek** = a request outside [current run start, encoded + ~18 s] kills ffmpeg and restarts it at that fragment with
   fast input seek (`-ss` before `-i`; a keyframe-aware bias for copy, exact for a transcode).
-  **Throttle**: more than 20 segments ahead of the player, SIGSTOP; SIGCONT below 10. Idle 60 s (`-stream-idle`) kills
-  the session; shutdown kills every process group and removes the temp dirs.
+  **Throttle**: more than 20 segments ahead of the player, SIGSTOP; SIGCONT below 10. A session is stopped
+  `-stream-idle` (60 s) after its last request, or, once its player has sent a heartbeat, 30 s after its last beat
+  or request (a request being waited for counts as activity); shutdown kills every process group and removes the temp dirs.
+  A 503 at a limit lists what is playing only to the server's own pages, not to a cross-site request.
 - Playlist URL `/api/sessions/<sid>/index.m3u8`; with a token configured every URI in the playlist carries `?token=`.
   `Playback.startSec` echoes the requested resume position; stream time 0 = file time 0.
 - ffmpeg binary: jellyfin-ffmpeg if installed, else PATH; `-ffmpeg`/`-ffprobe` override. Always a subprocess.
@@ -255,7 +283,7 @@ Listen first (supports `:0`), then advertise `_ply._tcp` with the real port, TXT
    (burn-in, tone-map) and say so in reasons.
 4. Keyframe-index VOD playlists for remux (see Streaming).
 5. Seek = kill + restart with fast input seek; serve only complete segments.
-6. Throttle via SIGSTOP/SIGCONT; idle kill 60 s; ffmpeg in its own process group; shutdown kills all and removes
+6. Throttle via SIGSTOP/SIGCONT; idle kill 60 s without a request (30 s after the last beat for a player that sends heartbeats); ffmpeg in its own process group; shutdown kills all and removes
    temp dirs; tests assert no ffmpeg children remain.
 7. Thumbnails/trickplay: later, keyframe-only, nice'd.
 8. Scans: incremental (size+mtime), bounded probe pool, ffprobe/ffmpeg for scans run at reduced priority

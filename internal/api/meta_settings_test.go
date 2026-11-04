@@ -72,7 +72,8 @@ func TestSettingsDefaultsAndShape(t *testing.T) {
 	rec := se.get("/api/settings")
 	wantStatus(t, rec, 200)
 	raw := decode[map[string]any](t, rec)
-	want := map[string]any{"tmdbKeySet": false, "tmdbKeySource": "", "metadataEnabled": true, "metadataForcedOff": false, "language": "en-US"}
+	want := map[string]any{"tmdbKeySet": false, "tmdbKeySource": "", "metadataEnabled": true, "metadataForcedOff": false, "language": "en-US",
+		"maxStreams": 4.0, "maxTranscodes": 1.0, "maxStreamsSource": "default", "maxTranscodesSource": "default"}
 	for k, v := range want {
 		if raw[k] != v {
 			t.Errorf("settings[%s] = %v, want %v", k, raw[k], v)

@@ -48,15 +48,45 @@ type KeyframeCache interface {
 
 // Options configures a Manager. Zero values pick the defaults in brackets.
 type Options struct {
-	FFmpeg      string        // ["ffmpeg"]
-	FFprobe     string        // ["ffprobe"]
-	TempRoot    string        // [os.TempDir()/ply-sessions]
-	MaxSessions int           // [4]
-	IdleTimeout time.Duration // no request for this long ends a session [60s]
+	FFmpeg  string // ["ffmpeg"]
+	FFprobe string // ["ffprobe"]
+	// Data is ply's data directory. With it, the session directories are made in
+	// <Data>/tmp/sessions (not in the system's temp directory, which differs between
+	// a terminal and launchd, and is cleaned by the system), and the registry of
+	// running ffmpeg process groups is kept in <Data>/sessions. Anything that an
+	// earlier version left in os.TempDir()/ply-sessions is cleaned up too.
+	Data string
+	// TempRoot is where the session directories are made [Data/tmp/sessions, or
+	// os.TempDir()/ply-sessions].
+	TempRoot string
+	// RegistryDir is where the registry files are kept [Data/sessions; without
+	// Data, there is no registry].
+	RegistryDir string
+	// Reaper is the program that runs ReapMain when started with "--reap" (ply
+	// itself): where there is no parent-death signal (macOS), one is started for
+	// every ffmpeg group, and kills the group if ply dies. Empty starts none.
+	Reaper string
+	// MaxSessions is the most plays at once, direct plays included [4]; and
+	// MaxTranscodes the most of them that transcode [1]. SetLimits changes them
+	// while running.
+	MaxSessions   int
+	MaxTranscodes int
+	// IdleTimeout ends a session that has had no request for a segment (or the
+	// playlist) for this long [60s]. That is for a player that sends no heartbeats
+	// (it may have 40 s of buffer and need nothing for as long). One that has sent a
+	// heartbeat says when it is gone, and BeatTimeout is its time.
+	IdleTimeout time.Duration
+	// BeatTimeout ends a session whose player has sent at least one heartbeat, that
+	// long after its last heartbeat or request [30s; never more than IdleTimeout].
+	BeatTimeout time.Duration
 	SegmentSec  float64       // minimum playlist segment duration [6]
 	Cache       KeyframeCache // optional
 	ProbeNice   int           // nice value of the keyframe scan [10]
 	Logger      *slog.Logger
+	// Clock is the time source [time.Now]; a test's.
+	Clock func() time.Time
+	// LeakCheck is how often the registry is compared with the sessions [5s].
+	LeakCheck time.Duration
 
 	// Throttling, in segments between ffmpeg's output and the player: pause
 	// above ThrottleHigh [20], resume below ThrottleLow [10].
@@ -80,14 +110,34 @@ func (o *Options) defaults() {
 	if o.FFprobe == "" {
 		o.FFprobe = "ffprobe"
 	}
+	if o.Data != "" {
+		if o.TempRoot == "" {
+			o.TempRoot = filepath.Join(o.Data, "tmp", "sessions")
+		}
+		if o.RegistryDir == "" {
+			o.RegistryDir = filepath.Join(o.Data, "sessions")
+		}
+	}
 	if o.TempRoot == "" {
 		o.TempRoot = filepath.Join(os.TempDir(), "ply-sessions")
 	}
 	if o.MaxSessions <= 0 {
-		o.MaxSessions = 4
+		o.MaxSessions = DefaultMaxStreams
+	}
+	if o.MaxTranscodes <= 0 {
+		o.MaxTranscodes = DefaultMaxTranscodes
 	}
 	if o.IdleTimeout <= 0 {
 		o.IdleTimeout = 60 * time.Second
+	}
+	if o.BeatTimeout <= 0 {
+		o.BeatTimeout = DefaultBeatTimeout
+	}
+	if o.Clock == nil {
+		o.Clock = time.Now
+	}
+	if o.LeakCheck <= 0 {
+		o.LeakCheck = 5 * time.Second
 	}
 	if o.SegmentSec <= 0 {
 		o.SegmentSec = DefaultSegmentSec
@@ -130,6 +180,10 @@ type Request struct {
 	AudioCodec  string
 	AudioCopy   bool
 	StartSec    float64
+	// Title and Client are for the listing of what is playing (Playing): what to
+	// call the item and who asked for it. They have no other use here.
+	Title  string
+	Client string
 	// Video overrides the default stream copy: a transcode. Its segments are
 	// equal, SegmentSec each, and need no keyframe index.
 	Video *VideoSpec
@@ -153,9 +207,21 @@ type Manager struct {
 	mu       sync.Mutex
 	sessions map[string]*Session
 	reserved int
-	stopping int // sessions taken out of sessions whose ffmpeg and files are not gone yet
-	closed   bool
-	wg       sync.WaitGroup // session monitors
+	// Sessions taken out of sessions whose ffmpeg and files are not gone yet. They
+	// count in Count, and against the limits only once they have been stopping for
+	// more than StopGrace.
+	stopping           map[string]stopInfo
+	reservedTranscodes int
+	maxStreams         int
+	maxTranscodes      int
+	direct             map[DirectKey]*directPlay
+	recentDirect       map[DirectKey]time.Time // direct plays that stopped being counted, by when they were last seen
+	closed             bool
+	wg                 sync.WaitGroup // session monitors and the housekeeping
+
+	reg       *registry     // nil without Options.RegistryDir
+	reaperExe string        // what is run as the reaper (see reaperLink); empty for none
+	stopGate  chan struct{} // a test's: Session.stop waits for it to be closed
 
 	kfMu    sync.Mutex
 	kfCalls map[string]*kfCall
@@ -174,24 +240,120 @@ type kfCall struct {
 }
 
 // NewManager prepares the temp area, removing what crashed predecessors left
-// there (including any ffmpeg they left running), and returns an idle
-// manager. It fails if the temp root is not a directory of ours.
+// there (including any ffmpeg they left running, found through the registry in
+// the data directory and, for the sessions of an earlier version, through the
+// pid files in the temp directories), and returns an idle manager. It fails if
+// the temp root is not a directory of ours.
 func NewManager(o Options) (*Manager, error) {
 	o.defaults()
 	if err := prepareRoot(o.TempRoot); err != nil {
 		return nil, fmt.Errorf("stream temp dir: %w", err)
 	}
-	removeStale(o.TempRoot, o.Logger)
+	reg, err := newRegistry(o.RegistryDir, o.Logger)
+	if err != nil {
+		return nil, fmt.Errorf("session registry: %w", err)
+	}
+	reg.sweep(o.TempRoot)
+	// With a registry, what ran in this root is in it, and has been dealt with; the
+	// pid files are for the roots that had none.
+	removeStale(o.TempRoot, o.Logger, reg == nil)
+	if o.Data != "" {
+		// Where the sessions were before they moved into the data directory. One
+		// release of this; the directory is not made, and a symlink is not followed.
+		if legacy := filepath.Join(os.TempDir(), "ply-sessions"); legacy != o.TempRoot && legacyRootOK(legacy) {
+			removeStale(legacy, o.Logger, true)
+		}
+	}
 	dir := filepath.Join(o.TempRoot, strconv.Itoa(os.Getpid()))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("stream temp dir: %w", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Manager{
+	m := &Manager{
 		o: o, log: o.Logger, dir: dir, ctx: ctx, cancel: cancel,
-		sessions: map[string]*Session{}, kfCalls: map[string]*kfCall{},
-		kfDistrust: map[distrustKey]time.Time{}, kfLocks: map[string]*pathLock{}, clock: time.Now,
-	}, nil
+		sessions: map[string]*Session{}, stopping: map[string]stopInfo{}, direct: map[DirectKey]*directPlay{},
+		recentDirect: map[DirectKey]time.Time{},
+		maxStreams:   o.MaxSessions, maxTranscodes: o.MaxTranscodes, reg: reg,
+		kfCalls: map[string]*kfCall{}, kfDistrust: map[distrustKey]time.Time{}, kfLocks: map[string]*pathLock{}, clock: o.Clock,
+	}
+	if reaperWanted && o.Reaper != "" {
+		m.reaperExe = reaperLink(o)
+	}
+	m.wg.Add(1)
+	go func() { defer m.wg.Done(); m.housekeeping() }()
+	return m, nil
+}
+
+// reaperLink makes <data>/ply-reaper, a symbolic link to the program that is the
+// reaper (ply itself), and returns it: the process is then named ply-reaper, and
+// `killall ply` (or a script that kills every ply it finds) does not take the
+// reapers down with the server they are there to outlive. Where it cannot be made,
+// or there is no data directory to make it in, the program is run as it is.
+func reaperLink(o Options) string {
+	dir := o.Data
+	if dir == "" && o.RegistryDir != "" {
+		dir = filepath.Dir(o.RegistryDir)
+	}
+	if dir == "" {
+		return o.Reaper
+	}
+	link, tmp := filepath.Join(dir, "ply-reaper"), filepath.Join(dir, fmt.Sprintf(".ply-reaper-%d", os.Getpid()))
+	_ = os.Remove(tmp)
+	if err := os.Symlink(o.Reaper, tmp); err != nil {
+		o.Logger.Warn("cannot link the reaper; it will run under the name of the server", "err", err)
+		return o.Reaper
+	}
+	if err := os.Rename(tmp, link); err != nil { // replaces a link an earlier start made, atomically
+		_ = os.Remove(tmp)
+		o.Logger.Warn("cannot link the reaper; it will run under the name of the server", "err", err)
+		return o.Reaper
+	}
+	return link
+}
+
+// legacyRootOK reports whether root is a real directory of ours, one that
+// removeStale can be trusted with (prepareRoot makes the same checks, and makes
+// it if it is not there).
+func legacyRootOK(root string) bool {
+	fi, err := os.Lstat(root)
+	return err == nil && fi.IsDir() && fi.Mode()&fs.ModeSymlink == 0 && ownedByUs(fi)
+}
+
+// housekeeping compares the registry with the sessions, every LeakCheck, until
+// the manager is closed: what the registry holds that no session explains is an
+// ffmpeg that got away, and is killed.
+func (m *Manager) housekeeping() {
+	t := time.NewTicker(m.o.LeakCheck)
+	defer t.Stop()
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-t.C:
+			m.leakCheck()
+		}
+	}
+}
+
+// leakCheck kills the ffmpeg process groups in the registry that belong to no
+// session of this manager, and removes their files and directories.
+func (m *Manager) leakCheck() {
+	for _, f := range m.reg.entries() {
+		if f.err != nil || foreignOwner(f.entry) {
+			continue
+		}
+		m.mu.Lock()
+		_, live := m.sessions[f.entry.SID]
+		_, going := m.stopping[f.entry.SID]
+		m.mu.Unlock()
+		if live || going {
+			continue
+		}
+		if m.reg.reap(f.entry, m.o.TempRoot) {
+			m.log.Warn("an ffmpeg outlived its session", "session", f.entry.SID, "pgid", f.entry.PGID)
+		}
+		_ = os.Remove(f.path)
+	}
 }
 
 // prepareRoot makes sure the temp root is a real directory that belongs to
@@ -207,7 +369,7 @@ func prepareRoot(root string) error {
 	case err != nil:
 		return err
 	case fi.Mode()&fs.ModeSymlink != 0:
-		return fmt.Errorf("%s is a symbolic link; refusing to use it (remove it or choose another temp directory)", root)
+		return fmt.Errorf("%s is a symbolic link; refusing to use it (remove it or choose another directory)", root)
 	case !fi.IsDir():
 		return fmt.Errorf("%s is not a directory", root)
 	case !ownedByUs(fi):
@@ -222,8 +384,10 @@ func prepareRoot(root string) error {
 // removeStale deletes the per-process directories (named by pid) of processes
 // that are gone, and any leftover of an earlier process with our own pid,
 // after killing the ffmpeg they may have left running. Anything in the root
-// that is not named like a pid is not ours and stays.
-func removeStale(root string, log *slog.Logger) {
+// that is not named like a pid is not ours and stays. killLeftovers is whether
+// to go by the pid files for the ffmpeg they may have left (see pidFile): not
+// where the registry knows them.
+func removeStale(root string, log *slog.Logger, killLeftovers bool) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return
@@ -237,7 +401,9 @@ func removeStale(root string, log *slog.Logger) {
 			continue // another live ply sharing the temp area
 		}
 		dir := filepath.Join(root, e.Name())
-		killLeftoverFFmpeg(dir, log)
+		if killLeftovers {
+			killLeftoverFFmpeg(dir, log)
+		}
 		if err := os.RemoveAll(dir); err != nil {
 			log.Warn("remove stale session dir", "dir", e.Name(), "err", err)
 		}
@@ -280,7 +446,7 @@ func (m *Manager) Dir() string { return m.dir }
 func (m *Manager) Count() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return len(m.sessions) + m.stopping
+	return len(m.sessions) + len(m.stopping)
 }
 
 // Get returns a live session.
@@ -291,26 +457,38 @@ func (m *Manager) Get(id string) (*Session, bool) {
 	return s, ok
 }
 
-// Delete stops and removes a session; false if there was none.
+// Delete stops and removes a session; false if there was none. For a direct
+// play (see Direct) it only drops it from the count: the client reading the file
+// is not ours to stop, and counts again with its next request if there is room.
 func (m *Manager) Delete(id string) bool {
 	m.mu.Lock()
 	s, ok := m.sessions[id]
 	if ok {
 		delete(m.sessions, id)
-		m.stopping++
+		m.stopping[id] = stopInfo{since: m.clock(), kind: s.kind}
+	}
+	dropped := false
+	if !ok {
+		for k, d := range m.direct {
+			if d.id == id {
+				delete(m.direct, k)
+				delete(m.recentDirect, k) // stopped on purpose: no grace
+				dropped = true
+			}
+		}
 	}
 	m.mu.Unlock()
 	if ok {
 		s.stop()
-		m.stopped()
+		m.stopped(id)
 	}
-	return ok
+	return ok || dropped
 }
 
 // stopped records that a session taken out of the map is completely gone.
-func (m *Manager) stopped() {
+func (m *Manager) stopped(id string) {
 	m.mu.Lock()
-	m.stopping--
+	delete(m.stopping, id)
 	m.mu.Unlock()
 }
 
@@ -323,14 +501,16 @@ func (m *Manager) Close() {
 	for id, s := range m.sessions {
 		all = append(all, s)
 		delete(m.sessions, id)
+		m.stopping[id] = stopInfo{since: m.clock(), kind: s.kind}
 	}
-	m.stopping += len(all)
+	m.direct = map[DirectKey]*directPlay{}
+	m.recentDirect = map[DirectKey]time.Time{}
 	m.mu.Unlock()
 
 	var wg sync.WaitGroup
 	for _, s := range all {
 		wg.Add(1)
-		go func() { defer wg.Done(); s.stop(); m.stopped() }()
+		go func() { defer wg.Done(); s.stop(); m.stopped(s.ID) }()
 	}
 	wg.Wait()
 	m.cancel() // aborts keyframe scans
@@ -342,23 +522,34 @@ func (m *Manager) Close() {
 // scanned (slow on the first play of a big file); ffmpeg is started at the
 // segment containing r.StartSec so the first segment is ready when asked for.
 func (m *Manager) Create(ctx context.Context, r Request) (*Session, error) {
+	transcode := r.transcode()
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
 		return nil, ErrClosed
 	}
-	if len(m.sessions)+m.reserved+m.stopping >= m.o.MaxSessions {
+	if err := m.admitLocked(transcode); err != nil {
 		m.mu.Unlock()
-		return nil, ErrTooManySessions
+		return nil, err
 	}
 	m.reserved++
+	if transcode {
+		m.reservedTranscodes++
+	}
 	m.mu.Unlock()
-	release := func() { m.mu.Lock(); m.reserved--; m.mu.Unlock() }
+	// unreserve gives back the place held for this session, with m.mu held.
+	unreserve := func() {
+		m.reserved--
+		if transcode {
+			m.reservedTranscodes--
+		}
+	}
+	release := func() { m.mu.Lock(); unreserve(); m.mu.Unlock() }
 
 	var kf []float64
 	var source string
 	var err error
-	if r.transcode() {
+	if transcode {
 		kf, err = uniformKeyframes(r.DurationSec, m.o.SegmentSec)
 	} else {
 		kf, source, err = m.keyframes(ctx, r, false)
@@ -394,7 +585,7 @@ func (m *Manager) Create(ctx context.Context, r Request) (*Session, error) {
 	s.lastSeg = startSeg
 
 	m.mu.Lock()
-	m.reserved--
+	unreserve()
 	if m.closed {
 		m.mu.Unlock()
 		_ = os.RemoveAll(dir)

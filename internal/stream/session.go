@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,7 +29,29 @@ type Session struct {
 	plan Plan
 	dir  string
 
-	lastUsed atomic.Int64 // unix nanoseconds of the last request
+	kind    string // KindTranscode or KindRemux
+	title   string
+	client  string
+	started time.Time
+
+	// lastUsed is when the session last had a request or a heartbeat (unix
+	// nanoseconds, by the manager's clock): the idle timeout runs from it.
+	lastUsed atomic.Int64
+
+	// What the player says of itself (heartbeat), and, until it does, a guess: the
+	// start of the last segment it asked for (estPos, as float64 bits).
+	hbMu     sync.Mutex // a leaf lock
+	hbSeen   bool
+	hbPos    float64
+	hbPaused bool
+	estPos   atomic.Uint64
+	// beaten is set by the first heartbeat: the player sends them, so the shorter
+	// Options.BeatTimeout applies (see idle).
+	beaten atomic.Bool
+	// busy counts the requests that are waiting for the session (for the plan, for
+	// the init segment): while there is one, the session is not idle, whatever the
+	// clock says.
+	busy atomic.Int32
 
 	mu       sync.Mutex
 	run      *run
@@ -70,6 +93,10 @@ type run struct {
 	paused   bool
 	replaced bool // stopped on purpose (seek or session end)
 
+	// The reaper started for this run (macOS), until the run ends.
+	reaperMu sync.Mutex
+	reaper   *exec.Cmd
+
 	// What the planGuard has seen of this run: the video track of its init
 	// segment, how many of its fragments it has gone through (checked) and how
 	// many of those it compared with the plan and found right (agreed; the
@@ -107,9 +134,41 @@ func (r *run) failure() string {
 }
 
 func newSession(m *Manager, id, dir string, r Request, plan Plan) *Session {
-	s := &Session{ID: id, m: m, req: r, plan: plan, dir: dir, stopCh: make(chan struct{})}
+	s := &Session{ID: id, m: m, req: r, plan: plan, dir: dir, stopCh: make(chan struct{}),
+		kind: KindRemux, title: r.Title, client: r.Client, started: m.clock()}
+	if r.transcode() {
+		s.kind = KindTranscode
+	}
+	s.estPos.Store(math.Float64bits(finitePos(r.StartSec)))
 	s.touch()
 	return s
+}
+
+// info describes the session for the listing of what is playing.
+func (s *Session) info() PlayInfo {
+	s.hbMu.Lock()
+	seen, pos, paused := s.hbSeen, s.hbPos, s.hbPaused
+	s.hbMu.Unlock()
+	if !seen {
+		pos = math.Float64frombits(s.estPos.Load())
+	}
+	return PlayInfo{ID: s.ID, ItemID: s.req.ItemID, Title: s.title, Kind: s.kind, Client: s.client,
+		StartedAt: s.started, LastSeenAt: time.Unix(0, s.lastUsed.Load()), PositionSec: pos, Paused: paused}
+}
+
+// heartbeat is the player saying it is alive: where it is, and whether it is
+// paused. It counts as a request for the idle timeout.
+func (s *Session) heartbeat(b Beat) {
+	s.hbMu.Lock()
+	if b.Position != nil {
+		s.hbSeen, s.hbPos = true, finitePos(*b.Position)
+	}
+	if b.Paused != nil {
+		s.hbPaused = *b.Paused
+	}
+	s.hbMu.Unlock()
+	s.beaten.Store(true)
+	s.touch()
 }
 
 // Plan returns the segment layout (read-only).
@@ -122,7 +181,7 @@ func (s *Session) Plan() Plan {
 // Dir is the session's temp directory.
 func (s *Session) Dir() string { return s.dir }
 
-func (s *Session) touch() { s.lastUsed.Store(time.Now().UnixNano()) }
+func (s *Session) touch() { s.lastUsed.Store(s.m.clock().UnixNano()) }
 
 // Playlist renders the VOD playlist; suffix is appended to every URI. A plan
 // read from the container is confirmed first, against the first fragment
@@ -197,19 +256,10 @@ func (s *Session) startRunLocked(g int) error {
 	cmd.Stderr = r.stderr
 	cmd.WaitDelay = 3 * time.Second
 	ownGroup(cmd)
-	if err := cmd.Start(); err != nil {
-		cancel()
-		return fmt.Errorf("start ffmpeg: %w", err)
-	}
 	r.cmd, r.cancel = cmd, cancel
-	// If ply itself dies without cleaning up, the next one finds this and kills
-	// the ffmpeg (it has its own process group, so nobody else will).
-	if err := os.WriteFile(filepath.Join(s.dir, pidFile), []byte(fmt.Sprintf("%d %s\n", cmd.Process.Pid, cmd.Path)), 0o600); err != nil {
-		s.m.log.Warn("record ffmpeg pid", "session", s.ID, "err", err)
-	}
 	started := time.Now()
-	go func() {
-		r.err = cmd.Wait()
+	err := startProcess(cmd, func(waitErr error) {
+		r.err = waitErr
 		diedByItself := r.err != nil && ctx.Err() == nil // not stopped by us
 		cancel()
 		cpu, rss := usage(cmd.ProcessState)
@@ -220,11 +270,66 @@ func (s *Session) startRunLocked(g int) error {
 			// What ffmpeg said is the only account of why (a client just gets a 500).
 			s.m.log.Warn("ffmpeg failed", "session", s.ID, "run", r.id, "exit", exitText(r.err), "stderr", r.stderr.String())
 		}
+		s.m.reg.removeRun(s.ID, cmd.Process.Pid)
+		r.stopReaper()
 		close(r.done)
-	}()
+	})
+	if err != nil {
+		cancel()
+		return fmt.Errorf("start ffmpeg: %w", err)
+	}
+	s.recordRun(r)
 	s.run = r
 	s.m.log.Debug("ffmpeg started", "session", s.ID, "run", r.id, "gop", g, "seek", spec.SeekSec)
 	return nil
+}
+
+// recordRun makes sure that, if ply dies from here on, the ffmpeg of run r does
+// not outlive it unnoticed: it is noted in the registry (for the next ply, and
+// the leak check), in the pid file of the session directory (for the sweep of
+// the temp directories), and, where the system has no parent-death signal, a
+// reaper is started for its group.
+func (s *Session) recordRun(r *run) {
+	cmd := r.cmd
+	pid := cmd.Process.Pid
+	if err := os.WriteFile(filepath.Join(s.dir, pidFile), []byte(fmt.Sprintf("%d %s\n", pid, cmd.Path)), 0o600); err != nil {
+		s.m.log.Warn("record ffmpeg pid", "session", s.ID, "err", err)
+	}
+	if start, err := processStart(pid); err == nil { // an ffmpeg that is gone already is not worth recording
+		e := regEntry{SID: s.ID, Item: s.req.ItemID, Title: s.title, PID: pid, PGID: pid, Start: start, Program: cmd.Path, Dir: s.dir}
+		if err := s.m.reg.write(e); err != nil {
+			s.m.log.Warn("record ffmpeg in the session registry", "session", s.ID, "err", err)
+		}
+	}
+	if s.m.reaperExe != "" {
+		rp, err := startReaper(s.m.reaperExe, pid)
+		if err != nil {
+			s.m.log.Warn("start the ffmpeg reaper", "session", s.ID, "err", err)
+		} else {
+			r.reaperMu.Lock()
+			r.reaper = rp
+			r.reaperMu.Unlock()
+		}
+	}
+	// The process may have exited before any of this was in place; its exit has
+	// then already cleaned up, and would not do it again.
+	if r.exited() {
+		s.m.reg.removeRun(s.ID, pid)
+		r.stopReaper()
+	}
+}
+
+// stopReaper ends the reaper of the run, if one is left: the group it guards is
+// gone, so ply has nothing more to be protected from.
+func (r *run) stopReaper() {
+	r.reaperMu.Lock()
+	rp := r.reaper
+	r.reaper = nil
+	r.reaperMu.Unlock()
+	if rp != nil {
+		_ = rp.Process.Kill()
+		_ = rp.Wait()
+	}
 }
 
 // fallBackLocked switches a failed GPU transcode to its software fallback,
@@ -322,7 +427,7 @@ func (s *Session) monitor() {
 			return
 		case <-t.C:
 		}
-		if time.Since(time.Unix(0, s.lastUsed.Load())) > s.m.o.IdleTimeout {
+		if s.idle() {
 			s.m.log.Info("session idle, stopping", "session", s.ID)
 			s.m.Delete(s.ID)
 			return
@@ -346,6 +451,28 @@ func (s *Session) monitor() {
 		s.pruneLocked()
 		s.mu.Unlock()
 	}
+}
+
+// idle reports whether the session has gone too long without a request or a
+// heartbeat: BeatTimeout once its player has sent a heartbeat (it says when it is
+// gone, paused or not), otherwise IdleTimeout (a player that sends none may have
+// buffer for longer than BeatTimeout and need nothing meanwhile). A request that
+// is being waited on is one: a segment that takes long to make is not a player
+// that left.
+func (s *Session) idle() bool {
+	limit := s.m.o.IdleTimeout
+	if s.beaten.Load() {
+		limit = min(limit, s.m.o.BeatTimeout)
+	}
+	if s.m.clock().Sub(time.Unix(0, s.lastUsed.Load())) <= limit {
+		return false
+	}
+	if s.busy.Load() > 0 {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.waiting) == 0
 }
 
 // pruneLocked removes the fragments the player is done with: those more than
@@ -391,10 +518,14 @@ func throttle(ahead int, paused bool, high, low int) throttleAction {
 func (s *Session) stop() {
 	s.stopOnce.Do(func() {
 		close(s.stopCh)
+		if s.m.stopGate != nil {
+			<-s.m.stopGate
+		}
 		s.mu.Lock()
 		s.closed = true
 		s.stopRunLocked()
 		s.mu.Unlock()
+		s.m.reg.remove(s.ID)
 		if err := os.RemoveAll(s.dir); err != nil {
 			s.m.log.Warn("remove session dir", "session", s.ID, "err", err)
 		}
@@ -410,6 +541,9 @@ func (s *Session) beginRequest(idx int) (id uint64, end func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lastSeg = idx
+	if idx >= 0 && idx < len(s.plan.Segments) {
+		s.estPos.Store(math.Float64bits(s.plan.Segments[idx].Start))
+	}
 	s.reqSeq++
 	id = s.reqSeq
 	if s.waiting == nil {
@@ -601,6 +735,11 @@ type Media struct{ *pieces }
 // ffmpeg run that produced one; later runs write identical headers.
 func (s *Session) OpenInit(ctx context.Context) (io.ReadSeekCloser, error) {
 	s.touch()
+	// Waiting for ffmpeg to write the init segment is a request in progress, as
+	// waiting for a segment is; and the time since the last request starts when this
+	// one ends.
+	s.busy.Add(1)
+	defer func() { s.busy.Add(-1); s.touch() }()
 	if err := s.awaitPlan(ctx); err != nil {
 		return nil, err
 	}
