@@ -314,7 +314,8 @@
 
   <footer class="attribution">
     <p class="muted">
-      This product uses the TMDB API but is not endorsed or certified by
+      <!-- The notice the TMDB API terms (paragraph 3) require, in their words. -->
+      This product uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by
       <a class="link" href="https://www.themoviedb.org/" target="_blank" rel="noreferrer">TMDB</a>.
     </p>
   </footer>

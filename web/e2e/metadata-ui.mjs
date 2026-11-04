@@ -391,6 +391,19 @@ const scenarios = {
     }
   },
 
+  // Mutant caught: the notice reworded (the TMDB API terms, paragraph 3, give it word for word).
+  async 'Settings: the TMDB notice is the one the terms require'(browser) {
+    const { context, page } = await open(browser);
+    await page.goto(`${base}/#/settings`);
+    const notice = page.locator('footer.attribution');
+    await notice.waitFor();
+    const said = ((await notice.textContent()) ?? '').replace(/\s+/g, ' ').trim();
+    const required = 'This product uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.';
+    check('the notice is word for word', said.includes(required), said);
+    check('TMDB links to themoviedb.org', (await notice.locator('a[href="https://www.themoviedb.org/"]').count()) === 1);
+    await context.close();
+  },
+
   // Mutant caught: onePerTitle returning the list as it is.
   async 'Home: two versions of one film are one tile, in Recently added and in Continue watching'(browser) {
     const { context, page } = await open(browser, {

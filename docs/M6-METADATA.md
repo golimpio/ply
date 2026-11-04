@@ -25,8 +25,9 @@ TVDB and IMDb are not used (TVDB v4 needs a paid licence; IMDb has no free API).
 - Hidden `-tmdb-url` flag / `PLY_TMDB_URL` env (API base) and `-tmdb-image-url` for tests.
 - `-metadata=false` disables all online lookups (privacy switch); also a toggle in settings.
 - `-metadata-language` default `en-US` (TMDB `language`); region for certifications = the part after `-`.
-- Settings page shows the required TMDB attribution: "This product uses the TMDB API but is not endorsed or
-  certified by TMDB" plus their logo.
+- Settings page shows the notice the TMDB API terms (paragraph 3) require, word for word: "This product uses
+  TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB", plus their logo
+  (less prominent than ply's own marks, as the terms ask).
 
 ## Identity hints (strongest first)
 1. NFO `<uniqueid type="tmdb|imdb|tvdb">`, `<tmdbid>`, `<imdbid>`, `<id>`, or an NFO that is just a URL
