@@ -350,31 +350,40 @@ func run() error {
 	var serveFailure error
 	select {
 	case <-ctx.Done():
-		log.Info("shutting down")
+		log.Info("shutting down; press Ctrl-C again to quit at once")
 	case serveFailure = <-serveErr:
-		stop() // cancels the scanner too
 	}
+	// Cancels the scanner and the queue, and gives the signals back: a second
+	// Ctrl-C now ends the process (the reaper and Pdeathsig take its ffmpeg along).
+	stop()
 
-	adv.Shutdown()
-	// Kill every ffmpeg and drop the temp dirs first: requests waiting on
-	// segments return at once instead of holding the HTTP shutdown up.
-	streams.Close()
-	if subGen != nil {
-		subGen.Close() // a first extraction of a big file can run for minutes
-	}
-	if artGen != nil {
-		artGen.Close() // a frame grab on a slow mount can too
-	}
 	shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(shutCtx); err != nil {
-		// Long-lived streams outlived the grace period.
-		srv.Close()
-	}
-	bg.Wait()
-	worker.Close()
-	scanner.Wait()
-	images.Close() // a download that was under way
+	stopper{log: log, every: 2 * time.Second, deadline: 30 * time.Second}.run([]stopStep{
+		{"network announcement", adv.Shutdown},
+		// Kill every ffmpeg and drop the temp dirs first: requests waiting on
+		// segments return at once instead of holding the HTTP shutdown up.
+		{"playback", streams.Close},
+		{"subtitle extraction", func() {
+			if subGen != nil {
+				subGen.Close() // a first extraction of a big file can run for minutes
+			}
+		}},
+		{"artwork", func() {
+			if artGen != nil {
+				artGen.Close() // a frame grab on a slow mount can too
+			}
+		}},
+		{"web requests", func() {
+			if err := srv.Shutdown(shutCtx); err != nil {
+				srv.Close() // long-lived streams outlived the grace period
+			}
+		}},
+		{"background jobs", bg.Wait},
+		{"metadata", worker.Close},
+		{"library scan", scanner.Wait},
+		{"image downloads", images.Close},
+	})
 	return serveFailure
 }
 
