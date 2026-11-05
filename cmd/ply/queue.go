@@ -42,7 +42,8 @@ type queueDeps struct {
 	worker  *metadata.Worker
 	art     *art.Generator // may be nil
 	subs    *subs.Generator
-	roots   func() []string // the library folders now
+	ratings *metadata.Ratings // may be nil (M10)
+	roots   func() []string   // the library folders now
 	log     *slog.Logger
 }
 
@@ -120,11 +121,20 @@ func newQueue(d queueDeps) *jobs.Queue {
 		Kind:     kindMetaMatch,
 		Priority: jobs.PriorityMatchNew,
 		Title:    func(json.RawMessage) string { return "Look up movie and show details" },
-		// Light to start (mostly network), but each item may probe a file or decode an
-		// image: between items it yields to a stalled viewer, a CPU transcode, browsing.
-		YieldNeed: func(json.RawMessage) tier.Need { return tier.Need{CPU: true} },
+		// Mostly network, but each item may probe its file and read its sidecars, which
+		// on a NAS shares the link with a film playing from it (measured 2026-11-05: the
+		// pass read the library during playback with lookups off). So it does not start
+		// while a video plays from the library's disk, and between items it yields to
+		// that too, as well as to a stalled viewer, a CPU transcode and browsing. Light:
+		// it reads a little at a time, and must not wait behind a full scan.
+		Light:     true,
+		Need:      func(json.RawMessage) tier.Need { return tier.Need{Disks: d.roots()} },
+		YieldNeed: func(json.RawMessage) tier.Need { return tier.Need{CPU: true, Disks: d.roots()} },
 		Run: func(ctx context.Context, r *jobs.Run) error {
 			d.worker.RunOnce(ctx)
+			if d.ratings != nil {
+				d.ratings.Nudge() // titles that were matched have ratings to fetch
+			}
 			return nil
 		},
 	})
@@ -136,6 +146,7 @@ func newQueue(d queueDeps) *jobs.Queue {
 			return pruneCaches(ctx, d.store, d.art, d.subs, d.log)
 		},
 	})
+	registerRatings(q, d)
 	return q
 }
 

@@ -35,12 +35,18 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, `kind must be "movie" or "episode"`)
 		return
 	}
+	rq, err := parseRatingQuery(q)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	entries, err := s.Store.ListItems(r.Context(), store.ListFilter{Kind: kind, Show: q.Get("show")})
 	if err != nil {
 		s.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.summaries(r.Context(), entries))
+	out := applyRatingQuery(s.summaries(r.Context(), entries), rq, func(it ItemSummary) *RatingEntry { return it.Rating })
+	writeJSON(w, http.StatusOK, out)
 }
 
 // loadEntry resolves {id}; it writes the error response and reports false if
@@ -91,7 +97,7 @@ func (s *Server) writeDetail(w http.ResponseWriter, r *http.Request, e store.Ent
 	d.EpisodeInfo = v.episodeInfo(e)
 	if id := v.titleIDOf(e); id != 0 {
 		if td, err := s.Store.GetTitleDetail(r.Context(), id); err == nil {
-			d.Meta = s.titleDetail(td)
+			d.Meta = s.titleDetail(td, v.primary)
 		} else if !errors.Is(err, store.ErrNotFound) {
 			s.Logger.Warn("metadata: reading a title", "id", id, "err", err)
 		}

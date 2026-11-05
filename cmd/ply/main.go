@@ -158,8 +158,17 @@ func run() error {
 		Store: st, KeyFlag: cfg.TMDBKey, KeyEnv: cfg.TMDBKeyEnv, KeyDefault: metadata.DefaultKey,
 		TVDBKeyFlag: cfg.TVDBKey, TVDBKeyEnv: cfg.TVDBKeyEnv, TVDBKeyDefault: metadata.DefaultTVDBKey,
 		TVDBPINFlag: cfg.TVDBPIN, TVDBPINEnv: cfg.TVDBPINEnv,
+		MDBListKeyFlag: cfg.MDBListKey, MDBListKeyEnv: cfg.MDBListKeyEnv, MDBListBaseURL: cfg.MDBListURL,
 		Disabled: !cfg.Metadata, Language: cfg.MetadataLanguage,
 		BaseURL: cfg.TMDBURL, ImageBaseURL: cfg.TMDBImageURL, TVDBBaseURL: cfg.TVDBURL, TVDBImageBaseURL: cfg.TVDBImageURL, Logger: log,
+	})
+	// Ratings (M10): IMDb's datasets (kept under <data>/cache/imdb: the ratings, and which episode
+	// is which of a show) and MDBList's answers, all run by the queue and paced to playback and
+	// browsing.
+	ratings := metadata.NewRatings(metadata.RatingsOptions{
+		Store: st, Settings: settings, Dir: filepath.Join(cfg.Data, "cache", "imdb"),
+		IMDbURL: cfg.IMDbRatingsURL, IMDbEpisodesURL: cfg.IMDbEpisodesURL,
+		Pace: paceFor(gov, tier.Need{CPU: true}), Logger: log,
 	})
 	images, err := metadata.NewImageCache(metadata.ImageOptions{
 		Dir: filepath.Join(cfg.Data, "images"), URL: settings.ImageURL, TVDBURL: settings.TVDBImageURL,
@@ -204,7 +213,7 @@ func run() error {
 		roots []string
 	}
 	active.roots = rootPaths(roots)
-	queue = newQueue(queueDeps{store: st, gov: gov, scanner: scanner, worker: worker, art: artGen, subs: subGen,
+	queue = newQueue(queueDeps{store: st, gov: gov, scanner: scanner, worker: worker, art: artGen, subs: subGen, ratings: ratings,
 		roots: func() []string { active.Lock(); defer active.Unlock(); return slices.Clone(active.roots) }, log: log})
 
 	// The scanner gets the folders' types last, with its settle time and its hooks
@@ -223,8 +232,12 @@ func run() error {
 		log.Warn("metadata: releasing pending files", "err", err)
 	}
 
-	var bg sync.WaitGroup // the queue, its schedule, the watcher, the match restorer and the lookups check
-	bg.Add(4)
+	var bg sync.WaitGroup // the queue, its schedule, the watcher, the match restorer, the lookups check and the ratings schedule
+	bg.Add(5)
+	go func() {
+		defer bg.Done()
+		scheduleRatings(ctx, queue, ratings, log)
+	}()
 	go func() {
 		defer bg.Done()
 		t := time.NewTicker(10 * time.Second)
@@ -303,6 +316,7 @@ func run() error {
 		Metadata: worker,
 		Settings: settings,
 		Images:   images,
+		Ratings:  ratings,
 
 		Jobs:     queue,
 		Governor: gov,

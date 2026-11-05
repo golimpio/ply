@@ -293,6 +293,39 @@ func TestSameKeyMergesWhileQueuedAndNeverRunsTwiceAtOnce(t *testing.T) {
 	}
 }
 
+// A Light kind with a disk need runs beside a heavy job (it does not wait for the
+// heavy lane), and is still held by the gate for its disk.
+func TestALightKindWithADiskNeedRunsBesideAHeavyJob(t *testing.T) {
+	g := newGate()
+	g.only = func(n tier.Need) bool { return len(n.Disks) > 0 }
+	release := make(chan struct{})
+	metaRan := make(chan struct{}, 1)
+	q, _ := start(t, Options{Gate: g},
+		Spec{Kind: "scan", Need: func(json.RawMessage) tier.Need { return tier.Need{CPU: true} },
+			Run: func(context.Context, *Run) error { <-release; return nil }},
+		Spec{Kind: "meta", Light: true, Need: func(json.RawMessage) tier.Need { return tier.Need{Disks: []string{"/nas"}} },
+			Run: func(context.Context, *Run) error { metaRan <- struct{}{}; return nil }})
+	defer close(release)
+	q.Enqueue(context.Background(), "scan", Opt{})
+	waitFor(t, "the heavy job", func() bool { return q.Started("scan") })
+
+	// Held for its disk while a video plays from it…
+	g.hold("a video is playing from the same disk")
+	q.Enqueue(context.Background(), "meta", Opt{})
+	select {
+	case <-metaRan:
+		t.Fatal("the light job ran while the gate held its disk")
+	case <-time.After(50 * time.Millisecond):
+	}
+	// …and runs beside the heavy job once it may (the heavy lane is still taken).
+	g.hold("")
+	select {
+	case <-metaRan:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the light job waited for the heavy lane")
+	}
+}
+
 func TestRetriesThenFails(t *testing.T) {
 	var attempts atomic.Int32
 	mem := newMem()
@@ -310,6 +343,10 @@ func TestRetriesThenFails(t *testing.T) {
 	if n := attempts.Load(); n != 3 {
 		t.Fatalf("%d attempts, want 3", n)
 	}
+	// The queue records the end in memory first and in the store just after, outside
+	// its lock: wait for the stored row rather than sample it mid-save (a flake seen in
+	// a parallel run).
+	waitFor(t, "the stored failure", func() bool { return mem.get(j.ID).State == Failed })
 	if r := mem.get(j.ID); r.State != Failed || r.Attempts != 3 || r.Error != "TMDB said 503" {
 		t.Fatalf("stored %+v", r)
 	}

@@ -20,15 +20,17 @@ const (
 // TitleCard is a title as a tile shows it. Poster and the other image fields are
 // relative URLs that carry the token.
 type TitleCard struct {
-	ID       int64    `json:"id"`
-	Kind     string   `json:"kind"` // movie | series
-	Title    string   `json:"title"`
-	Year     int      `json:"year"` // 0 when unknown
-	Poster   string   `json:"poster,omitempty"`
-	Backdrop string   `json:"backdrop,omitempty"`
-	Rating   *float64 `json:"rating,omitempty"`
-	ItemID   *int64   `json:"itemId,omitempty"` // movies: the first file
-	Show     string   `json:"show,omitempty"`   // shows: the show's name in the library
+	ID       int64  `json:"id"`
+	Kind     string `json:"kind"` // movie | series
+	Title    string `json:"title"`
+	Year     int    `json:"year"` // 0 when unknown
+	Poster   string `json:"poster,omitempty"`
+	Backdrop string `json:"backdrop,omitempty"`
+	// Rating (M10) is the primary source's rating, or the first the title has in the fixed order
+	// (its source says which); null when it has none.
+	Rating *RatingEntry `json:"rating"`
+	ItemID *int64       `json:"itemId,omitempty"` // movies: the first file
+	Show   string       `json:"show,omitempty"`   // shows: the show's name in the library
 
 	// NextAirDate is when a show's next episode airs (YYYY-MM-DD); it can be in the
 	// past until the show is next refreshed.
@@ -86,6 +88,9 @@ type TitleDetail struct {
 	// show with source "tvdb" has one to change (PATCH /api/titles/{id}); the field is not there
 	// for a movie or a show from anywhere else.
 	EpisodeOrder string `json:"episodeOrder,omitempty"`
+	// Ratings are every rating the title has, in the fixed order: IMDb, Rotten Tomatoes critics
+	// and audience, Metacritic, Letterboxd, Trakt, TMDB. [] when none.
+	Ratings []RatingEntry `json:"ratings"`
 	// Unmapped is in the answer to a PATCH that changed the order: how many of the show's episode
 	// files have no episode in it (their season and number are not TVDB's in that order).
 	Unmapped    *int   `json:"unmapped,omitempty"`
@@ -165,7 +170,9 @@ type EpisodeInfo struct {
 	Overview string   `json:"overview,omitempty"`
 	AirDate  string   `json:"airDate,omitempty"`
 	Still    string   `json:"still,omitempty"`
-	Rating   *float64 `json:"rating,omitempty"`
+	Rating   *float64 `json:"rating,omitempty"` // the episode's TMDB score out of 10, as before M10
+	// Ratings (M10) are the episode's IMDb rating, when it has one: [] when none.
+	Ratings []RatingEntry `json:"ratings"`
 }
 
 // MetaFields are the metadata fields that list rows (items, shows) carry.
@@ -174,11 +181,12 @@ type MetaFields struct {
 	Poster        string   `json:"poster,omitempty"`
 	Backdrop      string   `json:"backdrop,omitempty"`
 	Logo          string   `json:"logo,omitempty"`
-	Rating        *float64 `json:"rating,omitempty"`
 	Certification string   `json:"certification,omitempty"`
 	Genres        []string `json:"genres,omitempty"`
 	MatchState    string   `json:"matchState"`
 	NeedsReview   bool     `json:"needsReview"`
+	// Rating (M10): as TitleCard.Rating; null for a row with no title or no rating.
+	Rating *RatingEntry `json:"rating"`
 }
 
 // SeasonInfo is a season of GET /api/shows/{name}.
@@ -272,6 +280,25 @@ type SettingsView struct {
 	// TVDBAttributionURL is the link that goes with the attribution text (TVDB asks for a
 	// direct link to thetvdb.com).
 	TVDBAttributionURL string `json:"tvdbAttributionUrl"`
+
+	// Ratings (M10). The MDBList key is never in a response, as the others are not: only whether
+	// it is set and where it comes from (flag | env | settings | ""); MDBListKeyChecked is, like
+	// TVDBKeyChecked, in the answer to a PUT or PATCH that stored a key. RatingsPrimary is the source
+	// whose rating cards show; RatingsShown the sources to show, in order (both can be changed).
+	// The rest is read only: RatingsAvailable are the sources this install can produce a rating
+	// from, given its keys and the privacy switch; the attributions are the notices IMDb and
+	// MDBList ask for; IMDbDatasetUpdatedAt (RFC 3339) is null until the first download.
+	MDBListKeySet         bool     `json:"mdblistKeySet"`
+	MDBListKeySource      string   `json:"mdblistKeySource"`
+	MDBListKeyChecked     *bool    `json:"mdblistKeyChecked,omitempty"`
+	RatingsPrimary        string   `json:"ratingsPrimary"`
+	RatingsShown          []string `json:"ratingsShown"`
+	RatingsAvailable      []string `json:"ratingsAvailable"`
+	IMDbAttribution       string   `json:"imdbAttribution"`
+	IMDbAttributionURL    string   `json:"imdbAttributionUrl"`
+	MDBListAttribution    string   `json:"mdblistAttribution"`
+	MDBListAttributionURL string   `json:"mdblistAttributionUrl"`
+	IMDbDatasetUpdatedAt  *string  `json:"imdbDatasetUpdatedAt"`
 }
 
 // TVDBAttribution is the notice TheTVDB asks of an application that shows its metadata
@@ -323,9 +350,10 @@ func optInt(v int) *int {
 	return &v
 }
 
-func (s *Server) titleCard(c store.TitleCard) TitleCard {
+// titleCard builds a card; primary is the source whose rating it shows (see primaryRating).
+func (s *Server) titleCard(c store.TitleCard, primary string) TitleCard {
 	out := TitleCard{ID: c.ID, Kind: c.Kind, Title: c.Title, Year: c.Year, Poster: s.imageURL(c.Poster, posterSize),
-		Backdrop: s.imageURL(c.Backdrop, backdropSize), Rating: optFloat(c.Rating), Show: c.Show,
+		Backdrop: s.imageURL(c.Backdrop, backdropSize), Rating: primaryRating(c.Ratings, primary), Show: c.Show,
 		NextAirDate: c.NextAirDate}
 	if c.ItemID != 0 {
 		out.ItemID = ptr(c.ItemID)
@@ -333,18 +361,18 @@ func (s *Server) titleCard(c store.TitleCard) TitleCard {
 	return out
 }
 
-func (s *Server) titleCards(cards []store.TitleCard) []TitleCard {
+func (s *Server) titleCards(cards []store.TitleCard, primary string) []TitleCard {
 	out := make([]TitleCard, len(cards))
 	for i, c := range cards {
-		out[i] = s.titleCard(c)
+		out[i] = s.titleCard(c, primary)
 	}
 	return out
 }
 
-func (s *Server) titleDetail(d store.TitleDetail) *TitleDetail {
+func (s *Server) titleDetail(d store.TitleDetail, primary string) *TitleDetail {
 	out := &TitleDetail{
-		TitleCard: s.titleCard(d.TitleCard),
-		TMDBID:    d.TMDBID, TVDBID: d.TVDBID, IMDbID: d.IMDbID, OriginalTitle: d.OriginalTitle, SortTitle: d.SortTitle,
+		TitleCard: s.titleCard(d.TitleCard, primary), Ratings: ratingEntries(d.Ratings),
+		TMDBID: d.TMDBID, TVDBID: d.TVDBID, IMDbID: d.IMDbID, OriginalTitle: d.OriginalTitle, SortTitle: d.SortTitle,
 		Overview: d.Overview, Tagline: d.Tagline, ReleaseDate: d.ReleaseDate, EndDate: d.EndDate,
 		Status: d.Status, RuntimeMin: optInt(d.RuntimeMin), VoteCount: optInt(d.VoteCount), Certification: d.Certification,
 		Logo:   s.imageURL(d.Logo, logoSize),

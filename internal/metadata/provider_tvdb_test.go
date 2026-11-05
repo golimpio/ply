@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"errors"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -89,7 +90,8 @@ func TestTVDBProviderMapsAShow(t *testing.T) {
 		s2.Number != 2 || s2.Poster != "tvdb:/banners/seasons/900001-2.jpg" || len(s2.Episodes) != 2 {
 		t.Errorf("seasons = %+v", in.Seasons)
 	}
-	if e := s2.Episodes[0]; e != (store.Episode{Season: 2, Number: 1, Name: "Return", Overview: "Return (overview).", AirDate: "2021-04-01", RuntimeMin: 24,
+	// The episode list has no IMDb ids (M10 gets them from IMDb's episode dataset).
+	if e := s2.Episodes[0]; !reflect.DeepEqual(e, store.Episode{Season: 2, Number: 1, Name: "Return", Overview: "Return (overview).", AirDate: "2021-04-01", RuntimeMin: 24,
 		Still: "tvdb:/banners/episodes/900001/9000003.jpg"}) {
 		t.Errorf("S02E01 = %+v", e)
 	}

@@ -44,6 +44,9 @@ type ItemSummary struct {
 	MetaFields
 	Overview string `json:"overview,omitempty"`
 	Still    string `json:"still,omitempty"`
+	// Ratings (M10) are an episode's own: its IMDb rating when it has one, [] when it has none.
+	// A movie has no such field (its title's ratings are in Rating, and in meta.ratings).
+	Ratings []RatingEntry `json:"ratings,omitzero"`
 }
 
 // Subtitle describes a selectable subtitle track. Key is the ffprobe stream

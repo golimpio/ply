@@ -11,6 +11,7 @@ import (
 // to: loaded in a few queries for the whole list instead of two per item.
 type metaView struct {
 	s        *Server
+	primary  string // the source whose rating a row shows
 	series   map[string]store.SeriesMatch
 	briefs   map[int64]store.TitleBrief
 	episodes map[int64]map[[2]int]store.Episode
@@ -19,7 +20,7 @@ type metaView struct {
 // newMetaView loads what the entries need. A failure to read metadata is
 // logged and gives a view that adds nothing: metadata must never break a list.
 func (s *Server) newMetaView(ctx context.Context, entries []store.Entry) *metaView {
-	v := &metaView{s: s, series: map[string]store.SeriesMatch{}, briefs: map[int64]store.TitleBrief{},
+	v := &metaView{s: s, primary: s.ratingsPrimary(ctx), series: map[string]store.SeriesMatch{}, briefs: map[int64]store.TitleBrief{},
 		episodes: map[int64]map[[2]int]store.Episode{}}
 	hasEpisodes := false
 	var ids []int64
@@ -119,11 +120,14 @@ func (v *metaView) apply(sum *ItemSummary, e store.Entry) {
 			sum.MatchState, sum.NeedsReview = show.State, show.NeedsReview || e.NeedsReview
 		}
 	}
+	if e.Kind == store.KindEpisode {
+		sum.Ratings = []RatingEntry{} // an episode always says so, also when it has none
+	}
 	b, ok := v.briefs[titleID]
 	if titleID != 0 && ok {
 		sum.TitleID = ptr(titleID)
 		sum.Logo = s.imageURL(b.Logo, logoSize)
-		sum.Rating = optFloat(b.Rating)
+		sum.Rating = primaryRating(b.Ratings, v.primary)
 		sum.Certification = b.Certification
 		sum.Genres = b.Genres
 	}
@@ -140,6 +144,7 @@ func (v *metaView) apply(sum *ItemSummary, e store.Entry) {
 				}
 			}
 			sum.Overview = ep.Overview
+			sum.Ratings = episodeRatings(ep)
 			sum.Still = s.imageURL(pickArt(e.LocalThumb, store.LocalRef(store.ArtItem, e.ID, "thumb"), ep.Still), stillSize)
 		} else if e.LocalThumb != "" {
 			sum.Still = s.imageURL(store.LocalRef(store.ArtItem, e.ID, "thumb"), stillSize)
@@ -159,7 +164,7 @@ func (v *metaView) episodeInfo(e store.Entry) *EpisodeInfo {
 	if !ok {
 		return nil
 	}
-	return &EpisodeInfo{Name: ep.Name, Overview: ep.Overview, AirDate: ep.AirDate, Rating: optFloat(ep.Rating),
+	return &EpisodeInfo{Name: ep.Name, Overview: ep.Overview, AirDate: ep.AirDate, Rating: optFloat(ep.Rating), Ratings: episodeRatings(ep),
 		Still: v.s.imageURL(pickArt(e.LocalThumb, store.LocalRef(store.ArtItem, e.ID, "thumb"), ep.Still), stillSize)}
 }
 

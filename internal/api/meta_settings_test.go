@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -40,6 +42,7 @@ func (k *keyedProvider) Check(ctx context.Context) error {
 type settingsEnv struct {
 	*menv
 	settings *metadata.Settings
+	ratings  *metadata.Ratings // M10: over the same store; nothing runs it, the tests call it
 	built    []string
 	mu       sync.Mutex
 }
@@ -61,7 +64,8 @@ func newSettingsEnv(t *testing.T, so ...func(*metadata.SettingsOptions)) *settin
 		}
 		se.settings = metadata.NewSettings(opts)
 		se.worker = metadata.NewWorker(metadata.WorkerOptions{Store: o.Store, Source: se.settings, Images: o.Images, Refresh: 0})
-		o.Settings, o.Metadata = se.settings, se.worker
+		se.ratings = metadata.NewRatings(metadata.RatingsOptions{Store: o.Store, Settings: se.settings, Dir: filepath.Join(t.TempDir(), "imdb")})
+		o.Settings, o.Metadata, o.Ratings = se.settings, se.worker, se.ratings
 	})
 	se.menv.worker = se.worker
 	return se
@@ -74,13 +78,31 @@ func TestSettingsDefaultsAndShape(t *testing.T) {
 	raw := decode[map[string]any](t, rec)
 	want := map[string]any{"tmdbKeySet": false, "tmdbKeySource": "", "metadataEnabled": true, "metadataForcedOff": false, "language": "en-US",
 		"maxStreams": 4.0, "maxTranscodes": 1.0, "maxStreamsSource": "default", "maxTranscodesSource": "default",
-		"tvdbKeySet": false, "tvdbPinSet": false, "tvdbKeySource": "", "tvdbPinSource": "", "tvdbAttribution": tvdbAttribution, "tvdbAttributionUrl": tvdbAttributionURL}
+		"tvdbKeySet": false, "tvdbPinSet": false, "tvdbKeySource": "", "tvdbPinSource": "", "tvdbAttribution": tvdbAttribution, "tvdbAttributionUrl": tvdbAttributionURL,
+		// M10: exactly these, with these names.
+		"mdblistKeySet": false, "mdblistKeySource": "", "ratingsPrimary": "imdb",
+		"imdbAttribution": imdbAttribution, "imdbAttributionUrl": imdbAttributionURL,
+		"mdblistAttribution": mdblistAttribution, "mdblistAttributionUrl": mdblistAttributionURL,
+		"imdbDatasetUpdatedAt": nil, // null until the first download
+	}
 	for k, v := range want {
 		if raw[k] != v {
 			t.Errorf("settings[%s] = %v, want %v", k, raw[k], v)
 		}
 	}
-	if len(raw) != len(want) {
+	wantLists := map[string][]any{
+		"ratingsShown":     {"imdb", "rt_critics", "rt_audience", "metacritic", "letterboxd", "trakt", "tmdb"},
+		"ratingsAvailable": {"imdb"}, // IMDb needs no key; the others need theirs
+	}
+	for k, v := range wantLists {
+		if !reflect.DeepEqual(raw[k], v) {
+			t.Errorf("settings[%s] = %v, want %v", k, raw[k], v)
+		}
+	}
+	if _, there := raw["imdbDatasetUpdatedAt"]; !there {
+		t.Error("imdbDatasetUpdatedAt is absent; it is null until the first download")
+	}
+	if len(raw) != len(want)+len(wantLists) {
 		t.Errorf("settings = %v; exactly these fields, and never the key", raw)
 	}
 	// Without a Settings at all the page still loads.

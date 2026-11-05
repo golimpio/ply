@@ -25,6 +25,10 @@ type TitleCard struct {
 	// NextAirDate is when a show's next episode airs, YYYY-MM-DD; it may be past
 	// until the show is refreshed.
 	NextAirDate string
+
+	// Ratings (M10) are the title's ratings from every source that has one, in the fixed order of
+	// RatingSources. TMDB's is titles.rating, not a stored row.
+	Ratings []Rating
 }
 
 // CastMember and CrewMember are a credit with its person's name and photo.
@@ -85,7 +89,8 @@ const libraryTitle = `(EXISTS (SELECT 1 FROM items WHERE title_id = t.id)
 const (
 	cardCols = `t.id, t.kind, t.title, t.year, t.poster, t.backdrop, t.rating, COALESCE(t.next_air_date, ''),
 		COALESCE(mf.item_id, 0), COALESCE(mi.local_poster, ''), COALESCE(mi.local_backdrop, ''),
-		COALESCE(sf.show, ''), COALESCE(ss.rowid, 0), COALESCE(ss.local_poster, ''), COALESCE(ss.local_backdrop, '')`
+		COALESCE(sf.show, ''), COALESCE(ss.rowid, 0), COALESCE(ss.local_poster, ''), COALESCE(ss.local_backdrop, ''),
+		t.source, COALESCE(t.tmdb_id, 0), t.vote_count, t.fetched_at`
 	cardJoins = `
 		LEFT JOIN (SELECT title_id, MIN(id) AS item_id FROM items
 			WHERE title_id IS NOT NULL GROUP BY title_id) mf ON mf.title_id = t.id
@@ -110,11 +115,18 @@ func scanCard(sc scanner, lead ...any) (TitleCard, error) {
 		itemPoster, itemBackdrop   string
 		seriesID                   int64
 		seriesPoster, seriesBackdr string
+		source                     string
+		tmdbID, fetchedAt          int64
+		votes                      int
 	)
 	err := sc.Scan(append(lead, &c.ID, &c.Kind, &c.Title, &c.Year, &c.Poster, &c.Backdrop, &c.Rating, &c.NextAirDate,
-		&c.ItemID, &itemPoster, &itemBackdrop, &c.Show, &seriesID, &seriesPoster, &seriesBackdr)...)
+		&c.ItemID, &itemPoster, &itemBackdrop, &c.Show, &seriesID, &seriesPoster, &seriesBackdr,
+		&source, &tmdbID, &votes, &fetchedAt)...)
 	if err != nil {
 		return c, err
+	}
+	if r, ok := tmdbRating(c.Kind, source, tmdbID, c.Rating, votes, fetchedAt); ok {
+		c.Ratings = []Rating{r}
 	}
 	// A cover embedded in the file ranks below TMDB's poster; sidecar art beats it.
 	if c.ItemID != 0 && itemPoster != "" && (c.Poster == "" || !strings.HasPrefix(itemPoster, EmbeddedPrefix)) {
@@ -152,7 +164,11 @@ func queryCards(ctx context.Context, q queryer, where string, args []any, order 
 		}
 		cards = append(cards, c)
 	}
-	return cards, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close() // the connection of a snapshot is one query at a time
+	return cards, attachRatings(ctx, q, cards)
 }
 
 const (
@@ -483,7 +499,21 @@ func (s *Store) GetPerson(ctx context.Context, id int64) (d PersonDetail, err er
 			}
 			d.Credits = append(d.Credits, pc)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows.Close()
+		cards := make([]TitleCard, len(d.Credits))
+		for i, c := range d.Credits {
+			cards[i] = c.Title
+		}
+		if err := attachRatings(ctx, q, cards); err != nil {
+			return err
+		}
+		for i := range d.Credits {
+			d.Credits[i].Title = cards[i]
+		}
+		return nil
 	})
 	return d, err
 }
@@ -681,16 +711,17 @@ func (s *Store) Seasons(ctx context.Context, titleID int64) ([]Season, error) {
 // Episodes returns every stored episode of a show, by season and number.
 func (s *Store) Episodes(ctx context.Context, titleID int64) ([]Episode, error) {
 	rows, err := s.ro.QueryContext(ctx, `
-		SELECT season, episode, name, overview, air_date, runtime_min, still, rating
-		FROM episodes WHERE title_id = ? ORDER BY season, episode`, titleID)
+		SELECT `+episodeCols+`
+		FROM episodes e LEFT JOIN episode_ratings er ON er.imdb_id = e.imdb_id AND e.imdb_id <> ''
+		WHERE e.title_id = ? ORDER BY e.season, e.episode`, titleID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []Episode
 	for rows.Next() {
-		var e Episode
-		if err := rows.Scan(&e.Season, &e.Number, &e.Name, &e.Overview, &e.AirDate, &e.RuntimeMin, &e.Still, &e.Rating); err != nil {
+		e, err := scanEpisode(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, e)
@@ -698,13 +729,33 @@ func (s *Store) Episodes(ctx context.Context, titleID int64) ([]Episode, error) 
 	return out, rows.Err()
 }
 
+// episodeCols are the columns of an episode and its IMDb rating (the LEFT JOIN er).
+const episodeCols = `e.season, e.episode, e.name, e.overview, e.air_date, e.runtime_min, e.still, e.rating,
+	e.imdb_id, e.imdb_src, er.value, er.scale, er.votes, er.fetched_at`
+
+func scanEpisode(sc scanner) (Episode, error) {
+	var (
+		e              Episode
+		value, scale   sql.NullFloat64
+		votes, fetched sql.NullInt64
+	)
+	if err := sc.Scan(&e.Season, &e.Number, &e.Name, &e.Overview, &e.AirDate, &e.RuntimeMin, &e.Still, &e.Rating,
+		&e.IMDbID, &e.IMDbSource, &value, &scale, &votes, &fetched); err != nil {
+		return e, err
+	}
+	if value.Valid && scale.Valid {
+		e.IMDbRating = &Rating{Source: RatingIMDb, Value: value.Float64, Scale: scale.Float64, Votes: int(votes.Int64),
+			URL: "https://www.imdb.com/title/" + e.IMDbID + "/", FetchedAt: fetched.Int64}
+	}
+	return e, nil
+}
+
 // GetEpisode returns one stored episode, or ErrNotFound.
 func (s *Store) GetEpisode(ctx context.Context, titleID int64, season, episode int) (Episode, error) {
-	var e Episode
-	err := s.ro.QueryRowContext(ctx, `
-		SELECT season, episode, name, overview, air_date, runtime_min, still, rating
-		FROM episodes WHERE title_id = ? AND season = ? AND episode = ?`, titleID, season, episode).
-		Scan(&e.Season, &e.Number, &e.Name, &e.Overview, &e.AirDate, &e.RuntimeMin, &e.Still, &e.Rating)
+	e, err := scanEpisode(s.ro.QueryRowContext(ctx, `
+		SELECT `+episodeCols+`
+		FROM episodes e LEFT JOIN episode_ratings er ON er.imdb_id = e.imdb_id AND e.imdb_id <> ''
+		WHERE e.title_id = ? AND e.season = ? AND e.episode = ?`, titleID, season, episode))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Episode{}, ErrNotFound
 	}

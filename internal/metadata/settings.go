@@ -2,11 +2,13 @@ package metadata
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,6 +22,7 @@ const (
 	SettingTMDBKey   = "tmdb_key"
 	SettingTVDBKey   = "tvdb_key"
 	SettingTVDBPIN   = "tvdb_pin"
+	SettingMDBList   = "mdblist_key"
 	SettingEnabled   = "metadata_enabled" // "true" | "false"
 	SettingLanguage  = "metadata_language"
 	DefaultLanguage  = "en-US"
@@ -53,6 +56,10 @@ var (
 	ErrKeyRejected = errors.New("TMDB rejected the key")
 	// ErrTVDBRejected means TVDB refused the key or PIN at login.
 	ErrTVDBRejected = errors.New("TVDB rejected the key or PIN")
+	// ErrMDBListRejected means MDBList answered that the key is not valid.
+	ErrMDBListRejected = errors.New("MDBList rejected the key")
+	// ErrMDBListUnreachable is ErrUnreachable for MDBList.
+	ErrMDBListUnreachable = errors.New("could not reach MDBList")
 	// ErrUnreachable means the key could not be checked: TMDB was out of reach.
 	ErrUnreachable = errors.New("could not reach TMDB")
 	// ErrTVDBUnreachable is ErrUnreachable for TVDB.
@@ -72,9 +79,11 @@ var (
 // provider, and nowhere else.
 type Resolved struct {
 	key, tvdbKey, tvdbPIN string
+	mdblistKey            string
 	KeySource             KeySource // of the TMDB key
 	TVDBKeySource         KeySource
 	TVDBPINSource         KeySource // flag, env, settings, or none
+	MDBListKeySource      KeySource // flag, env, settings, or none
 	// Enabled is the privacy switch: false when -metadata=false was given or the
 	// setting turned it off. Nothing leaves the machine then.
 	Enabled bool
@@ -100,6 +109,10 @@ func (r Resolved) TVDBPINSet() bool { return r.tvdbPIN != "" }
 // TVDBKey and TVDBPIN are what to send to TVDB.
 func (r Resolved) TVDBKey() string { return r.tvdbKey }
 func (r Resolved) TVDBPIN() string { return r.tvdbPIN }
+
+// MDBListKeySet reports whether there is an MDBList key; MDBListKey is what to send to MDBList.
+func (r Resolved) MDBListKeySet() bool { return r.mdblistKey != "" }
+func (r Resolved) MDBListKey() string  { return r.mdblistKey }
 
 // Online reports whether lookups can be made: switched on, and a key of either provider.
 func (r Resolved) Online() bool { return r.Enabled && (r.key != "" || r.tvdbKey != "") }
@@ -142,6 +155,8 @@ type SettingsOptions struct {
 	// (flag, environment, settings).
 	TVDBKeyFlag, TVDBKeyEnv, TVDBKeyDefault string
 	TVDBPINFlag, TVDBPINEnv                 string
+	// The MDBList key (flag, environment, settings).
+	MDBListKeyFlag, MDBListKeyEnv string
 	// Disabled is -metadata=false: the privacy switch is off whatever the
 	// settings say.
 	Disabled bool
@@ -151,6 +166,7 @@ type SettingsOptions struct {
 	// TVDBImageBaseURL, TVDB's.
 	BaseURL, ImageBaseURL         string
 	TVDBBaseURL, TVDBImageBaseURL string
+	MDBListBaseURL                string
 	HTTPClient                    *http.Client
 	Logger                        *slog.Logger
 	// NewProvider builds a TMDB provider for a key and language, NewTVDB a TVDB
@@ -158,6 +174,8 @@ type SettingsOptions struct {
 	// replace them.
 	NewProvider func(key, language string) Provider
 	NewTVDB     func(key, pin, language string) Provider
+	// NewMDBList builds an MDBList client for a key; the default is the real client.
+	NewMDBList func(key string) *MDBListClient
 }
 
 // Settings resolves the keys, the privacy switch and the language from the
@@ -169,11 +187,17 @@ type Settings struct {
 	tvdbDown    atomic.Bool // the last thing asked of TVDB failed for the network's sake
 	tvdbRefused atomic.Bool // the last thing asked of TVDB was refused: the key or the PIN
 
-	mu         sync.Mutex
-	cached     Provider
-	cachedBy   [2]string // key, language
-	cachedTVDB Provider
-	tvdbBy     [3]string // key, PIN, language
+	// mdblistRefused is set when MDBList refused the key; the ratings job leaves MDBList alone until
+	// the key is changed or tested again (a refused key does not get better by itself).
+	mdblistRefused atomic.Bool
+
+	mu           sync.Mutex
+	cached       Provider
+	cachedBy     [2]string // key, language
+	cachedTVDB   Provider
+	tvdbBy       [3]string // key, PIN, language
+	cachedMDB    *MDBListClient
+	cachedMDBKey string
 }
 
 // String, GoString and LogValue keep the keys and the PIN, which the options hold,
@@ -203,6 +227,13 @@ func (s *Settings) newProvider(key, language string) Provider {
 		HTTPClient: s.o.HTTPClient, Logger: s.o.Logger}))
 }
 
+func (s *Settings) newMDBList(key string) *MDBListClient {
+	if s.o.NewMDBList != nil {
+		return s.o.NewMDBList(key)
+	}
+	return NewMDBListClient(MDBListOptions{Key: key, BaseURL: s.o.MDBListBaseURL, HTTPClient: s.o.HTTPClient, Logger: s.o.Logger})
+}
+
 func (s *Settings) newTVDB(key, pin, language string) Provider {
 	if s.o.NewTVDB != nil {
 		return s.o.NewTVDB(key, pin, language)
@@ -230,6 +261,8 @@ func (s *Settings) Resolve(ctx context.Context) Resolved {
 		cand{s.setting(ctx, SettingTVDBKey), KeyFromSettings}, cand{s.o.TVDBKeyDefault, KeyFromDefault})
 	r.tvdbPIN, r.TVDBPINSource = pick(cand{s.o.TVDBPINFlag, KeyFromFlag}, cand{s.o.TVDBPINEnv, KeyFromEnv},
 		cand{s.setting(ctx, SettingTVDBPIN), KeyFromSettings})
+	r.mdblistKey, r.MDBListKeySource = pick(cand{s.o.MDBListKeyFlag, KeyFromFlag}, cand{s.o.MDBListKeyEnv, KeyFromEnv},
+		cand{s.setting(ctx, SettingMDBList), KeyFromSettings})
 	if v, ok, err := s.o.Store.GetSetting(ctx, SettingEnabled); err == nil && ok && v == "false" {
 		r.Enabled = false
 	}
@@ -324,6 +357,12 @@ type Update struct {
 	// the stored one).
 	TVDBKey *string
 	TVDBPIN *string
+	// MDBListKey is the MDBList key ("" removes the stored one).
+	MDBListKey *string
+	// RatingsPrimary is the source whose rating cards show (one of RatingPrimaries); RatingsShown
+	// the sources to show, in order, each once (any of store.RatingSources; may be empty).
+	RatingsPrimary *string
+	RatingsShown   *[]string
 }
 
 // Update validates and stores a change. A new key is checked against its provider
@@ -350,8 +389,20 @@ func (s *Settings) Update(ctx context.Context, u Update) error {
 	if err != nil {
 		return err
 	}
+	mdbKey, err := cleanSecret(u.MDBListKey, keyValidationMsg)
+	if err != nil {
+		return err
+	}
 	if u.Language != nil && !languageCode.MatchString(*u.Language) {
 		return fmt.Errorf("%w: language must look like en-US or pt", ErrInvalidSetting)
+	}
+	if u.RatingsPrimary != nil && !slices.Contains(RatingPrimaries, *u.RatingsPrimary) {
+		return fmt.Errorf("%w: ratingsPrimary must be one of %s", ErrInvalidSetting, strings.Join(RatingPrimaries, ", "))
+	}
+	if u.RatingsShown != nil {
+		if err := validRatingsShown(*u.RatingsShown); err != nil {
+			return err
+		}
 	}
 	cur := s.Resolve(ctx)
 	lang := cur.Language
@@ -380,6 +431,30 @@ func (s *Settings) Update(ctx context.Context, u Update) error {
 		s.tvdbRefused.Store(false)
 	}
 
+	if u.MDBListKey != nil && mdbKey != "" && !s.o.Disabled {
+		if err := s.checkMDBList(ctx, mdbKey); err != nil {
+			return err
+		}
+		s.mdblistRefused.Store(false)
+	}
+	if u.RatingsPrimary != nil {
+		if err := s.o.Store.SetSetting(ctx, SettingRatingsPrimary, *u.RatingsPrimary); err != nil {
+			return err
+		}
+	}
+	if u.RatingsShown != nil {
+		list := *u.RatingsShown
+		if list == nil {
+			list = []string{} // a list with nothing in it, not null
+		}
+		raw, err := json.Marshal(list)
+		if err != nil {
+			return err
+		}
+		if err := s.o.Store.SetSetting(ctx, SettingRatingsShown, string(raw)); err != nil {
+			return err
+		}
+	}
 	if u.Language != nil {
 		if err := s.o.Store.SetSetting(ctx, SettingLanguage, *u.Language); err != nil {
 			return err
@@ -413,6 +488,12 @@ func (s *Settings) Update(ctx context.Context, u Update) error {
 		if err := s.storeSecret(ctx, SettingTVDBPIN, tvdbPIN); err != nil {
 			return err
 		}
+	}
+	if u.MDBListKey != nil {
+		if err := s.storeSecret(ctx, SettingMDBList, mdbKey); err != nil {
+			return err
+		}
+		s.mdblistRefused.Store(false) // a new key (or none) is not the one that was refused
 	}
 	if u.Key != nil {
 		return s.storeSecret(ctx, SettingTMDBKey, key)
@@ -473,6 +554,51 @@ func (s *Settings) checkTVDB(ctx context.Context, key, pin, language string) err
 	}
 }
 
+// checkMDBList asks MDBList for the key's limits: the cheapest call that shows the key works.
+func (s *Settings) checkMDBList(ctx context.Context, key string) error {
+	ctx, cancel := context.WithTimeout(ctx, keyCheckTimeout)
+	defer cancel()
+	err := s.newMDBList(key).Check(ctx)
+	switch {
+	case err == nil:
+		return nil
+	case IsUnauthorized(err):
+		return fmt.Errorf("%w: use the API key from your MDBList preferences page", ErrMDBListRejected)
+	default:
+		// The error is MDBList's or the network's: it never holds the key.
+		return fmt.Errorf("%w to check the key: %v", ErrMDBListUnreachable, err)
+	}
+}
+
+// MDBList returns the client for the key in use, or nil when nothing may leave the machine or there
+// is no key. It is built once per key.
+func (s *Settings) MDBList(ctx context.Context) (*MDBListClient, Resolved) {
+	r := s.Resolve(ctx)
+	if !r.Enabled || r.mdblistKey == "" {
+		return nil, r
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cachedMDB == nil || s.cachedMDBKey != r.mdblistKey {
+		s.cachedMDB, s.cachedMDBKey = s.newMDBList(r.mdblistKey), r.mdblistKey
+	}
+	return s.cachedMDB, r
+}
+
+// MDBListRefused reports whether MDBList refused the key it was last asked with.
+func (s *Settings) MDBListRefused() bool { return s.mdblistRefused.Load() }
+
+// NoteMDBList records what an MDBList call showed of the key: refused (a 401 or 403) or not.
+func (s *Settings) NoteMDBList(err error) {
+	if err != nil {
+		if IsUnauthorized(err) {
+			s.mdblistRefused.Store(true)
+		}
+		return
+	}
+	s.mdblistRefused.Store(false)
+}
+
 // Test checks the key in use for a provider (SourceTMDB or SourceTVDB), wherever it comes
 // from (a flag, the environment, the settings or the build), with a request made now: a
 // login for TVDB (with the PIN, if there is one), TMDB's configuration for TMDB. It is
@@ -482,13 +608,21 @@ func (s *Settings) checkTVDB(ctx context.Context, key, pin, language string) err
 // what Update says of a key that is refused or cannot be checked. None holds a key or a PIN.
 // A TVDB key that logs in clears what the status line says of TVDB (refused, unreachable).
 func (s *Settings) Test(ctx context.Context, provider string) error {
-	if provider != SourceTMDB && provider != SourceTVDB {
-		return fmt.Errorf("%w: provider must be tmdb or tvdb", ErrInvalidSetting)
+	if provider != SourceTMDB && provider != SourceTVDB && provider != SourceMDBList {
+		return fmt.Errorf("%w: provider must be tmdb, tvdb or mdblist", ErrInvalidSetting)
 	}
 	r := s.Resolve(ctx)
 	switch {
 	case !r.Enabled:
 		return ErrLookupsOff
+	case provider == SourceMDBList && !r.MDBListKeySet():
+		return ErrNoMDBList
+	case provider == SourceMDBList:
+		err := s.checkMDBList(ctx, r.mdblistKey)
+		if err == nil {
+			s.mdblistRefused.Store(false)
+		}
+		return err
 	case provider == SourceTMDB && !r.KeySet():
 		return ErrNoTMDB
 	case provider == SourceTVDB && !r.TVDBKeySet():

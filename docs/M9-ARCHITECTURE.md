@@ -266,9 +266,13 @@ Design:
     needs CPU and every root: it does not start while a video plays from the library's disk.
   - `scan.dirs` (10): the watcher's batches, through `Queue.Do`. It needs CPU only: a few headers, so a play from the
     same disk does not hold it. A batch that never ran is reported to the watcher as `ErrNotScanned`, which it retries.
-  - `meta.match` (20): the worker's passes, woken by `OnWake` (asynchronously), and every minute. Light to start;
-    before each item (`WorkerOptions.Pace`) it yields to a stalled viewer, a CPU transcode and browsing
-    (`YieldNeed` CPU). Outside a job (`paceFor`) the same pace waits on the governor directly.
+  - `meta.match` (20): the worker's passes, woken by `OnWake` (asynchronously), and every minute.
+    - Each item may probe its file and read its sidecars, even with lookups off. On a NAS that shares the link
+      with a film (measured 2026-11-05), so it needs the roots' disks: it does not start while a video plays from
+      them.
+    - Before each item (`WorkerOptions.Pace`) it yields to that, to a stalled viewer, a CPU transcode and browsing.
+    - `Spec.Light` keeps it in the light lane, so it never waits behind a full scan.
+    - Outside a job (`paceFor`) the same pace waits on the governor directly.
   - `cache.prune` (50): after each scan.
   - The scanner's own passes (a folder just added, a type changed) appear as a read-only `scan.folders` entry
     (`Options.Extra`, from `Scanner.Busy`). They pace through the governor directly.

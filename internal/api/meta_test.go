@@ -38,7 +38,7 @@ func TestItemListsCarryMetadata(t *testing.T) {
 			t.Errorf("%s = %q, want %q (relative, with the token)", field, got, withTok(want))
 		}
 	}
-	if movie.Rating == nil || *movie.Rating != 8.2 || movie.Certification != "R" || !slices.Equal(movie.Genres, []string{"Action", "Science Fiction"}) {
+	if movie.Rating == nil || movie.Rating.Source != "tmdb" || movie.Rating.Value != 8.2 || movie.Rating.Score100 != 82 || movie.Certification != "R" || !slices.Equal(movie.Genres, []string{"Action", "Science Fiction"}) {
 		t.Errorf("movie rating/certification/genres: %+v", movie)
 	}
 
@@ -63,10 +63,13 @@ func TestItemListsCarryMetadata(t *testing.T) {
 	raw := decode[[]map[string]any](t, m.get("/api/items"))
 	for _, r := range raw {
 		if int64(r["id"].(float64)) == m.multi {
-			for _, k := range []string{"titleId", "poster", "backdrop", "logo", "rating", "certification", "genres", "overview", "still"} {
+			for _, k := range []string{"titleId", "poster", "backdrop", "logo", "certification", "genres", "overview", "still", "ratings"} {
 				if _, there := r[k]; there {
 					t.Errorf("an unmatched movie has %q", k)
 				}
+			}
+			if v, there := r["rating"]; !there || v != nil { // M10: null, not absent
+				t.Errorf("an unmatched movie's rating = %v (there: %v), want null", v, there)
 			}
 			for _, k := range []string{"matchState", "needsReview"} {
 				if _, there := r[k]; !there {
@@ -198,7 +201,7 @@ func TestItemDetailCarriesTheTitleAndEpisodeMetadata(t *testing.T) {
 		meta.SortTitle != "Matrix, The" || meta.Overview != "A hacker learns." || meta.Tagline != "Wake up." ||
 		meta.ReleaseDate != "1999-03-30" || meta.Status != "Released" || meta.Certification != "R" || meta.Source != "tmdb" ||
 		meta.MatchState != "matched" || meta.Locked || meta.NeedsReview || meta.RuntimeMin == nil || *meta.RuntimeMin != 136 ||
-		meta.VoteCount == nil || *meta.VoteCount != 25000 || meta.Rating == nil || *meta.Rating != 8.2 {
+		meta.VoteCount == nil || *meta.VoteCount != 25000 || meta.Rating == nil || meta.Rating.Value != 8.2 {
 		t.Errorf("meta = %+v", meta)
 	}
 	if meta.ItemID == nil || *meta.ItemID != m.mp4 || meta.Logo != withTok("/api/images/tmdb/w500/l603.png") {
@@ -253,7 +256,7 @@ func TestShowsListAndDetail(t *testing.T) {
 	}
 	if sh.TitleID == nil || *sh.TitleID != m.showTitle || sh.Poster != withTok("/api/images/tmdb/w342/show.jpg") ||
 		sh.Backdrop != withTok("/api/images/tmdb/w1280/showb.jpg") || sh.Year == nil || *sh.Year != 2008 || sh.Overview != "A show." ||
-		!slices.Equal(sh.Genres, []string{"Drama"}) || sh.Rating == nil || *sh.Rating != 8.9 || sh.MatchState != "matched" || sh.NeedsReview {
+		!slices.Equal(sh.Genres, []string{"Drama"}) || sh.Rating == nil || sh.Rating.Value != 8.9 || sh.MatchState != "matched" || sh.NeedsReview {
 		t.Errorf("show metadata = %+v", sh)
 	}
 

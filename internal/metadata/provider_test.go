@@ -209,7 +209,7 @@ func TestProviderSeries(t *testing.T) {
 	}
 	wantEp := store.Episode{Season: 1, Number: 1, Name: "Pilot", Overview: "Diagnosed with terminal lung cancer, a high school chemistry teacher turns to a life of crime.",
 		AirDate: "2008-01-20", RuntimeMin: 58, Still: "tmdb:/ydlY3iPfeOAvu8gVqrxPoMvzNCn.jpg", Rating: 8.3}
-	if se.Episodes[0] != wantEp {
+	if !reflect.DeepEqual(se.Episodes[0], wantEp) {
 		t.Errorf("episode 1 = %+v, want %+v", se.Episodes[0], wantEp)
 	}
 	if se.Episodes[2].Still != "" {

@@ -133,9 +133,19 @@ func TestUpsertTitleRoundTripAndDetail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// TMDB's score is a rating of the card (M10); the time it was fetched is not what is tested here.
 	card := TitleCard{ID: titleID, Kind: KindMovie, Title: "The Matrix", Year: 1999,
-		Poster: "tmdb:/p603.jpg", Backdrop: "tmdb:/b603.jpg", Rating: 8.2, ItemID: itemID}
-	if d.TitleCard != card {
+		Poster: "tmdb:/p603.jpg", Backdrop: "tmdb:/b603.jpg", Rating: 8.2, ItemID: itemID,
+		Ratings: []Rating{{Source: RatingTMDB, Value: 8.2, Scale: 10, Votes: 1000, URL: "https://www.themoviedb.org/movie/603"}}}
+	got := d.TitleCard
+	if len(got.Ratings) == 1 {
+		got.Ratings = []Rating{got.Ratings[0]}
+		if got.Ratings[0].FetchedAt == 0 {
+			t.Error("TMDB's rating has no time")
+		}
+		got.Ratings[0].FetchedAt = 0
+	}
+	if !reflect.DeepEqual(got, card) {
 		t.Errorf("card = %+v, want %+v", d.TitleCard, card)
 	}
 	if d.TMDBID != 603 || d.IMDbID != "tt0000603" || d.SortTitle != "Matrix, The" || d.Overview != "About The Matrix" ||
@@ -471,7 +481,7 @@ func TestSeasonsAndEpisodes(t *testing.T) {
 	}
 	ep, err := s.GetEpisode(ctx, id, 1, 1)
 	want := Episode{Season: 1, Number: 1, Name: "Pilot", Overview: "p", AirDate: "2008-01-20", RuntimeMin: 58, Still: "tmdb:/e1.jpg", Rating: 8.1}
-	if err != nil || ep != want {
+	if err != nil || !reflect.DeepEqual(ep, want) {
 		t.Errorf("GetEpisode = %+v, %v; want %+v", ep, err, want)
 	}
 	if _, err := s.GetEpisode(ctx, id, 1, 9); !errors.Is(err, ErrNotFound) {

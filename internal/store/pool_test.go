@@ -318,6 +318,14 @@ func reads() []routed {
 		{name: "TMDBSeriesWithTVDBID", call: func(ctx context.Context, s *Store) error { _, err := s.TMDBSeriesWithTVDBID(ctx, 10); return err }},
 		{name: "MaxTitleID", call: func(ctx context.Context, s *Store) error { _, err := s.MaxTitleID(ctx); return err }},
 		{name: "UnmappedEpisodeFiles", call: func(ctx context.Context, s *Store) error { _, err := s.UnmappedEpisodeFiles(ctx, 1); return err }},
+		// M10: ratings.
+		{name: "IMDbLibrary", call: func(ctx context.Context, s *Store) error { _, err := s.IMDbLibrary(ctx); return err }},
+		{name: "DueRatings", call: func(ctx context.Context, s *Store) error { _, err := s.DueRatings(ctx, time.Now(), 10); return err }},
+		{name: "IMDbShows", call: func(ctx context.Context, s *Store) error { _, err := s.IMDbShows(ctx); return err }},
+		{name: "PlanEpisodeIMDb", call: func(ctx context.Context, s *Store) error {
+			_, err := s.PlanEpisodeIMDb(ctx, map[string][]DatasetEpisode{"tt1": {{IMDbID: "tt2", Season: 1, Number: 1}}})
+			return err
+		}},
 	}, extraReads...)
 }
 
@@ -421,6 +429,23 @@ func writes() []routed {
 		{name: "SetFingerprint", prio: prioLow, call: func(ctx context.Context, s *Store) error { return s.SetFingerprint(ctx, 1, 1, 1, "f") }},
 		{name: "SetExternalSubtitles", prio: prioLow, call: func(ctx context.Context, s *Store) error {
 			return s.SetExternalSubtitles(ctx, 1, []ExternalSubtitle{{Path: "/a.srt", Format: "srt"}})
+		}},
+		// M10: ratings, all background work.
+		{name: "SetIMDbRatings", prio: prioLow, call: func(ctx context.Context, s *Store) error {
+			return s.SetIMDbRatings(ctx, nil, []IMDbEpisodeRating{{IMDbID: "tt1", Value: 8, Votes: 1}}, 1, nil)
+		}},
+		{name: "PruneIMDbRatings", prio: prioLow, call: func(ctx context.Context, s *Store) error {
+			_, err := s.PruneIMDbRatings(ctx, 1, nil)
+			return err
+		}},
+		{name: "ReplaceMDBListRatings", prio: prioLow, call: func(ctx context.Context, s *Store) error {
+			return e(s.ReplaceMDBListRatings(ctx, 1, nil, 1))
+		}},
+		{name: "TouchRatingsChecked", prio: prioLow, call: func(ctx context.Context, s *Store) error {
+			return e(s.TouchRatingsChecked(ctx, 1, 1))
+		}},
+		{name: "ApplyEpisodeIMDb", prio: prioLow, call: func(ctx context.Context, s *Store) error {
+			return s.ApplyEpisodeIMDb(ctx, EpisodeIDPlan{changes: []epChange{{titleID: 1, slot: episodeSlot{1, 1}, imdb: "tt1", src: IMDbFromDataset}}}, nil)
 		}},
 	}, extraWrites...)
 }

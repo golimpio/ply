@@ -65,6 +65,10 @@ type Options struct {
 	Metadata *metadata.Worker   // matching, refreshing, fixing matches
 	Settings *metadata.Settings // the TMDB and TVDB keys, the privacy switch, the language
 	Images   *metadata.ImageCache
+	// Ratings (M10) fetches IMDb's and MDBList's ratings; the API asks it which sources it can
+	// give, when the IMDb dataset was last downloaded, and tells it to look for work when a key
+	// or a choice changes. nil: ratings are what the store already has.
+	Ratings *metadata.Ratings
 	// Now is the clock; nil means time.Now. (GET /api/upcoming asks which day it is.)
 	Now func() time.Time
 	// AllowedHosts are extra Host names to answer, beyond the ones knownHost

@@ -91,6 +91,11 @@ type Spec struct {
 	// stalled viewer, a CPU transcode), so that it does not keep the scanner from
 	// the folders the watcher saw change for the length of a film. Default: Need.
 	YieldNeed func(payload json.RawMessage) tier.Need
+	// Light puts the kind in the light lane whatever its Need: work that reads a
+	// disk a little at a time (a file's header, its sidecars) between network calls.
+	// Its Need still holds it while a video plays from that disk; it just does not
+	// wait for the heavy lane (a full scan) to be free.
+	Light bool
 }
 
 func (s *Spec) need(p json.RawMessage) tier.Need {

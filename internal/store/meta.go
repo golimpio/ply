@@ -158,7 +158,22 @@ type Episode struct {
 	RuntimeMin int
 	Still      string
 	Rating     float64
+
+	// M10. IMDbID (tt...) is the episode's id at IMDb: given by a provider's data (then IMDbSource is
+	// IMDbFromProvider and the mapping of IMDb's episode dataset never overwrites it), or mapped from
+	// that dataset (IMDbFromDataset). A fetch that brings none keeps the one stored for the season
+	// and number, for a show in the aired order. IMDbRating is filled by Episodes and GetEpisode: the
+	// episode's IMDb rating, nil when it has none.
+	IMDbID     string
+	IMDbSource string
+	IMDbRating *Rating
 }
+
+// Where an episode's IMDb id came from (Episode.IMDbSource).
+const (
+	IMDbFromProvider = "provider"
+	IMDbFromDataset  = "dataset"
+)
 
 // TitleInput is everything UpsertTitle writes in one transaction.
 //
@@ -250,6 +265,21 @@ func upsertTitleTx(ctx context.Context, tx *sql.Tx, in *TitleInput) (int64, erro
 	if err := setCredits(ctx, tx, id, in.Credits); err != nil {
 		return 0, err
 	}
+	// The episodes' IMDb ids, taken before a wipe: a fetch brings none. They are kept for a show that
+	// was in the aired order and still is (they are by season and number in that order), and not for
+	// one that left TVDB.
+	var mem episodeMemory
+	if !plan.wipe && plan.oldOrder == OrderAired {
+		var order string
+		if err := tx.QueryRowContext(ctx, `SELECT episode_order FROM titles WHERE id = ?`, id).Scan(&order); err != nil {
+			return 0, err
+		}
+		if order == OrderAired {
+			if mem, err = loadEpisodeIDs(ctx, tx, id); err != nil {
+				return 0, err
+			}
+		}
+	}
 	if plan.wipe || (in.ResetSeasons && !plan.skip) {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM seasons WHERE title_id = ?`, id); err != nil {
 			return 0, err
@@ -259,7 +289,7 @@ func upsertTitleTx(ctx context.Context, tx *sql.Tx, in *TitleInput) (int64, erro
 		}
 	}
 	if !plan.skip {
-		if err := setSeasons(ctx, tx, id, in.Seasons); err != nil {
+		if err := setSeasons(ctx, tx, id, in.Seasons, mem); err != nil {
 			return 0, err
 		}
 	}
@@ -271,7 +301,10 @@ func upsertTitleTx(ctx context.Context, tx *sql.Tx, in *TitleInput) (int64, erro
 // while they were being fetched), or wipe the stored ones first (the title left TVDB, whose
 // numbering the stored episodes still have). keep: the row is a show from TVDB and the input
 // is not (see TitleInput.keepTVDB): nothing is written, not even the title.
-type seasonsPlan struct{ skip, wipe, keep bool }
+type seasonsPlan struct {
+	skip, wipe, keep bool
+	oldOrder         string // the order the row had before the input was written
+}
 
 // upsertTitleRow writes the title row and says in plan what the seasons are to do.
 func upsertTitleRow(ctx context.Context, tx *sql.Tx, in *TitleInput, plan *seasonsPlan) (int64, error) {
@@ -350,6 +383,7 @@ func upsertTitleRow(ctx context.Context, tx *sql.Tx, in *TitleInput, plan *seaso
 	}
 	plan.skip = in.ExpectOrder != "" && oldOrder != in.ExpectOrder
 	plan.wipe = oldSource == SourceTVDB && source != SourceTVDB
+	plan.oldOrder = oldOrder
 
 	// The text the user can edit stays when the title is locked. Images are
 	// never blanked: a source that has none right now must not remove the ones
@@ -593,7 +627,7 @@ func upsertPerson(ctx context.Context, tx *sql.Tx, p Person) (int64, error) {
 	return id, err
 }
 
-func setSeasons(ctx context.Context, tx *sql.Tx, titleID int64, seasons []Season) error {
+func setSeasons(ctx context.Context, tx *sql.Tx, titleID int64, seasons []Season, mem episodeMemory) error {
 	for _, se := range seasons {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO seasons (title_id, season, name, overview, poster, air_date) VALUES (?, ?, ?, ?, ?, ?)
@@ -608,14 +642,24 @@ func setSeasons(ctx context.Context, tx *sql.Tx, titleID int64, seasons []Season
 			return err
 		}
 		for _, ep := range se.Episodes {
+			// An id the data brings is the provider's. A fetch that brings none (the season answers of
+			// TMDB and TVDB have no IMDb ids) keeps what the show had at this season and number.
+			imdb, src := ep.IMDbID, ""
+			if imdb != "" {
+				src = IMDbFromProvider
+			} else if old, ok := mem[[2]int{se.Number, ep.Number}]; ok {
+				imdb, src = old.imdb, old.src
+			}
 			if _, err := tx.ExecContext(ctx, `
-				INSERT INTO episodes (title_id, season, episode, name, overview, air_date, runtime_min, still, rating)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+				INSERT INTO episodes (title_id, season, episode, name, overview, air_date, runtime_min, still, rating,
+					imdb_id, imdb_src)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				ON CONFLICT (title_id, season, episode) DO UPDATE SET name = excluded.name,
 					overview = excluded.overview, air_date = excluded.air_date,
-					runtime_min = excluded.runtime_min, still = excluded.still, rating = excluded.rating`,
+					runtime_min = excluded.runtime_min, still = excluded.still, rating = excluded.rating,
+					imdb_id = excluded.imdb_id, imdb_src = excluded.imdb_src`,
 				titleID, se.Number, ep.Number, ep.Name, ep.Overview, ep.AirDate, ep.RuntimeMin, ep.Still,
-				ep.Rating); err != nil {
+				ep.Rating, imdb, src); err != nil {
 				return err
 			}
 		}

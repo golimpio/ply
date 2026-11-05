@@ -73,6 +73,15 @@ type Config struct {
 	TVDBPINEnv   string // PLY_TVDB_PIN
 	TVDBURL      string // hidden: -tvdb-url replaces TVDB's API address (tests)
 	TVDBImageURL string // hidden: -tvdb-image-url replaces the host of TVDB's images (tests)
+
+	// Ratings (M10): the MDBList key has the same two places as the others (-mdblist-key, then
+	// PLY_MDBLIST_KEY; the settings table comes after) and is never printed. The two addresses are
+	// for tests: MDBList's API and IMDb's two datasets (ratings, and the episodes of shows).
+	MDBListKey      string // -mdblist-key
+	MDBListKeyEnv   string // PLY_MDBLIST_KEY
+	MDBListURL      string // hidden: -mdblist-url
+	IMDbRatingsURL  string // hidden: -imdb-ratings-url
+	IMDbEpisodesURL string // hidden: -imdb-episodes-url
 }
 
 // Environment variables that stand in for flags (the flag wins).
@@ -87,6 +96,10 @@ const (
 	TVDBPINEnv           = "PLY_TVDB_PIN"
 	TVDBURLEnv           = "PLY_TVDB_URL"
 	TVDBImageURLEnv      = "PLY_TVDB_IMAGE_URL"
+	MDBListKeyEnv        = "PLY_MDBLIST_KEY"
+	MDBListURLEnv        = "PLY_MDBLIST_URL"
+	IMDbRatingsURLEnv    = "PLY_IMDB_RATINGS_URL"
+	IMDbEpisodesURLEnv   = "PLY_IMDB_EPISODES_URL"
 	AllowHostsEnv        = "PLY_ALLOW_HOSTS"
 	MaxStreamsEnv        = "PLY_MAX_STREAMS"
 	MaxTranscodesEnv     = "PLY_MAX_TRANSCODES"
@@ -95,7 +108,8 @@ const (
 )
 
 // hiddenFlags are accepted but not listed in the usage.
-var hiddenFlags = map[string]bool{"tmdb-url": true, "tmdb-image-url": true, "tvdb-url": true, "tvdb-image-url": true}
+var hiddenFlags = map[string]bool{"tmdb-url": true, "tmdb-image-url": true, "tvdb-url": true, "tvdb-image-url": true,
+	"mdblist-url": true, "imdb-ratings-url": true, "imdb-episodes-url": true}
 
 var languageCode = regexp.MustCompile(`^[a-z]{2,3}(-[A-Za-z]{2})?$`)
 
@@ -265,6 +279,10 @@ func Parse(args []string, out io.Writer) (Config, error) {
 	fs.StringVar(&c.TVDBPIN, "tvdb-pin", "", "your TheTVDB subscriber PIN, for a project key that needs one (env "+TVDBPINEnv+"; can also be set in the web UI)")
 	fs.StringVar(&c.TVDBURL, "tvdb-url", envString(TVDBURLEnv, ""), "")
 	fs.StringVar(&c.TVDBImageURL, "tvdb-image-url", envString(TVDBImageURLEnv, ""), "")
+	fs.StringVar(&c.MDBListKey, "mdblist-key", "", "MDBList API key for the Rotten Tomatoes, Metacritic, Letterboxd and Trakt ratings (env "+MDBListKeyEnv+"; can also be set in the web UI)")
+	fs.StringVar(&c.MDBListURL, "mdblist-url", envString(MDBListURLEnv, ""), "")
+	fs.StringVar(&c.IMDbRatingsURL, "imdb-ratings-url", envString(IMDbRatingsURLEnv, ""), "")
+	fs.StringVar(&c.IMDbEpisodesURL, "imdb-episodes-url", envString(IMDbEpisodesURLEnv, ""), "")
 	fs.Usage = func() { usage(fs, out) }
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
@@ -272,6 +290,7 @@ func Parse(args []string, out io.Writer) (Config, error) {
 	c.TMDBKeyEnv = os.Getenv(TMDBKeyEnv)
 	c.TVDBKeyEnv = os.Getenv(TVDBKeyEnv)
 	c.TVDBPINEnv = os.Getenv(TVDBPINEnv)
+	c.MDBListKeyEnv = os.Getenv(MDBListKeyEnv)
 	if err := c.parseLimits(fs); err != nil {
 		return Config{}, err
 	}
@@ -304,6 +323,7 @@ func Parse(args []string, out io.Writer) (Config, error) {
 	c.TMDBKeyEnv = strings.TrimSpace(c.TMDBKeyEnv)
 	c.TVDBKey, c.TVDBKeyEnv = strings.TrimSpace(c.TVDBKey), strings.TrimSpace(c.TVDBKeyEnv)
 	c.TVDBPIN, c.TVDBPINEnv = strings.TrimSpace(c.TVDBPIN), strings.TrimSpace(c.TVDBPINEnv)
+	c.MDBListKey, c.MDBListKeyEnv = strings.TrimSpace(c.MDBListKey), strings.TrimSpace(c.MDBListKeyEnv)
 
 	if c.Roots, err = resolveRoots(given); err != nil {
 		return Config{}, err

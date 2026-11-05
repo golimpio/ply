@@ -257,7 +257,7 @@ func (q *Queue) queuedWithKey(kind, key string) *entry {
 
 func (e *entry) setNeed() {
 	e.need = e.spec.need(e.Payload)
-	e.heavy = e.need.CPU || len(e.need.Disks) > 0
+	e.heavy = !e.spec.Light && (e.need.CPU || len(e.need.Disks) > 0)
 }
 
 func (q *Queue) insert(ctx context.Context, j Job) (int64, error) {

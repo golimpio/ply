@@ -125,9 +125,10 @@ func (s *Server) handlePerson(w http.ResponseWriter, r *http.Request) {
 		Biography:  d.Biography, Birthday: d.Birthday, Deathday: d.Deathday, PlaceOfBirth: d.PlaceOfBirth, IMDbID: d.IMDbID,
 		TMDBID: d.TMDBID, TVDBID: d.TVDBID, Credits: []PersonCredit{},
 	}
+	primary := s.ratingsPrimary(r.Context())
 	for _, c := range d.Credits {
 		out.Credits = append(out.Credits, PersonCredit{TitleID: c.Title.ID, Kind: c.Kind, Job: c.Job, Character: c.Character,
-			Title: s.titleCard(c.Title)})
+			Title: s.titleCard(c.Title, primary)})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -191,12 +192,18 @@ func (s *Server) handleTitles(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "genre, collection and person must be ids")
 		return
 	}
+	rq, err := parseRatingQuery(q)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	cards, err := s.Store.Titles(r.Context(), f)
 	if err != nil {
 		s.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.titleCards(cards))
+	out := applyRatingQuery(s.titleCards(cards, s.ratingsPrimary(r.Context())), rq, func(c TitleCard) *RatingEntry { return c.Rating })
+	writeJSON(w, http.StatusOK, out)
 }
 
 // handleUpcoming lists the library's shows with an episode still to air, soonest
@@ -213,7 +220,7 @@ func (s *Server) handleUpcoming(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]UpcomingShow, len(shows))
 	for i, u := range shows {
-		card := s.titleCard(u.TitleCard)
+		card := s.titleCard(u.TitleCard, "")
 		out[i] = UpcomingShow{TitleID: u.ID, Show: u.Show, Poster: card.Poster, Backdrop: card.Backdrop, NextAirDate: u.NextAirDate}
 		if e := u.NextEpisode; e.Number > 0 {
 			out[i].NextEpisode = &NextEpisode{Season: e.Season, Episode: e.Number, Name: e.Name}
@@ -237,7 +244,7 @@ func (s *Server) handleCollection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, CollectionDetail{ID: c.ID, Name: c.Name, Overview: c.Overview,
-		Poster: s.imageURL(c.Poster, posterSize), Backdrop: s.imageURL(c.Backdrop, backdropSize), Titles: s.titleCards(c.Titles)})
+		Poster: s.imageURL(c.Poster, posterSize), Backdrop: s.imageURL(c.Backdrop, backdropSize), Titles: s.titleCards(c.Titles, s.ratingsPrimary(r.Context()))})
 }
 
 // ---- shows ----
@@ -263,7 +270,7 @@ func (s *Server) findShow(w http.ResponseWriter, r *http.Request) (store.Show, b
 }
 
 // showMeta fills the metadata fields of a show from its row and title.
-func (s *Server) showMeta(sm store.SeriesMatch, hasRow bool, b store.TitleBrief, hasBrief bool) (MetaFields, *int, string) {
+func (s *Server) showMeta(sm store.SeriesMatch, hasRow bool, b store.TitleBrief, hasBrief bool, primary string) (MetaFields, *int, string) {
 	m := MetaFields{MatchState: store.MatchPending}
 	if hasRow {
 		m.MatchState, m.NeedsReview = sm.State, sm.NeedsReview
@@ -280,7 +287,7 @@ func (s *Server) showMeta(sm store.SeriesMatch, hasRow bool, b store.TitleBrief,
 	if hasBrief {
 		m.TitleID = ptr(b.ID)
 		m.Logo = s.imageURL(b.Logo, logoSize)
-		m.Rating = optFloat(b.Rating)
+		m.Rating = primaryRating(b.Ratings, primary)
 		m.Certification = b.Certification
 		m.Genres = b.Genres
 		year, overview = optInt(b.Year), b.Overview
@@ -293,6 +300,11 @@ func (s *Server) showMeta(sm store.SeriesMatch, hasRow bool, b store.TitleBrief,
 }
 
 func (s *Server) handleShows(w http.ResponseWriter, r *http.Request) {
+	rq, err := parseRatingQuery(r.URL.Query())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	shows, err := s.Store.Shows(r.Context())
 	if err != nil {
 		s.internalError(w, r, err)
@@ -313,13 +325,15 @@ func (s *Server) handleShows(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.Logger.Warn("metadata: reading titles", "err", err)
 	}
+	primary := s.ratingsPrimary(r.Context())
 	out := make([]ShowSummary, len(shows))
 	for i, sh := range shows {
 		row, hasRow := rows[sh.Name]
 		b, hasBrief := briefs[row.TitleID]
-		m, year, overview := s.showMeta(row, hasRow, b, hasBrief && row.TitleID != 0)
+		m, year, overview := s.showMeta(row, hasRow, b, hasBrief && row.TitleID != 0, primary)
 		out[i] = ShowSummary{Show: sh.Name, Seasons: sh.Seasons, EpisodeCount: sh.EpisodeCount, Year: year, Overview: overview, MetaFields: m}
 	}
+	out = applyRatingQuery(out, rq, func(sh ShowSummary) *RatingEntry { return sh.Rating })
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -342,13 +356,14 @@ func (s *Server) showDetail(ctx context.Context, sh store.Show) (ShowDetail, err
 		hasBrief bool
 		detail   *TitleDetail
 		stored   = map[int]store.Season{}
+		primary  = s.ratingsPrimary(ctx)
 	)
 	if hasRow && row.TitleID != 0 {
 		if briefs, err := s.Store.TitleBriefs(ctx, []int64{row.TitleID}); err == nil {
 			brief, hasBrief = briefs[row.TitleID]
 		}
 		if d, err := s.Store.GetTitleDetail(ctx, row.TitleID); err == nil {
-			detail = s.titleDetail(d)
+			detail = s.titleDetail(d, primary)
 		}
 		if seasons, err := s.Store.Seasons(ctx, row.TitleID); err == nil {
 			for _, se := range seasons {
@@ -356,7 +371,7 @@ func (s *Server) showDetail(ctx context.Context, sh store.Show) (ShowDetail, err
 			}
 		}
 	}
-	m, year, overview := s.showMeta(row, hasRow, brief, hasBrief)
+	m, year, overview := s.showMeta(row, hasRow, brief, hasBrief, primary)
 	out := ShowDetail{Show: sh.Name, EpisodeCount: sh.EpisodeCount, Year: year, Overview: overview, MetaFields: m, Meta: detail,
 		Seasons: []SeasonInfo{}}
 
@@ -678,7 +693,7 @@ func (s *Server) handlePatchTitle(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	out := s.titleDetail(d)
+	out := s.titleDetail(d, s.ratingsPrimary(r.Context()))
 	if changedOrder {
 		// How many of the show's files have no episode in the new order: the page can say so.
 		if n, err := s.Store.UnmappedEpisodeFiles(r.Context(), id); err == nil {
@@ -734,6 +749,7 @@ func (s *Server) handleReview(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
+	primary := s.ratingsPrimary(r.Context())
 	out := make([]ReviewEntry, len(list))
 	for i, e := range list {
 		out[i] = ReviewEntry{Kind: e.Kind, Show: e.Show, Title: e.Title, Year: e.Year, MatchState: e.MatchState,
@@ -745,7 +761,7 @@ func (s *Server) handleReview(w http.ResponseWriter, r *http.Request) {
 			out[i].Episodes = append(out[i].Episodes, ReviewEpisode{ID: ep.ID, Path: ep.Path})
 		}
 		if e.Candidate != nil {
-			c := s.titleCard(*e.Candidate)
+			c := s.titleCard(*e.Candidate, primary)
 			out[i].Candidate = &c
 		}
 	}
@@ -805,8 +821,10 @@ func (s *Server) settingsView(ctx context.Context) SettingsView {
 		r := s.Settings.Resolve(ctx)
 		v = SettingsView{TMDBKeySet: r.KeySet(), TMDBKeySource: string(r.KeySource), MetadataEnabled: r.Enabled,
 			MetadataForcedOff: r.ForcedOff, Language: r.Language,
-			TVDBKeySet: r.TVDBKeySet(), TVDBPINSet: r.TVDBPINSet(), TVDBKeySource: string(r.TVDBKeySource), TVDBPINSource: string(r.TVDBPINSource)}
+			TVDBKeySet: r.TVDBKeySet(), TVDBPINSet: r.TVDBPINSet(), TVDBKeySource: string(r.TVDBKeySource), TVDBPINSource: string(r.TVDBPINSource),
+			MDBListKeySet: r.MDBListKeySet(), MDBListKeySource: string(r.MDBListKeySource)}
 	}
+	s.ratingsSettings(ctx, &v)
 	v.TVDBAttribution, v.TVDBAttributionURL = tvdbAttribution, tvdbAttributionURL
 	l := s.playLimits(ctx)
 	v.MaxStreams, v.MaxStreamsSource = l.streams, l.streamsSource
@@ -826,6 +844,11 @@ type settingsRequest struct {
 	Language        *string `json:"language"`
 	MaxStreams      *int    `json:"maxStreams"`
 	MaxTranscodes   *int    `json:"maxTranscodes"`
+	// M10: the MDBList key ("" removes the stored one), the source whose rating cards show, and the
+	// sources to show, in order (null leaves them alone; [] shows none).
+	MDBListKey     *string   `json:"mdblistKey"`
+	RatingsPrimary *string   `json:"ratingsPrimary"`
+	RatingsShown   *[]string `json:"ratingsShown"`
 }
 
 // handlePatchSettings is PATCH (and PUT) /api/settings: it changes the settings
@@ -844,10 +867,11 @@ func (s *Server) handlePatchSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req == (settingsRequest{}) {
-		writeError(w, http.StatusBadRequest, "give at least one of tmdbKey, tvdbKey, tvdbPin, metadataEnabled, language, maxStreams, maxTranscodes")
+		writeError(w, http.StatusBadRequest, "give at least one of tmdbKey, tvdbKey, tvdbPin, mdblistKey, metadataEnabled, language, ratingsPrimary, ratingsShown, maxStreams, maxTranscodes")
 		return
 	}
-	metadataChange := req.TMDBKey != nil || req.TVDBKey != nil || req.TVDBPIN != nil || req.MetadataEnabled != nil || req.Language != nil
+	metadataChange := req.TMDBKey != nil || req.TVDBKey != nil || req.TVDBPIN != nil || req.MetadataEnabled != nil || req.Language != nil ||
+		req.MDBListKey != nil || req.RatingsPrimary != nil || req.RatingsShown != nil
 	if metadataChange && s.Settings == nil {
 		writeError(w, http.StatusServiceUnavailable, "settings are not available")
 		return
@@ -857,13 +881,15 @@ func (s *Server) handlePatchSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if metadataChange {
 		err := s.Settings.Update(r.Context(), metadata.Update{Key: req.TMDBKey, Enabled: req.MetadataEnabled, Language: req.Language,
-			TVDBKey: req.TVDBKey, TVDBPIN: req.TVDBPIN})
+			TVDBKey: req.TVDBKey, TVDBPIN: req.TVDBPIN, MDBListKey: req.MDBListKey, RatingsPrimary: req.RatingsPrimary,
+			RatingsShown: req.RatingsShown})
 		switch {
 		case err == nil:
-		case errors.Is(err, metadata.ErrInvalidSetting), errors.Is(err, metadata.ErrKeyRejected), errors.Is(err, metadata.ErrTVDBRejected):
+		case errors.Is(err, metadata.ErrInvalidSetting), errors.Is(err, metadata.ErrKeyRejected), errors.Is(err, metadata.ErrTVDBRejected),
+			errors.Is(err, metadata.ErrMDBListRejected):
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
-		case errors.Is(err, metadata.ErrUnreachable), errors.Is(err, metadata.ErrTVDBUnreachable):
+		case errors.Is(err, metadata.ErrUnreachable), errors.Is(err, metadata.ErrTVDBUnreachable), errors.Is(err, metadata.ErrMDBListUnreachable):
 			writeError(w, http.StatusBadGateway, err.Error())
 			return
 		default:
@@ -872,6 +898,9 @@ func (s *Server) handlePatchSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if s.Metadata != nil {
 			s.Metadata.Reload() // a new key or language takes effect at once
+		}
+		if s.Ratings != nil {
+			s.Ratings.Wake() // a key for MDBList, or the privacy switch, may leave ratings to fetch
 		}
 	}
 	if req.MaxStreams != nil || req.MaxTranscodes != nil {
@@ -889,6 +918,9 @@ func (s *Server) handlePatchSettings(w http.ResponseWriter, r *http.Request) {
 	// the answer about a key that tvdbKeyChecked gives.
 	if req.TVDBKey != nil && strings.TrimSpace(*req.TVDBKey) != "" {
 		view.TVDBKeyChecked = ptr(!view.MetadataForcedOff)
+	}
+	if req.MDBListKey != nil && strings.TrimSpace(*req.MDBListKey) != "" {
+		view.MDBListKeyChecked = ptr(!view.MetadataForcedOff)
 	}
 	writeJSON(w, http.StatusOK, view)
 }
@@ -920,7 +952,7 @@ type SettingsTest struct {
 	Error string `json:"error,omitempty"` // why not: never has a key or a PIN in it
 }
 
-// handleTestSettings is POST /api/settings/test {"provider": "tmdb" | "tvdb"}: it checks the key
+// handleTestSettings is POST /api/settings/test {"provider": "tmdb" | "tvdb" | "mdblist"}: it checks the key
 // in use for that provider, from wherever it comes, with a request made now (a login for
 // TVDB, with its PIN if there is one). A key that does not work is an answer, not a failure of
 // the request: 200 with ok false and the reason. The key is not in the reply, and it is not
@@ -933,8 +965,8 @@ func (s *Server) handleTestSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	provider := strings.ToLower(strings.TrimSpace(req.Provider))
-	if provider != metadata.SourceTMDB && provider != metadata.SourceTVDB {
-		writeError(w, http.StatusBadRequest, `provider must be "tmdb" or "tvdb"`)
+	if provider != metadata.SourceTMDB && provider != metadata.SourceTVDB && provider != metadata.SourceMDBList {
+		writeError(w, http.StatusBadRequest, `provider must be "tmdb", "tvdb" or "mdblist"`)
 		return
 	}
 	if s.Settings == nil {
