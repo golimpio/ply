@@ -16,6 +16,11 @@ import (
 	"time"
 )
 
+// extraReads and extraWrites are routed calls another test file adds (the
+// background queue's, in jobs_test.go), so that each table of methods lives with
+// its methods.
+var extraReads, extraWrites []routed
+
 // chunkSpec is the batch size the bulk writes are specified to have: at most 500
 // rows per transaction. It is a number of its own, not writeChunk, so that changing
 // writeChunk fails the tests rather than moving them along.
@@ -250,7 +255,7 @@ func reads() []routed {
 		}
 		return err
 	}
-	return []routed{
+	return append([]routed{
 		{name: "Folders", call: func(ctx context.Context, s *Store) error { _, err := s.Folders(ctx); return err }},
 		{name: "GetFolder", call: func(ctx context.Context, s *Store) error { _, err := s.GetFolder(ctx, 1); return nf(err) }},
 		{name: "CountItemsByRoot", call: func(ctx context.Context, s *Store) error { _, err := s.CountItemsByRoot(ctx); return err }},
@@ -266,6 +271,7 @@ func reads() []routed {
 		{name: "GetTitle", call: func(ctx context.Context, s *Store) error { _, err := s.GetTitle(ctx, 1); return nf(err) }},
 		{name: "GetSetting", call: func(ctx context.Context, s *Store) error { _, _, err := s.GetSetting(ctx, "k"); return err }},
 		{name: "SettingsWithPrefix", call: func(ctx context.Context, s *Store) error { _, err := s.SettingsWithPrefix(ctx, "k"); return err }},
+		{name: "ItemsBelow", call: func(ctx context.Context, s *Store) error { _, err := s.ItemsBelow(ctx, "/nowhere"); return err }},
 		{name: "TypedSince", call: func(ctx context.Context, s *Store) error { _, err := s.TypedSince(ctx); return err }},
 		{name: "TitlesDueForRefresh", call: func(ctx context.Context, s *Store) error {
 			_, err := s.TitlesDueForRefresh(ctx, time.Now(), 10)
@@ -307,7 +313,11 @@ func reads() []routed {
 		{name: "PathsWithFingerprint", call: func(ctx context.Context, s *Store) error { _, err := s.PathsWithFingerprint(ctx, 1, "f"); return err }},
 		{name: "WithoutFingerprint", call: func(ctx context.Context, s *Store) error { _, err := s.WithoutFingerprint(ctx, 0, 10); return err }},
 		{name: "Continue", call: func(ctx context.Context, s *Store) error { _, err := s.Continue(ctx, 10); return err }},
-	}
+		{name: "GetTitleByTVDB", call: func(ctx context.Context, s *Store) error { _, err := s.GetTitleByTVDB(ctx, 1); return nf(err) }},
+		{name: "TMDBSeriesWithTVDBID", call: func(ctx context.Context, s *Store) error { _, err := s.TMDBSeriesWithTVDBID(ctx, 10); return err }},
+		{name: "MaxTitleID", call: func(ctx context.Context, s *Store) error { _, err := s.MaxTitleID(ctx); return err }},
+		{name: "UnmappedEpisodeFiles", call: func(ctx context.Context, s *Store) error { _, err := s.UnmappedEpisodeFiles(ctx, 1); return err }},
+	}, extraReads...)
 }
 
 func writes() []routed {
@@ -319,7 +329,7 @@ func writes() []routed {
 		}
 		return err
 	}
-	return []routed{
+	return append([]routed{
 		// What a person is waiting for.
 		{name: "SetProgress (not started)", prio: prioHigh, call: func(ctx context.Context, s *Store) error {
 			_, err := s.SetProgress(ctx, 1, 10, 100)
@@ -344,6 +354,11 @@ func writes() []routed {
 		{name: "SetKeyframes", prio: prioHigh, call: func(ctx context.Context, s *Store) error { return e(s.SetKeyframes(ctx, 1, []float64{0})) }},
 		{name: "PatchTitle", prio: prioHigh, call: func(ctx context.Context, s *Store) error { return e(s.PatchTitle(ctx, 1, TitlePatch{})) }},
 		{name: "SetPersonDetails", prio: prioHigh, call: func(ctx context.Context, s *Store) error { return e(s.SetPersonDetails(ctx, 1, Person{}, 1)) }},
+		{name: "SetPersonDetailsMerged", prio: prioHigh, call: func(ctx context.Context, s *Store) error {
+			_, err := s.SetPersonDetailsMerged(ctx, 1, Person{}, 1)
+			return e(err)
+		}},
+		{name: "SetEpisodeOrder", prio: prioHigh, call: func(ctx context.Context, s *Store) error { return e(s.SetEpisodeOrder(ctx, 1, OrderDVD)) }},
 		{name: "SetItemMatch", prio: prioHigh, call: func(ctx context.Context, s *Store) error { return e(s.SetItemMatch(ctx, 1, match)) }},
 		{name: "SetSeriesMatch", prio: prioHigh, call: func(ctx context.Context, s *Store) error { return e(s.SetSeriesMatch(ctx, "x", match)) }},
 		{name: "LinkItemTitle (a person's)", prio: prioHigh, call: func(ctx context.Context, s *Store) error {
@@ -406,7 +421,7 @@ func writes() []routed {
 		{name: "SetExternalSubtitles", prio: prioLow, call: func(ctx context.Context, s *Store) error {
 			return s.SetExternalSubtitles(ctx, 1, []ExternalSubtitle{{Path: "/a.srt", Format: "srt"}})
 		}},
-	}
+	}, extraWrites...)
 }
 
 // Every method of Store is either a read or a write, and the test below knows

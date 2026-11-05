@@ -1,0 +1,44 @@
+{
+  "status": "success",
+  "data": {
+    "id": 900001,
+    "name": "Test Anime",
+    "slug": "test-anime",
+    "image": "https://artworks.thetvdb.com/banners/posters/900001-1.jpg",
+    "nameTranslations": [
+      "eng",
+      "por"
+    ],
+    "overviewTranslations": [
+      "eng",
+      "por"
+    ],
+    "aliases": [],
+    "firstAired": "2020-04-01",
+    "lastAired": "2026-12-01",
+    "nextAired": "2026-12-01",
+    "score": 1000,
+    "status": {
+      "id": 1,
+      "name": "Continuing",
+      "recordType": "series",
+      "keepUpdated": true
+    },
+    "originalCountry": "jpn",
+    "originalLanguage": "jpn",
+    "defaultSeasonType": 1,
+    "isOrderRandomized": false,
+    "lastUpdated": "2026-10-30 10:00:00",
+    "averageRuntime": 24,
+    "overview": "A fictional series for ply's tests. Its episodes are numbered through (absolute) and by season (aired).",
+    "year": "2020",
+    "episodes": []
+  },
+  "links": {
+    "prev": null,
+    "self": "https://api4.thetvdb.com/v4/series/900001/episodes/dvd/eng?page=0",
+    "next": null,
+    "total_items": 0,
+    "page_size": 500
+  }
+}

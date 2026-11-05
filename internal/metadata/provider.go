@@ -10,43 +10,60 @@ import (
 	"ply/internal/store"
 )
 
-// Candidate is a title a search found, in the terms the matcher scores.
+// The two places titles come from: Candidate.Source, Provider.Name and the
+// source of a stored title (store.SourceTMDB, store.SourceTVDB).
+const (
+	SourceTMDB = store.SourceTMDB
+	SourceTVDB = store.SourceTVDB
+)
+
+// Candidate is a title a search found, in the terms the matcher scores. ID is the
+// title's id at the provider named by Source.
 type Candidate struct {
-	TMDBID        int64
+	ID            int64
+	Source        string // SourceTMDB | SourceTVDB; the matcher fills in the provider's own when empty
 	Title         string
 	OriginalTitle string
 	Year          int // 0 = unknown
 	Overview      string
-	Poster        string // image ref, "tmdb:/abc.jpg"
+	Poster        string // image ref, "tmdb:/abc.jpg" or "tvdb:/banners/posters/1-1.jpg"
 	Popularity    float64
 }
 
-// Provider is where metadata comes from. TMDB implements it; the worker and
-// the tests talk to this interface so that they can use a fake.
+// Provider is where metadata comes from, one place at a time: TMDB and TVDB
+// implement it, the worker and the tests talk to this interface so that they can
+// use a fake. Providers puts the two together.
 //
 // Every error that satisfies IsTransient is worth retrying later; any other is
 // final for that request (not found, bad key).
 type Provider interface {
+	// Name is SourceTMDB or SourceTVDB: whose ids the other methods take and give.
+	Name() string
 	// SearchMovies and SearchSeries return the candidates in relevance order.
-	// year 0 searches any year.
+	// year 0 searches any year. TVDB has no movies: its SearchMovies finds none.
 	SearchMovies(ctx context.Context, query string, year int) ([]Candidate, error)
 	SearchSeries(ctx context.Context, query string, year int) ([]Candidate, error)
 	// Find looks a title up by an external id (ExternalIMDb, ExternalTVDB).
 	Find(ctx context.Context, source, id string) (movies, series []Candidate, err error)
 	// Movie returns a movie ready for store.UpsertTitle: details, credits,
 	// certification, artwork and its collection.
-	Movie(ctx context.Context, tmdbID int64) (*store.TitleInput, error)
-	// Series returns a show with the given seasons (and their episodes).
-	// Seasons TMDB does not know are left out.
-	Series(ctx context.Context, tmdbID int64, seasons []int) (*store.TitleInput, error)
-	// Person returns the details of a person; the TMDBID is set.
-	Person(ctx context.Context, tmdbID int64) (*store.Person, error)
+	Movie(ctx context.Context, id int64) (*store.TitleInput, error)
+	// Series returns a show. TMDB gives the seasons asked for (and their
+	// episodes; seasons it does not know are left out) and has one order; TVDB gives
+	// every season, in the order asked for (store.OrderAired, OrderDVD,
+	// OrderAbsolute; "" is aired), and the result has ResetSeasons set.
+	Series(ctx context.Context, id int64, order string, seasons []int) (*store.TitleInput, error)
+	// Person returns the details of a person; the TMDBID or the TVDBID is set, as
+	// the provider's own, and TVDB may say the other.
+	Person(ctx context.Context, id int64) (*store.Person, error)
 	// Changes returns the ids of the movies or shows (store.KindMovie,
-	// store.KindSeries) that changed between start and end.
+	// store.KindSeries) that changed between start and end. TVDB's is its updates
+	// feed, from start on, for shows.
 	Changes(ctx context.Context, kind string, start, end time.Time) ([]int64, error)
 	// Check reports whether the credentials work.
 	Check(ctx context.Context) error
 	// ImageURL is where an image can be downloaded: size "w342", "original".
+	// file is TMDB's file path, or TVDB's "/banners/...".
 	ImageURL(size, file string) string
 }
 
@@ -57,6 +74,9 @@ var _ Provider = (*TMDB)(nil)
 
 // NewTMDB wraps a client.
 func NewTMDB(c *Client) *TMDB { return &TMDB{c: c} }
+
+// Name implements Provider.
+func (p *TMDB) Name() string { return SourceTMDB }
 
 // Limits of what is stored per title.
 const (
@@ -98,7 +118,7 @@ func (p *TMDB) SearchSeries(ctx context.Context, query string, year int) ([]Cand
 func movieCandidates(res []MovieResult) []Candidate {
 	out := make([]Candidate, 0, len(res))
 	for _, r := range res {
-		out = append(out, Candidate{TMDBID: r.ID, Title: r.Title, OriginalTitle: r.OriginalTitle,
+		out = append(out, Candidate{ID: r.ID, Source: SourceTMDB, Title: r.Title, OriginalTitle: r.OriginalTitle,
 			Year: yearOf(r.ReleaseDate), Overview: r.Overview, Poster: ImageRef(r.PosterPath), Popularity: r.Popularity})
 	}
 	return out
@@ -107,7 +127,7 @@ func movieCandidates(res []MovieResult) []Candidate {
 func tvCandidates(res []TVResult) []Candidate {
 	out := make([]Candidate, 0, len(res))
 	for _, r := range res {
-		out = append(out, Candidate{TMDBID: r.ID, Title: r.Name, OriginalTitle: r.OriginalName,
+		out = append(out, Candidate{ID: r.ID, Source: SourceTMDB, Title: r.Name, OriginalTitle: r.OriginalName,
 			Year: yearOf(r.FirstAirDate), Overview: r.Overview, Poster: ImageRef(r.PosterPath), Popularity: r.Popularity})
 	}
 	return out
@@ -140,7 +160,7 @@ func (p *TMDB) Movie(ctx context.Context, tmdbID int64) (*store.TitleInput, erro
 	return movieInput(d, coll, p.c.langCode(), p.c.Region()), nil
 }
 
-func (p *TMDB) Series(ctx context.Context, tmdbID int64, seasons []int) (*store.TitleInput, error) {
+func (p *TMDB) Series(ctx context.Context, tmdbID int64, _ string, seasons []int) (*store.TitleInput, error) {
 	d, err := p.c.TVDetails(ctx, tmdbID)
 	if err != nil {
 		return nil, err

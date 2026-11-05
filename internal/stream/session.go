@@ -51,6 +51,10 @@ type Session struct {
 	// beaten is set by the first heartbeat: the player sends them, so the shorter
 	// Options.BeatTimeout applies (see idle).
 	beaten atomic.Bool
+	// pausedBeat is set when a heartbeat says the player is paused, and cleared by the
+	// next request or heartbeat that says it is not: Options.PausedBeatTimeout applies
+	// while it is set (see idle).
+	pausedBeat atomic.Bool
 	// busy counts the requests that are waiting for the session (for the plan, for
 	// the init segment): while there is one, the session is not idle, whatever the
 	// clock says.
@@ -172,7 +176,10 @@ func (s *Session) heartbeat(b Beat) {
 	}
 	s.hbMu.Unlock()
 	s.beaten.Store(true)
-	s.touch()
+	if b.Paused != nil {
+		s.pausedBeat.Store(*b.Paused)
+	}
+	s.stamp()
 }
 
 // Plan returns the segment layout (read-only).
@@ -185,7 +192,15 @@ func (s *Session) Plan() Plan {
 // Dir is the session's temp directory.
 func (s *Session) Dir() string { return s.dir }
 
-func (s *Session) touch() { s.lastUsed.Store(s.m.clock().UnixNano()) }
+// stamp notes a sign of life: now is the last time the session was heard from.
+func (s *Session) stamp() { s.lastUsed.Store(s.m.clock().UnixNano()) }
+
+// touch is stamp for a request: a player that asks for something is playing, so
+// the longer time of a paused one (see idle) is over.
+func (s *Session) touch() {
+	s.pausedBeat.Store(false)
+	s.stamp()
+}
 
 // Playlist renders the VOD playlist; suffix is appended to every URI. A plan
 // read from the container is confirmed first, against the first fragment
@@ -436,7 +451,7 @@ func (s *Session) monitor() {
 		}
 		if s.idle() {
 			s.m.log.Info("session idle, stopping", "session", s.ID)
-			s.m.Delete(s.ID)
+			s.m.end(s.ID, false) // lost, not stopped by anybody
 			return
 		}
 		s.mu.Lock()
@@ -462,14 +477,18 @@ func (s *Session) monitor() {
 
 // idle reports whether the session has gone too long without a request or a
 // heartbeat: BeatTimeout once its player has sent a heartbeat (it says when it is
-// gone, paused or not), otherwise IdleTimeout (a player that sends none may have
-// buffer for longer than BeatTimeout and need nothing meanwhile). A request that
-// is being waited on is one: a segment that takes long to make is not a player
-// that left.
+// gone), but PausedBeatTimeout while the last one said it is paused (a hidden tab
+// beats about once a minute), otherwise IdleTimeout (a player that sends none may
+// have buffer for longer than BeatTimeout and need nothing meanwhile). A request
+// that is being waited on is one: a segment that takes long to make is not a
+// player that left.
 func (s *Session) idle() bool {
 	limit := s.m.o.IdleTimeout
 	if s.beaten.Load() {
 		limit = min(limit, s.m.o.BeatTimeout)
+		if s.pausedBeat.Load() {
+			limit = max(limit, s.m.o.PausedBeatTimeout)
+		}
 	}
 	if s.m.clock().Sub(time.Unix(0, s.lastUsed.Load())) <= limit {
 		return false

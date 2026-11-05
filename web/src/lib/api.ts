@@ -345,13 +345,26 @@ export interface Settings {
    * It is not with -metadata=false (nothing is sent to TMDB then), and may be refused later.
    */
   tmdbKeyChecked?: boolean;
+  /** How many plays may run at once, direct ones included (absent from a server older than M9). */
+  maxStreams?: number;
+  /** How many of them may be transcodes (conversions on the CPU or GPU). */
+  maxTranscodes?: number;
+  /** 'flag': set on the command line or in the environment, so it cannot be changed here (409). */
+  maxStreamsSource?: LimitSource;
+  maxTranscodesSource?: LimitSource;
 }
+
+export type LimitSource = 'flag' | 'settings' | 'default';
 
 export interface SettingsUpdate {
   /** "" removes the stored key. The server checks a new key against TMDB. */
   tmdbKey?: string;
   metadataEnabled?: boolean;
   language?: string;
+  /** 1..32; ApiError 400 out of range, 409 when the command line set it. */
+  maxStreams?: number;
+  /** 1..16; the same. */
+  maxTranscodes?: number;
 }
 
 /** A TMDB or IMDb id, to link a file or show to. */
@@ -401,13 +414,175 @@ export interface ScanStatus {
   watching?: WatchRoot[];
 }
 
+// ---- library folders (M7) -------------------------------------------------------
+
+/** What every file of a library folder is: never mixed. */
+export type FolderKind = 'movies' | 'shows';
+
+export interface LibraryFolder {
+  /** 0 for a -media folder whose type the first scan has not guessed yet: it can't be changed or removed. */
+  id: number;
+  path: string;
+  /** '' until a -media folder's type is guessed. */
+  kind: FolderKind | '';
+  /** The type was guessed from the file names, not chosen. */
+  guessed: boolean;
+  /** 'flag': given on the command line, so it can't be removed here (it would come back at the next start). */
+  source: 'flag' | 'ui';
+  /** The type was given on the command line (-movies, -shows). */
+  kindLocked: boolean;
+  items: number;
+  /** Unix seconds of the last scan that covered all of the folder without trouble; 0 for none. */
+  lastScanAt: number;
+  state: 'ok' | 'missing' | 'error';
+  error: string;
+}
+
+export interface DirEntry {
+  name: string;
+  path: string;
+}
+
+/** GET /api/fs: the directories of `path`, or with no path the places to start from. */
+export interface DirListing {
+  path: string;
+  /** '' at the top. */
+  parent: string;
+  dirs: DirEntry[];
+  places?: DirEntry[];
+}
+
+// ---- background queue (M9) -----------------------------------------------------
+
+export type JobState = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
+
+/** A job of the background queue. A negative id is work outside the queue (no actions). */
+export interface Job {
+  id: number;
+  kind: string;
+  key?: string;
+  title: string;
+  /** Lower runs first: 0 a person's request, 10 new files, 20 their details, 30 scans, 40 refreshes, 50 caches. */
+  priority: number;
+  state: JobState;
+  /** A person asked for it (a button, a bump, a retry). */
+  user: boolean;
+  done: number;
+  /** 0 when the amount of work is not known. */
+  total: number;
+  note?: string;
+  /** Why it waits for playback or browsing, while it does. */
+  held?: string;
+  attempts: number;
+  error?: string;
+  createdAt: string;
+  /** A retry: not before this. */
+  runAt?: string;
+  startedAt?: string;
+  finishedAt?: string;
+}
+
+/** What playback is doing. Capitalised: the Go struct has no JSON tags. */
+export interface PlaybackLoad {
+  Sessions: number;
+  /** Of the sessions, not paused. */
+  Active: number;
+  Transcodes: number;
+  /** Of the transcodes, on the CPU. */
+  Software: number;
+  /** Segment requests blocked on ffmpeg: a viewer is stalled. */
+  Waiting: number;
+  Paths: string[];
+}
+
+/** The tiers above the queue: playback, then browsing. */
+export interface TierState {
+  playback: PlaybackLoad;
+  browsing: boolean;
+  /** What holds light background work right now. */
+  hold: { held: boolean; reason?: string };
+}
+
+/** GET /api/jobs, and the first event of GET /api/events. */
+export interface JobsSnapshot {
+  paused: boolean;
+  /** Started, including those still held; work outside the queue (negative ids) last. */
+  running: Job[];
+  /** In the order they will start. */
+  queued: Job[];
+  /** Newest first, at most 200. */
+  history: Job[];
+  tier: TierState;
+}
+
+/** An event of GET /api/events other than a snapshot. */
+export interface JobEvent {
+  seq: number;
+  type: string;
+  job?: Job;
+  tier?: TierState;
+}
+
+/** Something being played (GET /api/sessions). */
+export interface PlayingSession {
+  id: string;
+  sessionId: string;
+  itemId: number;
+  title: string;
+  kind: Method;
+  client: string;
+  startedAt: string;
+  lastSeenAt: string;
+  positionSec: number;
+  paused: boolean;
+}
+
+/** The tiers with Go's nulls and missing fields filled in. */
+export function normaliseTier(t: Partial<TierState> | null | undefined): TierState {
+  const p: Partial<PlaybackLoad> = t?.playback ?? {};
+  return {
+    playback: {
+      Sessions: p.Sessions ?? 0,
+      Active: p.Active ?? 0,
+      Transcodes: p.Transcodes ?? 0,
+      Software: p.Software ?? 0,
+      Waiting: p.Waiting ?? 0,
+      Paths: p.Paths ?? [],
+    },
+    browsing: !!t?.browsing,
+    hold: { held: !!t?.hold?.held, reason: t?.hold?.reason || undefined },
+  };
+}
+
+/** A snapshot with Go's null slices as [] (and an empty one for null). */
+export function normaliseSnapshot(s: Partial<JobsSnapshot> | null | undefined): JobsSnapshot {
+  return {
+    paused: !!s?.paused,
+    running: s?.running ?? [],
+    queued: s?.queued ?? [],
+    history: s?.history ?? [],
+    tier: normaliseTier(s?.tier),
+  };
+}
+
 export class ApiError extends Error {
   readonly status: number;
-  constructor(status: number, message: string) {
+  /** Seconds from a Retry-After header given in seconds (a 503 while the server is busy); else undefined. */
+  readonly retryAfter?: number;
+  /** The JSON body of the answer, when it had one (the 503 at a play limit says what is playing). */
+  readonly body?: unknown;
+  constructor(status: number, message: string, retryAfter?: number, body?: unknown) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.retryAfter = retryAfter;
+    this.body = body;
   }
+}
+
+function retryAfterOf(res: Response): number | undefined {
+  const v = res.headers.get('Retry-After')?.trim();
+  return v && /^\d+$/.test(v) ? Number(v) : undefined;
 }
 
 // ---- token -----------------------------------------------------------------
@@ -539,13 +714,15 @@ async function request<T>(method: string, path: string, body?: unknown, keepaliv
   }
   if (!res.ok) {
     let message = res.statusText || `HTTP ${res.status}`;
+    let body: unknown;
     try {
-      const j = (await res.json()) as { error?: string };
+      body = await res.json();
+      const j = body as { error?: string } | null;
       if (j?.error) message = j.error;
     } catch {
       // non-JSON error body
     }
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, retryAfterOf(res), body);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -611,6 +788,14 @@ export const api = {
     } catch {
       // best effort: the server also reaps idle sessions
     }
+  },
+
+  /**
+   * Keep an HLS session alive: every 10 s while it is open, paused or not, and at once on pause and
+   * play (lib/heartbeat.ts). ApiError 404: the session is gone, start another.
+   */
+  async heartbeat(sid: string, positionSec: number, paused: boolean): Promise<void> {
+    await request<void>('POST', `/api/sessions/${encodeURIComponent(sid)}/heartbeat`, { positionSec, paused });
   },
 
   /**
@@ -710,6 +895,32 @@ export const api = {
     return (await request<ReviewEntry[] | null>('GET', '/api/metadata/review')) ?? [];
   },
 
+  // ---- library folders (M7) ----
+
+  async folders(): Promise<LibraryFolder[]> {
+    return (await request<LibraryFolder[] | null>('GET', '/api/folders')) ?? [];
+  },
+
+  /** A scan of the folder starts at once. ApiError 400 (bad path, overlap) and 409 (already there) say why. */
+  addFolder: (path: string, kind: FolderKind) => request<LibraryFolder>('POST', '/api/folders', { path, kind }),
+
+  /** Reads the folder's files again as the new type; progress is kept. 409 for a type set on the command line. */
+  setFolderKind: (id: number, kind: FolderKind) => request<LibraryFolder>('PATCH', `/api/folders/${id}`, { kind }),
+
+  /**
+   * Takes the folder out of the library. Without `forget` its progress and fixed matches are kept
+   * and come back if it is added again. 503 when a scan is busy: nothing was removed.
+   */
+  async removeFolder(id: number, forget = false): Promise<void> {
+    await request<void>('DELETE', `/api/folders/${id}${forget ? '?forget=1' : ''}`);
+  },
+
+  /** Directories only, dot-folders left out. With no path: home, mounted disks and the library folders. */
+  async listDirs(path?: string): Promise<DirListing> {
+    const d = await request<DirListing>('GET', `/api/fs${qs({ path })}`);
+    return { ...d, path: d.path ?? '', parent: d.parent ?? '', dirs: d.dirs ?? [], places: d.places ?? undefined };
+  },
+
   settings: () => request<Settings>('GET', '/api/settings'),
 
   /**
@@ -717,4 +928,43 @@ export const api = {
    * ApiError 400 says why it was refused, 502 that TMDB could not be reached.
    */
   saveSettings: (u: SettingsUpdate) => request<Settings>('PUT', '/api/settings', u),
+
+  // ---- background queue (M9) ----
+  // Actions: ApiError 404 for a job the queue no longer has, 409 when its state does not allow it.
+
+  async jobs(): Promise<JobsSnapshot> {
+    return normaliseSnapshot(await request<JobsSnapshot | null>('GET', '/api/jobs'));
+  },
+
+  /** Stops a running job, or drops a queued one. */
+  async cancelJob(id: number): Promise<void> {
+    await request<void>('POST', `/api/jobs/${id}/cancel`);
+  },
+
+  /** Moves a queued job to the front. */
+  async bumpJob(id: number): Promise<void> {
+    await request<void>('POST', `/api/jobs/${id}/bump`);
+  },
+
+  /** Queues a finished job again; the answer is the new job. */
+  retryJob: (id: number) => request<Job>('POST', `/api/jobs/${id}/retry`),
+
+  /** Nothing new starts; running jobs finish. */
+  async pauseQueue(): Promise<void> {
+    await request<void>('POST', '/api/queue/pause');
+  },
+
+  async resumeQueue(): Promise<void> {
+    await request<void>('POST', '/api/queue/resume');
+  },
+
+  /** Everything being played, oldest first. */
+  async sessions(): Promise<PlayingSession[]> {
+    return (await request<PlayingSession[] | null>('GET', '/api/sessions')) ?? [];
+  },
+
+  /** Stops something being played; unlike deleteSession, failures are thrown. */
+  async stopSession(id: string): Promise<void> {
+    await request<void>('DELETE', `/api/sessions/${encodeURIComponent(id)}`);
+  },
 };

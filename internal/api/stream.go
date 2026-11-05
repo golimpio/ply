@@ -106,11 +106,14 @@ func videoSpec(codec string, s hwaccel.Spec) *stream.VideoSpec {
 	return &stream.VideoSpec{Codec: codec, Encode: s.Encode, Pre: s.Pre, Filter: s.Filter, Complex: s.Complex}
 }
 
-// session resolves {sid}, or writes a 404.
+// session resolves {sid}, or writes a 410 (stopped on purpose a moment ago) or a 404.
 func (s *Server) session(w http.ResponseWriter, r *http.Request) (*stream.Session, bool) {
 	if s.Streams != nil {
 		if sess, ok := s.Streams.Get(r.PathValue("sid")); ok {
 			return sess, true
+		}
+		if s.stoppedOnPurpose(w, r.PathValue("sid")) {
+			return nil, false
 		}
 	}
 	writeError(w, http.StatusNotFound, "session not found")

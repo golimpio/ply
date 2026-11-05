@@ -169,12 +169,14 @@ func (s *Store) ints(ctx context.Context, query string, args ...any) ([]int, err
 }
 
 // SeasonsNeedingFetchAll is SeasonsNeedingFetch for every matched show: the
-// seasons with episode files and no stored episodes, by title id.
+// seasons with episode files and no stored episodes, by title id. A show from TVDB
+// is left out: its fetch brings every season at once, so a season it has no episodes
+// for is one TVDB does not have (asking again would fetch the whole show for nothing).
 func (s *Store) SeasonsNeedingFetchAll(ctx context.Context) (map[int64][]int, error) {
 	rows, err := s.ro.QueryContext(ctx, `
 		SELECT DISTINCT sm.title_id, i.season FROM series_matches sm
 		JOIN items i ON i.kind = 'episode' AND i.show = sm.show
-		JOIN titles t ON t.id = sm.title_id AND t.tmdb_id IS NOT NULL
+		JOIN titles t ON t.id = sm.title_id AND t.source <> 'tvdb' AND (t.tmdb_id IS NOT NULL OR t.tvdb_id IS NOT NULL)
 		WHERE NOT EXISTS (SELECT 1 FROM episodes e WHERE e.title_id = sm.title_id AND e.season = i.season)
 		ORDER BY sm.title_id, i.season`)
 	if err != nil {

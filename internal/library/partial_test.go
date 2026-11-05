@@ -576,10 +576,11 @@ func TestOrphansUnderAFailedRootAreKept(t *testing.T) {
 		t.Error("an orphan row under a root that failed to scan was pruned")
 	}
 
-	// Control: once the root is there and clean, a file that is really gone goes.
+	// Control: once the root is there and clean, a file that is really gone goes (the
+	// folder it was indexed under is there, with other files in it: it is no unmounted disk).
 	mustRename(t, moved, outer)
 	mustRemove(t, file)
-	write(t, filepath.Join(outer, "keep.mkv"), "22")
+	write(t, filepath.Join(inner, "Other (2002).mkv"), "22")
 	mustScan(t, s)
 	if _, ok := paths(t, st)[file]; ok {
 		t.Error("control: the orphan row of a vanished file was not pruned")

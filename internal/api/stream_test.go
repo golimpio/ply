@@ -237,7 +237,7 @@ func TestSessionDelete(t *testing.T) {
 	if processAlive(pid) {
 		t.Errorf("ffmpeg (pid %d) still running after DELETE", pid)
 	}
-	wantJSONError(t, e.get("/api/sessions/"+pb.SessionID+"/index.m3u8"), 404)
+	wantJSONError(t, e.get("/api/sessions/"+pb.SessionID+"/index.m3u8"), 410) // stopped on purpose: not "lost"
 	wantJSONError(t, e.do("DELETE", "/api/sessions/"+pb.SessionID, nil, ""), 404)
 }
 
@@ -355,7 +355,7 @@ func TestPlaylistOfAGoneSession(t *testing.T) {
 	pb := e.startSession("", `{}`)
 	wantStatus(t, e.get("/api/sessions/"+pb.SessionID+"/index.m3u8"), 200)
 	wantStatus(t, e.do("DELETE", "/api/sessions/"+pb.SessionID, nil, ""), 204)
-	wantJSONError(t, e.get("/api/sessions/"+pb.SessionID+"/index.m3u8"), 404)
+	wantJSONError(t, e.get("/api/sessions/"+pb.SessionID+"/index.m3u8"), 410)
 }
 
 func TestPlaybackWithoutStreaming(t *testing.T) {

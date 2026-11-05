@@ -39,6 +39,14 @@ Movies, never mixed**. Add and remove them from the web page, with no restart.
     none and gets no others: "Lost" becomes "Lost (2004)") keeps its manual match: the series row moves to the new name.
     Anything else (a type change that makes episodes movies, several shows read as one, a new name with a match of its
     own) archives the match for the old show, as below.
+  - A typed folder that **takes over** rows an older configuration indexed under another root (`-media /m`, then
+    `-shows /m/TV`) reads them as its type says: the scan that moves a row (or indexes its changed file) re-reads it
+    (`rereadArrived`), and `Reread` reads the rows under the folder that are not its yet, so that the note is not spent
+    before they have arrived. A folder with no type, or a nested root's items, are left alone. The scan writes the
+    note `m7.reread.<root>` (value `arrived`, `library.RereadNotePrefix`) before the first row moves and clears it when
+    the rows are read; it keeps the rows to read across passes, and a start that finds the note (the server reads all
+    `m7.reread.*` notes, `rereadPending`) reads the folder again, so a shutdown or an error in between loses nothing,
+    for a folder added in the UI as for one from the command line. A note someone else made stands until they clear it.
 
 ## Command line
 - `-movies DIR` and `-shows DIR` (repeatable) give the folder and its type. In the UI the type is locked.
@@ -70,11 +78,14 @@ CREATE TABLE item_archive (
     archived_at  INTEGER NOT NULL,
     -- 006: the match of the show an episode was in, apart from the movie's
     series_id    INTEGER NOT NULL DEFAULT 0,
-    series_show  TEXT    NOT NULL DEFAULT ''  -- the show it was for ('' = any: the row predates the column)
+    series_show  TEXT    NOT NULL DEFAULT '',  -- the show it was for ('' = any: the row predates the column)
+    -- 008 (M8): the same slot for a match made through TVDB; series_id is 0 then, and the other way round
+    series_tvdb_id INTEGER NOT NULL DEFAULT 0
 );
 ```
 - A path can hold a movie's match and a show's at once (a file that was a movie, then an episode, then a movie again), each
-  in its slot; each slot holds the latest. A show's match comes back only for an episode of the **same show**.
+  in its slot; each slot holds the latest. A show's match comes back only for an episode of the **same show**. A show
+  matched by hand through TVDB is kept by its TVDB id and comes back as such (`store.KindSeriesTVDB`, see M8).
 - **Command-line folders** are upserted into `folders` at every start: `-movies` and `-shows` set the kind, and `-media` keeps the stored one.
   Whether a folder came from the command line is per run, not stored.
 - **Active roots** = the command-line folders plus every UI folder (`folders` rows). Removing a UI folder deletes its row.
@@ -90,6 +101,14 @@ CREATE TABLE item_archive (
     returns `ErrScanBusy` (503 with `Retry-After`). A pass that left the folder's files unseen because it was taken out
     (`pass.skipped`) removes **nothing** of the folder and notes no scan of it, even if the folder is back by the time it
     ends, and the same for a partial pass: a folder that is put back keeps every row, progress and match.
+- **Rows of a root that is no longer configured** (and was not taken out) go only when their file is gone **and** their
+  disk is there: a root that is missing or empty, or a volume mounted inside it that is not mounted now, keeps its rows
+  (an unmounted NAS must lose nothing when a narrower folder is given).
+- **Background work and `GET /api/scan`:** `running` is true while any pass runs or is queued on the scan semaphore (the full scan, the
+  scan of a folder just added, the re-reading after a type change or `Reread`, a partial scan), counted, so overlapping
+  ones are handled, and not while the scan of a new folder sleeps before it looks again at files still settling; `lastStarted`/`lastFinished`/`lastError` stay those of the full scan. The scan of a new folder tries
+  again, a bounded number of times, when it could not run. `Scanner.Close` (and `Wait` once the scanner's context has ended)
+  stops any more background work from starting, so a request goroutine cannot race a shutdown.
 - **Restore on add:** when the scanner indexes a file whose path is in `item_archive` it restores the progress (the row loses it).
   A manual match is applied through the worker by TMDB id, **and stays in the archive until it is applied**
   (`ForgetArchivedMatch`, called by the worker side): the scanner reports every archived match whose item is in the library,
@@ -130,6 +149,18 @@ CREATE TABLE item_archive (
 - **Security:** `/api/fs` and every folder mutation require the token when one is set. They never send
   `Access-Control-Allow-Origin`, and they refuse a cross-site request: an `Origin` that isn't this server, or
   `Sec-Fetch-Site: cross-site`, gets 403. Otherwise any page on the LAN could list the server's folders.
+
+## Settings UI (`LibraryFolders.svelte`, `FolderPicker.svelte`)
+- One card per folder: path, item count, last scan, a missing or unreadable disk, the watcher's state, and a
+  Movies | TV shows switch. The switch is locked for a type set at startup. A guessed type says so, and a
+  `-media` folder not guessed yet (id 0) has no switch and no Remove.
+- Changing the type asks first ("Read X as TV shows?") and says that progress is kept. Remove asks first; the
+  "also forget progress and fixed matches" box (`?forget=1`) is off by default. A refusal (a 503 while a scan is busy,
+  a 409) is shown in the dialog, and nothing is assumed to have changed.
+- Add a folder: browse from the places, the Up and Places buttons, or a typed path. The type must be chosen; there is
+  no default. Navigation never waits for a listing (a slow share): only the answer to the latest request is shown.
+- The review list shows a show's flagged episodes (`episodes`), each linking to its item.
+- Checked by `web/e2e/folders-ui.mjs` against a mocked API.
 
 ## Ownership
 - **velvet-viper:**

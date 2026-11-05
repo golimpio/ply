@@ -8,35 +8,38 @@ import (
 	"ply/internal/store"
 )
 
-// ErrNoSuchTitle means TMDB has nothing under the id (or IMDb id) given.
-var ErrNoSuchTitle = errors.New("TMDB has no such title")
+// ErrNoSuchTitle means the provider has nothing under the id (or IMDb id, or
+// address) given.
+var ErrNoSuchTitle = errors.New("the provider has no such title")
 
-// Ref names a TMDB title for a manual match: by TMDB id, or by IMDb id.
+// Ref names a title for a manual match: by TMDB id, by TVDB id (a show), by the slug
+// of its address at thetvdb.com (a show), or by IMDb id. Give one.
 type Ref struct {
-	TMDBID int64
-	IMDbID string
+	TMDBID   int64
+	TVDBID   int64
+	TVDBSlug string
+	IMDbID   string
 }
 
-// resolve returns the TMDB id a Ref names, asking TMDB's find for an IMDb id.
-func resolve(ctx context.Context, p Provider, kind string, ref Ref) (int64, error) {
+// resolveMovie returns the TMDB id a Ref names, asking TMDB's find for an IMDb id.
+func resolveMovie(ctx context.Context, tm Provider, ref Ref) (int64, error) {
 	if ref.TMDBID > 0 {
 		return ref.TMDBID, nil
 	}
-	movies, series, err := p.Find(ctx, ExternalIMDb, ref.IMDbID)
+	if ref.IMDbID == "" {
+		return 0, ErrNoSuchTitle // a TVDB ref: TVDB has no movies
+	}
+	movies, _, err := tm.Find(ctx, ExternalIMDb, ref.IMDbID)
 	if err != nil {
 		return 0, err
 	}
-	found := movies
-	if kind == store.KindSeries {
-		found = series
-	}
-	if len(found) == 0 {
+	if len(movies) == 0 {
 		return 0, ErrNoSuchTitle
 	}
-	return found[0].TMDBID, nil
+	return movies[0].ID, nil
 }
 
-func (w *Worker) provider(ctx context.Context) (Provider, error) {
+func (w *Worker) provider(ctx context.Context) (*Providers, error) {
 	p, _ := w.o.Source.Provider(ctx)
 	if p == nil {
 		return nil, ErrLookupsOff
@@ -46,12 +49,16 @@ func (w *Worker) provider(ctx context.Context) (Provider, error) {
 
 // MatchMovie links a movie file to the TMDB title ref names, as a person's
 // decision (state "manual": it is never matched again on its own). The errors
-// are ErrLookupsOff, ErrNoSuchTitle, store.ErrNotFound for an unknown item, or
-// what TMDB said (see IsTransient).
+// are ErrLookupsOff, ErrNoTMDB, ErrNoSuchTitle, store.ErrNotFound for an unknown
+// item, or what TMDB said (see IsTransient).
 func (w *Worker) MatchMovie(ctx context.Context, itemID int64, ref Ref) error {
 	p, err := w.provider(ctx)
 	if err != nil {
 		return err
+	}
+	tm := p.Movies()
+	if tm == nil {
+		return ErrNoTMDB
 	}
 	e, err := w.o.Store.GetEntry(ctx, itemID)
 	if err != nil {
@@ -60,11 +67,11 @@ func (w *Worker) MatchMovie(ctx context.Context, itemID int64, ref Ref) error {
 	if e.Kind != store.KindMovie {
 		return errors.New("metadata: not a movie")
 	}
-	id, err := resolve(ctx, p, store.KindMovie, ref)
+	id, err := resolveMovie(ctx, tm, ref)
 	if err != nil {
 		return err
 	}
-	in, err := p.Movie(ctx, id)
+	in, err := tm.Movie(ctx, id)
 	if IsNotFound(err) {
 		return ErrNoSuchTitle
 	}
@@ -84,7 +91,11 @@ func (w *Worker) MatchMovie(ctx context.Context, itemID int64, ref Ref) error {
 	return nil
 }
 
-// MatchShow is MatchMovie for a whole show.
+// MatchShow is MatchMovie for a whole show. The title is TVDB's when ref names one at
+// TVDB (a TVDB id, a slug) or an IMDb id that TVDB knows (it is looked up there first
+// when TVDB is on); TMDB's when it names one at TMDB. A person's pick of a TMDB title
+// while TVDB is on stays TMDB's. ErrNoTVDB or ErrNoTMDB when the ref needs a provider
+// that is not set up.
 func (w *Worker) MatchShow(ctx context.Context, show string, ref Ref) error {
 	p, err := w.provider(ctx)
 	if err != nil {
@@ -97,7 +108,7 @@ func (w *Worker) MatchShow(ctx context.Context, show string, ref Ref) error {
 	if len(items) == 0 {
 		return store.ErrNotFound
 	}
-	id, err := resolve(ctx, p, store.KindSeries, ref)
+	sr, err := p.ResolveShow(ctx, ref)
 	if err != nil {
 		return err
 	}
@@ -105,7 +116,7 @@ func (w *Worker) MatchShow(ctx context.Context, show string, ref Ref) error {
 	if err != nil {
 		return err
 	}
-	in, err := p.Series(ctx, id, seasons)
+	in, err := w.fetchShow(ctx, p, sr.Source, sr.ID, seasons)
 	if IsNotFound(err) {
 		return ErrNoSuchTitle
 	}
@@ -154,14 +165,30 @@ func (w *Worker) UnmatchShow(ctx context.Context, show string) error {
 	return err
 }
 
-// Search lists the TMDB titles a query could mean, best first, for the "fix
-// match" dialog. ErrLookupsOff when TMDB is not available.
+// Search lists the titles a query could mean, best first, for the "fix match"
+// dialog: movies at TMDB; shows at TVDB, then TMDB, when TVDB is on (each result says
+// which, in Source). A query that is "tvdb:81189" or the address of a show at
+// thetvdb.com names that show: the one result, with score 1. ErrLookupsOff when nothing
+// can be asked.
 func (w *Worker) Search(ctx context.Context, q Query) ([]Scored, error) {
 	p, err := w.provider(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return Search(ctx, p, q)
+	if q.Kind == store.KindSeries {
+		if c, named, err := p.Lookup(ctx, q.Title); named {
+			if err != nil {
+				return nil, err
+			}
+			return []Scored{c}, nil
+		}
+		return p.SearchShows(ctx, q)
+	}
+	tm := p.Movies()
+	if tm == nil {
+		return nil, ErrNoTMDB
+	}
+	return Search(ctx, tm, q)
 }
 
 // How long a person TMDB failed to give details for is left alone: one TMDB
@@ -187,33 +214,66 @@ type personFailure struct {
 // is time to try again, so that opening the page of a person TMDB does not
 // have, or while TMDB is out of reach, asks it nothing each time.
 func (w *Worker) EnsurePerson(ctx context.Context, id int64) error {
+	_, err := w.EnsurePersonID(ctx, id)
+	return err
+}
+
+// EnsurePersonID is EnsurePerson that returns the id the person has afterwards. A person
+// of TVDB whose record gives a TMDB id that another person has is that person: the two
+// are merged, and the id is the one that is left (the same as id otherwise).
+//
+// A person TMDB knows is asked of TMDB, whose details are fuller, when it is on; one
+// only TVDB knows is asked of TVDB.
+func (w *Worker) EnsurePersonID(ctx context.Context, id int64) (int64, error) {
 	d, err := w.o.Store.GetPerson(ctx, id)
 	if err != nil {
-		return err
+		return id, err
 	}
-	if d.FetchedAt != 0 || d.TMDBID == 0 {
-		return nil
+	if d.FetchedAt != 0 || (d.TMDBID == 0 && d.TVDBID == 0) {
+		return id, nil
 	}
 	now := w.now()
 	w.mu.Lock()
 	f, failed := w.personFailed[id]
 	w.mu.Unlock()
 	if failed && now.Before(f.until) {
-		return f.err
+		return id, f.err
 	}
 	p, err := w.provider(ctx)
 	if err != nil {
-		return err
+		return id, err
 	}
-	info, err := p.Person(ctx, d.TMDBID)
+	var (
+		info *store.Person
+		from string
+	)
+	switch {
+	case d.TMDBID != 0 && p.TMDB != nil:
+		from = SourceTMDB
+		info, err = p.TMDB.Person(ctx, d.TMDBID)
+	case d.TVDBID != 0 && p.TVDB != nil:
+		from = SourceTVDB
+		info, err = p.TVDB.Person(ctx, d.TVDBID)
+	default:
+		return id, ErrLookupsOff
+	}
 	if err != nil {
 		w.notePersonFailure(ctx, id, f.attempts, err, now)
-		return err
+		return id, err
 	}
 	w.mu.Lock()
 	delete(w.personFailed, id)
 	w.mu.Unlock()
-	return w.o.Store.SetPersonDetails(ctx, id, *info, w.now().Unix())
+	if from == SourceTVDB {
+		// The store finds the survivor if another request merged this person meanwhile. On any
+		// other failure the id stays what it was: 0 would be a page for no one.
+		survivor, err := w.o.Store.SetPersonDetailsMerged(ctx, id, *info, w.now().Unix())
+		if err != nil {
+			return id, err
+		}
+		return survivor, nil
+	}
+	return id, w.o.Store.SetPersonDetails(ctx, id, *info, w.now().Unix())
 }
 
 // notePersonFailure remembers a failed fetch. A refused key and a caller that

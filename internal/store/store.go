@@ -96,7 +96,7 @@ func open(path string, chmod func(string, os.FileMode) error) (*Store, error) {
 		rw.Close()
 		return nil, fmt.Errorf("open %s: %w", abs, err)
 	}
-	// The TMDB key is in here. A database an earlier version left readable is
+	// The metadata keys (TMDB's, TVDB's and its PIN) are in here. A database an earlier version left readable is
 	// closed up now.
 	var unsupported error
 	for _, suffix := range []string{"", "-wal", "-shm"} {
@@ -121,7 +121,7 @@ func open(path string, chmod func(string, os.FileMode) error) (*Store, error) {
 	}
 	if unsupported != nil {
 		s.warnings = append(s.warnings, fmt.Sprintf("cannot make the database files owner-only (%v): the filesystem "+
-			"may not support permissions; keep the data directory %s private, it holds the TMDB key", unsupported, filepath.Dir(abs)))
+			"may not support permissions; keep the data directory %s private, it holds the metadata keys", unsupported, filepath.Dir(abs)))
 	}
 
 	// The readers come last: the database exists, is migrated, and its files are
@@ -166,7 +166,7 @@ func ownFile(path string) error {
 		return fmt.Errorf("%s is not a regular file", path)
 	}
 	if uid, ok := fileOwner(fi); ok && uid != os.Geteuid() {
-		return fmt.Errorf("%s belongs to another user (uid %d); ply keeps the TMDB key in it", path, uid)
+		return fmt.Errorf("%s belongs to another user (uid %d); ply keeps the metadata keys in it", path, uid)
 	}
 	return nil
 }
@@ -255,10 +255,26 @@ func (s *Store) migrate(ctx context.Context) error {
 	if _, err := s.rw.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`); err != nil {
 		return err
 	}
-	var current int
-	if err := s.rw.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_version`).Scan(&current); err != nil {
+	// Every version that is not recorded is applied, in order: a database that has 8 and
+	// not 7 (a branch that numbered its migration later than the other's) gets 7 too.
+	applied := map[int]bool{}
+	rows, err := s.rw.QueryContext(ctx, `SELECT version FROM schema_version`)
+	if err != nil {
 		return err
 	}
+	for rows.Next() {
+		var v int
+		if err := rows.Scan(&v); err != nil {
+			rows.Close()
+			return err
+		}
+		applied[v] = true
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
 	entries, err := migrationFS.ReadDir("migrations")
 	if err != nil {
 		return err
@@ -270,7 +286,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("migration %q: name must start with a number", e.Name())
 		}
-		if version <= current {
+		if applied[version] {
 			continue
 		}
 		body, err := migrationFS.ReadFile("migrations/" + e.Name())
@@ -284,10 +300,35 @@ func (s *Store) migrate(ctx context.Context) error {
 	return nil
 }
 
+// foreignKeysOff is the line a migration starts with when it rebuilds a table that
+// others refer to: SQLite cannot alter a CHECK, so the table is created anew, filled,
+// swapped in, and with foreign keys on the DROP would run the ON DELETE actions of
+// every row that refers to it. The pragma has no effect inside a transaction, so the
+// runner turns the keys off before it begins one, checks them (PRAGMA
+// foreign_key_check) before it commits, and turns them on again.
+const foreignKeysOff = "-- ply:foreign-keys-off"
+
 // applyMigration runs on the writer connection without the writer lock: Open
 // calls it before anything else can reach the store.
-func (s *Store) applyMigration(ctx context.Context, version int, body string) error {
-	tx, err := s.rw.BeginTx(ctx, nil)
+func (s *Store) applyMigration(ctx context.Context, version int, body string) (err error) {
+	// One connection for all of it: the pragma belongs to the connection.
+	conn, err := s.rw.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	keysOff := strings.HasPrefix(strings.TrimSpace(body), foreignKeysOff)
+	if keysOff {
+		if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+			return err
+		}
+		defer func() {
+			if _, rerr := conn.ExecContext(context.WithoutCancel(ctx), `PRAGMA foreign_keys = ON`); rerr != nil && err == nil {
+				err = rerr
+			}
+		}()
+	}
+	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -295,8 +336,32 @@ func (s *Store) applyMigration(ctx context.Context, version int, body string) er
 	if _, err := tx.ExecContext(ctx, body); err != nil {
 		return err
 	}
+	if keysOff {
+		if err := checkForeignKeys(ctx, tx); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO schema_version (version) VALUES (?)`, version); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// checkForeignKeys fails when a row refers to one that is not there.
+func checkForeignKeys(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `PRAGMA foreign_key_check`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	if rows.Next() {
+		var table, parent string
+		var rowid sql.NullInt64
+		var fk int
+		if err := rows.Scan(&table, &rowid, &parent, &fk); err != nil {
+			return err
+		}
+		return fmt.Errorf("row %d of %s refers to a missing row of %s", rowid.Int64, table, parent)
+	}
+	return rows.Err()
 }

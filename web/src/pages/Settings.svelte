@@ -5,7 +5,9 @@
   import { resource } from '../lib/resource.svelte';
   import { app, rescan, scan } from '../lib/state.svelte';
   import FixMatch from '../components/FixMatch.svelte';
+  import LibraryFolders from '../components/LibraryFolders.svelte';
   import Picture from '../components/Picture.svelte';
+  import PlaybackLimits from '../components/PlaybackLimits.svelte';
 
   const settings = resource(() => {
     void app.libraryVersion;
@@ -34,10 +36,6 @@
   const review = resource(() => {
     void app.libraryVersion;
     return api.review();
-  });
-  const scanInfo = resource(() => {
-    void app.libraryVersion;
-    return api.scanStatus();
   });
 
   // TMDB "language" codes people are likely to want; whatever the server has is kept.
@@ -269,12 +267,25 @@
               <p class="muted">
                 {#if r.matchState === 'unmatched'}
                   Nothing found{r.kind === 'series' ? ' for this show' : ''}.
+                {:else if r.episodes?.length}
+                  <!-- Flagged for its episodes: the entry can't say whether the match is also unsure. -->
+                  {#if r.candidate}Matched with {r.candidate.title}{r.candidate.year ? ` (${r.candidate.year})` : ''}.{/if}
                 {:else if r.candidate}
                   Matched with {r.candidate.title}{r.candidate.year ? ` (${r.candidate.year})` : ''}, but not for sure.
                 {:else}
                   Not sure about this match.
                 {/if}
               </p>
+              {#if r.episodes?.length}
+                <details class="episodes">
+                  <summary>
+                    {plural(r.episodes.length, 'episode')} with no episode number in the file name
+                  </summary>
+                  <ul>
+                    {#each r.episodes as ep (ep.id)}<li><a class="link" href={href.item(ep.id)}><code>{ep.path.split('/').pop()}</code></a></li>{/each}
+                  </ul>
+                </details>
+              {/if}
             </div>
             <button class="btn" onclick={() => openFix(r)}>Fix</button>
           </li>
@@ -284,33 +295,26 @@
   </section>
 
   <section aria-labelledby="folders-h">
-    <h2 id="folders-h">Media folders</h2>
-    {#if scanInfo.data}
-      {@const sc = scanInfo.data}
-      <p class="muted">
-        {plural(sc.itemCount, 'item')} in the library.
-        {#if sc.lastFinished}Last full scan {when(sc.lastFinished)}.{/if}
-      </p>
-      {#if sc.watching?.length}
-        <ul class="folders">
-          {#each sc.watching as w (w.root)}
-            <li>
-              <code>{w.root}</code>
-              {#if w.watching}
-                <span class="ok">New files show up within seconds.</span>
-              {:else}
-                <span class="warn">Not watched{w.error ? `: ${w.error}` : ''}. Picked up by the regular scan.</span>
-              {/if}
-            </li>
-          {/each}
-        </ul>
-      {:else}
-        <p class="muted">Folder watching is off. New files are picked up by the regular scan.</p>
-      {/if}
-    {:else if scanInfo.error}
-      <p class="error">{scanInfo.error}</p>
-    {/if}
+    <h2 id="folders-h">Library folders</h2>
+    <p class="muted lead">Each folder holds movies or TV shows, never both. Changes take effect at once.</p>
+    <LibraryFolders />
   </section>
+
+  <!-- Not at all when the settings did not load (the error is shown above) or the server has no limits (older than M9). -->
+  {#if settings.data ? settings.data.maxStreams !== undefined : !settings.error}
+    <section aria-labelledby="playback-h">
+      <h2 id="playback-h">Playback</h2>
+      <p class="muted lead">
+        Playing always comes first: background work waits while something plays. When a limit is reached, a new video
+        waits and shows what is playing, so that one can be stopped to make room.
+      </p>
+      {#if settings.data}
+        <PlaybackLimits settings={settings.data} />
+      {:else}
+        <div class="skeleton block" aria-busy="true"></div>
+      {/if}
+    </section>
+  {/if}
 
   <footer class="attribution">
     <p class="muted">
@@ -401,9 +405,6 @@
   .ok {
     color: var(--ok);
   }
-  .warn {
-    color: var(--warn);
-  }
   /* An on/off switch: role="switch" with aria-checked. */
   .switch {
     flex: none;
@@ -449,8 +450,7 @@
   .block {
     height: 9rem;
   }
-  .review,
-  .folders {
+  .review {
     list-style: none;
     margin: 0;
     padding: 0;
@@ -487,13 +487,19 @@
     margin: 0.1rem 0 0;
     font-size: 0.875rem;
   }
-  .folders li {
-    display: grid;
-    gap: 0.2rem;
-    font-size: 0.92rem;
+  .episodes {
+    margin-top: 0.3rem;
+    font-size: 0.85rem;
   }
-  .folders code {
-    width: fit-content;
+  .episodes summary {
+    color: var(--warn);
+    cursor: pointer;
+  }
+  .episodes ul {
+    margin: 0.35rem 0 0;
+    padding-left: 1.1rem;
+  }
+  .episodes code {
     overflow-wrap: anywhere;
   }
   .attribution p {

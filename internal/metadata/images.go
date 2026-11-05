@@ -79,8 +79,10 @@ type ImageOptions struct {
 	// Dir is the cache directory (<data>/images), created if missing.
 	Dir string
 	// URL gives the address of a TMDB image, or false when online lookups are
-	// switched off (cached images are still served).
+	// switched off (cached images are still served). TVDBURL is the same for a TVDB
+	// image, given by its "/banners/..." path.
 	URL        func(ctx context.Context, size, file string) (string, bool)
+	TVDBURL    func(ctx context.Context, size, file string) (string, bool)
 	HTTPClient *http.Client
 	Timeout    time.Duration // per download; default ImageTimeout
 	MaxBytes   int64         // per image; default MaxImageBytes
@@ -91,11 +93,13 @@ type ImageOptions struct {
 	Now      func() time.Time // replaced in tests
 }
 
-// ImageCache keeps TMDB images on disk under Dir/tmdb/<size>/<file>, fetched
-// once on first use, and covers extracted from media files under Dir/embedded.
+// ImageCache keeps TMDB images on disk under Dir/tmdb/<size>/<file> and TVDB
+// images under Dir/tvdb/<size>/<path>, fetched once on first use, and covers
+// extracted from media files under Dir/embedded.
 type ImageCache struct {
 	dir      string
 	url      func(ctx context.Context, size, file string) (string, bool)
+	tvdbURL  func(ctx context.Context, size, file string) (string, bool)
 	http     *http.Client
 	timeout  time.Duration
 	maxBytes int64
@@ -130,7 +134,7 @@ func NewImageCache(o ImageOptions) (*ImageCache, error) {
 		return nil, err
 	}
 	c := &ImageCache{
-		dir: o.Dir, url: o.URL, http: o.HTTPClient, timeout: o.Timeout, maxBytes: o.MaxBytes,
+		dir: o.Dir, url: o.URL, tvdbURL: o.TVDBURL, http: o.HTTPClient, timeout: o.Timeout, maxBytes: o.MaxBytes,
 		ffmpeg: o.FFmpeg, nice: o.Niceness, log: o.Logger, now: o.Now,
 		downloads: make(chan struct{}, maxDownloads),
 		covers:    make(chan struct{}, maxCovers),
@@ -199,15 +203,70 @@ func (c *ImageCache) TMDB(ctx context.Context, size, file string) (string, error
 	return dest, nil
 }
 
-// Prefetch makes sure the image of a "tmdb:/abc.jpg" ref is cached at size.
-// Refs of other kinds are ignored.
-func (c *ImageCache) Prefetch(ctx context.Context, size, ref string) error {
-	file, ok := TMDBFile(ref)
-	if !ok {
-		return nil
+// TVDB returns the path of the cached TVDB image, downloading it first when it is
+// not there. file is TVDB's path ("/banners/posters/81189-10.jpg", the slash is
+// optional). The sizes w92 to w342 are TVDB's thumbnail (the same name with "_t"
+// before the extension) and the others the original; a thumbnail TVDB does not
+// have is made up for by the original. Concurrent callers for one image share one
+// download. A request that is cancelled stops waiting; the download goes on for
+// the others.
+func (c *ImageCache) TVDB(ctx context.Context, size, file string) (string, error) {
+	if !ValidTVDBImage(size, file) {
+		return "", ErrBadImage
 	}
-	_, err := c.TMDB(ctx, size, file)
+	file = "/" + strings.TrimPrefix(file, "/")
+	dest := filepath.Join(c.dir, "tvdb", size, filepath.FromSlash(file))
+	if fi, err := os.Stat(dest); err == nil && fi.Mode().IsRegular() && fi.Size() > 0 {
+		return dest, nil
+	}
+	if c.tvdbURL == nil {
+		return "", ErrImageUnavailable
+	}
+	if _, ok := c.tvdbURL(ctx, size, file); !ok {
+		return "", ErrImageUnavailable // switched off: nothing leaves the machine
+	}
+	key := "tvdb/" + size + file
+	err := c.once(ctx, key, func(ctx context.Context) error {
+		select {
+		case c.downloads <- struct{}{}:
+			defer func() { <-c.downloads }()
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		return c.downloadTVDB(ctx, size, file, dest)
+	})
+	if err != nil {
+		return "", err
+	}
+	return dest, nil
+}
+
+// downloadTVDB fetches the thumbnail for a small size, and the original when TVDB has
+// no thumbnail of the image (404), or for a large one.
+func (c *ImageCache) downloadTVDB(ctx context.Context, size, file, dest string) error {
+	try := size
+	if !tvdbSmall(size) {
+		try = "original"
+	}
+	err := c.fetchFrom(ctx, c.tvdbURL, try, file, dest)
+	if errors.Is(err, errImageNotFound) && tvdbSmall(size) {
+		err = c.fetchFrom(ctx, c.tvdbURL, "original", file, dest)
+	}
 	return err
+}
+
+// Prefetch makes sure the image of a "tmdb:/abc.jpg" or "tvdb:/banners/..." ref is
+// cached at size. Refs of other kinds are ignored.
+func (c *ImageCache) Prefetch(ctx context.Context, size, ref string) error {
+	if file, ok := TMDBFile(ref); ok {
+		_, err := c.TMDB(ctx, size, file)
+		return err
+	}
+	if file, ok := TVDBFile(ref); ok {
+		_, err := c.TVDB(ctx, size, file)
+		return err
+	}
+	return nil
 }
 
 // once runs fn for key unless a run is already under way, and waits for it.
@@ -287,13 +346,27 @@ func (c *ImageCache) noteFailedLocked(key string) {
 	c.failed[key] = now.Add(imageFailureTTL)
 }
 
-// download fetches one image into dest through a temporary file in the same
-// directory, renamed into place only when the whole image has arrived.
-func (c *ImageCache) download(ctx context.Context, size, file, dest string) (err error) {
-	target, ok := c.url(ctx, size, file)
+// errImageNotFound is the image server saying 404.
+var errImageNotFound = errors.New("image not found")
+
+// download fetches one TMDB image into dest.
+func (c *ImageCache) download(ctx context.Context, size, file, dest string) error {
+	return c.fetchFrom(ctx, c.url, size, file, dest)
+}
+
+// fetchFrom fetches the image the address function gives for size and file.
+func (c *ImageCache) fetchFrom(ctx context.Context, address func(context.Context, string, string) (string, bool), size, file, dest string) error {
+	target, ok := address(ctx, size, file)
 	if !ok {
 		return ErrImageUnavailable
 	}
+	return c.fetch(ctx, target, size+"/"+strings.TrimPrefix(file, "/"), dest)
+}
+
+// fetch downloads target into dest through a temporary file in the same
+// directory, renamed into place only when the whole image has arrived. label names
+// the image in errors; the address is not in them.
+func (c *ImageCache) fetch(ctx context.Context, target, label, dest string) (err error) {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
@@ -307,11 +380,14 @@ func (c *ImageCache) download(ctx context.Context, size, file, dest string) (err
 		return redactURL(err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("image %s: %s: %w", label, resp.Status, errImageNotFound)
+	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("image %s/%s: %s", size, file, resp.Status)
+		return fmt.Errorf("image %s: %s", label, resp.Status)
 	}
 	if resp.ContentLength > c.maxBytes {
-		return fmt.Errorf("image %s/%s: %d bytes is over the limit", size, file, resp.ContentLength)
+		return fmt.Errorf("image %s: %d bytes is over the limit", label, resp.ContentLength)
 	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
@@ -331,15 +407,15 @@ func (c *ImageCache) download(ctx context.Context, size, file, dest string) (err
 		return redactURL(err)
 	}
 	if n > c.maxBytes {
-		return fmt.Errorf("image %s/%s: over the %d byte limit", size, file, c.maxBytes)
+		return fmt.Errorf("image %s: over the %d byte limit", label, c.maxBytes)
 	}
 	if n == 0 {
-		return fmt.Errorf("image %s/%s: empty", size, file)
+		return fmt.Errorf("image %s: empty", label)
 	}
 	head := make([]byte, 16)
 	hn, _ := tmp.ReadAt(head, 0)
-	if !looksLike(filepath.Ext(file), head[:hn]) {
-		return fmt.Errorf("image %s/%s: not a %s file", size, file, filepath.Ext(file))
+	if ext := filepath.Ext(dest); !looksLike(ext, head[:hn]) {
+		return fmt.Errorf("image %s: not a %s file", label, ext)
 	}
 	if err := tmp.Close(); err != nil {
 		return err
@@ -354,7 +430,7 @@ func (c *ImageCache) download(ctx context.Context, size, file, dest string) (err
 // an error page served with status 200 is not cached as a picture.
 func looksLike(ext string, head []byte) bool {
 	switch ext {
-	case ".jpg":
+	case ".jpg", ".jpeg":
 		return bytes.HasPrefix(head, []byte{0xFF, 0xD8})
 	case ".png":
 		return bytes.HasPrefix(head, []byte("\x89PNG"))

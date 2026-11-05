@@ -334,3 +334,89 @@ describe('playback', () => {
     expect(await m.api.playback(1, { startSec: 12.5 })).toEqual(full);
   });
 });
+
+describe('library folders', () => {
+  const call = (fn: ReturnType<typeof stubFetch>, i = 0) => fn.mock.calls[i] as unknown as FetchCall;
+
+  it('lists the folders, an empty list for the null Go sends', async () => {
+    stubFetch(json(null));
+    expect(await m.api.folders()).toEqual([]);
+    const f = { id: 1, path: '/m', kind: 'movies', guessed: false, source: 'ui', kindLocked: false, items: 3, lastScanAt: 0, state: 'ok', error: '' };
+    const fn = stubFetch(json([f]));
+    expect(await m.api.folders()).toEqual([f]);
+    expect(call(fn)[0]).toBe('/api/folders');
+  });
+
+  it('adds a folder with its path and type', async () => {
+    const fn = stubFetch(json({ id: 2, path: '/Volumes/NAS/TV' }, 201));
+    await m.api.addFolder('/Volumes/NAS/TV', 'shows');
+    expect(call(fn)[0]).toBe('/api/folders');
+    expect(call(fn)[1].method).toBe('POST');
+    expect(JSON.parse(call(fn)[1].body as string)).toEqual({ path: '/Volumes/NAS/TV', kind: 'shows' });
+  });
+
+  it("passes on the server's reason for refusing a folder", async () => {
+    stubFetch(json({ error: '/a/b overlaps the library folder /a' }, 400));
+    await expect(m.api.addFolder('/a/b', 'movies')).rejects.toMatchObject({ status: 400, message: '/a/b overlaps the library folder /a' });
+  });
+
+  it('changes a type with a PATCH of the folder', async () => {
+    const fn = stubFetch(json({ id: 4, kind: 'movies' }));
+    await m.api.setFolderKind(4, 'movies');
+    expect(call(fn)[0]).toBe('/api/folders/4');
+    expect(call(fn)[1].method).toBe('PATCH');
+    expect(JSON.parse(call(fn)[1].body as string)).toEqual({ kind: 'movies' });
+  });
+
+  it('asks to forget only when told to', async () => {
+    const fn = stubFetch(new Response(null, { status: 204 }));
+    await m.api.removeFolder(5);
+    await m.api.removeFolder(5, true);
+    expect(call(fn, 0)[0]).toBe('/api/folders/5');
+    expect(call(fn, 1)[0]).toBe('/api/folders/5?forget=1');
+    expect(call(fn, 1)[1].method).toBe('DELETE');
+  });
+
+  it('a removal refused while a scan is busy is an error that says when to retry', async () => {
+    const busy = new Response(JSON.stringify({ error: 'a scan of the library is still running' }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json', 'Retry-After': '30' },
+    });
+    stubFetch(busy);
+    await expect(m.api.removeFolder(5)).rejects.toMatchObject({ status: 503, retryAfter: 30 });
+  });
+
+  it('reads Retry-After only when it is a number of seconds', async () => {
+    const res = (h?: string) =>
+      new Response('{}', { status: 503, headers: h === undefined ? {} : { 'Retry-After': h } });
+    for (const [h, want] of [[undefined, undefined], ['', undefined], ['Wed, 21 Oct 2026 07:28:00 GMT', undefined], [' 5 ', 5], ['0', 0]] as const) {
+      stubFetch(res(h));
+      const err = await m.api.removeFolder(1).catch((e: unknown) => e);
+      expect((err as InstanceType<typeof m.ApiError>).retryAfter, String(h)).toBe(want);
+    }
+  });
+
+  it('escapes every character a folder name can hold', async () => {
+    const path = '/Volumes/A&B #1 100%+x?=/é';
+    const fn = stubFetch(json({ path, parent: '/Volumes', dirs: [] }));
+    await m.api.listDirs(path);
+    const url = new URL(call(fn)[0], location.origin);
+    expect(url.pathname).toBe('/api/fs');
+    expect([...url.searchParams.keys()]).toEqual(['path']);
+    expect(url.searchParams.get('path')).toBe(path);
+  });
+
+  it('lists directories: the places with no path, an escaped path otherwise', async () => {
+    const fn = stubFetch(json({ path: '', parent: '', dirs: null, places: [{ name: 'Home', path: '/Users/me' }] }));
+    const top = await m.api.listDirs();
+    expect(call(fn)[0]).toBe('/api/fs');
+    expect(top.dirs).toEqual([]);
+    expect(top.places).toEqual([{ name: 'Home', path: '/Users/me' }]);
+
+    const fn2 = stubFetch(json({ path: '/Volumes/My Disk', parent: '/Volumes', dirs: [{ name: 'A&B', path: '/Volumes/My Disk/A&B' }] }));
+    const d = await m.api.listDirs('/Volumes/My Disk');
+    expect(new URL(call(fn2)[0], location.origin).searchParams.get('path')).toBe('/Volumes/My Disk');
+    expect(d.parent).toBe('/Volumes');
+    expect(d.places).toBeUndefined();
+  });
+});

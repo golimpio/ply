@@ -21,6 +21,7 @@ type fakeMatcher struct {
 	movies []int64  // item ids
 	shows  []string // show names
 	refs   []int64  // the TMDB ids asked for, in order
+	tvdb   []int64  // the TVDB ids asked for, in order
 	errs   []error  // answers for the next calls, in order; then nil
 }
 
@@ -38,6 +39,7 @@ func (m *fakeMatcher) MatchMovie(_ context.Context, itemID int64, ref metadata.R
 	defer m.mu.Unlock()
 	m.movies = append(m.movies, itemID)
 	m.refs = append(m.refs, ref.TMDBID)
+	m.tvdb = append(m.tvdb, ref.TVDBID)
 	return m.next()
 }
 
@@ -46,6 +48,7 @@ func (m *fakeMatcher) MatchShow(_ context.Context, show string, ref metadata.Ref
 	defer m.mu.Unlock()
 	m.shows = append(m.shows, show)
 	m.refs = append(m.refs, ref.TMDBID)
+	m.tvdb = append(m.tvdb, ref.TVDBID)
 	return m.next()
 }
 
@@ -308,5 +311,82 @@ func TestPreviousRoots(t *testing.T) {
 	got, err := storedKinds(context.Background(), st)
 	if err != nil || len(got) != 1 || got["/films"] != library.KindMovies {
 		t.Errorf("storedKinds = %v, %v", got, err)
+	}
+}
+
+// archivedTVDBShow puts a show matched by hand through TVDB through the removal of /lib and a
+// return, as archivedMatches does for a TMDB one, and returns its episodes.
+func archivedTVDBShow(t *testing.T, st *store.Store) []int64 {
+	t.Helper()
+	ctx := context.Background()
+	items := func() []int64 {
+		return []int64{
+			addItem(t, st, &store.Item{Kind: store.KindEpisode, Show: "The Wire", Season: 1, Episode: 1, Path: "/lib/Wire/1.mkv"}),
+			addItem(t, st, &store.Item{Kind: store.KindEpisode, Show: "The Wire", Season: 1, Episode: 2, Path: "/lib/Wire/2.mkv"}),
+		}
+	}
+	items()
+	// TVDB knows the show's TMDB id too; the match was made through TVDB all the same.
+	title, err := st.UpsertTitle(ctx, &store.TitleInput{Title: store.Title{Kind: store.KindSeries, TVDBID: 79126, TMDBID: 1438,
+		Title: "The Wire", Source: store.SourceTVDB}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSeriesMatch(ctx, "The Wire", store.Match{TitleID: title, State: store.MatchManual, Score: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ArchiveAndDeleteRoot(ctx, "/lib", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PruneMetadata(ctx); err != nil {
+		t.Fatal(err)
+	}
+	eps := items()
+	for i, p := range []string{"/lib/Wire/1.mkv", "/lib/Wire/2.mkv"} {
+		if _, _, _, err := st.RestoreArchived(ctx, eps[i], p, 100); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return eps
+}
+
+// A show matched by hand through TVDB comes back through TVDB, by the TVDB id: MatchShow is asked
+// with that id and no TMDB one, once for the show, and the archive forgets the match when it is applied.
+func TestMatchRestorerAppliesAShowMatchedThroughTVDBByItsTVDBID(t *testing.T) {
+	m := &fakeMatcher{}
+	r, st := newRestorer(t, m)
+	archivedTVDBShow(t, st)
+	list := pending(t, st, r)
+	if len(list) != 2 || list[0].Kind != store.KindSeriesTVDB || list[0].TMDBID != 79126 {
+		t.Fatalf("control: the matches waiting are %+v, want the two episodes' through TVDB", list)
+	}
+	r.drain(context.Background())
+	if _, shows := m.snapshot(); !slices.Equal(shows, []string{"The Wire"}) {
+		t.Errorf("MatchShow was asked for %v, want The Wire once", shows)
+	}
+	if !slices.Equal(m.tvdb, []int64{79126}) || !slices.Equal(m.refs, []int64{0}) {
+		t.Errorf("ids asked for: TVDB %v, TMDB %v; want TVDB 79126 alone", m.tvdb, m.refs)
+	}
+	if list, _ := st.PendingMatches(context.Background()); len(list) != 0 {
+		t.Errorf("%v still wait in the archive after the match was applied", list)
+	}
+}
+
+// With no TVDB key the match waits in the archive; a show TVDB has not any more is dropped.
+func TestMatchRestorerKeepsATVDBMatchWithoutAKeyAndDropsOneThatIsGone(t *testing.T) {
+	m := &fakeMatcher{errs: []error{metadata.ErrNoTVDB, metadata.ErrNoTVDB}} // one for each episode: a show that failed is asked for again
+	r, st := newRestorer(t, m)
+	archivedTVDBShow(t, st)
+	pending(t, st, r)
+	r.drain(context.Background())
+	if list, _ := st.PendingMatches(context.Background()); len(list) != 2 {
+		t.Fatalf("%v wait after a refusal for want of a key, want the two episodes'", list)
+	}
+
+	m.errs = []error{metadata.ErrNoSuchTitle, metadata.ErrNoSuchTitle}
+	pending(t, st, r)
+	r.drain(context.Background())
+	if list, _ := st.PendingMatches(context.Background()); len(list) != 0 {
+		t.Errorf("%v wait after TVDB said the show is gone", list)
 	}
 }

@@ -18,3 +18,11 @@ export const MAX_SESSION_RESTARTS = 2;
 export function sessionGone(data: HlsErrorInfo): boolean {
   return data.type === 'networkError' && data.response?.code === 404;
 }
+
+/**
+ * A network error answered with 410 means someone stopped the session on purpose (DELETE, from the
+ * Activity page or another device's "too many videos" panel): it must not be started again on its own.
+ */
+export function sessionStopped(data: HlsErrorInfo): boolean {
+  return data.type === 'networkError' && data.response?.code === 410;
+}

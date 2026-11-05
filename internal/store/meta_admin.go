@@ -178,7 +178,7 @@ func (s *Store) dueTitles(ctx context.Context, now time.Time, limit int, byAge b
 	}
 	rows, err := s.ro.QueryContext(ctx, `
 		SELECT `+prefixed("t.", titleCols)+` FROM titles t
-		WHERE t.tmdb_id IS NOT NULL AND `+libraryTitle+` AND (`+cond+`)
+		WHERE (t.tmdb_id IS NOT NULL OR t.tvdb_id IS NOT NULL) AND `+libraryTitle+` AND (`+cond+`)
 		ORDER BY t.fetched_at, t.id LIMIT ?`, append(args, limit)...)
 	if err != nil {
 		return nil, err
@@ -195,30 +195,37 @@ func (s *Store) dueTitles(ctx context.Context, now time.Time, limit int, byAge b
 	return out, rows.Err()
 }
 
-// TitleRef identifies a title of the library at TMDB.
+// TitleRef identifies a title of the library at TMDB and TVDB. Source is the
+// title's (SourceTVDB: the ids to look it up by are TVDB's).
 type TitleRef struct {
 	ID     int64
 	Kind   string
 	TMDBID int64
+	TVDBID int64
+	Source string
 	Locked bool
 }
 
-// LibraryTitleRefs returns every title of the library that has a TMDB id, for
-// intersecting with a changes feed.
+// LibraryTitleRefs returns every title of the library that has a TMDB or a TVDB
+// id, for intersecting with a changes feed.
 func (s *Store) LibraryTitleRefs(ctx context.Context) ([]TitleRef, error) {
 	rows, err := s.ro.QueryContext(ctx, `
-		SELECT t.id, t.kind, t.tmdb_id, t.locked FROM titles t
-		WHERE t.tmdb_id IS NOT NULL AND `+libraryTitle+` ORDER BY t.id`)
+		SELECT t.id, t.kind, t.tmdb_id, t.tvdb_id, t.source, t.locked FROM titles t
+		WHERE (t.tmdb_id IS NOT NULL OR t.tvdb_id IS NOT NULL) AND `+libraryTitle+` ORDER BY t.id`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []TitleRef
 	for rows.Next() {
-		var r TitleRef
-		if err := rows.Scan(&r.ID, &r.Kind, &r.TMDBID, &r.Locked); err != nil {
+		var (
+			r          TitleRef
+			tmdb, tvdb sql.NullInt64
+		)
+		if err := rows.Scan(&r.ID, &r.Kind, &tmdb, &tvdb, &r.Source, &r.Locked); err != nil {
 			return nil, err
 		}
+		r.TMDBID, r.TVDBID = tmdb.Int64, tvdb.Int64
 		out = append(out, r)
 	}
 	return out, rows.Err()

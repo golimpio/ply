@@ -8,7 +8,9 @@ import (
 	"maps"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Library folder types, as in the folders table (the same strings as
@@ -205,7 +207,8 @@ func (s *Store) CountItemsByRoot(ctx context.Context) (map[string]int, error) {
 // scanner compares with a new reading of the name (see SetParsed).
 type RootItem struct {
 	Path    string
-	AddedAt int64 // unix seconds; compare with TypedSince
+	Root    string // the root the item is indexed under
+	AddedAt int64  // unix seconds; compare with TypedSince
 	ParsedRow
 }
 
@@ -240,9 +243,21 @@ func (s *Store) TypedSince(ctx context.Context) (int64, error) {
 // RootItems returns every item whose root is root, lowest id first. NeedsReview is
 // the item's own flag.
 func (s *Store) RootItems(ctx context.Context, root string) ([]RootItem, error) {
+	return s.rootItems(ctx, `WHERE root = ?`, root)
+}
+
+// ItemsBelow returns every item whose file is inside dir, whatever root it is indexed
+// under, lowest id first: the folder's own items, and the rows an earlier configuration
+// left under another root, which the scan has yet to move to it.
+func (s *Store) ItemsBelow(ctx context.Context, dir string) ([]RootItem, error) {
+	prefix := strings.TrimSuffix(dir, "/") + "/"
+	return s.rootItems(ctx, `WHERE substr(path, 1, ?) = ?`, utf8.RuneCountInString(prefix), prefix) // substr counts characters
+}
+
+func (s *Store) rootItems(ctx context.Context, where string, args ...any) ([]RootItem, error) {
 	rows, err := s.ro.QueryContext(ctx, `
-		SELECT id, path, added_at, kind, title, year, show, season, episode, needs_review
-		FROM items WHERE root = ? ORDER BY id`, root)
+		SELECT id, path, root, added_at, kind, title, year, show, season, episode, needs_review
+		FROM items `+where+` ORDER BY id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -250,8 +265,8 @@ func (s *Store) RootItems(ctx context.Context, root string) ([]RootItem, error) 
 	var out []RootItem
 	for rows.Next() {
 		var it RootItem
-		if err := rows.Scan(&it.ID, &it.Path, &it.AddedAt, &it.Kind, &it.Title, &it.Year, &it.Show, &it.Season, &it.Episode,
-			&it.NeedsReview); err != nil {
+		if err := rows.Scan(&it.ID, &it.Path, &it.Root, &it.AddedAt, &it.Kind, &it.Title, &it.Year, &it.Show, &it.Season,
+			&it.Episode, &it.NeedsReview); err != nil {
 			return nil, err
 		}
 		out = append(out, it)
@@ -297,10 +312,13 @@ func (s *Store) ArchiveAndDeleteRoot(ctx context.Context, root string, forget bo
 				}
 			} else {
 				if _, err := tx.ExecContext(ctx, `
-						INSERT INTO item_archive (path, size, tmdb_id, tmdb_kind, series_id, series_show, position_sec,
+						INSERT INTO item_archive (path, size, tmdb_id, tmdb_kind, series_id, series_tvdb_id, series_show, position_sec,
 							duration_sec, watched, progress_at, archived_at)
 						SELECT i.path, i.size, COALESCE(tm.tmdb_id, 0), CASE WHEN tm.tmdb_id IS NULL THEN '' ELSE tm.kind END,
-							COALESCE(ts.tmdb_id, 0), CASE WHEN ts.tmdb_id IS NULL THEN '' ELSE i.show END,
+							-- a show matched through TVDB is kept by its TVDB id, one matched through TMDB by its TMDB id
+							CASE WHEN ts.source = 'tvdb' THEN 0 ELSE COALESCE(ts.tmdb_id, 0) END,
+							CASE WHEN ts.source = 'tvdb' THEN COALESCE(ts.tvdb_id, 0) ELSE 0 END,
+							CASE WHEN COALESCE(CASE WHEN ts.source = 'tvdb' THEN ts.tvdb_id ELSE ts.tmdb_id END, 0) = 0 THEN '' ELSE i.show END,
 							COALESCE(p.position_sec, 0), COALESCE(p.duration_sec, 0), COALESCE(p.watched, 0),
 							COALESCE(p.updated_at, 0), ?
 						FROM items i
@@ -308,13 +326,15 @@ func (s *Store) ArchiveAndDeleteRoot(ctx context.Context, root string, forget bo
 						LEFT JOIN titles tm ON tm.id = CASE WHEN i.kind <> 'episode' AND i.match_state = 'manual' THEN i.title_id END
 						LEFT JOIN series_matches sm ON i.kind = 'episode' AND sm.show = i.show AND sm.match_state = 'manual'
 						LEFT JOIN titles ts ON ts.id = sm.title_id
-						WHERE i.id IN (`+in+`) AND (p.item_id IS NOT NULL OR tm.tmdb_id IS NOT NULL OR ts.tmdb_id IS NOT NULL)
+						WHERE i.id IN (`+in+`) AND (p.item_id IS NOT NULL OR tm.tmdb_id IS NOT NULL OR ts.tmdb_id IS NOT NULL
+							OR (ts.source = 'tvdb' AND ts.tvdb_id IS NOT NULL))
 						ON CONFLICT (path) DO UPDATE SET size = excluded.size,
 							-- a match still waiting to be applied (see RestoreArchived) is not replaced by none
 							tmdb_id = CASE WHEN excluded.tmdb_id <> 0 THEN excluded.tmdb_id ELSE item_archive.tmdb_id END,
 							tmdb_kind = CASE WHEN excluded.tmdb_id <> 0 THEN excluded.tmdb_kind ELSE item_archive.tmdb_kind END,
-							series_id = CASE WHEN excluded.series_id <> 0 THEN excluded.series_id ELSE item_archive.series_id END,
-							series_show = CASE WHEN excluded.series_id <> 0 THEN excluded.series_show ELSE item_archive.series_show END,
+							series_id = CASE WHEN excluded.series_id <> 0 OR excluded.series_tvdb_id <> 0 THEN excluded.series_id ELSE item_archive.series_id END,
+							series_tvdb_id = CASE WHEN excluded.series_id <> 0 OR excluded.series_tvdb_id <> 0 THEN excluded.series_tvdb_id ELSE item_archive.series_tvdb_id END,
+							series_show = CASE WHEN excluded.series_id <> 0 OR excluded.series_tvdb_id <> 0 THEN excluded.series_show ELSE item_archive.series_show END,
 							position_sec = excluded.position_sec,
 							duration_sec = excluded.duration_sec, watched = excluded.watched,
 							progress_at = excluded.progress_at, archived_at = excluded.archived_at`,
@@ -365,15 +385,15 @@ func rootBatch(ctx context.Context, tx *sql.Tx, root string) ([]int64, error) {
 func (s *Store) RestoreArchived(ctx context.Context, itemID int64, path string, size int64) (tmdbID int64, tmdbKind string, ok bool, err error) {
 	err = s.write(ctx, prioLow, func(tx *sql.Tx) error {
 		var (
-			archivedSize, progressAt, movieID, seriesID int64
-			movieKind                                   string
-			position, duration                          float64
-			watched                                     bool
+			archivedSize, progressAt, movieID, seriesID, seriesTVDB int64
+			movieKind                                               string
+			position, duration                                      float64
+			watched                                                 bool
 		)
 		err := tx.QueryRowContext(ctx, `
-			SELECT size, tmdb_id, tmdb_kind, series_id, position_sec, duration_sec, watched, progress_at
+			SELECT size, tmdb_id, tmdb_kind, series_id, series_tvdb_id, position_sec, duration_sec, watched, progress_at
 			FROM item_archive WHERE path = ?`, path).
-			Scan(&archivedSize, &movieID, &movieKind, &seriesID, &position, &duration, &watched, &progressAt)
+			Scan(&archivedSize, &movieID, &movieKind, &seriesID, &seriesTVDB, &position, &duration, &watched, &progressAt)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -383,6 +403,8 @@ func (s *Store) RestoreArchived(ctx context.Context, itemID int64, path string, 
 		switch {
 		case movieID != 0:
 			tmdbID, tmdbKind = movieID, movieKind
+		case seriesTVDB != 0:
+			tmdbID, tmdbKind = seriesTVDB, KindSeriesTVDB
 		case seriesID != 0:
 			tmdbID, tmdbKind = seriesID, KindSeries
 		}
@@ -420,8 +442,9 @@ func (s *Store) ForgetArchivedMatch(ctx context.Context, path, kind string) erro
 	switch kind {
 	case KindMovie:
 		set = `tmdb_id = 0, tmdb_kind = ''`
-	case KindSeries:
-		set = `series_id = 0, series_show = ''`
+	case KindSeries, KindSeriesTVDB:
+		// The two are alternatives: a show's match is made at one of the providers.
+		set = `series_id = 0, series_tvdb_id = 0, series_show = ''`
 	default:
 		return fmt.Errorf("store: title kind %q", kind)
 	}
@@ -430,14 +453,15 @@ func (s *Store) ForgetArchivedMatch(ctx context.Context, path, kind string) erro
 			return err
 		}
 		_, err := tx.ExecContext(ctx, `
-			DELETE FROM item_archive WHERE path = ? AND progress_at = 0 AND tmdb_id = 0 AND series_id = 0`, path)
+			DELETE FROM item_archive WHERE path = ? AND progress_at = 0 AND tmdb_id = 0 AND series_id = 0 AND series_tvdb_id = 0`, path)
 		return err
 	})
 }
 
 // PendingMatch is a manual match kept in the archive for an item that is in the
-// library, to be applied by TMDB id: a movie's own, or its show's (Kind is
-// KindMovie or KindSeries, as the item's kind says).
+// library, to be applied by id: a movie's own, or its show's (Kind is KindMovie or
+// KindSeries, as the item's kind says, or KindSeriesTVDB for a show matched through
+// TVDB). TMDBID is the id at the provider Kind names: TMDB's, or TVDB's for KindSeriesTVDB.
 type PendingMatch struct {
 	ItemID int64
 	Path   string
@@ -458,6 +482,11 @@ func (s *Store) PendingMatches(ctx context.Context) ([]PendingMatch, error) {
 		SELECT i.id, a.path, a.series_id, 'series'
 		FROM item_archive a JOIN items i ON i.path = a.path
 		WHERE a.series_id <> 0 AND i.kind = 'episode' AND (a.series_show = '' OR a.series_show = i.show)
+			AND NOT EXISTS (SELECT 1 FROM series_matches sm WHERE sm.show = i.show AND sm.match_state = 'manual')
+		UNION ALL
+		SELECT i.id, a.path, a.series_tvdb_id, 'series-tvdb'
+		FROM item_archive a JOIN items i ON i.path = a.path
+		WHERE a.series_tvdb_id <> 0 AND i.kind = 'episode' AND (a.series_show = '' OR a.series_show = i.show)
 			AND NOT EXISTS (SELECT 1 FROM series_matches sm WHERE sm.show = i.show AND sm.match_state = 'manual')
 		ORDER BY 1`)
 	if err != nil {
@@ -690,14 +719,16 @@ func setParsedRow(ctx context.Context, tx *sql.Tx, r ParsedRow, now int64, shows
 		size                          int64
 		titleKind, seriesState        sql.NullString
 		titleTMDB, seriesTMDB         sql.NullInt64
+		seriesSource                  sql.NullString
+		seriesTVDB                    sql.NullInt64
 	)
 	err := tx.QueryRowContext(ctx, `
-		SELECT i.kind, i.show, i.match_state, i.path, i.size, t.kind, t.tmdb_id, sm.match_state, st.tmdb_id
+		SELECT i.kind, i.show, i.match_state, i.path, i.size, t.kind, t.tmdb_id, sm.match_state, st.tmdb_id, st.source, st.tvdb_id
 		FROM items i LEFT JOIN titles t ON t.id = i.title_id
 		LEFT JOIN series_matches sm ON i.kind = 'episode' AND sm.show = i.show
 		LEFT JOIN titles st ON st.id = sm.title_id
 		WHERE i.id = ?`, r.ID).
-		Scan(&oldKind, &oldShow, &state, &path, &size, &titleKind, &titleTMDB, &seriesState, &seriesTMDB)
+		Scan(&oldKind, &oldShow, &state, &path, &size, &titleKind, &titleTMDB, &seriesState, &seriesTMDB, &seriesSource, &seriesTVDB)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -726,9 +757,15 @@ func setParsedRow(ctx context.Context, tx *sql.Tx, r ParsedRow, now int64, shows
 	}
 	// The show's match stays with the show: an episode that leaves it (it is a movie
 	// now, or another show's episode) takes it to the archive, for the day it is back.
-	if oldKind == KindEpisode && (r.Kind != KindEpisode || r.Show != oldShow) &&
-		seriesState.String == MatchManual && seriesTMDB.Int64 != 0 {
-		if err := archiveMatch(ctx, tx, path, size, seriesTMDB.Int64, KindSeries, oldShow, now); err != nil {
+	if oldKind == KindEpisode && (r.Kind != KindEpisode || r.Show != oldShow) && seriesState.String == MatchManual {
+		// A match made through TVDB is kept by its TVDB id.
+		switch {
+		case seriesSource.String == SourceTVDB && seriesTVDB.Int64 != 0:
+			err = archiveMatch(ctx, tx, path, size, seriesTVDB.Int64, KindSeriesTVDB, oldShow, now)
+		case seriesSource.String != SourceTVDB && seriesTMDB.Int64 != 0:
+			err = archiveMatch(ctx, tx, path, size, seriesTMDB.Int64, KindSeries, oldShow, now)
+		}
+		if err != nil {
 			return err
 		}
 	}
@@ -753,10 +790,17 @@ func setParsedRow(ctx context.Context, tx *sql.Tx, r ParsedRow, now int64, shows
 // it was for), so that an item that is a movie, then an episode, then a movie again
 // does not lose the one while the other is archived. Each slot holds the latest.
 func archiveMatch(ctx context.Context, tx *sql.Tx, path string, size, tmdbID int64, kind, show string, now int64) error {
-	if kind == KindSeries {
+	switch kind {
+	case KindSeries:
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO item_archive (path, size, series_id, series_show, archived_at) VALUES (?, ?, ?, ?, ?)
-			ON CONFLICT (path) DO UPDATE SET size = excluded.size, series_id = excluded.series_id,
+			ON CONFLICT (path) DO UPDATE SET size = excluded.size, series_id = excluded.series_id, series_tvdb_id = 0,
+				series_show = excluded.series_show, archived_at = excluded.archived_at`, path, size, tmdbID, show, now)
+		return err
+	case KindSeriesTVDB: // tmdbID is the TVDB id; the show's slot holds one of the two
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO item_archive (path, size, series_tvdb_id, series_show, archived_at) VALUES (?, ?, ?, ?, ?)
+			ON CONFLICT (path) DO UPDATE SET size = excluded.size, series_tvdb_id = excluded.series_tvdb_id, series_id = 0,
 				series_show = excluded.series_show, archived_at = excluded.archived_at`, path, size, tmdbID, show, now)
 		return err
 	}

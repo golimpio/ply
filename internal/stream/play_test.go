@@ -414,8 +414,14 @@ func TestHeartbeatKeepsAPausedSessionAlive(t *testing.T) {
 		t.Errorf("playing = %+v, want the paused session at 600 s", p)
 	}
 
-	// And when the beats stop it goes, like any session.
-	clk.Advance(31 * time.Second)
+	// And when the beats stop it goes, like any session: a paused player's 3 minutes,
+	// not the 30 s of one that plays.
+	clk.Advance(DefaultPausedBeatTimeout - time.Second)
+	settle(m)
+	if _, ok := m.Get(beaten.ID); !ok {
+		t.Fatal("the paused session was stopped inside its 3 minutes")
+	}
+	clk.Advance(2 * time.Second)
 	waitUntil(t, "the session whose beats stopped to be stopped", 5*time.Second, func() bool { return m.Count() == 0 })
 	if p := f.procs(t); len(p) != 0 {
 		t.Errorf("ffmpeg survived the idle stop: %v", p)
@@ -576,12 +582,20 @@ func TestAReturningDirectPlayIsAdmittedAtTheLimit(t *testing.T) {
 		t.Errorf("%d plays after it came back, want the session and it", n)
 	}
 
-	// A play stopped on purpose (Stop in the list) gets no grace.
+	// A play stopped on purpose (Stop in the list) gets no grace: its requests for the
+	// file are refused as stopped, and when it announces a play again (the page does,
+	// with POST /playback) it is a stranger at the limit like any other.
 	if !m.Delete(id) {
 		t.Fatal("Delete found no direct play")
 	}
+	if _, err := brief(m, paused, "Movie", "10.0.0.2 · Safari", 0); !errors.Is(err, ErrStopped) {
+		t.Errorf("a play that was stopped on purpose, asking for the file again = %v, want ErrStopped", err)
+	}
+	if err := m.CheckDirect(paused); !errors.Is(err, ErrTooManySessions) {
+		t.Errorf("a play that was stopped on purpose, announced again at the limit = %v, want it refused", err)
+	}
 	if _, err := brief(m, paused, "Movie", "10.0.0.2 · Safari", 0); !errors.Is(err, ErrTooManySessions) {
-		t.Errorf("a play that was stopped on purpose, back at the limit = %v, want it refused", err)
+		t.Errorf("... and asking for the file = %v, want the limit (no longer ErrStopped)", err)
 	}
 }
 
@@ -695,4 +709,215 @@ func TestWaitForTheInitSegmentIsNotIdle(t *testing.T) {
 	}
 	clk.Advance(31 * time.Second)
 	waitUntil(t, "the session to be stopped 31 s after the request ended", 5*time.Second, func() bool { return m.Count() == 0 })
+}
+
+// A session stopped on purpose (Delete: the Activity page, the cap panel) is
+// remembered as that for StoppedTTL, so that its player is told it was stopped and
+// does not start another; one ply ended because nothing was heard from it, or that
+// never was, is not.
+func TestASessionStoppedOnPurposeIsRememberedAsStopped(t *testing.T) {
+	f := newFake(t)
+	clk := newTestClock()
+	m := fakeManager(t, f, func(o *Options) { o.Clock = clk.Now })
+	ctx := context.Background()
+	stopped, err := m.Create(ctx, fakeRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lost, err := m.Create(ctx, fakeRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Stopped(stopped.ID) || m.Stopped(lost.ID) || m.Stopped("nosuchsession") {
+		t.Fatal("something was stopped before anything was") // positive control
+	}
+	if !m.Delete(stopped.ID) {
+		t.Fatal("Delete found no session")
+	}
+	if !m.Stopped(stopped.ID) {
+		t.Fatal("a session stopped by Delete is not remembered as stopped")
+	}
+	if m.Stopped("nosuchsession") || m.Stopped(lost.ID) {
+		t.Error("an unknown session, or one still running, counts as stopped")
+	}
+	if m.Heartbeat(stopped.ID, Beat{}) {
+		t.Error("a heartbeat for a stopped session was accepted")
+	}
+
+	// One that nobody stopped, that ply ended for its silence, is lost, not stopped.
+	clk.Advance(61 * time.Second)
+	waitUntil(t, "the silent session to be ended", 5*time.Second, func() bool {
+		_, ok := m.Get(lost.ID)
+		return !ok
+	})
+	if m.Stopped(lost.ID) {
+		t.Error("a session that ply ended for its silence counts as stopped on purpose")
+	}
+	if !m.Stopped(stopped.ID) {
+		t.Error("the stopped session was forgotten before StoppedTTL")
+	}
+
+	// It is remembered for StoppedTTL from the stop: 61 s have passed.
+	clk.Advance(StoppedTTL - 61*time.Second - time.Nanosecond)
+	if !m.Stopped(stopped.ID) {
+		t.Error("forgotten a nanosecond before StoppedTTL")
+	}
+	clk.Advance(time.Nanosecond)
+	if m.Stopped(stopped.ID) {
+		t.Error("still remembered as stopped StoppedTTL after it was")
+	}
+}
+
+// The same for a direct play dropped by Delete: its next requests for the file are
+// refused as stopped (not counted again), until StoppedTTL has passed or the client
+// announces a play (CheckDirect); one that merely expired is not stopped.
+func TestADirectPlayDroppedOnPurposeIsRefusedAsStopped(t *testing.T) {
+	f := newFake(t)
+	clk := newTestClock()
+	m := fakeManager(t, f, func(o *Options) { o.Clock = clk.Now })
+	k := DirectKey{ItemID: 1, IP: "10.0.0.2", UserAgent: "Safari"}
+	other := DirectKey{ItemID: 1, IP: "10.0.0.3", UserAgent: "Chrome"}
+	expired := DirectKey{ItemID: 2, IP: "10.0.0.4", UserAgent: "VLC"}
+
+	id, err := brief(m, k, "Movie", "10.0.0.2 · Safari", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idExpired, err := brief(m, expired, "Movie", "10.0.0.4 · VLC", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.Delete(id) {
+		t.Fatal("Delete found no direct play")
+	}
+	if !m.Stopped(id) {
+		t.Error("a direct play dropped by Delete is not remembered as stopped")
+	}
+	if m.Heartbeat(id, Beat{}) {
+		t.Error("a heartbeat for a dropped direct play was accepted")
+	}
+	if _, err := brief(m, k, "Movie", "10.0.0.2 · Safari", 0); !errors.Is(err, ErrStopped) {
+		t.Fatalf("its next request for the file = %v, want ErrStopped", err)
+	}
+	if n := len(m.Playing()); n != 1 {
+		t.Errorf("%d plays, want only the other that is still counted", n)
+	}
+	if _, err := brief(m, other, "Movie", "10.0.0.3 · Chrome", 0); err != nil { // it is that client that was stopped
+		t.Errorf("another client: %v", err)
+	}
+
+	// A play that ran out by itself was not stopped by anybody.
+	clk.Advance(DirectTTL)
+	if m.Stopped(idExpired) {
+		t.Error("a direct play that expired counts as stopped on purpose")
+	}
+	if _, err := brief(m, expired, "Movie", "10.0.0.4 · VLC", 0); err != nil {
+		t.Errorf("a direct play that expired, asking again: %v", err)
+	}
+
+	// ... and the refusal ends with StoppedTTL.
+	clk.Advance(StoppedTTL - DirectTTL - time.Nanosecond)
+	if _, err := brief(m, k, "Movie", "10.0.0.2 · Safari", 0); !errors.Is(err, ErrStopped) {
+		t.Errorf("a nanosecond before StoppedTTL = %v, want ErrStopped", err)
+	}
+	clk.Advance(time.Nanosecond)
+	if _, err := brief(m, k, "Movie", "10.0.0.2 · Safari", 0); err != nil {
+		t.Errorf("StoppedTTL after the stop: %v, want it admitted", err)
+	}
+	if m.Stopped(id) {
+		t.Error("still stopped StoppedTTL later")
+	}
+}
+
+// A hidden tab beats about once a minute: a paused player has PausedBeatTimeout
+// (3 min), exactly, from its last heartbeat.
+func TestAPausedPlayerHasThreeMinutes(t *testing.T) {
+	f := newFake(t)
+	clk := newTestClock()
+	m := fakeManager(t, f, func(o *Options) { o.Clock = clk.Now })
+	s, err := m.Create(context.Background(), fakeRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Heartbeat(s.ID, Beat{Paused: ptrTo(true)})
+	clk.Advance(DefaultPausedBeatTimeout)
+	settle(m)
+	if _, ok := m.Get(s.ID); !ok {
+		t.Fatal("a paused player that beat 3 minutes ago was stopped (30 s is for one that plays)")
+	}
+	clk.Advance(time.Nanosecond)
+	waitUntil(t, "the paused session to be stopped after 3 minutes", 5*time.Second, func() bool { return m.Count() == 0 })
+}
+
+// The long window is for as long as the player is paused: a request, or a
+// heartbeat that says it is not paused, brings back the 30 s; a heartbeat that
+// does not say, leaves things as they are.
+func TestThePausedWindowEndsWithARequestOrAnUnpausedBeat(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		do   func(t *testing.T, m *Manager, s *Session)
+		kept bool // the 3 minutes still apply afterwards
+	}{
+		{"a request for a segment", func(t *testing.T, m *Manager, s *Session) {
+			seg, err := s.OpenSegment(context.Background(), 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			seg.Close()
+		}, false},
+		{"a heartbeat that says it plays", func(t *testing.T, m *Manager, s *Session) {
+			m.Heartbeat(s.ID, Beat{Paused: ptrTo(false)})
+		}, false},
+		{"a heartbeat that says nothing of it", func(t *testing.T, m *Manager, s *Session) {
+			m.Heartbeat(s.ID, Beat{Position: ptrTo(5.0)})
+		}, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFake(t)
+			clk := newTestClock()
+			m := fakeManager(t, f, func(o *Options) { o.Clock = clk.Now })
+			s, err := m.Create(context.Background(), fakeRequest())
+			if err != nil {
+				t.Fatal(err)
+			}
+			m.Heartbeat(s.ID, Beat{Paused: ptrTo(true)})
+			clk.Advance(100 * time.Second) // well past 30 s, inside 3 minutes
+			settle(m)
+			if _, ok := m.Get(s.ID); !ok {
+				t.Fatal("the paused session was stopped inside its 3 minutes")
+			}
+			c.do(t, m, s)
+			clk.Advance(31 * time.Second)
+			if c.kept {
+				settle(m)
+				if _, ok := m.Get(s.ID); !ok {
+					t.Fatal("the paused window ended although nothing said the player plays")
+				}
+				clk.Advance(DefaultPausedBeatTimeout)
+			}
+			waitUntil(t, "the session to be stopped", 5*time.Second, func() bool { return m.Count() == 0 })
+		})
+	}
+}
+
+// The paused window cannot be made longer than MaxPausedBeatTimeout.
+func TestThePausedWindowHasACeiling(t *testing.T) {
+	f := newFake(t)
+	clk := newTestClock()
+	m := fakeManager(t, f, func(o *Options) { o.Clock = clk.Now; o.PausedBeatTimeout = time.Hour })
+	if m.o.PausedBeatTimeout != MaxPausedBeatTimeout {
+		t.Fatalf("PausedBeatTimeout = %v, want it held to %v", m.o.PausedBeatTimeout, MaxPausedBeatTimeout)
+	}
+	s, err := m.Create(context.Background(), fakeRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Heartbeat(s.ID, Beat{Paused: ptrTo(true)})
+	clk.Advance(MaxPausedBeatTimeout)
+	settle(m)
+	if _, ok := m.Get(s.ID); !ok {
+		t.Fatal("stopped inside the ceiling")
+	}
+	clk.Advance(time.Nanosecond)
+	waitUntil(t, "the session to be stopped past the ceiling", 5*time.Second, func() bool { return m.Count() == 0 })
 }

@@ -126,39 +126,47 @@ func (s *Scanner) SetRoots(roots []Root) {
 	if len(fresh) == 0 && len(retyped) == 0 {
 		return
 	}
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	s.spawn(func() {
 		if len(retyped) > 0 {
 			s.reparseRoots(s.ctx, retyped)
 		}
 		if len(fresh) > 0 {
 			s.scanFresh(s.ctx, fresh)
 		}
-	}()
+	})
 }
 
 // scanFresh scans the folders that were just added, whole, as a partial scan
 // (never at the same time as a full one). Directories left for later because
 // their files were still being written are looked at again after the settle time.
 func (s *Scanner) scanFresh(ctx context.Context, roots []string) {
-	dirs := make([]Dir, len(roots))
+	whole := make([]Dir, len(roots))
 	for i, r := range roots {
-		dirs[i] = Dir{Path: r, Recursive: true}
+		whole[i] = Dir{Path: r, Recursive: true}
 	}
+	dirs := whole
 	for attempt := 0; len(dirs) > 0 && attempt <= freshScanRetries; attempt++ {
 		if attempt > 0 {
+			// Sleeping is not scanning: the status says idle (this runs as background work
+			// that counts as running, see spawn) until the next look begins.
+			s.leave()
 			select {
 			case <-time.After(s.settle + freshRetryPad):
+				s.enter()
 			case <-ctx.Done():
+				s.enter()
 				return
 			}
 		}
 		res, err := s.ScanDirs(ctx, dirs)
+		dirs = res.Deferred
 		if err != nil && ctx.Err() == nil {
 			s.log.Warn("scan of a new library folder finished with errors", "folders", roots, "err", err)
+			// A scan that could not run, or not all of the way (the library could not be
+			// read, a walk failed), says nothing of what was left for later: the folders
+			// are looked at again whole, after the same wait, as often as the others.
+			dirs = whole
 		}
-		dirs = res.Deferred
 	}
 }
 
@@ -296,11 +304,7 @@ func (p *pass) finishRoots(ctx context.Context, scanned []string) []error {
 // there was nothing to do), so that the caller can forget it was asked. It is not
 // called for a folder the scanner did not get to (it ended first). Wait waits for it.
 func (s *Scanner) Reread(roots []string, done func(root string, err error)) {
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		s.rereadTyped(s.ctx, roots, done)
-	}()
+	s.spawn(func() { s.rereadTyped(s.ctx, roots, done) })
 }
 
 func (s *Scanner) rereadTyped(ctx context.Context, roots []string, done func(root string, err error)) {
@@ -330,10 +334,21 @@ func (s *Scanner) rereadOne(ctx context.Context, root string, ids *[]int64) erro
 	if !ok || kind == "" {
 		return nil
 	}
-	items, err := s.store.RootItems(ctx, root)
+	// The folder's items include the ones it is about to take over: rows an older
+	// configuration indexed under another root (a -media /m, for a -shows /m/TV), which the
+	// scan moves to it. They are read again now, so that the note that the folder was to be
+	// read is not spent before they have arrived.
+	items, err := s.store.ItemsBelow(ctx, root)
 	if err != nil {
 		return err
 	}
+	items = slices.DeleteFunc(items, func(it store.RootItem) bool {
+		if it.Root == root {
+			return false
+		}
+		_, other := s.rootKind(it.Root) // another root's item (a nested one), or a retired root's
+		return other || s.rootRetired(it.Root)
+	})
 	rows := readings(root, kind, items)
 	if len(rows) > 0 {
 		s.log.Warn(fmt.Sprintf("folder %s: given as %s on the command line, and it had items from before folders had types; %d of its %d items are read again as that type says",
@@ -495,7 +510,14 @@ func (s *Scanner) DropRoot(ctx context.Context, path string, forget bool) (int, 
 	s.rootMu.Lock()
 	delete(s.retired, path)
 	delete(s.lastScan, path)
+	a := s.due[path]
+	delete(s.due, path) // nothing left of it to read again
 	s.rootMu.Unlock()
+	if a != nil && a.owned {
+		if err := s.store.DeleteSetting(ctx, RereadNotePrefix+path); err != nil && ctx.Err() == nil {
+			s.log.Warn("forgetting that a folder took over items", "folder", path, "err", err)
+		}
+	}
 	s.log.Info("library folder removed", "folder", path, "items", n, "archived", !forget)
 	return n, nil
 }
@@ -524,10 +546,6 @@ func (s *Scanner) putBack(path string, taken *takenRoot) {
 	}
 	s.rootMu.Unlock()
 	if back {
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
-			s.scanFresh(s.ctx, []string{path})
-		}()
+		s.spawn(func() { s.scanFresh(s.ctx, []string{path}) })
 	}
 }

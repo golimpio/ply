@@ -11,14 +11,14 @@ import (
 func TestFakeMatchesLikeTheRealThing(t *testing.T) {
 	f := &Fake{
 		MovieSearch: map[string][]metadata.Candidate{
-			"the matrix": {{TMDBID: 603, Title: "The Matrix", Year: 1999, Popularity: 80}},
+			"the matrix": {{ID: 603, Title: "The Matrix", Year: 1999, Popularity: 80}},
 		},
 		Movies: map[int64]*store.TitleInput{603: {Title: store.Title{Kind: store.KindMovie, TMDBID: 603, Title: "The Matrix"}}},
 		Shows: map[int64]*store.TitleInput{1396: {Title: store.Title{Kind: store.KindSeries, TMDBID: 1396},
 			Seasons: []store.Season{{Number: 1}, {Number: 2}, {Number: 3}}}},
 	}
 	res, err := metadata.Match(t.Context(), f, metadata.Query{Kind: store.KindMovie, Title: "The Matrix", Year: 1999})
-	if err != nil || res.TMDBID != 603 || res.State != store.MatchMatched {
+	if err != nil || res.ID != 603 || res.State != store.MatchMatched {
 		t.Fatalf("Match = %+v, %v", res, err)
 	}
 	if want := []string{`SearchMovies("The Matrix", 1999)`}; !slices.Equal(f.Calls(), want) {
@@ -31,7 +31,7 @@ func TestFakeMatchesLikeTheRealThing(t *testing.T) {
 	if _, err := f.Movie(t.Context(), 1); !metadata.IsNotFound(err) || metadata.IsTransient(err) {
 		t.Errorf("unknown movie: %v", err)
 	}
-	show, err := f.Series(t.Context(), 1396, []int{2, 3, 9})
+	show, err := f.Series(t.Context(), 1396, "", []int{2, 3, 9})
 	if err != nil || len(show.Seasons) != 2 || show.Seasons[0].Number != 2 {
 		t.Errorf("Series = %+v, %v", show, err)
 	}

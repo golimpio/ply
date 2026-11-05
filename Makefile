@@ -53,7 +53,9 @@ help: ## List the targets
 .PHONY: deps
 deps: $(WEB_DEPS) ## Install the web UI's npm packages (Go fetches its own)
 
-$(WEB_DEPS): web/package.json web/package-lock.json
+# The lock file alone: an edit to package.json's scripts must not trigger npm ci, which
+# deletes node_modules first (and fails with ENOTEMPTY if anything else is using it).
+$(WEB_DEPS): web/package-lock.json
 	cd web && $(NPM) ci
 	@touch $@
 
@@ -121,8 +123,8 @@ test-web: $(WEB_DEPS) ## Web unit tests (vitest)
 e2e: e2e-web e2e-player ## All browser checks (needs Google Chrome)
 
 .PHONY: e2e-web
-e2e-web: web ## Browser checks against a mocked API (player wiring, metadata screens)
-	cd web && node e2e/player-wiring.mjs && node e2e/metadata-ui.mjs
+e2e-web: web ## Browser checks against a mocked API (player wiring and limits, metadata, folders, activity)
+	cd web && node e2e/player-wiring.mjs && node e2e/metadata-ui.mjs && node e2e/folders-ui.mjs && node e2e/activity-ui.mjs && node e2e/player-limits.mjs
 
 .PHONY: e2e-player
 e2e-player: build ## Browser checks of the player against a real ply (throwaway library)

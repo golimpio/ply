@@ -63,6 +63,16 @@ type Config struct {
 	MetadataRefresh  time.Duration // -metadata-refresh: how often titles are refreshed; 0 never
 	TMDBURL          string        // hidden: -tmdb-url replaces TMDB's API address (tests)
 	TMDBImageURL     string        // hidden: -tmdb-image-url replaces TMDB's image address (tests)
+
+	// TheTVDB (M8): the same two places for the key as for TMDB's (-tvdb-key, then
+	// PLY_TVDB_KEY), and for the subscriber PIN (-tvdb-pin, then PLY_TVDB_PIN); the settings
+	// table and the build come after. Neither is ever printed.
+	TVDBKey      string // -tvdb-key
+	TVDBKeyEnv   string // PLY_TVDB_KEY
+	TVDBPIN      string // -tvdb-pin
+	TVDBPINEnv   string // PLY_TVDB_PIN
+	TVDBURL      string // hidden: -tvdb-url replaces TVDB's API address (tests)
+	TVDBImageURL string // hidden: -tvdb-image-url replaces the host of TVDB's images (tests)
 }
 
 // Environment variables that stand in for flags (the flag wins).
@@ -73,6 +83,10 @@ const (
 	MetadataRefreshEnv   = "PLY_METADATA_REFRESH"
 	TMDBURLEnv           = "PLY_TMDB_URL"
 	TMDBImageURLEnv      = "PLY_TMDB_IMAGE_URL"
+	TVDBKeyEnv           = "PLY_TVDB_KEY"
+	TVDBPINEnv           = "PLY_TVDB_PIN"
+	TVDBURLEnv           = "PLY_TVDB_URL"
+	TVDBImageURLEnv      = "PLY_TVDB_IMAGE_URL"
 	AllowHostsEnv        = "PLY_ALLOW_HOSTS"
 	MaxStreamsEnv        = "PLY_MAX_STREAMS"
 	MaxTranscodesEnv     = "PLY_MAX_TRANSCODES"
@@ -81,7 +95,7 @@ const (
 )
 
 // hiddenFlags are accepted but not listed in the usage.
-var hiddenFlags = map[string]bool{"tmdb-url": true, "tmdb-image-url": true}
+var hiddenFlags = map[string]bool{"tmdb-url": true, "tmdb-image-url": true, "tvdb-url": true, "tvdb-image-url": true}
 
 var languageCode = regexp.MustCompile(`^[a-z]{2,3}(-[A-Za-z]{2})?$`)
 
@@ -247,11 +261,17 @@ func Parse(args []string, out io.Writer) (Config, error) {
 	fs.DurationVar(&c.MetadataRefresh, "metadata-refresh", envRefresh, "how often titles are refreshed from TMDB (0 turns the refresh off; env "+MetadataRefreshEnv+")")
 	fs.StringVar(&c.TMDBURL, "tmdb-url", envString(TMDBURLEnv, ""), "")
 	fs.StringVar(&c.TMDBImageURL, "tmdb-image-url", envString(TMDBImageURLEnv, ""), "")
+	fs.StringVar(&c.TVDBKey, "tvdb-key", "", "TheTVDB project API key for TV shows; shows then come from TVDB, and TMDB is the fallback (env "+TVDBKeyEnv+"; can also be set in the web UI)")
+	fs.StringVar(&c.TVDBPIN, "tvdb-pin", "", "your TheTVDB subscriber PIN, for a project key that needs one (env "+TVDBPINEnv+"; can also be set in the web UI)")
+	fs.StringVar(&c.TVDBURL, "tvdb-url", envString(TVDBURLEnv, ""), "")
+	fs.StringVar(&c.TVDBImageURL, "tvdb-image-url", envString(TVDBImageURLEnv, ""), "")
 	fs.Usage = func() { usage(fs, out) }
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
 	}
 	c.TMDBKeyEnv = os.Getenv(TMDBKeyEnv)
+	c.TVDBKeyEnv = os.Getenv(TVDBKeyEnv)
+	c.TVDBPINEnv = os.Getenv(TVDBPINEnv)
 	if err := c.parseLimits(fs); err != nil {
 		return Config{}, err
 	}
@@ -282,6 +302,8 @@ func Parse(args []string, out io.Writer) (Config, error) {
 	}
 	c.TMDBKey = strings.TrimSpace(c.TMDBKey)
 	c.TMDBKeyEnv = strings.TrimSpace(c.TMDBKeyEnv)
+	c.TVDBKey, c.TVDBKeyEnv = strings.TrimSpace(c.TVDBKey), strings.TrimSpace(c.TVDBKeyEnv)
+	c.TVDBPIN, c.TVDBPINEnv = strings.TrimSpace(c.TVDBPIN), strings.TrimSpace(c.TVDBPINEnv)
 
 	if c.Roots, err = resolveRoots(given); err != nil {
 		return Config{}, err

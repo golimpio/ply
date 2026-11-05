@@ -719,15 +719,18 @@ func TestDropRootAloneKeepsTheItemsOfFilesThatAreGone(t *testing.T) {
 	e.setRoots(movies(root))
 	e.progress(e.item(file).ID, 600)
 
+	queued := make(chan struct{}, 4)
+	e.s.queued = func() { queued <- struct{}{} } // a pass has to wait for its turn
 	release := e.hold()
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() { defer wg.Done(); e.s.Scan(ctx) }()
-	time.Sleep(100 * time.Millisecond) // the scan waits for its turn
-	mustRemove(t, root)                // an unmounted disk, say
+	<-queued            // the scan waits for its turn
+	mustRemove(t, file) // the file is gone, the folder is there: no unmounted disk
 	var n int
 	go func() { defer wg.Done(); n, _ = e.s.DropRoot(ctx, root, false) }()
-	time.Sleep(100 * time.Millisecond)
+	<-queued // DropRoot has taken the folder out, and waits behind the scan
+	waitUntil(t, "the folder is taken out", func() bool { return e.s.rootRetired(root) })
 	release()
 	wg.Wait()
 	if n != 2 {

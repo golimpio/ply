@@ -132,16 +132,16 @@ func TestMatchFixtures(t *testing.T) {
 			t.Errorf("%s: %v", tc.name, err)
 			continue
 		}
-		if res.TMDBID != tc.wantID || res.State != tc.wantState || res.NeedsReview != tc.wantReview ||
+		if res.ID != tc.wantID || res.State != tc.wantState || res.NeedsReview != tc.wantReview ||
 			math.Abs(res.Score-tc.wantScore) > 1e-6 || res.ByID {
 			t.Errorf("%s: got id %d state %s review %v score %.6f byID %v; want id %d state %s review %v score %.6f",
-				tc.name, res.TMDBID, res.State, res.NeedsReview, res.Score, res.ByID, tc.wantID, tc.wantState, tc.wantReview, tc.wantScore)
+				tc.name, res.ID, res.State, res.NeedsReview, res.Score, res.ByID, tc.wantID, tc.wantState, tc.wantReview, tc.wantScore)
 		}
 		if tc.wantAsked != nil && !slices.Equal(f.asked(), tc.wantAsked) && !(len(tc.wantAsked) == 0 && len(f.asked()) == 0) {
 			t.Errorf("%s: searches\n got %q\nwant %q", tc.name, f.asked(), tc.wantAsked)
 		}
-		if res.TMDBID != 0 && res.Candidates[0].TMDBID != res.TMDBID {
-			t.Errorf("%s: best candidate %d is not the match %d", tc.name, res.Candidates[0].TMDBID, res.TMDBID)
+		if res.ID != 0 && res.Candidates[0].ID != res.ID {
+			t.Errorf("%s: best candidate %d is not the match %d", tc.name, res.Candidates[0].ID, res.ID)
 		}
 		if !slices.IsSortedFunc(res.Candidates, func(a, b Scored) int { return -compareFloat(a.Score, b.Score) }) {
 			t.Errorf("%s: candidates not best first: %+v", tc.name, res.Candidates)
@@ -210,8 +210,8 @@ func TestMatchByID(t *testing.T) {
 			t.Errorf("%s: %v", tc.name, err)
 			continue
 		}
-		if res.TMDBID != tc.wantID || res.ByID != tc.wantByID || res.State != tc.wantState {
-			t.Errorf("%s: id %d byID %v state %s; want %d %v %s", tc.name, res.TMDBID, res.ByID, res.State, tc.wantID, tc.wantByID, tc.wantState)
+		if res.ID != tc.wantID || res.ByID != tc.wantByID || res.State != tc.wantState {
+			t.Errorf("%s: id %d byID %v state %s; want %d %v %s", tc.name, res.ID, res.ByID, res.State, tc.wantID, tc.wantByID, tc.wantState)
 		}
 		if res.ByID && (res.Score != 1 || res.NeedsReview) {
 			t.Errorf("%s: an id gives full confidence, got score %v review %v", tc.name, res.Score, res.NeedsReview)
@@ -240,7 +240,7 @@ func TestMatchNeverMakesTMDBTroubleAnUnmatch(t *testing.T) {
 		if err == nil || IsTransient(err) != tc.transient {
 			t.Errorf("%s: err = %v, transient %v; want an error, transient %v", tc.name, err, IsTransient(err), tc.transient)
 		}
-		if res.State == store.MatchUnmatched || res.TMDBID != 0 {
+		if res.State == store.MatchUnmatched || res.ID != 0 {
 			t.Errorf("%s: result %+v; a failure must not decide anything", tc.name, res)
 		}
 	}
@@ -251,7 +251,7 @@ func TestMatchNeverMakesTMDBTroubleAnUnmatch(t *testing.T) {
 	f.on("/search/movie", params("query", "The Matrix", "year", "1999"), "search_movie_matrix.json")
 	q := movieQ("The Matrix", 1999)
 	q.Hints.IMDb = "tt0133093"
-	if res, err := Match(t.Context(), newTMDB(t, f), q); err == nil || !IsTransient(err) || res.TMDBID != 0 {
+	if res, err := Match(t.Context(), newTMDB(t, f), q); err == nil || !IsTransient(err) || res.ID != 0 {
 		t.Errorf("a failing find fell back to the search: %+v, %v", res, err)
 	}
 
@@ -275,7 +275,7 @@ func TestMatchNeverMakesTMDBTroubleAnUnmatch(t *testing.T) {
 			f.fail(tc.path, tc.query, status, "", headers)
 			f.on("/search/tv", params("query", "Breaking Bad"), "search_tv_breaking_bad.json")
 			res, err := Match(t.Context(), newTMDB(t, f), Query{Kind: store.KindSeries, Title: "Breaking Bad", Hints: tc.hints})
-			if err == nil || !IsTransient(err) || res.TMDBID != 0 || res.State == store.MatchUnmatched || res.State == store.MatchMatched {
+			if err == nil || !IsTransient(err) || res.ID != 0 || res.State == store.MatchUnmatched || res.State == store.MatchMatched {
 				t.Errorf("%s with %d: %+v, %v; want a transient error and no verdict", tc.name, status, res, err)
 			}
 			if f.count("/search/tv") != 0 {
@@ -440,33 +440,33 @@ func TestScoreFormulaAndBoundaries(t *testing.T) {
 func TestScoreCandidatesUsesOnlyTheTopTen(t *testing.T) {
 	var cands []Candidate
 	for i := 0; i < 12; i++ {
-		cands = append(cands, Candidate{TMDBID: int64(i + 1), Title: fmt.Sprintf("Other %d", i), Year: 1900, Popularity: float64(i)})
+		cands = append(cands, Candidate{ID: int64(i + 1), Title: fmt.Sprintf("Other %d", i), Year: 1900, Popularity: float64(i)})
 	}
-	cands[10] = Candidate{TMDBID: 999, Title: "Perfect", Year: 2000, Popularity: 100} // the 11th
+	cands[10] = Candidate{ID: 999, Title: "Perfect", Year: 2000, Popularity: 100} // the 11th
 	got := ScoreCandidates(movieQ("Perfect", 2000), cands)
 	if len(got) != 10 {
 		t.Errorf("scored %d candidates, want 10", len(got))
 	}
 	for _, s := range got {
-		if s.TMDBID == 999 {
+		if s.ID == 999 {
 			t.Error("the 11th result was scored")
 		}
 	}
 	// Positive control: in the top ten, it wins.
 	cands[0], cands[10] = cands[10], cands[0]
-	if got := ScoreCandidates(movieQ("Perfect", 2000), cands); got[0].TMDBID != 999 {
+	if got := ScoreCandidates(movieQ("Perfect", 2000), cands); got[0].ID != 999 {
 		t.Errorf("the perfect candidate in the top ten lost: %+v", got[0])
 	}
 }
 
 func TestScoreCandidatesKeepsTMDBOrderForTies(t *testing.T) {
 	cands := []Candidate{
-		{TMDBID: 1, Title: "Same", Year: 2000, Popularity: 5},
-		{TMDBID: 2, Title: "Same", Year: 2000, Popularity: 5},
-		{TMDBID: 3, Title: "Same", Year: 2000, Popularity: 5},
+		{ID: 1, Title: "Same", Year: 2000, Popularity: 5},
+		{ID: 2, Title: "Same", Year: 2000, Popularity: 5},
+		{ID: 3, Title: "Same", Year: 2000, Popularity: 5},
 	}
 	got := ScoreCandidates(movieQ("Same", 2000), cands)
-	if got[0].TMDBID != 1 || got[1].TMDBID != 2 || got[2].TMDBID != 3 {
+	if got[0].ID != 1 || got[1].ID != 2 || got[2].ID != 3 {
 		t.Errorf("ties reordered: %+v", got)
 	}
 }

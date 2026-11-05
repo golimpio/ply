@@ -73,7 +73,8 @@ func TestSettingsDefaultsAndShape(t *testing.T) {
 	wantStatus(t, rec, 200)
 	raw := decode[map[string]any](t, rec)
 	want := map[string]any{"tmdbKeySet": false, "tmdbKeySource": "", "metadataEnabled": true, "metadataForcedOff": false, "language": "en-US",
-		"maxStreams": 4.0, "maxTranscodes": 1.0, "maxStreamsSource": "default", "maxTranscodesSource": "default"}
+		"maxStreams": 4.0, "maxTranscodes": 1.0, "maxStreamsSource": "default", "maxTranscodesSource": "default",
+		"tvdbKeySet": false, "tvdbPinSet": false, "tvdbKeySource": "", "tvdbAttribution": tvdbAttribution, "tvdbAttributionUrl": tvdbAttributionURL}
 	for k, v := range want {
 		if raw[k] != v {
 			t.Errorf("settings[%s] = %v, want %v", k, raw[k], v)
@@ -165,7 +166,7 @@ func TestSettingsPutValidatesAndTakesEffectWithoutARestart(t *testing.T) {
 		t.Errorf("status after the key = %+v", st)
 	}
 	// The worker, which was told, now asks TMDB for the waiting files.
-	se.fake.MovieSearch = map[string][]metadata.Candidate{"multi": {{TMDBID: 7, Title: "Multi", Year: 2019, Popularity: 1}}}
+	se.fake.MovieSearch = map[string][]metadata.Candidate{"multi": {{ID: 7, Title: "Multi", Year: 2019, Popularity: 1}}}
 	se.fake.Movies = map[int64]*store.TitleInput{7: {Title: store.Title{Kind: store.KindMovie, TMDBID: 7, Title: "Multi", Year: 2019}}}
 	se.worker.RunOnce(ctx)
 	if e, _ := se.store.GetEntry(ctx, se.multi); e.MatchState != store.MatchMatched {
@@ -193,7 +194,7 @@ func TestSettingsSwitchAndLanguage(t *testing.T) {
 		t.Errorf("status = %+v", st)
 	}
 	wantJSONError(t, se.do("PUT", fmt.Sprintf("/api/items/%d/match", se.multi), `{"tmdbId": 5}`), 409) // switched off
-	se.fake.MovieSearch = map[string][]metadata.Candidate{"the matrix": {{TMDBID: 603, Title: "The Matrix", Year: 1999}}}
+	se.fake.MovieSearch = map[string][]metadata.Candidate{"the matrix": {{ID: 603, Title: "The Matrix", Year: 1999}}}
 	v = decode[SettingsView](t, se.do("PUT", "/api/settings", `{"metadataEnabled": true}`))
 	if !v.MetadataEnabled || v.Language != "pt-BR" {
 		t.Errorf("switched back on = %+v", v)
@@ -281,6 +282,7 @@ func (m *menv) authCases() []authCase {
 		{"GET", "/api/metadata/search?kind=movie&q=x", ""},
 		{"GET", "/api/settings", ""},
 		{"PUT", "/api/settings", `{"language": "fr-FR"}`},
+		{"POST", "/api/settings/test", `{"provider": "tmdb"}`},
 		{"GET", "/api/images/tmdb/w342/p603.jpg", ""},
 		{"GET", fmt.Sprintf("/api/images/local/item/%d/poster", m.mp4), ""},
 	}

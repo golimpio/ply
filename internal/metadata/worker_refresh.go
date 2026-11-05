@@ -12,10 +12,11 @@ import (
 	"ply/internal/store"
 )
 
-// refreshTitle fetches a title again, overlays the NFO next to its first file
-// and stores it. A title TMDB no longer knows is left as it is and marked
-// looked at, so that it is not asked for again at once.
-func (w *Worker) refreshTitle(ctx context.Context, p Provider, t store.Title) error {
+// refreshTitle fetches a title again from where it came from, overlays the NFO
+// next to its first file and stores it. A title its provider no longer knows is left
+// as it is and marked looked at, so that it is not asked for again at once. errSkip
+// when the provider it came from is not set up.
+func (w *Worker) refreshTitle(ctx context.Context, p *Providers, t store.Title) error {
 	cards, err := w.o.Store.TitleCards(ctx, []int64{t.ID})
 	if err != nil {
 		return err
@@ -28,7 +29,7 @@ func (w *Worker) refreshTitle(ctx context.Context, p Provider, t store.Title) er
 	switch t.Kind {
 	case store.KindSeries:
 		seasons, _ := w.o.Store.SeasonsWithFiles(ctx, t.ID)
-		in, err = p.Series(ctx, t.TMDBID, seasons)
+		in, err = w.fetchSeries(ctx, p, t, seasons)
 		if err == nil && card.Show != "" {
 			if items, ierr := w.o.Store.ShowItems(ctx, card.Show); ierr == nil && len(items) > 0 {
 				dir := showDir(items[0].Path)
@@ -37,7 +38,11 @@ func (w *Worker) refreshTitle(ctx context.Context, p Provider, t store.Title) er
 			}
 		}
 	default:
-		in, err = p.Movie(ctx, t.TMDBID)
+		tm := p.Movies()
+		if tm == nil || t.TMDBID == 0 {
+			return errSkip
+		}
+		in, err = tm.Movie(ctx, t.TMDBID)
 		if err == nil && card.ItemID != 0 {
 			if e, gerr := w.o.Store.GetEntry(ctx, card.ItemID); gerr == nil {
 				local := w.localMovie(ctx, e.Item, w.names)
@@ -82,11 +87,11 @@ func (w *Worker) noteNFO(id int64, path string) {
 	w.mu.Unlock()
 }
 
-// rereadTMDBTitle takes in the local sources of a title that has TMDB data. Its
-// artwork is already recorded; its NFO is laid over TMDB's data, so the title is
-// fetched again, but only when the NFO is not the one that was laid over it
-// last: a poster that came or went, or a moved file, asks nothing of TMDB.
-func (w *Worker) rereadTMDBTitle(ctx context.Context, p Provider, t store.Title, nfoPath string) {
+// rereadRemoteTitle takes in the local sources of a title that has TMDB or TVDB data.
+// Its artwork is already recorded; its NFO is laid over the provider's data, so the
+// title is fetched again, but only when the NFO is not the one that was laid over it
+// last: a poster that came or went, or a moved file, asks nothing of the provider.
+func (w *Worker) rereadRemoteTitle(ctx context.Context, p *Providers, t store.Title, nfoPath string) {
 	if p == nil {
 		return
 	}
@@ -96,20 +101,41 @@ func (w *Worker) rereadTMDBTitle(ctx context.Context, p Provider, t store.Title,
 	if known && was == nfoStamp(nfoPath) {
 		return
 	}
-	w.refreshTitles(ctx, p, []store.Title{t})
+	w.refreshTitles(ctx, p, []store.Title{t}, false)
 }
 
-// refreshTitles refreshes each title and reports whether it got through them
-// all. It stops at the first failure that may pass (TMDB out of reach); a
-// refused key ends the pass.
-func (w *Worker) refreshTitles(ctx context.Context, p Provider, titles []store.Title) bool {
+// refreshTitles refreshes each title and reports whether it got through them all. It
+// stops at the first failure of TMDB that may pass (out of reach); a refused TMDB key ends
+// the pass. TVDB is not so much in the way: a show from TVDB that cannot be refreshed because
+// TVDB refuses the key, or cannot be reached, is passed over, as are the others from TVDB
+// after it in this call, and the titles at TMDB go on (the call reports false for an outage,
+// so that it is tried again soon). A title whose provider is not set up is passed over.
+//
+// paced asks Pace before each title; a refresh that is one item of the inbox has been
+// paced as that item, and says false.
+func (w *Worker) refreshTitles(ctx context.Context, p *Providers, titles []store.Title, paced bool) bool {
+	tvdbOff, complete := false, true
 	for _, t := range titles {
 		if ctx.Err() != nil || w.aborted {
 			return false
 		}
+		if tvdbOff && t.Source == store.SourceTVDB {
+			continue
+		}
+		if paced && !w.pace(ctx) {
+			return false
+		}
 		err := w.refreshTitle(ctx, p, t)
+		// A show from TVDB is fetched from TVDB alone: what fails is TVDB's, whatever the error is.
+		fromTVDB := t.Source == store.SourceTVDB || isTVDB(err)
 		switch {
-		case err == nil:
+		case err == nil, errors.Is(err, errSkip):
+		case fromTVDB && IsUnauthorized(err):
+			w.noteError(err)
+			tvdbOff = true
+		case fromTVDB && IsTransient(err):
+			w.noteError(err)
+			tvdbOff, complete = true, false
 		case IsUnauthorized(err):
 			w.abort(err)
 			return false
@@ -120,14 +146,15 @@ func (w *Worker) refreshTitles(ctx context.Context, p Provider, titles []store.T
 			w.noteError(err)
 		}
 	}
-	return true
+	return complete
 }
 
 // refreshDue refreshes what is due. Shows whose next episode has aired are
 // always looked at. Everything else follows the -metadata-refresh period: the
-// titles in TMDB's changes feed since the last poll, or, when there is no poll
-// within the feed's reach, the titles whose data is old.
-func (w *Worker) refreshDue(ctx context.Context, p Provider) {
+// titles in TMDB's changes feed (TVDB's updates feed, for the shows from TVDB) since
+// the last poll, or, when there is no poll within the feed's reach, the titles whose
+// data is old.
+func (w *Worker) refreshDue(ctx context.Context, p *Providers) {
 	if w.o.Refresh <= 0 {
 		return
 	}
@@ -135,7 +162,7 @@ func (w *Worker) refreshDue(ctx context.Context, p Provider) {
 	if airing, err := w.o.Store.AiringTitlesDue(ctx, now, refreshBatch); err != nil {
 		w.noteError(err)
 	} else if len(airing) > 0 {
-		w.refreshTitles(ctx, p, airing)
+		w.refreshTitles(ctx, p, airing, true)
 	}
 	if ctx.Err() != nil || w.aborted {
 		return
@@ -159,10 +186,11 @@ func (w *Worker) refreshDue(ctx context.Context, p Provider) {
 	advancePoll := true
 	if poll.IsZero() || now.Sub(poll) > ChangesWindow {
 		titles, err = w.o.Store.TitlesDueForRefresh(ctx, now, 1<<20)
-	} else if titles, err = w.changedTitles(ctx, p, poll, now); err != nil && !IsTransient(err) && !IsUnauthorized(err) && ctx.Err() == nil {
+	} else if titles, err = w.changedTitles(ctx, p, poll, now); err != nil && !IsTransient(err) && (!IsUnauthorized(err) || tvdbKeyRefused(err)) && ctx.Err() == nil {
 		// The feed cannot be used (it refuses us, or it is too long to follow): go
 		// by age instead, and leave the poll time where it is, so that the next
-		// refresh asks the feed for everything since then.
+		// refresh asks the feed for everything since then. (TMDB's feed refusing the key
+		// ends the pass below; TVDB's does not.)
 		w.noteError(err)
 		advancePoll = false
 		titles, err = w.o.Store.TitlesDueForRefresh(ctx, now, 1<<20)
@@ -176,7 +204,7 @@ func (w *Worker) refreshDue(ctx context.Context, p Provider) {
 		}
 		return
 	}
-	if !w.refreshTitles(ctx, p, titles) {
+	if !w.refreshTitles(ctx, p, titles, true) {
 		if ctx.Err() == nil && !w.aborted {
 			w.setRetryRefresh(now)
 		}
@@ -194,20 +222,34 @@ func (w *Worker) setRetryRefresh(now time.Time) {
 	w.mu.Unlock()
 }
 
-// changedTitles returns the titles of the library that TMDB's changes feed
-// lists between since and now.
-func (w *Worker) changedTitles(ctx context.Context, p Provider, since, now time.Time) ([]store.Title, error) {
+// changedTitles returns the titles of the library that the changes feeds list
+// between since and now: TMDB's for movies and for the shows from TMDB, TVDB's
+// updates for the shows from TVDB.
+func (w *Worker) changedTitles(ctx context.Context, p *Providers, since, now time.Time) ([]store.Title, error) {
+	// changed is keyed by what the ids are: the kind for TMDB's, "tvdb" for TVDB's.
 	changed := map[string]map[int64]bool{}
-	for _, kind := range []string{store.KindMovie, store.KindSeries} {
-		ids, err := p.Changes(ctx, kind, since, now)
+	feed := func(key string, prov Provider, kind string) error {
+		if prov == nil {
+			return nil
+		}
+		ids, err := prov.Changes(ctx, kind, since, now)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		set := make(map[int64]bool, len(ids))
 		for _, id := range ids {
 			set[id] = true
 		}
-		changed[kind] = set
+		changed[key] = set
+		return nil
+	}
+	for _, kind := range []string{store.KindMovie, store.KindSeries} {
+		if err := feed(kind, p.For(SourceTMDB), kind); err != nil {
+			return nil, err
+		}
+	}
+	if err := feed(SourceTVDB, p.For(SourceTVDB), store.KindSeries); err != nil {
+		return nil, err
 	}
 	refs, err := w.o.Store.LibraryTitleRefs(ctx)
 	if err != nil {
@@ -215,7 +257,11 @@ func (w *Worker) changedTitles(ctx context.Context, p Provider, since, now time.
 	}
 	var titles []store.Title
 	for _, r := range refs {
-		if !changed[r.Kind][r.TMDBID] {
+		if r.Source == store.SourceTVDB {
+			if !changed[SourceTVDB][r.TVDBID] {
+				continue
+			}
+		} else if !changed[r.Kind][r.TMDBID] {
 			continue
 		}
 		t, err := w.o.Store.GetTitle(ctx, r.ID)
@@ -229,8 +275,9 @@ func (w *Worker) changedTitles(ctx context.Context, p Provider, since, now time.
 
 // fetchSeasons fetches, at once, the seasons of matched shows that have files
 // and no stored episodes. A season TMDB has nothing for is not asked for again
-// for a few hours. It reports whether it fetched anything.
-func (w *Worker) fetchSeasons(ctx context.Context, p Provider) bool {
+// for a few hours. It reports whether it fetched anything. A show from TVDB is not
+// among them (SeasonsNeedingFetchAll leaves it out), so TVDB refusing its key cannot end it.
+func (w *Worker) fetchSeasons(ctx context.Context, p *Providers) bool {
 	need, err := w.o.Store.SeasonsNeedingFetchAll(ctx)
 	if err != nil {
 		w.noteError(err)
@@ -265,12 +312,23 @@ func (w *Worker) fetchSeasons(ctx context.Context, p Provider) bool {
 			continue
 		}
 		did = true
+		if !w.pace(ctx) {
+			w.mu.Lock()
+			for _, k := range keys {
+				delete(w.seasonTried, k) // not asked, so not tried
+			}
+			w.mu.Unlock()
+			return did
+		}
 		if err := w.refreshTitle(ctx, p, t); err != nil {
 			w.mu.Lock()
 			for _, k := range keys {
 				delete(w.seasonTried, k) // try again next pass
 			}
 			w.mu.Unlock()
+			if errors.Is(err, errSkip) {
+				continue
+			}
 			if IsUnauthorized(err) {
 				w.abort(err)
 			} else {
@@ -285,7 +343,7 @@ func (w *Worker) fetchSeasons(ctx context.Context, p Provider) bool {
 }
 
 // runJob does a refresh somebody asked for.
-func (w *Worker) runJob(ctx context.Context, p Provider, j job) {
+func (w *Worker) runJob(ctx context.Context, p *Providers, j job) {
 	switch {
 	case j.all:
 		if _, err := w.o.Store.RequeueUnmatched(ctx); err != nil {
@@ -305,7 +363,7 @@ func (w *Worker) runJob(ctx context.Context, p Provider, j job) {
 				titles = append(titles, t)
 			}
 		}
-		w.refreshTitles(ctx, p, titles)
+		w.refreshTitles(ctx, p, titles, true)
 	case j.show != "":
 		w.refreshShow(ctx, p, j.show)
 	default:
@@ -326,7 +384,7 @@ func (w *Worker) runJob(ctx context.Context, p Provider, j job) {
 	}
 }
 
-func (w *Worker) refreshShow(ctx context.Context, p Provider, show string) {
+func (w *Worker) refreshShow(ctx context.Context, p *Providers, show string) {
 	sm, err := w.o.Store.GetSeriesMatch(ctx, show)
 	if err != nil {
 		return
@@ -339,16 +397,16 @@ func (w *Worker) refreshShow(ctx context.Context, p Provider, show string) {
 	})
 }
 
-// refreshLinked fetches a linked TMDB title again; a file without one (or whose
+// refreshLinked fetches a linked TMDB or TVDB title again; a file without one (or whose
 // title is only local) is matched again instead, by requeue, unless a person
 // decided it.
-func (w *Worker) refreshLinked(ctx context.Context, p Provider, titleID int64, requeue func() error) {
+func (w *Worker) refreshLinked(ctx context.Context, p *Providers, titleID int64, requeue func() error) {
 	if titleID != 0 {
-		if t, err := w.o.Store.GetTitle(ctx, titleID); err == nil && t.TMDBID != 0 {
+		if t, err := w.o.Store.GetTitle(ctx, titleID); err == nil && hasRemote(t) {
 			if p == nil {
 				return
 			}
-			w.refreshTitles(ctx, p, []store.Title{t})
+			w.refreshTitles(ctx, p, []store.Title{t}, false)
 			return
 		}
 	}
@@ -361,7 +419,7 @@ func (w *Worker) refreshLinked(ctx context.Context, p Provider, titleID int64, r
 // NFO text over the title it has. Nothing is matched from scratch. done holds
 // the shows already taken in by this batch: the 40 episodes of a show that
 // moved are one show to read again, not 40.
-func (w *Worker) rereadLocal(ctx context.Context, p Provider, id int64, done map[string]bool) {
+func (w *Worker) rereadLocal(ctx context.Context, p *Providers, id int64, done map[string]bool) {
 	e, err := w.o.Store.GetEntry(ctx, id)
 	if err != nil {
 		return
@@ -384,11 +442,11 @@ func (w *Worker) rereadLocal(ctx context.Context, p Provider, id int64, done map
 	if err != nil {
 		return
 	}
-	if t.TMDBID != 0 {
+	if hasRemote(t) {
 		// Only the NFO next to the title's first file is laid over it (see
 		// refreshTitle): the other versions say nothing new about it.
 		if cards, err := w.o.Store.TitleCards(ctx, []int64{t.ID}); err == nil && cards[t.ID].ItemID == e.ID {
-			w.rereadTMDBTitle(ctx, p, t, local.loc.NFO)
+			w.rereadRemoteTitle(ctx, p, t, local.loc.NFO)
 		}
 		return
 	}
@@ -400,7 +458,7 @@ func (w *Worker) rereadLocal(ctx context.Context, p Provider, id int64, done map
 	}
 }
 
-func (w *Worker) rereadEpisode(ctx context.Context, p Provider, it store.Item, done map[string]bool) {
+func (w *Worker) rereadEpisode(ctx context.Context, p *Providers, it store.Item, done map[string]bool) {
 	loc := EpisodeLocal(it.Path, dirNames(filepath.Dir(it.Path)))
 	w.setArt(ctx, it.ID, store.Art{Poster: it.LocalPoster, Backdrop: it.LocalBackdrop, Thumb: loc.Thumb})
 	if it.Show == "" || done["s"+it.Show] {
@@ -421,8 +479,8 @@ func (w *Worker) rereadEpisode(ctx context.Context, p Provider, it store.Item, d
 	if err != nil {
 		return
 	}
-	if t.TMDBID != 0 {
-		w.rereadTMDBTitle(ctx, p, t, show.NFO)
+	if hasRemote(t) {
+		w.rereadRemoteTitle(ctx, p, t, show.NFO)
 		return
 	}
 	items, err := w.o.Store.ShowItems(ctx, it.Show)

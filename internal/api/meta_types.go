@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"ply/internal/metadata"
 	"ply/internal/store"
 )
 
@@ -63,6 +64,7 @@ type CrewMember struct {
 type TitleDetail struct {
 	TitleCard
 	TMDBID        int64          `json:"tmdbId,omitempty"`
+	TVDBID        int64          `json:"tvdbId,omitempty"`
 	IMDbID        string         `json:"imdbId,omitempty"`
 	OriginalTitle string         `json:"originalTitle,omitempty"`
 	SortTitle     string         `json:"sortTitle"`
@@ -79,10 +81,17 @@ type TitleDetail struct {
 	Collection    *CollectionRef `json:"collection,omitempty"`
 	Cast          []CastMember   `json:"cast"`
 	Crew          []CrewMember   `json:"crew"`
-	Source        string         `json:"source"` // tmdb | nfo | mixed
-	Locked        bool           `json:"locked"`
-	MatchState    string         `json:"matchState"`
-	NeedsReview   bool           `json:"needsReview"`
+	Source        string         `json:"source"` // tvdb | tmdb | nfo | mixed
+	// EpisodeOrder is how a show's files map to its episodes: aired, dvd or absolute. Only a
+	// show with source "tvdb" has one to change (PATCH /api/titles/{id}); the field is not there
+	// for a movie or a show from anywhere else.
+	EpisodeOrder string `json:"episodeOrder,omitempty"`
+	// Unmapped is in the answer to a PATCH that changed the order: how many of the show's episode
+	// files have no episode in it (their season and number are not TVDB's in that order).
+	Unmapped    *int   `json:"unmapped,omitempty"`
+	Locked      bool   `json:"locked"`
+	MatchState  string `json:"matchState"`
+	NeedsReview bool   `json:"needsReview"`
 }
 
 // NextEpisode is the episode of a show that airs next.
@@ -128,6 +137,8 @@ type Person struct {
 	Deathday     string         `json:"deathday,omitempty"`
 	PlaceOfBirth string         `json:"placeOfBirth,omitempty"`
 	IMDbID       string         `json:"imdbId,omitempty"`
+	TMDBID       int64          `json:"tmdbId,omitempty"` // a person both sites know has both, and one page
+	TVDBID       int64          `json:"tvdbId,omitempty"`
 	Credits      []PersonCredit `json:"credits"`
 }
 
@@ -191,9 +202,14 @@ type ShowDetail struct {
 	Seasons []SeasonInfo `json:"seasons"`
 }
 
-// Candidate is an entry of GET /api/metadata/search.
+// Candidate is an entry of GET /api/metadata/search. Source says where it came from
+// ("tmdb" or "tvdb"), ID is its id there, and the one of tmdbId and tvdbId that is its
+// own is set: that is what PUT .../match takes to apply it.
 type Candidate struct {
-	TMDBID        int64   `json:"tmdbId"`
+	Source        string  `json:"source"`
+	ID            int64   `json:"id"`
+	TMDBID        int64   `json:"tmdbId,omitempty"`
+	TVDBID        int64   `json:"tvdbId,omitempty"`
 	Title         string  `json:"title"`
 	OriginalTitle string  `json:"originalTitle,omitempty"`
 	Year          int     `json:"year"`
@@ -240,16 +256,45 @@ type SettingsView struct {
 	// TMDBKeyChecked is in the answer to a PUT that stored a key: whether the key was
 	// checked against TMDB. It was not with -metadata=false, when nothing may be sent.
 	TMDBKeyChecked *bool `json:"tmdbKeyChecked,omitempty"`
+
+	// TheTVDB (M8). The key and the PIN are never in a response: only whether each is set
+	// and where the key came from (flag | env | settings | default | ""). Shows are TVDB's
+	// when a key is set. A key or PIN from a flag or the environment cannot be changed here
+	// (a PATCH for it stores one that the flag still beats). TVDBKeyChecked is, like
+	// TMDBKeyChecked, in the answer to a PUT that stored a key or a PIN: whether it was
+	// checked with a login at TVDB (not with -metadata=false).
+	TVDBKeySet      bool   `json:"tvdbKeySet"`
+	TVDBPINSet      bool   `json:"tvdbPinSet"`
+	TVDBKeySource   string `json:"tvdbKeySource"`
+	TVDBKeyChecked  *bool  `json:"tvdbKeyChecked,omitempty"`
+	TVDBAttribution string `json:"tvdbAttribution"`
+	// TVDBAttributionURL is the link that goes with the attribution text (TVDB asks for a
+	// direct link to thetvdb.com).
+	TVDBAttributionURL string `json:"tvdbAttributionUrl"`
 }
 
-// imageURL turns an image ref ("tmdb:/abc.jpg", "local:item:12:poster") into a
-// relative URL with the token, or "" for a ref it does not understand. size is
-// used for TMDB images.
+// TVDBAttribution is the notice TheTVDB asks of an application that shows its metadata
+// (https://thetvdb.com/api-information: a direct link to TheTVDB.com, with this sample
+// wording).
+const (
+	tvdbAttribution    = "Metadata provided by TheTVDB. Please consider adding missing information or subscribing."
+	tvdbAttributionURL = "https://thetvdb.com"
+)
+
+// imageURL turns an image ref ("tmdb:/abc.jpg", "tvdb:/banners/posters/1-1.jpg",
+// "local:item:12:poster") into a relative URL with the token, or "" for a ref it does
+// not understand. size is used for TMDB and TVDB images.
 func (s *Server) imageURL(ref, size string) string {
 	switch {
 	case strings.HasPrefix(ref, "tmdb:/"):
 		file := strings.TrimPrefix(ref, "tmdb:/")
 		return s.withToken(fmt.Sprintf("/api/images/tmdb/%s/%s", size, file))
+	case strings.HasPrefix(ref, "tvdb:/"):
+		p, ok := metadata.TVDBFile(ref)
+		if !ok {
+			return ""
+		}
+		return s.withToken(fmt.Sprintf("/api/images/tvdb/%s%s", size, p))
 	case strings.HasPrefix(ref, "local:"):
 		parts := strings.Split(ref, ":")
 		if len(parts) != 4 {
@@ -298,12 +343,15 @@ func (s *Server) titleCards(cards []store.TitleCard) []TitleCard {
 func (s *Server) titleDetail(d store.TitleDetail) *TitleDetail {
 	out := &TitleDetail{
 		TitleCard: s.titleCard(d.TitleCard),
-		TMDBID:    d.TMDBID, IMDbID: d.IMDbID, OriginalTitle: d.OriginalTitle, SortTitle: d.SortTitle,
+		TMDBID:    d.TMDBID, TVDBID: d.TVDBID, IMDbID: d.IMDbID, OriginalTitle: d.OriginalTitle, SortTitle: d.SortTitle,
 		Overview: d.Overview, Tagline: d.Tagline, ReleaseDate: d.ReleaseDate, EndDate: d.EndDate,
 		Status: d.Status, RuntimeMin: optInt(d.RuntimeMin), VoteCount: optInt(d.VoteCount), Certification: d.Certification,
 		Logo:   s.imageURL(d.Logo, logoSize),
 		Genres: []Genre{}, Cast: []CastMember{}, Crew: []CrewMember{},
 		Source: d.Source, Locked: d.Locked, MatchState: d.MatchState, NeedsReview: d.NeedsReview,
+	}
+	if d.Kind == store.KindSeries && d.Source == store.SourceTVDB {
+		out.EpisodeOrder = d.EpisodeOrder
 	}
 	for _, g := range d.Genres {
 		out.Genres = append(out.Genres, Genre{ID: g.ID, Name: g.Name})

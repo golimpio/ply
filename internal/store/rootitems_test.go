@@ -43,11 +43,40 @@ func TestRootItems(t *testing.T) {
 		}
 		got[i].AddedAt = 0
 	}
-	wantA := RootItem{Path: "/lib/a.mp4", ParsedRow: ParsedRow{ID: ids["/lib/a.mp4"], Kind: KindMovie, Title: "A", Year: 1999}}
-	wantB := RootItem{Path: "/lib/Show/S01E02.mkv", ParsedRow: ParsedRow{ID: ids["/lib/Show/S01E02.mkv"], Kind: KindEpisode,
+	wantA := RootItem{Path: "/lib/a.mp4", Root: "/lib", ParsedRow: ParsedRow{ID: ids["/lib/a.mp4"], Kind: KindMovie, Title: "A", Year: 1999}}
+	wantB := RootItem{Path: "/lib/Show/S01E02.mkv", Root: "/lib", ParsedRow: ParsedRow{ID: ids["/lib/Show/S01E02.mkv"], Kind: KindEpisode,
 		Title: "Ep", Show: "Show", Season: 1, Episode: 2, NeedsReview: true}}
 	if got[0] != wantA || got[1] != wantB {
 		t.Errorf("RootItems(/lib) = %+v, want %+v and %+v", got, wantA, wantB)
+	}
+}
+
+// ItemsBelow lists the items whose file is inside a folder, whatever root they are
+// indexed under, and only those: a folder with the same start is another folder.
+func TestItemsBelow(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	add := func(path, root string) int64 {
+		it := movie(path, "T")
+		it.Root = root
+		id, err := s.UpsertItem(ctx, it, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	in1 := add("/m/TV/Lost (2004)/a.mkv", "/m") // an earlier configuration's root
+	in2 := add("/m/TV/été/b.mkv", "/m/TV")
+	add("/m/TVshows/c.mkv", "/m") // not inside /m/TV
+	add("/m/Movies/d.mkv", "/m")
+	for _, dir := range []string{"/m/TV", "/m/TV/"} {
+		got, err := s.ItemsBelow(ctx, dir)
+		if err != nil || len(got) != 2 || got[0].ID != in1 || got[0].Root != "/m" || got[1].ID != in2 || got[1].Root != "/m/TV" {
+			t.Errorf("ItemsBelow(%q) = %+v, %v; want the two items inside, with their roots", dir, got, err)
+		}
+	}
+	if got, _ := s.ItemsBelow(ctx, "/m/TV/été"); len(got) != 1 || got[0].ID != in2 {
+		t.Errorf("ItemsBelow of a folder with multi-byte characters = %+v", got)
 	}
 }
 

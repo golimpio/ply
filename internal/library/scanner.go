@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -46,7 +47,12 @@ type Prober interface {
 	Probe(ctx context.Context, path string) (probe.Result, error)
 }
 
-// Status is the scanner state reported by GET /api/scan.
+// Status is the scanner state reported by GET /api/scan. Running is true while any
+// pass is running or queued on the scan semaphore: a full scan, the scan of a folder that
+// was just added, the re-reading of a folder whose type changed (or of a first typed
+// one), a partial scan. It is not true while the scan of a new folder sleeps before it
+// looks again at files that were still being written. LastStarted, LastFinished and
+// LastError are those of the full scan.
 type Status struct {
 	Running      bool       `json:"running"`
 	LastStarted  *time.Time `json:"lastStarted"`
@@ -71,26 +77,38 @@ type Scanner struct {
 	managed  bool                 // SetRoots was called: untyped roots are guessed (see guessKind)
 	retired  map[string]bool      // roots taken out whose items are yet to be dropped (see removeOrphans)
 	lastScan map[string]time.Time // root -> when a scan last covered all of it
+	due      map[string]*arrivals // typed root -> the rows it took over that are yet to be read again (guarded by rootMu)
 
 	sem      chan struct{} // one pass at a time, full or partial; DropRoot and the re-parse take it too
 	full     atomic.Bool   // a full scan is running or waiting for its turn
-	wg       sync.WaitGroup
-	fpCursor int64 // fingerprint backfill: the last item id done (guarded by sem)
+	fpCursor int64         // fingerprint backfill: the last item id done (guarded by sem)
+
+	// The background work (see spawn). Nothing starts once the scanner is closed, so
+	// that Wait, at shutdown, is never racing an Add from a request goroutine.
+	lifeMu sync.Mutex
+	closed bool
+	wg     sync.WaitGroup
+
+	// Seams the tests replace.
+	fileStates func(ctx context.Context) (map[string]store.FileState, error) // Store.FileStates
+	queued     func()                                                        // called when a pass has to wait for its turn
 
 	devOf        func(path string) (dev uint64, ok bool) // device of a directory (tests replace it)
 	mountMu      sync.Mutex
 	mounts       map[string]bool // mount boundaries met so far, in configured spelling (persisted)
 	mountsLoaded bool
 
-	mu     sync.Mutex // guards status
+	mu     sync.Mutex // guards status and busy
 	status Status
+	busy   int // passes and background work under way or waiting (see enter); Status.Running is busy > 0
 
 	hookMu     sync.Mutex
 	onAdded    func(ids []int64)
 	onSidecars func(ids []int64)
 	onRestore  func(itemID, tmdbID int64, kind string)
-	matchGate  func() bool // nil, or says whether archived matches can be applied now
-	gated      atomic.Bool // a report was held back because the gate was closed
+	matchGate  func() bool                                      // nil, or says whether archived matches can be applied now
+	gated      atomic.Bool                                      // a report was held back because the gate was closed
+	pace       func(ctx context.Context, done, total int) error // see SetPace
 
 	// restoreArchived gives a file's archive row back (Store.RestoreArchived); tests
 	// replace it to count the calls.
@@ -108,7 +126,7 @@ func NewScanner(ctx context.Context, st *store.Store, p Prober, roots []string, 
 	}
 	s := &Scanner{ctx: ctx, store: st, prober: p, workers: defaultWorkers, log: log,
 		now: time.Now, sem: make(chan struct{}, 1), devOf: deviceOf, restoreArchived: st.RestoreArchived,
-		retired: map[string]bool{}, lastScan: map[string]time.Time{}}
+		fileStates: st.FileStates, retired: map[string]bool{}, lastScan: map[string]time.Time{}, due: map[string]*arrivals{}}
 	for _, r := range roots {
 		s.roots = append(s.roots, Root{Path: r})
 	}
@@ -120,6 +138,32 @@ func NewScanner(ctx context.Context, st *store.Store, p Prober, roots []string, 
 // kept) and ScanDirs reports their directories in Result.Deferred. Call it
 // before the first scan.
 func (s *Scanner) SetSettle(d time.Duration) { s.settle = d }
+
+// SetPace sets the function a pass calls before it probes each file (done of
+// total files so far) and every pacePerDirs directories of a walk (0, 0). It
+// blocks while the machine is needed for something more important (playback,
+// browsing: the tier governor) and reports progress; an error, which only the
+// end of ctx should cause, stops the pass as a cancellation would. nil (the
+// default) never waits.
+func (s *Scanner) SetPace(fn func(ctx context.Context, done, total int) error) {
+	s.hookMu.Lock()
+	s.pace = fn
+	s.hookMu.Unlock()
+}
+
+// pacePerDirs is how many directories a walk reads between two calls of the pace
+// function: reading a directory of a network share is cheap, but a library has thousands.
+const pacePerDirs = 100
+
+func (s *Scanner) paced(ctx context.Context, done, total int) error {
+	s.hookMu.Lock()
+	fn := s.pace
+	s.hookMu.Unlock()
+	if fn == nil {
+		return nil
+	}
+	return fn(ctx, done, total)
+}
 
 // OnAdded registers fn to be called after each scan that created items or
 // moved existing ones to a new path, with their ids, and after items were read
@@ -218,12 +262,60 @@ func (s *Scanner) reportMatches(ctx context.Context) {
 }
 
 func (s *Scanner) acquire(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err // an ended context gets no turn, however free the semaphore is
+	}
+	select {
+	case s.sem <- struct{}{}:
+		return nil
+	default:
+	}
+	if s.queued != nil {
+		s.queued() // a pass is running: this one waits for its turn
+	}
 	select {
 	case s.sem <- struct{}{}:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// enter and leave count what is under way, each pass and each piece of background work
+// once, so that overlapping ones are handled: Status.Running is true until the last
+// of them has left.
+func (s *Scanner) enter() {
+	s.mu.Lock()
+	s.busy++
+	s.mu.Unlock()
+}
+
+func (s *Scanner) leave() {
+	s.mu.Lock()
+	s.busy--
+	s.mu.Unlock()
+}
+
+// spawn runs fn in the background, where Wait waits for it, and reports false, running
+// nothing, once the scanner is closed (Close, or Wait after its context ended). The
+// check and the WaitGroup's Add are one step under a mutex, so that a request goroutine
+// putting a folder back cannot race the Wait of a shutdown. The work counts as running
+// from the moment spawn returns, while it waits for its turn too: a caller that polls the
+// status after adding a folder must not see an idle scanner before the scan has begun.
+func (s *Scanner) spawn(fn func()) bool {
+	s.lifeMu.Lock()
+	defer s.lifeMu.Unlock()
+	if s.closed {
+		return false
+	}
+	s.wg.Add(1)
+	s.enter()
+	go func() {
+		defer s.wg.Done()
+		defer s.leave()
+		fn()
+	}()
+	return true
 }
 
 func (s *Scanner) release() { <-s.sem }
@@ -235,16 +327,17 @@ func (s *Scanner) Trigger() bool {
 	if !s.full.CompareAndSwap(false, true) {
 		return false
 	}
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	if !s.spawn(func() {
 		defer s.full.Store(false)
 		if err := s.acquire(s.ctx); err != nil {
 			return
 		}
 		defer s.release()
 		s.logResult(s.run(s.ctx))
-	}()
+	}) {
+		s.full.Store(false)
+		return false
+	}
 	return true
 }
 
@@ -288,13 +381,39 @@ func (s *Scanner) Run(ctx context.Context, interval time.Duration) {
 
 // Wait blocks until the work the scanner started itself has finished: the scans
 // started by Trigger, and what SetRoots started (the scan of a new folder, the
-// re-reading of items).
-func (s *Scanner) Wait() { s.wg.Wait() }
+// re-reading of items). Once the scanner's context has ended it also closes the
+// scanner, as Close does: this is the Wait of a shutdown.
+func (s *Scanner) Wait() {
+	if s.ctx.Err() != nil {
+		s.Close()
+		return
+	}
+	s.wg.Wait()
+}
+
+// Close stops the scanner from starting any more background work (Trigger, SetRoots, a
+// folder put back, Reread then do nothing) and waits for what is running. The passes
+// the caller runs itself (Scan, ScanDirs) are its own business.
+func (s *Scanner) Close() {
+	s.lifeMu.Lock()
+	s.closed = true
+	s.lifeMu.Unlock()
+	s.wg.Wait()
+}
+
+// Busy is Status().Running without counting the items: whether a pass is under
+// way or waiting for its turn. It is cheap enough to ask every second.
+func (s *Scanner) Busy() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.busy > 0
+}
 
 // Status returns the current scanner state.
 func (s *Scanner) Status(ctx context.Context) Status {
 	s.mu.Lock()
 	st := s.status
+	st.Running = s.busy > 0
 	s.mu.Unlock()
 	if n, err := s.store.CountItems(ctx); err == nil {
 		st.ItemCount = n
@@ -308,18 +427,29 @@ func (s *Scanner) logResult(err error) {
 	}
 }
 
-func (s *Scanner) run(ctx context.Context) error {
+func (s *Scanner) run(ctx context.Context) (err error) {
 	start := time.Now()
 	s.mu.Lock()
-	s.status.Running = true
+	s.busy++
 	s.status.LastStarted = &start
 	s.mu.Unlock()
+	var end time.Time
+	defer func() { // however the scan ends, it is not running any more
+		if end.IsZero() {
+			end = time.Now()
+		}
+		s.mu.Lock()
+		s.busy-- // with LastFinished: whoever sees the scan idle sees it finished
+		s.status.LastFinished = &end
+		s.status.LastError = ""
+		if err != nil {
+			s.status.LastError = err.Error()
+		}
+		s.mu.Unlock()
+	}()
 
-	var (
-		p   *pass
-		err error
-	)
-	states, err := s.store.FileStates(ctx)
+	var p *pass
+	states, err := s.fileStates(ctx)
 	if err != nil {
 		err = fmt.Errorf("load library state: %w", err)
 	} else {
@@ -330,16 +460,7 @@ func (s *Scanner) run(ctx context.Context) error {
 		err = s.scanAll(ctx, p)
 		p.saveMounts(ctx)
 	}
-
-	end := time.Now()
-	s.mu.Lock()
-	s.status.Running = false
-	s.status.LastFinished = &end
-	s.status.LastError = ""
-	if err != nil {
-		s.status.LastError = err.Error()
-	}
-	s.mu.Unlock()
+	end = time.Now()
 
 	if p != nil {
 		s.log.Info("scan complete", "indexed", p.sum.indexed.Load(), "moved", p.sum.moved,
@@ -380,6 +501,12 @@ type pass struct {
 
 	archived    map[string]bool // paths whose archive row holds progress to give back
 	restoreOnly []restoreJob    // unchanged rows that have such an archive row
+	// arrived are, by typed root, the items the pass found under a root that is gone from
+	// the configuration and gave to it: read before types or under another type, they are
+	// read again as the root's type says (rereadArrived). noted are the roots whose arrival
+	// has been noted in the settings already (noteArrival).
+	arrived map[string][]int64
+	noted   map[string]bool
 	// skipped are the roots whose files the pass left alone because they were taken out
 	// (DropRoot is waiting for the pass). Their rows were not looked at: whatever became
 	// of the root since, a file of it that was not seen is not a file that is gone.
@@ -416,7 +543,7 @@ func (s *Scanner) newPass(states map[string]store.FileState, roots []Root, retir
 		kinds[r.Path] = r.Kind
 	}
 	p := &pass{s: s, states: states, owners: map[string]string{}, now: s.now(), roots: roots, kinds: kinds, retired: retired,
-		archived: map[string]bool{}, skipped: map[string]bool{},
+		archived: map[string]bool{}, skipped: map[string]bool{}, arrived: map[string][]int64{}, noted: map[string]bool{},
 		seen: map[string]struct{}{}, seenBy: map[string]int{}, deferred: map[string]bool{},
 		settling: map[int64]bool{}, available: map[string]bool{}, failed: map[string]bool{},
 		names: map[string]map[string]bool{}, devs: map[string]uint64{}, down: map[string]bool{}}
@@ -470,6 +597,7 @@ func (s *Scanner) scanAll(ctx context.Context, p *pass) error {
 	}
 	errs = append(errs, p.indexAll(ctx)...)
 	p.restoreExisting(ctx)
+	errs = append(errs, p.rereadArrived(ctx)...)
 	if err := ctx.Err(); err != nil {
 		if !errors.Is(errors.Join(errs...), err) {
 			errs = append(errs, err)
@@ -533,6 +661,12 @@ func (p *pass) removeOrphans(ctx context.Context, failed []string) error {
 			slices.ContainsFunc(failed, func(r string) bool { return within(r, path) }) {
 			continue
 		}
+		// A file is gone when its disk is there and it is not: the rows of a share that is not
+		// mounted now (the root they were indexed under, or a volume inside it) are kept, as a
+		// scan of that root would keep them.
+		if !p.rootAvailable(st.Root) || p.unmounted(path, st.Root) != "" {
+			continue
+		}
 		if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
 			gone = append(gone, st.ID)
 		}
@@ -588,7 +722,7 @@ func (p *pass) walk(ctx context.Context, dir string, recursive bool, claimant fu
 		p.s.log.Warn("walk error", "path", dir, "err", err)
 		return 1, nil
 	}
-	walkErrors := 0
+	walkErrors, dirs := 0, 0
 	err = filepath.WalkDir(walkDir, func(walked string, d fs.DirEntry, err error) error {
 		if err != nil {
 			walkErrors++
@@ -607,6 +741,11 @@ func (p *pass) walk(ctx context.Context, dir string, recursive bool, claimant fu
 		if d.IsDir() {
 			if !recursive {
 				return fs.SkipDir
+			}
+			if dirs++; dirs%pacePerDirs == 0 {
+				if err := p.s.paced(ctx, 0, 0); err != nil {
+					return err
+				}
 			}
 			if rel, err := filepath.Rel(walkDir, walked); err == nil {
 				p.noteDir(walked, filepath.Join(dir, rel))
@@ -691,11 +830,13 @@ func (p *pass) visit(ctx context.Context, path string, d fs.DirEntry, claimant f
 	if indexed && st.Size == info.Size() && st.MTime == mtime {
 		if st.Root != root {
 			// Indexed under a root that is gone from the configuration.
+			p.noteArrival(ctx, root)
 			if err := p.s.store.SetItemRoot(ctx, st.ID, root); err != nil {
 				p.s.log.Warn("move item to its new root", "path", path, "err", err)
 			} else {
 				st.Root = root
 				p.states[path] = st
+				p.arrived[root] = append(p.arrived[root], st.ID)
 			}
 		}
 		// The video is unchanged, but subtitles come and go on their own.
@@ -726,9 +867,140 @@ func (p *pass) visit(ctx context.Context, path string, d fs.DirEntry, claimant f
 		// it is unchanged and not looked at again.
 		p.recheck(filepath.Dir(path), false)
 	}
+	if indexed && st.Root != root {
+		p.noteArrival(ctx, root)
+		p.arrived[root] = append(p.arrived[root], st.ID) // the file changed: indexing it moves the row
+	}
 	p.work = append(p.work, job{path: path, root: root, kind: p.kinds[root], size: info.Size(), mtime: mtime,
 		subs: subs, isNew: !indexed, archived: p.archived[path]})
 	return nil
+}
+
+// RereadNotePrefix starts the settings that note a typed folder whose items are to be
+// read again as its type says: the command line's first typed folder (cmd/ply), and a
+// folder that took over rows another root left (noteArrival). The server reads them at
+// every start and has the scanner read the folders again (Reread), so that a start that
+// ends before the re-reading is done does not lose it.
+const RereadNotePrefix = "m7.reread."
+
+// arrivalNote is the value of the notes the scanner makes itself, and clears itself. A
+// note with another value was made by someone else, who clears it.
+const arrivalNote = "arrived"
+
+// arrivals are the rows a typed root took over that have yet to be read again. The
+// scanner keeps them until they are (a pass that fails to read them is followed by
+// another that tries again); the settings note is what outlives the process.
+type arrivals struct {
+	ids   map[int64]bool
+	owned bool // the settings note is the scanner's to clear
+}
+
+// noteArrival notes, once per pass and root, that a typed root is about to take over rows:
+// a settings note, written before the first row moves, that stays until they have been read
+// again. A start after a pass that was cut short (shutdown, an error) reads the folder
+// again from it. An untyped root takes rows over as they are, and notes nothing.
+func (p *pass) noteArrival(ctx context.Context, root string) {
+	if p.kinds[root] == "" || p.noted[root] {
+		return
+	}
+	p.noted[root] = true
+	s := p.s
+	owned := false
+	switch v, ok, err := s.store.GetSetting(ctx, RereadNotePrefix+root); {
+	case err != nil:
+		s.log.Warn("noting that a folder took over items", "folder", root, "err", err)
+	case !ok:
+		if err := s.store.SetSetting(ctx, RereadNotePrefix+root, arrivalNote); err != nil {
+			s.log.Warn("noting that a folder took over items", "folder", root, "err", err)
+		} else {
+			owned = true
+		}
+	default:
+		owned = v == arrivalNote // another note stands: whoever made it clears it
+	}
+	s.rootMu.Lock()
+	defer s.rootMu.Unlock()
+	a := s.due[root]
+	if a == nil {
+		a = &arrivals{ids: map[int64]bool{}}
+		s.due[root] = a
+	}
+	a.owned = a.owned || owned
+}
+
+// rereadArrived reads again, as their root's type says, the items typed roots have taken
+// over (p.arrived, and what earlier passes could not read): an item keeps the reading it
+// had when its row is moved (SetItemRoot) or indexed again (UpsertItem), because what a
+// path says is SetParsed's to change, and a folder that takes over what an older
+// configuration indexed (a -shows /m/TV over a -media /m) would otherwise hold items read
+// the old way next to new files read its way. Only those items are touched, and only those
+// whose reading differs. When they are read, the settings note goes; when the pass ends
+// first (shutdown) or the reading fails, the note stays and the scanner tries again at
+// its next pass, and the next start reads the folder from the note. The caller holds the
+// scan semaphore.
+func (p *pass) rereadArrived(ctx context.Context) []error {
+	s := p.s
+	s.rootMu.Lock()
+	for root, ids := range p.arrived {
+		if p.kinds[root] == "" {
+			continue // not typed yet: the guess leaves such items as they are
+		}
+		a := s.due[root]
+		if a == nil {
+			a = &arrivals{ids: map[int64]bool{}}
+			s.due[root] = a
+		}
+		for _, id := range ids {
+			a.ids[id] = true
+		}
+	}
+	roots := slices.Sorted(maps.Keys(s.due))
+	s.rootMu.Unlock()
+
+	var errs []error
+	for _, root := range roots {
+		if ctx.Err() != nil {
+			break
+		}
+		if _, ok := s.rootKind(root); !ok || s.rootRetired(root) {
+			s.rootMu.Lock() // the folder is gone: nothing to read (its note, if any, is found and forgotten at the next start)
+			delete(s.due, root)
+			s.rootMu.Unlock()
+			continue
+		}
+		if kind, _ := s.rootKind(root); kind == "" || p.left(root) {
+			continue
+		}
+		s.rootMu.Lock()
+		a := s.due[root]
+		var (
+			only  map[int64]bool
+			owned bool
+		)
+		if a != nil {
+			only, owned = maps.Clone(a.ids), a.owned
+		}
+		s.rootMu.Unlock()
+		if a == nil {
+			continue
+		}
+		ids, err := s.reparse(ctx, root, only)
+		p.reparsed = append(p.reparsed, ids...)
+		if err != nil {
+			p.failed[root] = true
+			errs = append(errs, fmt.Errorf("root %s: read the items it took over again: %w", root, err))
+			continue
+		}
+		s.rootMu.Lock()
+		delete(s.due, root) // rows whose file could not be indexed are still under the old root: the next pass notes them again
+		s.rootMu.Unlock()
+		if owned {
+			if err := s.store.DeleteSetting(ctx, RereadNotePrefix+root); err != nil && ctx.Err() == nil {
+				s.log.Warn("forgetting that a folder took over items", "folder", root, "err", err)
+			}
+		}
+	}
+	return errs
 }
 
 // recheck asks for dir (and, when recursive, its subdirectories) to be
@@ -1213,7 +1485,10 @@ func (p *pass) indexAll(ctx context.Context) []error {
 		}()
 	}
 feed:
-	for _, j := range p.work {
+	for i, j := range p.work {
+		if err := p.s.paced(ctx, i, len(p.work)); err != nil {
+			break feed // like the end of ctx: what was probed stays, the rest waits for the next pass
+		}
 		select {
 		case jobs <- j:
 		case <-ctx.Done():

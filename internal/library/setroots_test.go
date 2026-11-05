@@ -997,17 +997,20 @@ func TestOnlyDropRootRemovesADroppedRootsItems(t *testing.T) {
 	gone, kept, never := filepath.Join(base, "gone"), filepath.Join(base, "kept"), filepath.Join(base, "never")
 	dune := filepath.Join(gone, "Dune (2021).mkv")
 	write(t, dune, "1")
+	write(t, filepath.Join(gone, "Other (2020).mkv"), "4444") // keeps the folder there when Dune goes
 	write(t, filepath.Join(kept, "Heat (1995).mkv"), "22")
 	e.setRoots(movies(gone), movies(kept))
 	e.progress(e.item(dune).ID, 600)
-	// A row of a root that is not configured, and was never taken out: a leftover.
+	// A row of a root that is not configured, and was never taken out: a leftover. Its
+	// folder is there, with another file in it (no unmounted disk), and the file is not.
+	write(t, filepath.Join(never, "Present.mkv"), "333")
 	if _, err := e.st.UpsertItem(context.Background(), &store.Item{Kind: store.KindMovie, Title: "Old", Path: filepath.Join(never, "Old.mkv"),
 		Root: never, Size: 5, MTime: 5}, nil); err != nil {
 		t.Fatal(err)
 	}
 
 	e.s.SetRoots([]Root{movies(kept)})
-	mustRemove(t, gone) // an unmounted disk, say
+	mustRemove(t, dune) // the file is gone, the folder is there: no unmounted disk
 	mustScan(t, e.s)
 	if _, ok := e.items()[dune]; !ok {
 		t.Fatal("a scan removed the item of a root that was just taken out, with its progress unarchived")
@@ -1016,7 +1019,7 @@ func TestOnlyDropRootRemovesADroppedRootsItems(t *testing.T) {
 		t.Error("control: the leftover of a root that was never taken out should be cleaned up")
 	}
 
-	if n, err := e.s.DropRoot(context.Background(), gone, false); err != nil || n != 1 {
+	if n, err := e.s.DropRoot(context.Background(), gone, false); err != nil || n != 2 {
 		t.Fatalf("DropRoot = %d, %v", n, err)
 	}
 	if got := e.countRaw(`SELECT COUNT(*) FROM item_archive WHERE path = ? AND position_sec = 600`, dune); got != 1 {

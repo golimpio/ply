@@ -23,12 +23,14 @@ import (
 	"ply/internal/config"
 	"ply/internal/discovery"
 	"ply/internal/hwaccel"
+	"ply/internal/jobs"
 	"ply/internal/library"
 	"ply/internal/metadata"
 	"ply/internal/probe"
 	"ply/internal/store"
 	"ply/internal/stream"
 	"ply/internal/subs"
+	"ply/internal/tier"
 	"ply/internal/watch"
 	"ply/web"
 )
@@ -111,6 +113,11 @@ func run() error {
 	}
 	defer streams.Close() // also run explicitly on shutdown; Close is idempotent
 
+	// Playback first, browsing second, the background queue third: the governor
+	// holds queued work while a viewer or a person browsing needs the machine.
+	gov := tier.New(tier.Options{Playback: playbackLoad{streams}})
+	streams.OnLoadChange(gov.Notify)
+
 	artGen, err := art.New(ctx, art.Options{Dir: filepath.Join(cfg.Data, "art"), FFmpeg: ffmpegBin})
 	if err != nil {
 		log.Warn("artwork disabled", "err", err)
@@ -149,18 +156,35 @@ func run() error {
 	// calls only set a flag.
 	settings := metadata.NewSettings(metadata.SettingsOptions{
 		Store: st, KeyFlag: cfg.TMDBKey, KeyEnv: cfg.TMDBKeyEnv, KeyDefault: metadata.DefaultKey,
+		TVDBKeyFlag: cfg.TVDBKey, TVDBKeyEnv: cfg.TVDBKeyEnv, TVDBKeyDefault: metadata.DefaultTVDBKey,
+		TVDBPINFlag: cfg.TVDBPIN, TVDBPINEnv: cfg.TVDBPINEnv,
 		Disabled: !cfg.Metadata, Language: cfg.MetadataLanguage,
-		BaseURL: cfg.TMDBURL, ImageBaseURL: cfg.TMDBImageURL, Logger: log,
+		BaseURL: cfg.TMDBURL, ImageBaseURL: cfg.TMDBImageURL, TVDBBaseURL: cfg.TVDBURL, TVDBImageBaseURL: cfg.TVDBImageURL, Logger: log,
 	})
 	images, err := metadata.NewImageCache(metadata.ImageOptions{
-		Dir: filepath.Join(cfg.Data, "images"), URL: settings.ImageURL, FFmpeg: ffmpegBin, Niceness: scanNice, Logger: log,
+		Dir: filepath.Join(cfg.Data, "images"), URL: settings.ImageURL, TVDBURL: settings.TVDBImageURL,
+		FFmpeg: ffmpegBin, Niceness: scanNice, Logger: log,
 	})
 	if err != nil {
 		return fmt.Errorf("image cache: %w", err)
 	}
 	defer images.Close() // also run explicitly on shutdown; Close is idempotent
+	// The worker's passes run as queue jobs: whatever wakes it (new files, a
+	// refresh asked for) queues one; queue is set before anything can wake it.
+	var queue *jobs.Queue
 	worker := metadata.NewWorker(metadata.WorkerOptions{
 		Store: st, Source: settings, Images: images, Probe: prober.Probe, Refresh: cfg.MetadataRefresh, Logger: log,
+		// Each item of a pass waits while playback or browsing needs the machine.
+		Pace: paceFor(gov, tier.Need{CPU: true}),
+		// Off the caller's goroutine: a person's "refresh" request must not wait
+		// for the queue's (low-priority) write.
+		OnWake: func() {
+			go func() {
+				if _, err := queue.Enqueue(ctx, kindMetaMatch, jobs.Opt{Key: "match"}); err != nil && ctx.Err() == nil {
+					log.Warn("queue: metadata", "err", err)
+				}
+			}()
+		},
 	})
 	scanner.OnAdded(func([]int64) { worker.Notify() })
 	scanner.OnSidecarsChanged(worker.NotifySidecars)
@@ -172,6 +196,17 @@ func run() error {
 	// The archived matches are applied only while online lookups are on; the scanner
 	// reports them again when they come on (checked every few seconds, below).
 	scanner.SetMatchGate(func() bool { return settings.Resolve(ctx).Online() })
+	// The queue: scans, lookups and cache work, persisted, by priority, below
+	// playback and browsing. It is built before the scanner gets its roots, so
+	// that the scanner's first passes already yield.
+	var active struct {
+		sync.Mutex
+		roots []string
+	}
+	active.roots = rootPaths(roots)
+	queue = newQueue(queueDeps{store: st, gov: gov, scanner: scanner, worker: worker, art: artGen, subs: subGen,
+		roots: func() []string { active.Lock(); defer active.Unlock(); return slices.Clone(active.roots) }, log: log})
+
 	// The scanner gets the folders' types last, with its settle time and its hooks
 	// in place: first the types they had before this start's flags, which it takes
 	// as the ones its items were read with, then the ones they have now. A type that
@@ -183,8 +218,12 @@ func run() error {
 	scanner.SetRoots(previousRoots(roots, before))
 	scanner.SetRoots(roots)
 	rereadPending(ctx, st, scanner, log)
+	// Files left pending by the last run are looked up again (what worker.Run did first).
+	if err := st.ReleasePending(ctx); err != nil && ctx.Err() == nil {
+		log.Warn("metadata: releasing pending files", "err", err)
+	}
 
-	var bg sync.WaitGroup // the scanner loop, the watcher, the worker, the match restorer and the lookups check
+	var bg sync.WaitGroup // the queue, its schedule, the watcher, the match restorer and the lookups check
 	bg.Add(4)
 	go func() {
 		defer bg.Done()
@@ -201,11 +240,11 @@ func run() error {
 	}()
 	go func() {
 		defer bg.Done()
-		scanner.Run(ctx, cfg.ScanInterval)
+		queue.Run(ctx)
 	}()
 	go func() {
 		defer bg.Done()
-		worker.Run(ctx)
+		schedule(ctx, queue, cfg.ScanInterval, metadata.DefaultTick, log)
 	}()
 	go func() {
 		defer bg.Done()
@@ -214,7 +253,7 @@ func run() error {
 	// The watcher runs even with no folders, for the ones added later.
 	var watcher *watch.Watcher
 	if cfg.Watch {
-		watcher = watch.New(scanner, rootPaths(roots), log)
+		watcher = watch.New(queuedScanner{queue}, rootPaths(roots), log)
 		bg.Add(1)
 		go func() {
 			defer bg.Done()
@@ -225,6 +264,9 @@ func run() error {
 	// must not block. The scanner scans a new folder and reads a changed one again
 	// in the background.
 	setRoots := func(roots []library.Root) {
+		active.Lock()
+		active.roots = rootPaths(roots)
+		active.Unlock()
 		scanner.SetRoots(roots)
 		if watcher != nil {
 			watcher.SetRoots(rootPaths(roots))
@@ -234,7 +276,7 @@ func run() error {
 
 	apiOpts := api.Options{
 		Store:   st,
-		Scanner: scanner,
+		Scanner: scanControl{q: queue, scanner: scanner},
 		UI:      web.Dist,
 		ID:      id,
 		Name:    cfg.Name,
@@ -261,6 +303,9 @@ func run() error {
 		Metadata: worker,
 		Settings: settings,
 		Images:   images,
+
+		Jobs:     queue,
+		Governor: gov,
 	}
 	if watcher != nil {
 		apiOpts.Watcher = watcher // a nil *Watcher in the interface would not be nil
@@ -269,7 +314,7 @@ func run() error {
 	// The limits on plays: the flags, then the settings, then the defaults; the default
 	// number of transcodes needs the answer of the GPU probe, which may still be running.
 	handler.ApplyLimitsWhenReady(ctx)
-	go afterScans(ctx, scanner, st, artGen, subGen, worker, log)
+	go afterScans(ctx, scanner, queue, worker, log)
 	srv := &http.Server{
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -313,6 +358,7 @@ func run() error {
 		srv.Close()
 	}
 	bg.Wait()
+	worker.Close()
 	scanner.Wait()
 	images.Close() // a download that was under way
 	return serveFailure
@@ -448,12 +494,12 @@ func rootPaths(roots []library.Root) []string {
 	return paths
 }
 
-// afterScans does the housekeeping each time a scan finishes: it wakes the
-// metadata worker (files may have been added) and removes cached artwork and
-// subtitles of items that are gone or changed. Either generator may be nil. The
-// scanner has no completion hook, so its status is polled.
-func afterScans(ctx context.Context, sc api.ScanController, st *store.Store, artGen *art.Generator,
-	subGen *subs.Generator, worker *metadata.Worker, log *slog.Logger) {
+// afterScans queues the housekeeping each time a scan finishes, whatever started
+// it (a job, the scanner's own pass for a folder just added): it wakes the
+// metadata worker (files may have been added) and queues the pruning of cached
+// artwork and subtitles of items that are gone or changed. The scanner has no
+// completion hook, so its status is polled.
+func afterScans(ctx context.Context, sc api.ScanController, q *jobs.Queue, worker *metadata.Worker, log *slog.Logger) {
 	var seen time.Time
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
@@ -469,35 +515,8 @@ func afterScans(ctx context.Context, sc api.ScanController, st *store.Store, art
 		}
 		seen = *s.LastFinished
 		worker.Notify()
-		if artGen == nil && subGen == nil {
-			continue
-		}
-		states, err := st.FileStates(ctx)
-		if err != nil {
-			log.Warn("artwork prune: list items", "err", err)
-			continue
-		}
-		live := make(map[int64]int64, len(states))
-		for _, fs := range states {
-			live[fs.ID] = fs.MTime
-		}
-		if artGen != nil {
-			n, err := artGen.Prune(live)
-			if err != nil {
-				log.Warn("artwork prune", "err", err)
-			}
-			if n > 0 {
-				log.Info("artwork pruned", "files", n)
-			}
-		}
-		if subGen != nil {
-			n, err := subGen.Prune(live)
-			if err != nil {
-				log.Warn("subtitle cache prune", "err", err)
-			}
-			if n > 0 {
-				log.Info("subtitle cache pruned", "files", n)
-			}
+		if _, err := q.Enqueue(ctx, kindCachePrune, jobs.Opt{Key: "prune"}); err != nil && ctx.Err() == nil {
+			log.Warn("queue: cache prune", "err", err)
 		}
 	}
 }

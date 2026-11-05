@@ -55,19 +55,25 @@ func movieQuery(it store.Item, n NFO) Query {
 	return q
 }
 
-// failed handles an error from TMDB or the network for a file that was due. A
-// refused key ends the pass. Anything else is put off with a growing delay: a
-// failure never makes a file unmatched. It reports whether the file was settled.
+// failed handles an error from TMDB, TVDB or the network for a file that was due. A
+// refused TMDB key ends the pass. A refused TVDB key does not (the movies, and the shows
+// at TMDB, are no worse for it): the show waits an hour. Anything else is put off with a
+// growing delay: a failure never makes a file unmatched. It reports whether the file was
+// settled.
 func (w *Worker) failed(ctx context.Context, err error, attempts int, deferFn func(next int64) error) bool {
 	if ctx.Err() != nil {
 		return false
 	}
-	if IsUnauthorized(err) {
+	delay := RetryDelay(err, attempts+1)
+	switch {
+	case tvdbKeyRefused(err):
+		delay = tvdbRefusedDelay
+	case IsUnauthorized(err):
 		w.abort(err)
 		return false
 	}
 	w.noteError(err)
-	next := w.now().Add(RetryDelay(err, attempts+1)).Unix()
+	next := w.now().Add(delay).Unix()
 	if derr := deferFn(next); derr != nil && !errors.Is(derr, store.ErrNotFound) {
 		w.noteError(derr)
 		return false
@@ -81,7 +87,7 @@ func (w *Worker) adoptLocal(ctx context.Context, existing int64, in *store.Title
 	if existing == 0 {
 		return
 	}
-	if t, err := w.o.Store.GetTitle(ctx, existing); err == nil && t.TMDBID == 0 && t.Kind == in.Kind {
+	if t, err := w.o.Store.GetTitle(ctx, existing); err == nil && !hasRemote(t) && t.Kind == in.Kind {
 		in.ID = t.ID
 	}
 }
@@ -96,7 +102,7 @@ func (w *Worker) linkMovie(ctx context.Context, id int64, in *store.TitleInput, 
 	if err != nil && !errors.Is(err, store.ErrNotFound) && ctx.Err() == nil {
 		w.noteError(err)
 	}
-	if ok && in.TMDBID != 0 {
+	if ok && hasRemote(in.Title) {
 		w.noteNFO(titleID, nfoPath)
 	}
 	return ok
@@ -107,19 +113,21 @@ func (w *Worker) linkSeries(ctx context.Context, show string, in *store.TitleInp
 	if err != nil && !errors.Is(err, store.ErrNotFound) && ctx.Err() == nil {
 		w.noteError(err)
 	}
-	if ok && in.TMDBID != 0 {
+	if ok && hasRemote(in.Title) {
 		w.noteNFO(titleID, nfoPath)
 	}
 	return ok
 }
 
 // matchMovie settles one movie that is due. It reports whether it did.
-func (w *Worker) matchMovie(ctx context.Context, p Provider, d store.DueItem) bool {
+func (w *Worker) matchMovie(ctx context.Context, p *Providers, d store.DueItem) bool {
 	local := w.localMovie(ctx, d.Item, w.names)
 	q := movieQuery(d.Item, local.nfo)
 	pending := store.Match{State: store.MatchPending, Attempts: d.Attempts}
 
-	if p == nil {
+	// Movies are TMDB's; with no TMDB key (a TVDB key alone) there is nothing to ask.
+	tm := p.Movies()
+	if tm == nil {
 		// Nothing can be asked of TMDB. Take what the files say; the file stays
 		// pending, so that it is matched once there is a key.
 		pending.TitleID = d.TitleID
@@ -143,14 +151,14 @@ func (w *Worker) matchMovie(ctx context.Context, p Provider, d store.DueItem) bo
 	hints := q.Hints
 	for round := 0; ; round++ {
 		q.Hints = hints
-		if res, err = Match(ctx, p, q); err != nil {
+		if res, err = Match(ctx, tm, q); err != nil {
 			return w.failed(ctx, err, d.Attempts, func(next int64) error { return w.o.Store.DeferItemMatch(ctx, d.ID, next) })
 		}
 		if res.State == store.MatchUnmatched && !res.ByID {
 			// The tags inside the file may name the movie better than its file name.
 			if tags := w.tagsFor(ctx, d.Item, local.nfo); tags.Title != "" && !strings.EqualFold(tags.Title, q.Title) {
 				tq := Query{Kind: store.KindMovie, Title: tags.Title, Year: tags.Year, Hints: hints}
-				tres, terr := Match(ctx, p, tq)
+				tres, terr := Match(ctx, tm, tq)
 				if terr != nil {
 					return w.failed(ctx, terr, d.Attempts, func(next int64) error { return w.o.Store.DeferItemMatch(ctx, d.ID, next) })
 				}
@@ -159,10 +167,10 @@ func (w *Worker) matchMovie(ctx context.Context, p Provider, d store.DueItem) bo
 				}
 			}
 		}
-		if res.TMDBID == 0 {
+		if res.ID == 0 {
 			break
 		}
-		if in, err = p.Movie(ctx, res.TMDBID); err != nil {
+		if in, err = tm.Movie(ctx, res.ID); err != nil {
 			if IsNotFound(err) && res.ByID && round == 0 {
 				hints = Hints{} // the id in the name or NFO is wrong: go by the title
 				continue
@@ -206,7 +214,7 @@ func (w *Worker) tagsFor(ctx context.Context, it store.Item, n NFO) tagsView {
 }
 
 // matchSeries settles one show that is due. It reports whether it did.
-func (w *Worker) matchSeries(ctx context.Context, p Provider, d store.DueSeries) bool {
+func (w *Worker) matchSeries(ctx context.Context, p *Providers, d store.DueSeries) bool {
 	dir := showDir(d.Path)
 	loc := ShowLocal(dir, w.names(dir))
 	if err := w.o.Store.SetSeriesArt(ctx, d.Show, store.Art{Poster: loc.Poster, Backdrop: loc.Backdrop}); err != nil &&
@@ -243,7 +251,7 @@ func (w *Worker) matchSeries(ctx context.Context, p Provider, d store.DueSeries)
 		return in, ok
 	}
 
-	if p == nil {
+	if !p.ShowsOn() {
 		m := store.Match{State: store.MatchPending, Attempts: d.Attempts, TitleID: existing,
 			NextAttemptAt: w.now().Add(idleRecheck).Unix()}
 		if in, ok := localSeries(); ok {
@@ -262,12 +270,12 @@ func (w *Worker) matchSeries(ctx context.Context, p Provider, d store.DueSeries)
 	hints := q.Hints
 	for round := 0; ; round++ {
 		q.Hints = hints
-		if res, err = Match(ctx, p, q); err != nil {
+		if res, err = p.MatchShow(ctx, q); err != nil {
 			return w.failed(ctx, err, d.Attempts, deferFn)
 		}
 		if res.State == store.MatchUnmatched && !res.ByID {
 			if tags := w.showTags(ctx, items); tags.Show != "" && !strings.EqualFold(tags.Show, q.Title) {
-				tres, terr := Match(ctx, p, Query{Kind: store.KindSeries, Title: tags.Show, Hints: hints})
+				tres, terr := p.MatchShow(ctx, Query{Kind: store.KindSeries, Title: tags.Show, Hints: hints})
 				if terr != nil {
 					return w.failed(ctx, terr, d.Attempts, deferFn)
 				}
@@ -276,10 +284,10 @@ func (w *Worker) matchSeries(ctx context.Context, p Provider, d store.DueSeries)
 				}
 			}
 		}
-		if res.TMDBID == 0 {
+		if res.ID == 0 {
 			break
 		}
-		if in, err = p.Series(ctx, res.TMDBID, seasons); err != nil {
+		if in, err = w.fetchShow(ctx, p, res.Source, res.ID, seasons); err != nil {
 			if IsNotFound(err) && res.ByID && round == 0 {
 				hints = Hints{}
 				continue

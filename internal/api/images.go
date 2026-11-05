@@ -65,6 +65,48 @@ func (s *Server) handleTMDBImage(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, "", fi.ModTime(), f)
 }
 
+// handleTVDBImage serves GET /api/images/tvdb/{size}/{path...} (path is TVDB's, like
+// banners/posters/81189-10.jpg) from the cache, downloading the image from
+// artworks.thetvdb.com the first time: nothing else is ever fetched, whatever the
+// path says. A size off the allowlist or a path that is not plain (letters, digits and
+// / _ . - only, no "..", no empty or dot segment, a picture's extension) is a 400
+// before it touches the disk or the network; an image that cannot be had is a 404.
+func (s *Server) handleTVDBImage(w http.ResponseWriter, r *http.Request) {
+	size, file := r.PathValue("size"), "/"+r.PathValue("path")
+	if !metadata.ValidTVDBImage(size, file) {
+		writeError(w, http.StatusBadRequest, "invalid image")
+		return
+	}
+	if s.Images == nil {
+		writeError(w, http.StatusNotFound, "no such image")
+		return
+	}
+	path, err := s.Images.TVDB(r.Context(), size, file)
+	switch {
+	case err == nil:
+	case r.Context().Err() != nil:
+		return // the client went away
+	case errors.Is(err, metadata.ErrBadImage):
+		writeError(w, http.StatusBadRequest, "invalid image")
+		return
+	default:
+		writeError(w, http.StatusNotFound, "no such image")
+		return
+	}
+	f, err := metadata.OpenRegular(path)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "no such image")
+		return
+	}
+	defer f.Close()
+	fi, _ := f.Stat()
+	h := w.Header()
+	imageHeaders(h)
+	h.Set("Content-Type", metadata.TVDBContentType(file))
+	h.Set("Cache-Control", "public, max-age=31536000, immutable")
+	http.ServeContent(w, r, "", fi.ModTime(), f)
+}
+
 // handleLocalImage serves GET /api/images/local/{kind}/{id}/{slot}: artwork
 // found next to a file, by the path the database holds (never one from the
 // request), or the cover embedded in the media file.

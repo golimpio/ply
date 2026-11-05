@@ -227,6 +227,56 @@ Design:
 - Endpoints: `GET /api/jobs`, `POST /api/jobs/{id}/cancel|retry|bump`, `POST /api/queue/pause|resume`,
   `GET /api/sessions`. `/api/scan` and `/api/metadata/status` stay as thin views.
 
+### As built (2026-11-05)
+- `internal/tier`:
+  - `Governor.Check(Need)` and `Wait(ctx, Need, held)`:
+    - a stalled viewer (`Waiting>0`) holds everything;
+    - `Need.CPU` is held while a software transcode runs;
+    - `Need.Disks` is held while a play reads from the same disk;
+    - browsing holds everything for 300 ms after the last browse request (`Track(isBrowse)`, which counts no polling,
+      feed or playback request). Browsing alone holds a piece of work for at most `BrowseMaxHold` (2 s): a client
+      that polls the library without pause must not starve the queue. Playback holds have no limit.
+  - Disks are compared by key. On macOS a network share's key is its server (`statfs` `f_mntfromname`), since two
+    shares of one NAS share the link; anything else is keyed by its filesystem id (`st_dev` on Linux).
+    - Only exact answers are cached. A path that is not there yet (a share not mounted when ply starts) counts as on
+      its parent's disk for now, and is looked at again after 10 s.
+  - Polls every 250 ms, and at once on `stream.Manager.OnLoadChange` (`Changed()`).
+  - This replaces the weighted semaphores for now: the queue's lanes (below) bound the concurrency.
+- `internal/jobs`, the queue:
+  - Lanes: one heavy job at a time (any Need) beside two light ones.
+  - **Starting:** the dispatcher asks `Gate.Check` before a job gets a slot. A held job does not take its lane from a
+    lower-priority one that may run: a full scan held by a film on the NAS does not keep the watcher's small scan
+    waiting. The next held job of each lane is shown with its reason (`Job.Held`, listed with the running ones).
+  - **Between steps** a running job calls `Run.Yield`, against `Spec.YieldNeed` (default `Need`). `scan.full` yields
+    to CPU and stalls only: once it holds the scanner, waiting out a whole film would block every other scan too.
+  - Order: priority, then age.
+  - Dedupe: one queued job per kind+key, merged (`Spec.Merge`), with the merge check and the insert as one step;
+    a job never runs beside one with its key. A job the last run left queued and one this run queued with the same
+    key are one job.
+  - Retries: a failure retries with backoff (1 min doubling, at most 30 min, 5 attempts); `Permanent` fails at once.
+  - A panic is a failure.
+  - A person's actions: cancel (`context.WithCancelCause`), bump (priority 0), retry, and pause/resume (persisted).
+  - `Do` returns the job's own error (`errors.Is` works); `RunFrom(ctx)` gives code deep in a job its handle.
+  - Persisted in `jobs` (migration 007): state changes only, not progress. At startup a running job goes back to
+    queued, and a kind nobody registers fails. History is kept 7 days, the last 200 shown.
+  - An in-memory ring of 512 events serves `Last-Event-ID` replays. Ids start from the clock, so an id from an
+    earlier process gets a snapshot, not a replay.
+- Kinds in use:
+  - `scan.full` (30): every interval, and at once. "Scan now" queues it at 0, or moves a queued one to the front. It
+    needs CPU and every root: it does not start while a video plays from the library's disk.
+  - `scan.dirs` (10): the watcher's batches, through `Queue.Do`. It needs CPU only: a few headers, so a play from the
+    same disk does not hold it. A batch that never ran is reported to the watcher as `ErrNotScanned`, which it retries.
+  - `meta.match` (20): the worker's passes, woken by `OnWake` (asynchronously), and every minute. Light to start;
+    before each item (`WorkerOptions.Pace`) it yields to a stalled viewer, a CPU transcode and browsing
+    (`YieldNeed` CPU). Outside a job (`paceFor`) the same pace waits on the governor directly.
+  - `cache.prune` (50): after each scan.
+  - The scanner's own passes (a folder just added, a type changed) appear as a read-only `scan.folders` entry
+    (`Options.Extra`, from `Scanner.Busy`). They pace through the governor directly.
+- The scanner yields per file: `Scanner.SetPace` is called before each probe (with done/total, which becomes the
+  job's progress) and every 100 directories of a walk.
+- Verified live (a remux session plus "Scan now"): the scan waits with "a video is playing from the same disk", and
+  runs within a second of the session stopping.
+
 ## macOS-first optimisations (in order of expected effect)
 1. Plist `ProcessType` → Interactive/Standard; demote children, not the server.
 2. Darwin BG for background children:

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -52,12 +53,30 @@ type WorkerOptions struct {
 	Batch   int           // default DefaultBatch
 	Now     func() time.Time
 	Logger  *slog.Logger
+	// OnWake, when set, is called every time something wakes the worker (Notify,
+	// NotifySidecars, a refresh somebody asked for, a change of settings), in addition
+	// to waking it. It must not block. A nil hook changes nothing.
+	OnWake func()
+	// Pace, when set, is called once before each item a pass takes in hand: a file or
+	// show that is due, a sidecar notification, a refresh somebody asked for. It may
+	// block (the pass waits), which is how the owner of the worker holds it back. If it
+	// returns an error the pass stops, quietly: nothing is noted or marked failed, the
+	// item it was called for is untouched, and what is left (the notifications and
+	// refreshes too) is for the next pass. A nil Pace means no pacing.
+	Pace func(ctx context.Context) error
 }
 
 // Status is what GET /api/metadata/status reports.
 type Status struct {
-	Enabled     bool       `json:"enabled"` // the privacy switch
-	KeySet      bool       `json:"keySet"`
+	Enabled bool `json:"enabled"` // the privacy switch
+	KeySet  bool `json:"keySet"`  // a TMDB key
+	// TVDBKeySet says there is a TVDB key. Shows is where shows come from: "tvdb",
+	// "tmdb" (no TVDB key), or "" (nothing may be asked). ShowsLine is the sentence for
+	// the status line: "Shows: TVDB", "Shows: TMDB (no TVDB key)", "TVDB unreachable"
+	// (TVDB's last answer was a failure of the network or the key), or "".
+	TVDBKeySet  bool       `json:"tvdbKeySet"`
+	Shows       string     `json:"shows"`
+	ShowsLine   string     `json:"showsLine"`
 	Running     bool       `json:"running"` // a pass is under way
 	Pending     int        `json:"pending"`
 	Unmatched   int        `json:"unmatched"`
@@ -85,6 +104,8 @@ type Worker struct {
 	seasonTried    map[seasonKey]time.Time
 	nfoApplied     map[int64]string // title id -> stamp of the NFO last laid over it
 	personFailed   map[int64]personFailure
+	switchTried    map[int64]bool // shows TVDB was asked about for the move from TMDB (see switchToTVDB)
+	switchRetryAt  time.Time
 	closed         bool
 
 	// Background work (prefetching images after a manual match) runs under bgCtx,
@@ -145,7 +166,7 @@ func NewWorker(o WorkerOptions) *Worker {
 	w := &Worker{
 		o: o, log: o.Logger, wake: make(chan struct{}, 1),
 		sidecars: map[int64]struct{}{}, probes: map[int64]probeEntry{}, seasonTried: map[seasonKey]time.Time{},
-		nfoApplied: map[int64]string{}, personFailed: map[int64]personFailure{},
+		nfoApplied: map[int64]string{}, personFailed: map[int64]personFailure{}, switchTried: map[int64]bool{},
 	}
 	w.bgCtx, w.bgCancel = context.WithCancel(context.Background())
 	return w
@@ -183,10 +204,16 @@ func (w *Worker) now() time.Time { return w.o.Now() }
 
 // Notify tells the worker that items may be waiting to be matched (the scanner
 // added some). It never blocks.
-func (w *Worker) Notify() {
+func (w *Worker) Notify() { w.signal() }
+
+// signal wakes the worker and calls the OnWake hook, once.
+func (w *Worker) signal() {
 	select {
 	case w.wake <- struct{}{}:
 	default:
+	}
+	if w.o.OnWake != nil {
+		w.o.OnWake()
 	}
 }
 
@@ -202,7 +229,7 @@ func (w *Worker) NotifySidecars(ids []int64) {
 		w.sidecars[id] = struct{}{}
 	}
 	w.mu.Unlock()
-	w.Notify()
+	w.signal()
 }
 
 // Reload tells the worker that the settings changed (a new key, the privacy
@@ -212,8 +239,10 @@ func (w *Worker) Reload() {
 	w.mu.Lock()
 	w.reload = true
 	clear(w.personFailed) // a new key may find what the old one could not
+	clear(w.switchTried)
+	w.switchRetryAt = time.Time{}
 	w.mu.Unlock()
-	w.Notify()
+	w.signal()
 }
 
 // RefreshItem asks for a movie (or the show of an episode) to be fetched again
@@ -231,13 +260,23 @@ func (w *Worker) addJob(j job) {
 	w.mu.Lock()
 	w.jobs = append(w.jobs, j)
 	w.mu.Unlock()
-	w.Notify()
+	w.signal()
 }
 
 // Status reports the worker's state.
 func (w *Worker) Status(ctx context.Context) Status {
 	_, res := w.o.Source.Provider(ctx)
-	st := Status{Enabled: res.Enabled, KeySet: res.KeySet()}
+	st := Status{Enabled: res.Enabled, KeySet: res.KeySet(), TVDBKeySet: res.TVDBKeySet()}
+	switch {
+	case !res.Enabled:
+	case res.TVDBKeySet():
+		st.Shows, st.ShowsLine = SourceTVDB, "Shows: TVDB"
+		if res.TVDBDown {
+			st.ShowsLine = "TVDB unreachable"
+		}
+	case res.KeySet():
+		st.Shows, st.ShowsLine = SourceTMDB, "Shows: TMDB (no TVDB key)"
+	}
 	if c, err := w.o.Store.CountMatches(ctx); err == nil {
 		st.Pending, st.Unmatched, st.NeedsReview = c.Pending, c.Unmatched, c.NeedsReview
 	}
@@ -339,7 +378,8 @@ func (w *Worker) pass(ctx context.Context) {
 			w.noteError(err)
 		}
 	}
-	p, _ := w.o.Source.Provider(ctx)
+	p, res := w.o.Source.Provider(ctx)
+	switchUpTo, switching := w.switchCutoff(ctx, p, res)
 	did := false
 	for ctx.Err() == nil && !w.aborted {
 		worked := w.inbox(ctx, p)
@@ -348,6 +388,9 @@ func (w *Worker) pass(ctx context.Context) {
 		if !worked && n == 0 {
 			break
 		}
+	}
+	if switching && ctx.Err() == nil && !w.aborted {
+		did = w.switchToTVDB(ctx, p, switchUpTo) || did
 	}
 	if p != nil && ctx.Err() == nil && !w.aborted {
 		did = w.fetchSeasons(ctx, p) || did
@@ -381,9 +424,23 @@ func (w *Worker) names(dir string) []string {
 	return n
 }
 
+// pace waits for WorkerOptions.Pace before the next item of a pass. False means the pass
+// is to stop, without a word: it ends the pass as a refused key does (aborted), but
+// notes no error, and the caller leaves the item as it is.
+func (w *Worker) pace(ctx context.Context) bool {
+	if w.o.Pace == nil {
+		return true
+	}
+	if err := w.o.Pace(ctx); err != nil {
+		w.aborted = true
+		return false
+	}
+	return true
+}
+
 // batch matches the files that are due, up to one batch of movies and one of
 // shows, and returns how many it settled.
-func (w *Worker) batch(ctx context.Context, p Provider) int {
+func (w *Worker) batch(ctx context.Context, p *Providers) int {
 	now := w.now().Unix()
 	n := 0
 	items, err := w.o.Store.DueItems(ctx, now, w.o.Batch)
@@ -396,6 +453,9 @@ func (w *Worker) batch(ctx context.Context, p Provider) int {
 			return n
 		}
 		if key := "i" + strconv.FormatInt(d.ID, 10); !w.handled[key] {
+			if !w.pace(ctx) {
+				return n
+			}
 			w.handled[key] = true
 			if w.matchMovie(ctx, p, d) {
 				n++
@@ -412,6 +472,9 @@ func (w *Worker) batch(ctx context.Context, p Provider) int {
 			return n
 		}
 		if key := "s" + d.Show; !w.handled[key] {
+			if !w.pace(ctx) {
+				return n
+			}
 			w.handled[key] = true
 			if w.matchSeries(ctx, p, d) {
 				n++
@@ -422,7 +485,7 @@ func (w *Worker) batch(ctx context.Context, p Provider) int {
 }
 
 // inbox does what people asked for and what the scanner reported.
-func (w *Worker) inbox(ctx context.Context, p Provider) bool {
+func (w *Worker) inbox(ctx context.Context, p *Providers) bool {
 	w.mu.Lock()
 	ids := make([]int64, 0, len(w.sidecars))
 	for id := range w.sidecars {
@@ -434,19 +497,38 @@ func (w *Worker) inbox(ctx context.Context, p Provider) bool {
 	w.mu.Unlock()
 
 	done := map[string]bool{}
-	for _, id := range ids {
+	for i, id := range ids {
 		if ctx.Err() != nil || w.aborted {
 			break
 		}
+		if !w.pace(ctx) {
+			w.requeue(ids[i:], jobs) // taken out of the queues above: put back, all that was not done
+			return true
+		}
 		w.rereadLocal(ctx, p, id, done)
 	}
-	for _, j := range jobs {
+	for i, j := range jobs {
 		if ctx.Err() != nil || w.aborted {
 			break
+		}
+		if !w.pace(ctx) {
+			w.requeue(nil, jobs[i:])
+			return true
 		}
 		w.runJob(ctx, p, j)
 	}
 	return len(ids) > 0 || len(jobs) > 0
+}
+
+// requeue puts sidecar notifications and refreshes back for the next pass, the refreshes
+// ahead of any that came since. It does not wake the worker.
+func (w *Worker) requeue(ids []int64, jobs []job) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, id := range ids {
+		w.sidecars[id] = struct{}{}
+	}
+	w.jobs = append(slices.Clone(jobs), w.jobs...)
 }
 
 // prefetch caches the poster and backdrop of a stored title.

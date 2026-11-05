@@ -1,0 +1,51 @@
+{
+  "status": "success",
+  "data": {
+    "id": 900002,
+    "name": "Second Show",
+    "slug": "second-show",
+    "image": "https://artworks.thetvdb.com/banners/posters/900002-1.jpg",
+    "nameTranslations": [
+      "eng",
+      "por"
+    ],
+    "overviewTranslations": [
+      "eng",
+      "por"
+    ],
+    "aliases": [],
+    "firstAired": "2018-01-01",
+    "lastAired": "2019-01-01",
+    "nextAired": "",
+    "score": 1000,
+    "status": {
+      "id": 2,
+      "name": "Ended"
+    },
+    "originalCountry": "jpn",
+    "originalLanguage": "jpn",
+    "defaultSeasonType": 1,
+    "isOrderRandomized": false,
+    "lastUpdated": "2026-10-30 10:00:00",
+    "averageRuntime": 24,
+    "overview": "The second fictional series.",
+    "year": "2018",
+    "artworks": [],
+    "genres": [],
+    "remoteIds": [
+      {
+        "id": "tt9000002",
+        "type": 2,
+        "sourceName": "IMDB"
+      }
+    ],
+    "characters": [],
+    "seasons": [],
+    "contentRatings": [],
+    "translations": {
+      "nameTranslations": [],
+      "overviewTranslations": []
+    },
+    "episodes": null
+  }
+}

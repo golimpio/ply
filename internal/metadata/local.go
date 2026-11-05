@@ -124,8 +124,9 @@ func nfoCredits(n NFO) []store.Credit {
 	return credits
 }
 
-// overlayNFO lays the NFO's text on top of a title fetched from TMDB and
-// reports whether it changed anything (then the title's source is "mixed").
+// overlayNFO lays the NFO's text on top of a title fetched from TMDB or TVDB and
+// reports whether it changed anything (then a TMDB title's source is "mixed"; a
+// TVDB title keeps "tvdb", which is what tells a refresh where to ask).
 // What is overlaid: the titles, overview, tagline, dates, runtime and
 // certification. Genres, collection and credits come from the NFO only when
 // TMDB had none.
@@ -173,7 +174,7 @@ func overlayNFO(in *store.TitleInput, n NFO) bool {
 			changed = true
 		}
 	}
-	if changed {
+	if changed && in.Source != store.SourceTVDB {
 		in.Source = store.SourceMixed
 	}
 	return changed

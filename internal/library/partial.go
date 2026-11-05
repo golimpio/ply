@@ -59,6 +59,8 @@ func (s *Scanner) ScanDirs(ctx context.Context, dirs []Dir) (Result, error) {
 		return Result{}, err
 	}
 	defer s.release()
+	s.enter() // Status.Running while it works
+	defer s.leave()
 
 	roots, retired := s.snapshot()
 	scopes, sidecarDirs := s.scopes(roots, dirs, false)
@@ -66,7 +68,7 @@ func (s *Scanner) ScanDirs(ctx context.Context, dirs []Dir) (Result, error) {
 		return Result{}, nil
 	}
 	start := time.Now()
-	states, err := s.store.FileStates(ctx)
+	states, err := s.fileStates(ctx)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: load library state: %w", ErrNotScanned, err)
 	}
@@ -110,6 +112,7 @@ func (s *Scanner) ScanDirs(ctx context.Context, dirs []Dir) (Result, error) {
 	}
 	errs = append(errs, p.indexAll(ctx)...)
 	p.restoreExisting(ctx)
+	errs = append(errs, p.rereadArrived(ctx)...)
 	if err := ctx.Err(); err != nil {
 		// What was indexed before the end is not lost: the worker is told.
 		s.notify(slices.Concat(p.added, p.reparsed), nil)
@@ -173,6 +176,9 @@ func (p *pass) removeIn(ctx context.Context, d Dir) error {
 		return filepath.Dir(path) == d.Path
 	})
 	if err != nil {
+		// What was to go is still there: the folder is not known whole, so it has no
+		// scan time and no guess (as in a full scan).
+		p.failed[d.Path] = true
 		return fmt.Errorf("%s: %w", d.Path, err)
 	}
 	return nil

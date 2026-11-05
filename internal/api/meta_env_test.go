@@ -31,6 +31,7 @@ type menv struct {
 	*env
 	srv     *Server
 	fake    *metadatatest.Fake
+	tvdb    *metadatatest.Fake // TVDB: not on until a test calls src.SetTVDB(m.tvdb)
 	src     *metadata.StaticSource
 	worker  *metadata.Worker
 	images  *metadata.ImageCache
@@ -88,10 +89,11 @@ func newMetaEnvWith(t *testing.T, token string, hook func(*menv, *Options)) *men
 	}))
 	t.Cleanup(m.imgSrv.Close)
 	m.fake.ImageBase = m.imgSrv.URL
+	m.tvdb = &metadatatest.Fake{Source: metadata.SourceTVDB, ImageBase: m.imgSrv.URL}
 	m.src = metadata.NewStaticSource(m.fake)
 
 	var err error
-	m.images, err = metadata.NewImageCache(metadata.ImageOptions{Dir: filepath.Join(e.dir, "..", "images"), URL: m.src.ImageURL})
+	m.images, err = metadata.NewImageCache(metadata.ImageOptions{Dir: filepath.Join(e.dir, "..", "images"), URL: m.src.ImageURL, TVDBURL: m.src.TVDBImageURL})
 	if err != nil {
 		t.Fatal(err)
 	}

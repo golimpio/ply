@@ -24,9 +24,23 @@ const (
 // Where a title's data came from.
 const (
 	SourceTMDB  = "tmdb"
+	SourceTVDB  = "tvdb" // a show from TheTVDB (NFO text laid over it keeps the source)
 	SourceNFO   = "nfo"
 	SourceMixed = "mixed" // TMDB data with NFO text on top
 )
+
+// How a show's files are mapped to its episodes (TVDB's season types official,
+// dvd and absolute). A show from TMDB is always aired.
+const (
+	OrderAired    = "aired"
+	OrderDVD      = "dvd"
+	OrderAbsolute = "absolute"
+)
+
+// ValidEpisodeOrder reports whether order is one of OrderAired, OrderDVD, OrderAbsolute.
+func ValidEpisodeOrder(order string) bool {
+	return order == OrderAired || order == OrderDVD || order == OrderAbsolute
+}
 
 // Credit kinds.
 const (
@@ -68,6 +82,10 @@ type Title struct {
 	NextEpisodeNumber int
 	NextEpisodeName   string
 
+	// EpisodeOrder is how a show's files map to its episodes (OrderAired when empty). An
+	// upsert that leaves it empty keeps the stored one.
+	EpisodeOrder string
+
 	FetchedAt int64 // unix seconds; 0 = never
 	CreatedAt int64
 	UpdatedAt int64
@@ -94,7 +112,8 @@ type Collection struct {
 // and Profile of a credit's person; SetPersonDetails writes the rest.
 type Person struct {
 	ID           int64
-	TMDBID       int64 // 0 = NFO-only, deduped by exact name
+	TMDBID       int64 // 0 = NFO-only or TVDB-only, deduped by exact name
+	TVDBID       int64 // 0 = none; a TVDB person that TMDB also knows has both
 	Name         string
 	Profile      string
 	Biography    string
@@ -152,12 +171,20 @@ type TitleInput struct {
 	Collection *Collection // nil = the title belongs to none
 	Credits    []Credit
 	Seasons    []Season // the seasons fetched; others are left alone
+	// ResetSeasons makes Seasons the only seasons the title has: the others, and their
+	// episodes, are removed (a change of episode order renumbers them all).
+	ResetSeasons bool
+	// ExpectOrder, when set, is the episode order Seasons are numbered in. If the title has
+	// another by the time it is stored (a person changed it while the seasons were being
+	// fetched), the seasons are left out: the stored ones are in the new order already. A
+	// refresh sets it, and leaves EpisodeOrder empty so as not to write the order it began with.
+	ExpectOrder string
 }
 
 const titleCols = `id, kind, tmdb_id, imdb_id, tvdb_id, title, original_title, sort_title, year,
 	overview, tagline, release_date, end_date, status, runtime_min, rating, vote_count, certification,
 	poster, backdrop, logo, collection_id, source, locked, next_air_date, next_episode_season,
-	next_episode_number, next_episode_name, fetched_at, created_at, updated_at`
+	next_episode_number, next_episode_name, episode_order, fetched_at, created_at, updated_at`
 
 func scanTitle(sc scanner) (Title, error) {
 	var (
@@ -169,7 +196,7 @@ func scanTitle(sc scanner) (Title, error) {
 		&t.Year, &t.Overview, &t.Tagline, &t.ReleaseDate, &t.EndDate, &t.Status, &t.RuntimeMin,
 		&t.Rating, &t.VoteCount, &t.Certification, &t.Poster, &t.Backdrop, &t.Logo, &collection,
 		&t.Source, &t.Locked, &nextAir, &t.NextEpisodeSeason, &t.NextEpisodeNumber, &t.NextEpisodeName,
-		&t.FetchedAt, &t.CreatedAt, &t.UpdatedAt)
+		&t.EpisodeOrder, &t.FetchedAt, &t.CreatedAt, &t.UpdatedAt)
 	t.TMDBID, t.TVDBID, t.CollectionID = tmdb.Int64, tvdb.Int64, collection.Int64
 	t.NextAirDate = nextAir.String
 	return t, err
@@ -204,7 +231,8 @@ func upsertTitleTx(ctx context.Context, tx *sql.Tx, in *TitleInput) (int64, erro
 	if in.Kind != KindMovie && in.Kind != KindSeries {
 		return 0, fmt.Errorf("store: title kind %q", in.Kind)
 	}
-	id, err := upsertTitleRow(ctx, tx, in)
+	var plan seasonsPlan
+	id, err := upsertTitleRow(ctx, tx, in, &plan)
 	if err != nil {
 		return 0, err
 	}
@@ -214,13 +242,30 @@ func upsertTitleTx(ctx context.Context, tx *sql.Tx, in *TitleInput) (int64, erro
 	if err := setCredits(ctx, tx, id, in.Credits); err != nil {
 		return 0, err
 	}
-	if err := setSeasons(ctx, tx, id, in.Seasons); err != nil {
-		return 0, err
+	if plan.wipe || (in.ResetSeasons && !plan.skip) {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM seasons WHERE title_id = ?`, id); err != nil {
+			return 0, err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM episodes WHERE title_id = ?`, id); err != nil {
+			return 0, err
+		}
+	}
+	if !plan.skip {
+		if err := setSeasons(ctx, tx, id, in.Seasons); err != nil {
+			return 0, err
+		}
 	}
 	return id, nil
 }
 
-func upsertTitleRow(ctx context.Context, tx *sql.Tx, in *TitleInput) (int64, error) {
+// seasonsPlan is what the row says about the seasons of the input: skip them (they are
+// numbered in an episode order that is not the stored one any more: a person changed it
+// while they were being fetched), or wipe the stored ones first (the title left TVDB, whose
+// numbering the stored episodes still have).
+type seasonsPlan struct{ skip, wipe bool }
+
+// upsertTitleRow writes the title row and says in plan what the seasons are to do.
+func upsertTitleRow(ctx context.Context, tx *sql.Tx, in *TitleInput, plan *seasonsPlan) (int64, error) {
 	now := time.Now().Unix()
 	fetched := in.FetchedAt
 	if fetched == 0 {
@@ -228,22 +273,44 @@ func upsertTitleRow(ctx context.Context, tx *sql.Tx, in *TitleInput) (int64, err
 	}
 	source := in.Source
 	switch source {
-	case SourceTMDB, SourceNFO, SourceMixed:
+	case SourceTMDB, SourceTVDB, SourceNFO, SourceMixed:
 	case "":
 		source = SourceNFO
-		if in.TMDBID != 0 {
+		switch {
+		case in.TMDBID != 0:
 			source = SourceTMDB
+		case in.TVDBID != 0:
+			source = SourceTVDB
 		}
 	default:
 		return 0, fmt.Errorf("store: title source %q", source)
+	}
+	if in.EpisodeOrder != "" && !ValidEpisodeOrder(in.EpisodeOrder) {
+		return 0, fmt.Errorf("store: episode order %q", in.EpisodeOrder)
+	}
+	// Only a show from TVDB has an order but aired.
+	insertOrder := in.EpisodeOrder
+	if source != SourceTVDB {
+		insertOrder = ""
 	}
 	collection, err := upsertCollection(ctx, tx, in.Collection)
 	if err != nil {
 		return 0, err
 	}
 
-	id, err := findTitle(ctx, tx, in)
+	id, err := findTitle(ctx, tx, in, source)
 	if err != nil {
+		return 0, err
+	}
+	// A title has one row, found by either of its ids, but an id belongs to one row.
+	// The source says which id is the title's own; the other is written only if no
+	// other row has it (two rows that stand for one show are what is left of that).
+	tmdb, tvdb := nullInt(in.TMDBID), nullInt(in.TVDBID)
+	if source == SourceTVDB {
+		if tmdb, err = unlessOwned(ctx, tx, "tmdb_id", in.Kind, in.TMDBID, id); err != nil {
+			return 0, err
+		}
+	} else if tvdb, err = unlessOwned(ctx, tx, "tvdb_id", in.Kind, in.TVDBID, id); err != nil {
 		return 0, err
 	}
 	if id == 0 {
@@ -251,23 +318,36 @@ func upsertTitleRow(ctx context.Context, tx *sql.Tx, in *TitleInput) (int64, err
 			INSERT INTO titles (kind, tmdb_id, imdb_id, tvdb_id, title, original_title, sort_title, year,
 				overview, tagline, release_date, end_date, status, runtime_min, rating, vote_count,
 				certification, poster, backdrop, logo, collection_id, source, next_air_date,
-				next_episode_season, next_episode_number, next_episode_name, fetched_at, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?)
+				next_episode_season, next_episode_number, next_episode_name, episode_order, fetched_at, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?,
+				COALESCE(NULLIF(?, ''), 'aired'), ?, ?, ?)
 			RETURNING id`,
-			in.Kind, nullInt(in.TMDBID), in.IMDbID, nullInt(in.TVDBID), in.Title.Title, in.OriginalTitle,
+			in.Kind, tmdb, in.IMDbID, tvdb, in.Title.Title, in.OriginalTitle,
 			in.SortTitle, in.Year, in.Overview, in.Tagline, in.ReleaseDate, in.EndDate, in.Status,
 			in.RuntimeMin, in.Rating, in.VoteCount, in.Certification, in.Poster, in.Backdrop, in.Logo,
 			collection, source, in.NextAirDate, in.NextEpisodeSeason, in.NextEpisodeNumber, in.NextEpisodeName,
-			fetched, now, now).Scan(&id)
+			insertOrder, fetched, now, now).Scan(&id)
 		return id, err
 	}
 
+	// What the row has now decides what the seasons do (see seasonsPlan).
+	var oldOrder, oldSource string
+	if err := tx.QueryRowContext(ctx, `SELECT episode_order, source FROM titles WHERE id = ?`, id).Scan(&oldOrder, &oldSource); err != nil {
+		return 0, err
+	}
+	plan.skip = in.ExpectOrder != "" && oldOrder != in.ExpectOrder
+	plan.wipe = oldSource == SourceTVDB && source != SourceTVDB
+
 	// The text the user can edit stays when the title is locked. Images are
 	// never blanked: a source that has none right now must not remove the ones
-	// we have.
+	// we have. A TVDB title that TVDB gives no TMDB id keeps the one it has.
+	idSet := `tmdb_id = ?, tvdb_id = ?`
+	if source == SourceTVDB {
+		idSet = `tmdb_id = COALESCE(?, tmdb_id), tvdb_id = ?`
+	}
 	_, err = tx.ExecContext(ctx, `
 		UPDATE titles SET
-			tmdb_id = ?, imdb_id = ?, tvdb_id = ?, original_title = ?,
+			`+idSet+`, imdb_id = ?, original_title = ?,
 			title      = CASE WHEN locked = 1 THEN title      ELSE ? END,
 			sort_title = CASE WHEN locked = 1 THEN sort_title ELSE ? END,
 			year       = CASE WHEN locked = 1 THEN year       ELSE ? END,
@@ -279,34 +359,73 @@ func upsertTitleRow(ctx context.Context, tx *sql.Tx, in *TitleInput) (int64, err
 			backdrop = CASE WHEN ? <> '' THEN ? ELSE backdrop END,
 			logo     = CASE WHEN ? <> '' THEN ? ELSE logo     END,
 			collection_id = ?, source = ?, next_air_date = NULLIF(?, ''),
-			next_episode_season = ?, next_episode_number = ?, next_episode_name = ?, fetched_at = ?, updated_at = ?
+			next_episode_season = ?, next_episode_number = ?, next_episode_name = ?,
+			episode_order = CASE WHEN ? = 'tvdb' THEN COALESCE(NULLIF(?, ''), episode_order) ELSE 'aired' END,
+			fetched_at = ?, updated_at = ?
 		WHERE id = ?`,
-		nullInt(in.TMDBID), in.IMDbID, nullInt(in.TVDBID), in.OriginalTitle,
+		tmdb, tvdb, in.IMDbID, in.OriginalTitle,
 		in.Title.Title, in.SortTitle, in.Year, in.Overview, in.Tagline,
 		in.ReleaseDate, in.EndDate, in.Status, in.RuntimeMin, in.Rating, in.VoteCount, in.Certification,
 		in.Poster, in.Poster, in.Backdrop, in.Backdrop, in.Logo, in.Logo,
 		collection, source, in.NextAirDate, in.NextEpisodeSeason, in.NextEpisodeNumber, in.NextEpisodeName,
-		fetched, now, id)
+		source, in.EpisodeOrder, fetched, now, id)
 	return id, err
 }
 
-// findTitle returns the id of the row UpsertTitle updates, or 0.
-func findTitle(ctx context.Context, tx *sql.Tx, in *TitleInput) (int64, error) {
-	var id int64
-	if in.TMDBID != 0 {
-		err := tx.QueryRowContext(ctx, `SELECT id FROM titles WHERE kind = ? AND tmdb_id = ?`,
-			in.Kind, in.TMDBID).Scan(&id)
-		if !errors.Is(err, sql.ErrNoRows) {
+// unlessOwned is nullInt(v), or nil when a row other than self (0: a row about to
+// be inserted) of the kind has v in col ("tmdb_id" or "tvdb_id"): the ids are unique.
+func unlessOwned(ctx context.Context, tx *sql.Tx, col, kind string, v, self int64) (any, error) {
+	if v == 0 {
+		return nil, nil
+	}
+	var taken bool
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM titles WHERE kind = ? AND `+col+` = ? AND id <> ?)`,
+		kind, v, self).Scan(&taken)
+	if err != nil || taken {
+		return nil, err
+	}
+	return v, nil
+}
+
+// findTitle returns the id of the row UpsertTitle updates, or 0. A title is found by
+// its own id first (TVDB's for a title from TVDB, else TMDB's) and then by the other
+// that it carries: a show that moves from one to the other stays one row, with its
+// matches, episodes and credits.
+func findTitle(ctx context.Context, tx *sql.Tx, in *TitleInput, source string) (int64, error) {
+	byTMDB := func() (int64, error) {
+		if in.TMDBID == 0 {
+			return 0, nil
+		}
+		return titleByID(ctx, tx, `SELECT id FROM titles WHERE kind = ? AND tmdb_id = ?`, in.Kind, in.TMDBID)
+	}
+	byTVDB := func() (int64, error) {
+		if in.TVDBID == 0 {
+			return 0, nil
+		}
+		return titleByID(ctx, tx, `SELECT id FROM titles WHERE kind = ? AND tvdb_id = ?`, in.Kind, in.TVDBID)
+	}
+	first, second := byTMDB, byTVDB
+	if source == SourceTVDB {
+		first, second = byTVDB, byTMDB
+	}
+	for _, find := range []func() (int64, error){first, second} {
+		if id, err := find(); err != nil || id != 0 {
 			return id, err
 		}
 	}
 	if in.ID == 0 {
 		return 0, nil
 	}
-	// Addressing by id is for titles that have no TMDB identity yet; a row that
+	// Addressing by id is for titles that have no remote identity yet; a row that
 	// has one belongs to that identity.
-	err := tx.QueryRowContext(ctx, `SELECT id FROM titles WHERE id = ? AND kind = ? AND tmdb_id IS NULL`,
-		in.ID, in.Kind).Scan(&id)
+	return titleByID(ctx, tx, `SELECT id FROM titles WHERE kind = ? AND id = ? AND tmdb_id IS NULL AND tvdb_id IS NULL`,
+		in.Kind, in.ID)
+}
+
+// titleByID runs a query for one title id; 0 for none.
+func titleByID(ctx context.Context, tx *sql.Tx, query string, args ...any) (int64, error) {
+	var id int64
+	err := tx.QueryRowContext(ctx, query, args...).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, nil
 	}
@@ -393,7 +512,7 @@ func setCredits(ctx context.Context, tx *sql.Tx, titleID int64, credits []Credit
 		if c.Person.Name == "" {
 			continue
 		}
-		key := Person{TMDBID: c.Person.TMDBID, Name: c.Person.Name, Profile: c.Person.Profile}
+		key := Person{TMDBID: c.Person.TMDBID, TVDBID: c.Person.TVDBID, Name: c.Person.Name, Profile: c.Person.Profile}
 		pid, ok := people[key]
 		if !ok {
 			var err error
@@ -416,21 +535,38 @@ func setCredits(ctx context.Context, tx *sql.Tx, titleID int64, credits []Credit
 	return nil
 }
 
-// upsertPerson finds or creates a person by TMDB id, or by exact name when
-// there is none. An empty profile never replaces a known one, and a person's
+// upsertPerson finds or creates a person by TMDB id, else by TVDB id, else by
+// exact name. An empty profile never replaces a known one, and a person's
 // fetched details (biography, birthday, fetched_at...) are never touched: a
 // credit only knows a name and a photo.
 func upsertPerson(ctx context.Context, tx *sql.Tx, p Person) (int64, error) {
 	var id int64
-	if p.TMDBID != 0 {
+	switch {
+	case p.TMDBID != 0:
 		err := tx.QueryRowContext(ctx, `
 			INSERT INTO people (tmdb_id, name, profile) VALUES (?, ?, ?)
 			ON CONFLICT (tmdb_id) DO UPDATE SET name = excluded.name,
 				profile = CASE WHEN excluded.profile <> '' THEN excluded.profile ELSE profile END
 			RETURNING id`, p.TMDBID, p.Name, p.Profile).Scan(&id)
+		if err == nil && p.TVDBID != 0 {
+			// Both ids: the person is one row. The TVDB id goes on it unless it is another's.
+			_, err = tx.ExecContext(ctx, `
+				UPDATE people SET tvdb_id = ? WHERE id = ? AND tvdb_id IS NULL
+					AND NOT EXISTS (SELECT 1 FROM people WHERE tvdb_id = ?)`, p.TVDBID, id, p.TVDBID)
+		}
+		return id, err
+	case p.TVDBID != 0:
+		err := tx.QueryRowContext(ctx, `
+			INSERT INTO people (tvdb_id, name, profile) VALUES (?, ?, ?)
+			ON CONFLICT (tvdb_id) DO UPDATE SET
+				-- a person TMDB knows too (the two were merged) keeps the name and the photo TMDB gave
+				name = CASE WHEN people.tmdb_id IS NOT NULL THEN people.name ELSE excluded.name END,
+				profile = CASE WHEN people.tmdb_id IS NOT NULL AND people.profile <> '' THEN people.profile
+					WHEN excluded.profile <> '' THEN excluded.profile ELSE people.profile END
+			RETURNING id`, p.TVDBID, p.Name, p.Profile).Scan(&id)
 		return id, err
 	}
-	err := tx.QueryRowContext(ctx, `SELECT id FROM people WHERE tmdb_id IS NULL AND name = ?`, p.Name).Scan(&id)
+	err := tx.QueryRowContext(ctx, `SELECT id FROM people WHERE tmdb_id IS NULL AND tvdb_id IS NULL AND name = ?`, p.Name).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = tx.QueryRowContext(ctx, `INSERT INTO people (name, profile) VALUES (?, ?) RETURNING id`,
 			p.Name, p.Profile).Scan(&id)

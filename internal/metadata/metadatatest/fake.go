@@ -16,10 +16,21 @@ import (
 	"ply/internal/store"
 )
 
+// ShowOrder names a show in one episode order.
+type ShowOrder struct {
+	ID    int64
+	Order string
+}
+
 // Fake is a metadata.Provider. Fill the fields before use; they are read
 // without locking, so do not change them while it is in use (Err and Calls
 // aside, which are safe through the methods).
+//
+// It stands for TMDB, or, with Source set to metadata.SourceTVDB, for TVDB: shows
+// only, every season in each fetch, and the episode order of the fetch in the result.
 type Fake struct {
+	// Source is whose ids the fake gives: metadata.SourceTMDB (the default) or SourceTVDB.
+	Source string
 	// Search results by lower-case query; the year is ignored. A query that is
 	// not here finds nothing.
 	MovieSearch  map[string][]metadata.Candidate
@@ -32,6 +43,10 @@ type Fake struct {
 	Movies map[int64]*store.TitleInput
 	Shows  map[int64]*store.TitleInput
 	People map[int64]*store.Person
+	// For a TVDB fake: a show in an episode order other than aired (Series falls back to
+	// Shows for an order not here), and the show each thetvdb.com slug names.
+	ShowOrders map[ShowOrder]*store.TitleInput
+	Slugs      map[string]int64
 	// What Changes returns.
 	ChangedMovies []int64
 	ChangedShows  []int64
@@ -48,6 +63,16 @@ type Fake struct {
 }
 
 var _ metadata.Provider = (*Fake)(nil)
+
+// Name implements metadata.Provider.
+func (f *Fake) Name() string {
+	if f.Source == "" {
+		return metadata.SourceTMDB
+	}
+	return f.Source
+}
+
+func (f *Fake) tvdb() bool { return f.Name() == metadata.SourceTVDB }
 
 // Offline makes every method fail with a transient error, as when there is no
 // network; Online undoes it.
@@ -104,6 +129,30 @@ func (f *Fake) SearchMovies(ctx context.Context, query string, year int) ([]meta
 	return slices.Clone(f.MovieSearch[strings.ToLower(query)]), nil
 }
 
+// Brief describes a show without its episodes (see metadata.Providers.Lookup).
+func (f *Fake) Brief(ctx context.Context, id int64) (metadata.Candidate, error) {
+	if err := f.enter(ctx, "Brief(%d)", id); err != nil {
+		return metadata.Candidate{}, err
+	}
+	in, ok := f.Shows[id]
+	if !ok {
+		return metadata.Candidate{}, notFound(fmt.Sprintf("GET /series/%d/extended", id))
+	}
+	return metadata.Candidate{ID: id, Source: f.Name(), Title: in.Title.Title, OriginalTitle: in.OriginalTitle, Year: in.Year,
+		Overview: in.Overview, Poster: in.Poster}, nil
+}
+
+// SeriesBySlug finds the show of a thetvdb.com address by Slugs.
+func (f *Fake) SeriesBySlug(ctx context.Context, slug string) (int64, error) {
+	if err := f.enter(ctx, "SeriesBySlug(%q)", slug); err != nil {
+		return 0, err
+	}
+	if id, ok := f.Slugs[slug]; ok {
+		return id, nil
+	}
+	return 0, metadata.ErrNoSuchTitle
+}
+
 func (f *Fake) SearchSeries(ctx context.Context, query string, year int) ([]metadata.Candidate, error) {
 	if err := f.enter(ctx, "SearchSeries(%q, %d)", query, year); err != nil {
 		return nil, err
@@ -124,22 +173,39 @@ func (f *Fake) Movie(ctx context.Context, id int64) (*store.TitleInput, error) {
 		return nil, err
 	}
 	in, ok := f.Movies[id]
-	if !ok {
+	if !ok || f.tvdb() {
 		return nil, notFound(fmt.Sprintf("GET /movie/%d", id))
 	}
 	cp := *in
 	return &cp, nil
 }
 
-func (f *Fake) Series(ctx context.Context, id int64, seasons []int) (*store.TitleInput, error) {
-	if err := f.enter(ctx, "Series(%d, %v)", id, seasons); err != nil {
+// Series gives the show. A TMDB fake gives the seasons asked for; a TVDB fake gives all
+// of them, from ShowOrders for an order that has an entry there, else from Shows, and
+// the result has the order of the call.
+func (f *Fake) Series(ctx context.Context, id int64, order string, seasons []int) (*store.TitleInput, error) {
+	if f.tvdb() {
+		if order == "" {
+			order = store.OrderAired
+		}
+		if err := f.enter(ctx, "Series(%d, %s)", id, order); err != nil {
+			return nil, err
+		}
+	} else if err := f.enter(ctx, "Series(%d, %v)", id, seasons); err != nil {
 		return nil, err
 	}
 	in, ok := f.Shows[id]
+	if v, has := f.ShowOrders[ShowOrder{id, order}]; has && f.tvdb() {
+		in, ok = v, true
+	}
 	if !ok {
 		return nil, notFound(fmt.Sprintf("GET /tv/%d", id))
 	}
 	cp := *in
+	if f.tvdb() {
+		cp.EpisodeOrder, cp.ResetSeasons = order, len(cp.Seasons) > 0
+		return &cp, nil
+	}
 	cp.Seasons = nil
 	for _, se := range in.Seasons {
 		if slices.Contains(seasons, se.Number) {
@@ -174,6 +240,12 @@ func (f *Fake) Changes(ctx context.Context, kind string, _, _ time.Time) ([]int6
 func (f *Fake) Check(ctx context.Context) error { return f.enter(ctx, "Check()") }
 
 func (f *Fake) ImageURL(size, file string) string {
+	if f.tvdb() {
+		if !metadata.ValidTVDBImage(size, file) {
+			return ""
+		}
+		return strings.TrimRight(f.ImageBase, "/") + "/tvdb/" + size + "/" + strings.TrimPrefix(file, "/")
+	}
 	if !metadata.ValidSize(size) || !metadata.ValidImagePath(file) {
 		return ""
 	}

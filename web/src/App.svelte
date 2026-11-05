@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
+  import { openActivity } from './lib/activity.svelte';
   import { api, ApiError, getToken, onUnauthorized, setToken } from './lib/api';
   import { ambient } from './lib/ambient.svelte';
   import { router } from './lib/router.svelte';
@@ -8,6 +9,7 @@
   import SearchPalette from './components/SearchPalette.svelte';
   import TabBar from './components/TabBar.svelte';
   import TokenPrompt from './components/TokenPrompt.svelte';
+  import Activity from './pages/Activity.svelte';
   import Collection from './pages/Collection.svelte';
   import Genre from './pages/Genre.svelte';
   import Home from './pages/Home.svelte';
@@ -32,6 +34,12 @@
   $effect(() => {
     document.documentElement.style.setProperty('--tint', ambient.color || 'var(--accent)');
     document.documentElement.toggleAttribute('data-lit', !!ambient.color);
+  });
+
+  // The background queue's live feed, for the header's indicator and the Activity page. Closed while
+  // a video plays: nothing shows it then, and playback comes first.
+  $effect(() => {
+    if (phase === 'ready' && !playing) return untrack(openActivity);
   });
 
   onUnauthorized(() => {
@@ -116,6 +124,8 @@
         {#key route.id}<Collection id={route.id} />{/key}
       {:else if route.name === 'settings'}
         <Settings />
+      {:else if route.name === 'activity'}
+        <Activity />
       {:else}
         <div class="page center">
           <h1>This page doesn’t exist</h1>

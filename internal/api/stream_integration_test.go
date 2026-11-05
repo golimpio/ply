@@ -282,8 +282,9 @@ func TestHLSEndToEnd(t *testing.T) {
 				if _, err := os.Stat(dir); !os.IsNotExist(err) {
 					t.Errorf("session dir still there: %v", err)
 				}
-				if resp, _ := e.do("GET", pb.URL, "", nil); resp.StatusCode != 404 {
-					t.Errorf("playlist after DELETE = %d, want 404", resp.StatusCode)
+				// (410, not 404: it was stopped on purpose, and a player must not start another.)
+				if resp, _ := e.do("GET", pb.URL, "", nil); resp.StatusCode != 410 {
+					t.Errorf("playlist after DELETE = %d, want 410", resp.StatusCode)
 				}
 			})
 		}

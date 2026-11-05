@@ -358,7 +358,7 @@ func TestTitlesDueForRefresh(t *testing.T) {
 	if len(refs) != len(specs)-2 {
 		t.Errorf("LibraryTitleRefs = %d refs, want %d", len(refs), len(specs)-2)
 	}
-	if !reflect.DeepEqual(refs[0], TitleRef{ID: refs[0].ID, Kind: KindSeries, TMDBID: 1000, Locked: false}) {
+	if !reflect.DeepEqual(refs[0], TitleRef{ID: refs[0].ID, Kind: KindSeries, TMDBID: 1000, Source: SourceTMDB, Locked: false}) {
 		t.Errorf("first ref = %+v", refs[0])
 	}
 }

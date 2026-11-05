@@ -88,8 +88,8 @@ func TestKeyPrecedenceIsFlagEnvSettingsDefault(t *testing.T) {
 		if (p != nil) != (tc.wantKey != "") {
 			t.Errorf("%s: provider = %v", tc.name, p)
 		}
-		if p != nil && p.(*stubProvider).key != tc.wantKey {
-			t.Errorf("%s: the provider was built with %q, want %q", tc.name, p.(*stubProvider).key, tc.wantKey)
+		if p != nil && p.TMDB.(*stubProvider).key != tc.wantKey {
+			t.Errorf("%s: the provider was built with %q, want %q", tc.name, p.TMDB.(*stubProvider).key, tc.wantKey)
 		}
 	}
 }
@@ -152,18 +152,18 @@ func TestProviderIsBuiltOncePerKeyAndLanguage(t *testing.T) {
 	env.st.SetSetting(ctx, SettingTMDBKey, "AAA")
 	p1, _ := s.Provider(ctx)
 	p2, _ := s.Provider(ctx)
-	if p1 == nil || p1 != p2 || len(env.built) != 1 {
+	if p1 == nil || p1.TMDB != p2.TMDB || len(env.built) != 1 {
 		t.Fatalf("built %v; want one provider shared", env.built)
 	}
 	// A change of key is seen at once, with no restart.
 	env.st.SetSetting(ctx, SettingTMDBKey, "BBB")
 	p3, r := s.Provider(ctx)
-	if p3 == p1 || p3.(*stubProvider).key != "BBB" || r.Key() != "BBB" || len(env.built) != 2 {
+	if p3.TMDB == p1.TMDB || p3.TMDB.(*stubProvider).key != "BBB" || r.Key() != "BBB" || len(env.built) != 2 {
 		t.Errorf("after a key change: %v, built %v", p3, env.built)
 	}
 	// And of language.
 	env.st.SetSetting(ctx, SettingLanguage, "fr-FR")
-	if p4, _ := s.Provider(ctx); p4.(*stubProvider).language != "fr-FR" || len(env.built) != 3 {
+	if p4, _ := s.Provider(ctx); p4.TMDB.(*stubProvider).language != "fr-FR" || len(env.built) != 3 {
 		t.Errorf("after a language change: built %v", env.built)
 	}
 	// The key removed: no provider.

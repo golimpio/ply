@@ -50,21 +50,36 @@ func (s *Server) metadataOff(w http.ResponseWriter) bool {
 	return false
 }
 
+// providerName is whose error err is: TVDB's (a *metadata.TVDBError) or TMDB's.
+func providerName(err error) string {
+	var te *metadata.TVDBError
+	if errors.As(err, &te) {
+		return "TVDB"
+	}
+	return "TMDB"
+}
+
 // metadataError turns an error of the metadata package into a response.
 func (s *Server) metadataError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not found")
 	case errors.Is(err, metadata.ErrLookupsOff):
-		writeError(w, http.StatusConflict, "online metadata lookups are off: set a TMDB key and turn them on in the settings")
+		writeError(w, http.StatusConflict, "online metadata lookups are off: set a TMDB or TVDB key and turn them on in the settings")
+	case errors.Is(err, metadata.ErrNoTVDB), errors.Is(err, metadata.ErrNoTMDB):
+		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, metadata.ErrNoSuchTitle):
-		writeError(w, http.StatusBadRequest, "TMDB has no title with that id")
+		writeError(w, http.StatusBadRequest, "no title with that id")
+	case errors.Is(err, metadata.ErrNoSuchOrder):
+		writeError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, metadata.ErrNotTVDB):
+		writeError(w, http.StatusBadRequest, err.Error())
 	case r.Context().Err() != nil:
 		// the client went away
 	case metadata.IsUnauthorized(err):
-		writeError(w, http.StatusBadGateway, "TMDB refused the key")
+		writeError(w, http.StatusBadGateway, providerName(err)+" refused the key")
 	case metadata.IsTransient(err), errors.Is(err, context.DeadlineExceeded):
-		writeError(w, http.StatusBadGateway, "could not reach TMDB: "+err.Error())
+		writeError(w, http.StatusBadGateway, "could not reach "+providerName(err)+": "+err.Error())
 	default:
 		s.internalError(w, r, err)
 	}
@@ -81,9 +96,12 @@ func (s *Server) handlePerson(w http.ResponseWriter, r *http.Request) {
 		// The details are fetched the first time anyone opens the page. A
 		// failure only means the page has less on it.
 		ctx, cancel := context.WithTimeout(r.Context(), personFetch)
-		if err := s.Metadata.EnsurePerson(ctx, id); err != nil && !errors.Is(err, store.ErrNotFound) && !errors.Is(err, metadata.ErrLookupsOff) {
+		// A person of TVDB that TMDB knows too is merged into the TMDB person: the page is that one's.
+		now, err := s.Metadata.EnsurePersonID(ctx, id)
+		if err != nil && !errors.Is(err, store.ErrNotFound) && !errors.Is(err, metadata.ErrLookupsOff) {
 			s.Logger.Debug("metadata: person details", "id", id, "err", err)
 		}
+		id = now
 		cancel()
 	}
 	d, err := s.Store.GetPerson(r.Context(), id)
@@ -98,7 +116,7 @@ func (s *Server) handlePerson(w http.ResponseWriter, r *http.Request) {
 	out := Person{
 		PersonCard: PersonCard{ID: d.ID, Name: d.Name, Profile: s.imageURL(d.Profile, profileSize), KnownFor: d.KnownFor},
 		Biography:  d.Biography, Birthday: d.Birthday, Deathday: d.Deathday, PlaceOfBirth: d.PlaceOfBirth, IMDbID: d.IMDbID,
-		Credits: []PersonCredit{},
+		TMDBID: d.TMDBID, TVDBID: d.TVDBID, Credits: []PersonCredit{},
 	}
 	for _, c := range d.Credits {
 		out.Credits = append(out.Credits, PersonCredit{TitleID: c.Title.ID, Kind: c.Kind, Job: c.Job, Character: c.Character,
@@ -374,18 +392,40 @@ func (s *Server) handleShow(w http.ResponseWriter, r *http.Request) {
 type matchRequest struct {
 	TMDBID *int64  `json:"tmdbId"`
 	IMDbID *string `json:"imdbId"`
+	// For a show: TVDB's id, or the address of its page at thetvdb.com ("tvdb:81189" and
+	// "thetvdb.com/series/breaking-bad" are accepted too).
+	TVDBID *int64  `json:"tvdbId"`
+	TVDB   *string `json:"tvdb"`
 }
 
-// ref validates the body of a match request: exactly one of tmdbId and imdbId.
+// ref validates the body of a match request: exactly one of tmdbId, imdbId, tvdbId and
+// tvdb.
 func (m matchRequest) ref() (metadata.Ref, string) {
+	given := 0
+	for _, set := range []bool{m.TMDBID != nil, m.IMDbID != nil, m.TVDBID != nil, m.TVDB != nil} {
+		if set {
+			given++
+		}
+	}
 	switch {
-	case m.TMDBID != nil && m.IMDbID != nil:
-		return metadata.Ref{}, "give tmdbId or imdbId, not both"
+	case given > 1:
+		return metadata.Ref{}, "give one of tmdbId, tvdbId, tvdb and imdbId, not several"
 	case m.TMDBID != nil:
 		if *m.TMDBID <= 0 {
 			return metadata.Ref{}, "tmdbId must be a positive number"
 		}
 		return metadata.Ref{TMDBID: *m.TMDBID}, ""
+	case m.TVDBID != nil:
+		if *m.TVDBID <= 0 {
+			return metadata.Ref{}, "tvdbId must be a positive number"
+		}
+		return metadata.Ref{TVDBID: *m.TVDBID}, ""
+	case m.TVDB != nil:
+		id, slug, ok := metadata.ParseTVDBRef(*m.TVDB)
+		if !ok {
+			return metadata.Ref{}, `tvdb must look like tvdb:81189 or https://thetvdb.com/series/breaking-bad`
+		}
+		return metadata.Ref{TVDBID: id, TVDBSlug: slug}, ""
 	case m.IMDbID != nil:
 		id := strings.ToLower(strings.TrimSpace(*m.IMDbID))
 		if !reIMDb.MatchString(id) {
@@ -393,7 +433,7 @@ func (m matchRequest) ref() (metadata.Ref, string) {
 		}
 		return metadata.Ref{IMDbID: id}, ""
 	}
-	return metadata.Ref{}, "give tmdbId or imdbId"
+	return metadata.Ref{}, "give tmdbId, tvdbId, tvdb or imdbId"
 }
 
 // decodeBody reads the JSON body of an edit (at most maxEditBody bytes) into v.
@@ -445,6 +485,10 @@ func (s *Server) handleMatchItem(w http.ResponseWriter, r *http.Request) {
 	}
 	ref, ok := readMatchRequest(w, r)
 	if !ok || s.metadataOff(w) {
+		return
+	}
+	if ref.TVDBID != 0 || ref.TVDBSlug != "" {
+		writeError(w, http.StatusBadRequest, "TVDB has no movies: give tmdbId or imdbId")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), matchTimeout)
@@ -529,6 +573,16 @@ type titlePatch struct {
 	Year      *int    `json:"year"`
 	Overview  *string `json:"overview"`
 	Tagline   *string `json:"tagline"`
+	// EpisodeOrder (aired, dvd or absolute) is for a show from TVDB: the files are mapped
+	// to its episodes again in that order and the show is fetched again. It does not lock
+	// the title; the text fields do.
+	EpisodeOrder *string `json:"episodeOrder"`
+}
+
+// text reports whether the patch edits text, which locks the title.
+func (p titlePatch) text() bool {
+	p.EpisodeOrder = nil
+	return p != (titlePatch{})
 }
 
 func (s *Server) handlePatchTitle(w http.ResponseWriter, r *http.Request) {
@@ -541,7 +595,11 @@ func (s *Server) handlePatchTitle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req == (titlePatch{}) {
-		writeError(w, http.StatusBadRequest, "give at least one of title, sortTitle, year, overview, tagline")
+		writeError(w, http.StatusBadRequest, "give at least one of title, sortTitle, year, overview, tagline, episodeOrder")
+		return
+	}
+	if req.EpisodeOrder != nil && !store.ValidEpisodeOrder(*req.EpisodeOrder) {
+		writeError(w, http.StatusBadRequest, "episodeOrder must be aired, dvd or absolute")
 		return
 	}
 	for _, f := range []struct {
@@ -575,22 +633,45 @@ func (s *Server) handlePatchTitle(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	err := s.Store.PatchTitle(r.Context(), id, store.TitlePatch{Title: req.Title, SortTitle: req.SortTitle, Year: req.Year,
-		Overview: req.Overview, Tagline: req.Tagline})
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "title not found")
-		return
+	// The order first: if TVDB cannot give the show in it, nothing is changed.
+	changedOrder := req.EpisodeOrder != nil
+	if req.EpisodeOrder != nil {
+		if s.metadataOff(w) {
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), matchTimeout)
+		err := s.Metadata.SetEpisodeOrder(ctx, id, *req.EpisodeOrder)
+		cancel()
+		if err != nil {
+			s.metadataError(w, r, err)
+			return
+		}
 	}
-	if err != nil {
-		s.internalError(w, r, err)
-		return
+	if req.text() {
+		err := s.Store.PatchTitle(r.Context(), id, store.TitlePatch{Title: req.Title, SortTitle: req.SortTitle, Year: req.Year,
+			Overview: req.Overview, Tagline: req.Tagline})
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "title not found")
+			return
+		}
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
 	}
 	d, err := s.Store.GetTitleDetail(r.Context(), id)
 	if err != nil {
 		s.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.titleDetail(d))
+	out := s.titleDetail(d)
+	if changedOrder {
+		// How many of the show's files have no episode in the new order: the page can say so.
+		if n, err := s.Store.UnmappedEpisodeFiles(r.Context(), id); err == nil {
+			out.Unmapped = &n
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // ---- refresh, status, review, search ----
@@ -691,8 +772,13 @@ func (s *Server) handleMetadataSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]Candidate, len(res))
 	for i, c := range res {
-		out[i] = Candidate{TMDBID: c.TMDBID, Title: c.Title, OriginalTitle: c.OriginalTitle, Year: c.Year, Overview: c.Overview,
+		out[i] = Candidate{Source: c.Source, ID: c.ID, Title: c.Title, OriginalTitle: c.OriginalTitle, Year: c.Year, Overview: c.Overview,
 			Poster: s.imageURL(c.Poster, "w185"), Score: c.Score}
+		if c.Source == metadata.SourceTVDB {
+			out[i].TVDBID = c.ID
+		} else {
+			out[i].TMDBID = c.ID
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -704,8 +790,10 @@ func (s *Server) settingsView(ctx context.Context) SettingsView {
 	if s.Settings != nil {
 		r := s.Settings.Resolve(ctx)
 		v = SettingsView{TMDBKeySet: r.KeySet(), TMDBKeySource: string(r.KeySource), MetadataEnabled: r.Enabled,
-			MetadataForcedOff: r.ForcedOff, Language: r.Language}
+			MetadataForcedOff: r.ForcedOff, Language: r.Language,
+			TVDBKeySet: r.TVDBKeySet(), TVDBPINSet: r.TVDBPINSet(), TVDBKeySource: string(r.TVDBKeySource)}
 	}
+	v.TVDBAttribution, v.TVDBAttributionURL = tvdbAttribution, tvdbAttributionURL
 	l := s.playLimits(ctx)
 	v.MaxStreams, v.MaxStreamsSource = l.streams, l.streamsSource
 	v.MaxTranscodes, v.MaxTranscodesSource = l.transcodes, l.transcodesSource
@@ -718,6 +806,8 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 
 type settingsRequest struct {
 	TMDBKey         *string `json:"tmdbKey"`
+	TVDBKey         *string `json:"tvdbKey"` // "" removes the stored key
+	TVDBPIN         *string `json:"tvdbPin"` // "" removes the stored PIN
 	MetadataEnabled *bool   `json:"metadataEnabled"`
 	Language        *string `json:"language"`
 	MaxStreams      *int    `json:"maxStreams"`
@@ -740,10 +830,10 @@ func (s *Server) handlePatchSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req == (settingsRequest{}) {
-		writeError(w, http.StatusBadRequest, "give at least one of tmdbKey, metadataEnabled, language, maxStreams, maxTranscodes")
+		writeError(w, http.StatusBadRequest, "give at least one of tmdbKey, tvdbKey, tvdbPin, metadataEnabled, language, maxStreams, maxTranscodes")
 		return
 	}
-	metadataChange := req.TMDBKey != nil || req.MetadataEnabled != nil || req.Language != nil
+	metadataChange := req.TMDBKey != nil || req.TVDBKey != nil || req.TVDBPIN != nil || req.MetadataEnabled != nil || req.Language != nil
 	if metadataChange && s.Settings == nil {
 		writeError(w, http.StatusServiceUnavailable, "settings are not available")
 		return
@@ -752,13 +842,14 @@ func (s *Server) handlePatchSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if metadataChange {
-		err := s.Settings.Update(r.Context(), metadata.Update{Key: req.TMDBKey, Enabled: req.MetadataEnabled, Language: req.Language})
+		err := s.Settings.Update(r.Context(), metadata.Update{Key: req.TMDBKey, Enabled: req.MetadataEnabled, Language: req.Language,
+			TVDBKey: req.TVDBKey, TVDBPIN: req.TVDBPIN})
 		switch {
 		case err == nil:
-		case errors.Is(err, metadata.ErrInvalidSetting), errors.Is(err, metadata.ErrKeyRejected):
+		case errors.Is(err, metadata.ErrInvalidSetting), errors.Is(err, metadata.ErrKeyRejected), errors.Is(err, metadata.ErrTVDBRejected):
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
-		case errors.Is(err, metadata.ErrUnreachable):
+		case errors.Is(err, metadata.ErrUnreachable), errors.Is(err, metadata.ErrTVDBUnreachable):
 			writeError(w, http.StatusBadGateway, err.Error())
 			return
 		default:
@@ -780,5 +871,48 @@ func (s *Server) handlePatchSettings(w http.ResponseWriter, r *http.Request) {
 	if req.TMDBKey != nil && strings.TrimSpace(*req.TMDBKey) != "" {
 		view.TMDBKeyChecked = ptr(!view.MetadataForcedOff)
 	}
+	// The key, not the PIN: a PIN alone is checked against the key that is there, but it is
+	// the answer about a key that tvdbKeyChecked gives.
+	if req.TVDBKey != nil && strings.TrimSpace(*req.TVDBKey) != "" {
+		view.TVDBKeyChecked = ptr(!view.MetadataForcedOff)
+	}
 	writeJSON(w, http.StatusOK, view)
+}
+
+// SettingsTest is the answer of POST /api/settings/test.
+type SettingsTest struct {
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"` // why not: never has a key or a PIN in it
+}
+
+// handleTestSettings is POST /api/settings/test {"provider": "tmdb" | "tvdb"}: it checks the key
+// in use for that provider, from wherever it comes, with a request made now (a login for
+// TVDB, with its PIN if there is one). A key that does not work is an answer, not a failure of
+// the request: 200 with ok false and the reason. The key is not in the reply, and it is not
+// something the page can ask for: the page only sees whether it works.
+func (s *Server) handleTestSettings(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Provider string `json:"provider"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	provider := strings.ToLower(strings.TrimSpace(req.Provider))
+	if provider != metadata.SourceTMDB && provider != metadata.SourceTVDB {
+		writeError(w, http.StatusBadRequest, `provider must be "tmdb" or "tvdb"`)
+		return
+	}
+	if s.Settings == nil {
+		writeError(w, http.StatusServiceUnavailable, "settings are not available")
+		return
+	}
+	err := s.Settings.Test(r.Context(), provider)
+	if r.Context().Err() != nil {
+		return // the client went away
+	}
+	if err != nil {
+		writeJSON(w, http.StatusOK, SettingsTest{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, SettingsTest{OK: true})
 }

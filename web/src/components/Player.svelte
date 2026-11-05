@@ -3,19 +3,28 @@
   import type HlsType from 'hls.js';
   import { api, mediaUrl, type ItemDetail, type Playback, type Subtitle } from '../lib/api';
   import { channelLabel, codecLabel, episodeLabel, languageLabel, methodLabel } from '../lib/format';
+  import { Heartbeat } from '../lib/heartbeat';
   import { applyProgress } from '../lib/library.svelte';
+  import { AUTO_RETRIES, limitOf, probeMedia, type PlayLimit as Limit } from '../lib/playlimit';
   import { browserProfile } from '../lib/profile';
   import { Progress } from '../lib/progress';
   import { href } from '../lib/router.svelte';
-  import { MAX_SESSION_RESTARTS, sessionGone } from '../lib/session';
+  import { MAX_SESSION_RESTARTS, sessionGone, sessionStopped } from '../lib/session';
   import { artSrc } from '../lib/ui-types';
   import PlayerControls, { type Track } from './PlayerControls.svelte';
+  import PlayLimit from './PlayLimit.svelte';
 
   let { item, startSec = 0 }: { item: ItemDetail; startSec?: number } = $props();
 
   let video = $state<HTMLVideoElement>();
-  let phase = $state<'starting' | 'ready' | 'error'>('starting');
+  /** 'stopped': someone stopped this play on purpose (410), from another device or the Activity page. */
+  let phase = $state<'starting' | 'ready' | 'error' | 'limit' | 'stopped'>('starting');
   let error = $state('');
+  /** The server is at its limit of plays or conversions: what it said. Kept while a retry is asked. */
+  let limit = $state<Limit>();
+  /** The cap panel counts down and tries again on its own (not for ever: see AUTO_RETRIES). */
+  let limitAuto = $state(true);
+  let limitRetries = 0;
   let playback = $state<Playback>();
   /** The audio stream the viewer picked; undefined until they pick one (the server chooses). */
   let audioIndex = $state<number>();
@@ -28,6 +37,10 @@
   let sessionId: string | undefined;
   let destroyed = false;
   let attempt = 0;
+  /** Whether the current attempt plays once loaded; a retry at the limit keeps it (a paused player stays paused). */
+  let wantPlay = true;
+  /** Whether the stream torn down by pagehide was playing: a restore from the back/forward cache keeps that. */
+  let leftPlaying = true;
   let resumed = false;
   /**
    * Resume state of the <video> across streams (lib/progress.ts): where each stream must start, what
@@ -46,6 +59,22 @@
     },
     () => item.durationSec,
   );
+  /**
+   * Keeps the HLS session alive, paused or not (lib/heartbeat.ts); a direct play has none. A 404
+   * means the server lost it (sessionLost); a 410 that someone stopped it (stoppedElsewhere).
+   */
+  const heartbeat = new Heartbeat({
+    send: (sid, pos, paused) => api.heartbeat(sid, pos, paused),
+    position: () => progress.position(),
+    paused: () => el?.paused ?? true,
+    onGone: (sid, pos) => {
+      if (destroyed || sid !== sessionId) return;
+      if (!sessionLost(attempt, pos, wantsToPlay())) fail('The server ended this stream.');
+    },
+    onStopped: (sid) => {
+      if (!destroyed && sid === sessionId) stoppedElsewhere();
+    },
+  });
   /** The hls.js chunk would not load: the browser remembers that for the life of the page. */
   let chunkFailed = false;
   /** Times in a row the server dropped our session and we started another (reset once playback runs). */
@@ -125,9 +154,18 @@
     restart();
   }
 
-  /** Start a new playback at the current position (a new audio track or burned-in subtitle). */
+  /**
+   * Whether the viewer wants this to play. Once a stream is ready that is the element's own state;
+   * before (preparing, or at the limit) the element sits paused by release(), so it is what the last
+   * start() was asked for.
+   */
+  function wantsToPlay(): boolean {
+    return phase === 'ready' ? !(el?.paused ?? true) : wantPlay;
+  }
+
+  /** Start a new playback at the current position (a new audio track or burned-in subtitle), paused if it was. */
   function restart() {
-    void start(progress.position());
+    void start(progress.position(), wantsToPlay());
   }
 
   // ---- progress ------------------------------------------------------------------
@@ -146,11 +184,13 @@
 
   function onPlay() {
     startTicker();
+    heartbeat.beat();
   }
 
   function onPause() {
     stopTicker();
     progress.report();
+    heartbeat.beat();
   }
 
   function onEnded() {
@@ -173,6 +213,7 @@
       el.removeAttribute('src');
       el.load();
     }
+    heartbeat.stop();
     if (sessionId) {
       void api.deleteSession(sessionId);
       sessionId = undefined;
@@ -182,13 +223,68 @@
   function fail(message: string) {
     phase = 'error';
     error = message;
+    limit = undefined;
     progress.report(); // where it got to, while the element still knows
     release();
   }
 
-  /** Start a stream at `at` seconds into the file, replacing the current one. */
-  async function start(at: number) {
+  /**
+   * The server lost the session of attempt `run` (404: it restarted, or reaped it): carry on where it
+   * was in a new one, playing or paused as it was. However many ways the loss is reported (a beat, a
+   * segment, the element), it counts once: the first starts a new attempt, the others are stale.
+   * False when it has been tried too often in a row (the caller decides how to fail).
+   */
+  function sessionLost(run: number, at: number, play: boolean): boolean {
+    if (run !== attempt) return true;
+    if (sessionRestarts >= MAX_SESSION_RESTARTS) return false;
+    sessionRestarts++;
+    void start(at, play);
+    return true;
+  }
+
+  /** Someone stopped this play on purpose (410): say so, and start nothing until the viewer asks. */
+  function stoppedElsewhere() {
+    attempt++; // whatever is still on its way (a start, a probe) is for a play that is over
+    progress.report();
+    sessionId = undefined; // already ended by the server: nothing to delete
+    release();
+    limit = undefined;
+    phase = 'stopped';
+  }
+
+  let frame = $state<HTMLDivElement>();
+
+  /**
+   * A retry got in: the cap panel goes. If it had the focus (or the page has it), the focus goes to
+   * the player's play button rather than falling to the page.
+   */
+  function closeLimit() {
+    if (!limit) return;
+    const a = document.activeElement;
+    const inPanel = a === document.body || !!frame?.querySelector('.overlay.limit')?.contains(a);
+    limit = undefined;
+    if (inPanel) frame?.querySelector<HTMLElement>('.controls .ctl.big')?.focus();
+  }
+
+  /** The server is at a limit: show what is playing instead of a broken video. */
+  function refused(l: Limit) {
+    progress.report();
+    release();
+    limit = l;
+    limitAuto = limitRetries < AUTO_RETRIES;
+    phase = 'limit';
+  }
+
+  /** From the cap panel: its countdown ran out (auto), or the viewer asked (or stopped a play). */
+  function retryLimit(auto: boolean) {
+    limitRetries = auto ? limitRetries + 1 : 0;
+    void start(progress.position(), wantPlay);
+  }
+
+  /** Start a stream at `at` seconds into the file, replacing the current one; `play` it once loaded. */
+  async function start(at: number, play = true) {
     const run = ++attempt;
+    wantPlay = play;
     progress.report(); // the position of the stream we are about to replace (a no-op unless it counts)
     release();
     progress.begin(at);
@@ -206,7 +302,10 @@
         subtitleIndex: burnIndex,
       });
     } catch (e) {
-      if (!destroyed && run === attempt) fail(e instanceof Error ? e.message : String(e));
+      if (destroyed || run !== attempt) return;
+      const l = limitOf(e);
+      if (l) refused(l);
+      else fail(e instanceof Error ? e.message : String(e));
       return;
     }
     if (destroyed || run !== attempt) {
@@ -215,6 +314,8 @@
     }
     sessionId = pb.sessionId;
     playback = pb;
+    closeLimit();
+    if (pb.sessionId) heartbeat.start(pb.sessionId);
 
     if (!pb.url) {
       // Without a url the server could not stream it (streaming disabled); the last reason says why.
@@ -259,15 +360,14 @@
       let mediaRetries = 0;
       h.on(Hls.Events.ERROR, (_evt, data) => {
         if (h !== hls) return;
-        if (sessionGone(data)) {
-          // The server ends a session that is not asked for anything for a while, and a paused player
-          // with a full buffer asks for nothing: the same URL will never work again (hls.js would
-          // retry it for half a minute). Start a new session at the current position instead; if
-          // that keeps failing the same way, stop (startLoad cannot revive a playlist that 404s).
-          if (sessionRestarts < MAX_SESSION_RESTARTS) {
-            sessionRestarts++;
-            restart();
-          } else if (data.fatal) fail(`Stream error: ${data.details}`);
+        if (sessionStopped(data)) {
+          stoppedElsewhere(); // stopped on purpose: not to be started again on its own
+        } else if (sessionGone(data)) {
+          // The server ends a session that is not asked for anything for a while: the same URL will
+          // never work again (hls.js would retry it for half a minute). Start a new session at the
+          // current position instead; if that keeps failing the same way, stop (startLoad cannot
+          // revive a playlist that 404s).
+          if (!sessionLost(run, progress.position(), wantsToPlay()) && data.fatal) fail(`Stream error: ${data.details}`);
         } else if (!data.fatal) {
           return;
         } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR && networkRetries++ < 3) h.startLoad();
@@ -278,9 +378,10 @@
       h.loadSource(url);
       h.attachMedia(v);
     }
-    v.play().catch(() => {
-      // autoplay blocked: the user can press play
-    });
+    if (play)
+      v.play().catch(() => {
+        // autoplay blocked: the user can press play
+      });
   }
 
   // Resume: stream time 0 is file time 0, so a resume is a plain seek once metadata is known. The
@@ -294,11 +395,8 @@
   function onVideoError() {
     if (!el?.currentSrc) return; // fired by our own teardown
     const code = el.error?.code;
-    if (code === MediaError.MEDIA_ERR_NETWORK && isHlsUrl(el.currentSrc) && sessionRestarts < MAX_SESSION_RESTARTS) {
-      sessionRestarts++; // native HLS (Safari): the same, a session that expired while paused
-      restart();
-      return;
-    }
+    const src = el.currentSrc;
+    const playing = wantsToPlay();
     const why =
       code === MediaError.MEDIA_ERR_NETWORK
         ? 'a network error interrupted the stream'
@@ -307,11 +405,28 @@
           : code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
             ? 'this format is not supported'
             : 'playback failed';
-    fail(`The browser could not play this item: ${why}.`);
+    const message = `The browser could not play this item: ${why}.`;
+    // A file that will not decode was served: there is no refusal to look for, and asking for the
+    // file again would keep a direct play counted by the server for nothing.
+    if (code === MediaError.MEDIA_ERR_DECODE) {
+      fail(message);
+      return;
+    }
+    // The element only says that it failed. Ask the URL (a direct play's file, or Safari's native HLS
+    // playlist) why: stopped on purpose (410), at a limit (503), or for a playlist a lost session.
+    const run = attempt;
+    void probeMedia(src).then((r) => {
+      if (destroyed || run !== attempt) return;
+      if (r?.kind === 'stopped') stoppedElsewhere();
+      else if (r?.kind === 'limit') refused(r.limit);
+      else if (code === MediaError.MEDIA_ERR_NETWORK && isHlsUrl(src) && sessionLost(run, progress.position(), playing)) return;
+      else fail(message);
+    });
   }
 
   /** Leaving the page: report first (the media element is about to be torn down), then release. */
   function leave() {
+    leftPlaying = wantsToPlay();
     progress.report(true);
     release();
   }
@@ -321,7 +436,7 @@
    * it was. A first load also fires pageshow, but not with `persisted`.
    */
   function restore(e: PageTransitionEvent) {
-    if (e.persisted && !destroyed) void start(progress.position());
+    if (e.persisted && !destroyed) void start(progress.position(), leftPlaying);
   }
 
   function retry() {
@@ -352,10 +467,11 @@
 
 <svelte:window onpagehide={leave} onpageshow={restore} />
 <!-- iOS Safari often skips pagehide when the app is switched away from: report when the page is hidden. -->
-<svelte:document onvisibilitychange={() => document.hidden && progress.report(true)} />
+<!-- Back in view: beat at once, so that a session lost while hidden (timers are throttled) is replaced now. -->
+<svelte:document onvisibilitychange={() => (document.hidden ? progress.report(true) : heartbeat.beat())} />
 
 <div class="player">
-  <div class="frame">
+  <div class="frame" bind:this={frame}>
     <!-- svelte-ignore a11y_media_has_caption -->
     <video
       bind:this={video}
@@ -368,6 +484,7 @@
       onended={onEnded}
       oncanplay={() => {
         sessionRestarts = 0;
+        limitRetries = 0;
         if (phase === 'starting') phase = 'ready';
       }}
       onerror={onVideoError}
@@ -388,7 +505,17 @@
         onClose={() => (location.hash = href.item(item.id))}
       />
     {/if}
-    {#if phase === 'starting'}
+    {#if limit && (phase === 'limit' || phase === 'starting')}
+      <div class="overlay limit">
+        <PlayLimit {limit} auto={limitAuto} busy={phase === 'starting'} onRetry={retryLimit} />
+      </div>
+    {:else if phase === 'stopped'}
+      <div class="overlay stopped" role="alert">
+        <strong>Stopped from another device</strong>
+        <span>Someone stopped this video from another device. It won't start again on its own.</span>
+        <button class="btn primary" onclick={() => void start(progress.position())}>Play again</button>
+      </div>
+    {:else if phase === 'starting'}
       <div class="overlay passive"><span class="spinner"></span> Preparing stream…</div>
     {:else if phase === 'error'}
       <div class="overlay" role="alert">
@@ -457,6 +584,15 @@
   }
   .overlay strong {
     color: var(--danger);
+  }
+  .overlay.stopped strong {
+    color: var(--text);
+    font-size: 1.15rem;
+  }
+  .overlay.limit {
+    justify-content: safe center;
+    overflow-y: auto;
+    background: rgb(0 0 0 / 0.86);
   }
   .spinner {
     width: 1.1em;

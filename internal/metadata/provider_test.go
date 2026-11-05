@@ -172,7 +172,7 @@ func TestProviderSeries(t *testing.T) {
 	f.on("/tv/1396", "", "tv_1396.json")
 	f.on("/tv/1396/season/1", "", "tv_1396_season_1.json")
 	f.fail("/tv/1396/season/2", "", 404, "error_404.json", nil)
-	in, err := newTMDB(t, f).Series(t.Context(), 1396, []int{1, 2, 1})
+	in, err := newTMDB(t, f).Series(t.Context(), 1396, "", []int{1, 2, 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ func TestProviderSeries(t *testing.T) {
 func TestProviderSeriesAiringAndFailures(t *testing.T) {
 	f := newFakeTMDB(t)
 	f.on("/tv/100088", "", "tv_airing.json")
-	in, err := newTMDB(t, f).Series(t.Context(), 100088, nil)
+	in, err := newTMDB(t, f).Series(t.Context(), 100088, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestProviderSeriesAiringAndFailures(t *testing.T) {
 	// A show with nothing left to air has no next episode.
 	f.on("/tv/1396", "", "tv_1396.json")
 	f.on("/tv/1396/season/1", "", "tv_1396_season_1.json")
-	ended, err := newTMDB(t, f).Series(t.Context(), 1396, nil)
+	ended, err := newTMDB(t, f).Series(t.Context(), 1396, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestProviderSeriesAiringAndFailures(t *testing.T) {
 	f.on("/tv/1396", "", "tv_1396.json")
 	f.on("/tv/1396/season/1", "", "tv_1396_season_1.json")
 	f.fail("/tv/1396/season/2", "", 500, "", nil)
-	if in, err := newTMDB(t, f).Series(t.Context(), 1396, []int{1, 2}); err == nil || !IsTransient(err) || in != nil {
+	if in, err := newTMDB(t, f).Series(t.Context(), 1396, "", []int{1, 2}); err == nil || !IsTransient(err) || in != nil {
 		t.Errorf("Series with a failing season = %v, %v", in, err)
 	}
 }
@@ -282,7 +282,7 @@ func TestProviderPersonFindChangesCheck(t *testing.T) {
 	}
 
 	movies, series, err := p.Find(ctx, ExternalIMDb, "tt0133093")
-	if err != nil || len(movies) != 1 || len(series) != 0 || movies[0].TMDBID != 603 || movies[0].Year != 1999 || movies[0].Title != "The Matrix" {
+	if err != nil || len(movies) != 1 || len(series) != 0 || movies[0].ID != 603 || movies[0].Year != 1999 || movies[0].Title != "The Matrix" {
 		t.Errorf("Find = %+v %+v %v", movies, series, err)
 	}
 	if movies, series, err = p.Find(ctx, ExternalIMDb, "tt0000000"); err != nil || len(movies)+len(series) != 0 {
@@ -320,13 +320,13 @@ func TestProviderSearchCandidates(t *testing.T) {
 	if err != nil || len(cands) != 2 {
 		t.Fatalf("SearchMovies = %+v, %v", cands, err)
 	}
-	want := Candidate{TMDBID: 194, Title: "Amélie", OriginalTitle: "Le Fabuleux Destin d'Amélie Poulain", Year: 2001,
+	want := Candidate{ID: 194, Source: SourceTMDB, Title: "Amélie", OriginalTitle: "Le Fabuleux Destin d'Amélie Poulain", Year: 2001,
 		Overview: cands[0].Overview, Poster: "tmdb:/nSxDa3M9aMvGVLoItzWTepQ5h5d.jpg", Popularity: 40.121}
 	if cands[0] != want {
 		t.Errorf("candidate = %+v, want %+v", cands[0], want)
 	}
 	shows, err := p.SearchSeries(t.Context(), "Breaking Bad", 2008)
-	if err != nil || len(shows) != 2 || shows[0].TMDBID != 1396 || shows[0].Title != "Breaking Bad" || shows[0].Year != 2008 {
+	if err != nil || len(shows) != 2 || shows[0].ID != 1396 || shows[0].Title != "Breaking Bad" || shows[0].Year != 2008 {
 		t.Errorf("SearchSeries = %+v, %v", shows, err)
 	}
 }

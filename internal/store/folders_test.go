@@ -38,7 +38,7 @@ func TestMigration005CreatesFoldersAndKeepsData(t *testing.T) {
 	}
 	for table, want := range map[string][]string{
 		"folders":      {"id", "path", "kind", "guessed", "added_at"},
-		"item_archive": {"path", "size", "tmdb_id", "tmdb_kind", "position_sec", "duration_sec", "watched", "progress_at", "archived_at", "series_id", "series_show"},
+		"item_archive": {"path", "size", "tmdb_id", "tmdb_kind", "position_sec", "duration_sec", "watched", "progress_at", "archived_at", "series_id", "series_show", "series_tvdb_id"},
 	} {
 		if got := columns(t, s.rw, table); !slices.Equal(got, want) {
 			t.Errorf("%s columns = %v, want %v", table, got, want)
@@ -55,8 +55,8 @@ func TestMigration005CreatesFoldersAndKeepsData(t *testing.T) {
 		versions = append(versions, v)
 	}
 	rows.Close()
-	if !slices.Equal(versions, []int{1, 2, 3, 4, 5, 6}) {
-		t.Errorf("schema_version = %v", versions)
+	if want := migrationNumbers(t); !slices.Equal(versions, want) || !slices.Contains(versions, 8) {
+		t.Errorf("schema_version = %v, want %v (and 8, the TVDB one)", versions, want)
 	}
 	// The table itself refuses what the Go side would also refuse.
 	if _, err := s.rw.Exec(`INSERT INTO folders (path, kind, added_at) VALUES ('/x', 'mixed', 1)`); err == nil {

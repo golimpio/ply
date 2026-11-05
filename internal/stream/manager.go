@@ -80,10 +80,15 @@ type Options struct {
 	// BeatTimeout ends a session whose player has sent at least one heartbeat, that
 	// long after its last heartbeat or request [30s; never more than IdleTimeout].
 	BeatTimeout time.Duration
-	SegmentSec  float64       // minimum playlist segment duration [6]
-	Cache       KeyframeCache // optional
-	ProbeNice   int           // nice value of the keyframe scan [10]
-	Logger      *slog.Logger
+	// PausedBeatTimeout is BeatTimeout for a session whose last heartbeat said the
+	// player is paused, until the next request or unpaused heartbeat [3 min; never
+	// more than MaxPausedBeatTimeout]: a browser slows the timers of a hidden tab to
+	// about one a minute, so a paused player in one beats too rarely for 30 s.
+	PausedBeatTimeout time.Duration
+	SegmentSec        float64       // minimum playlist segment duration [6]
+	Cache             KeyframeCache // optional
+	ProbeNice         int           // nice value of the keyframe scan [10]
+	Logger            *slog.Logger
 	// Clock is the time source [time.Now]; a test's.
 	Clock func() time.Time
 	// LeakCheck is how often the registry is compared with the sessions [5s].
@@ -134,6 +139,10 @@ func (o *Options) defaults() {
 	if o.BeatTimeout <= 0 {
 		o.BeatTimeout = DefaultBeatTimeout
 	}
+	if o.PausedBeatTimeout <= 0 {
+		o.PausedBeatTimeout = DefaultPausedBeatTimeout
+	}
+	o.PausedBeatTimeout = min(o.PausedBeatTimeout, MaxPausedBeatTimeout)
 	if o.Clock == nil {
 		o.Clock = time.Now
 	}
@@ -211,7 +220,12 @@ type Manager struct {
 	// Sessions taken out of sessions whose ffmpeg and files are not gone yet. They
 	// count in Count, and against the limits only once they have been stopping for
 	// more than StopGrace.
-	stopping           map[string]stopInfo
+	stopping map[string]stopInfo
+	// Sessions (by id) and direct plays (by id and by client) that were stopped on
+	// purpose, and when, for StoppedTTL: to tell a player that it was told to stop,
+	// not that the session was lost (Stopped).
+	stoppedIDs         map[string]time.Time
+	stoppedDirect      map[DirectKey]time.Time
 	reservedTranscodes int
 	maxStreams         int
 	maxTranscodes      int
@@ -278,8 +292,8 @@ func NewManager(o Options) (*Manager, error) {
 	m := &Manager{
 		o: o, log: o.Logger, dir: dir, ctx: ctx, cancel: cancel,
 		sessions: map[string]*Session{}, stopping: map[string]stopInfo{}, direct: map[DirectKey]*directPlay{},
-		recentDirect: map[DirectKey]time.Time{},
-		maxStreams:   o.MaxSessions, maxTranscodes: o.MaxTranscodes, reg: reg,
+		recentDirect: map[DirectKey]time.Time{}, stoppedIDs: map[string]time.Time{}, stoppedDirect: map[DirectKey]time.Time{},
+		maxStreams: o.MaxSessions, maxTranscodes: o.MaxTranscodes, reg: reg,
 		kfCalls: map[string]*kfCall{}, kfDistrust: map[distrustKey]time.Time{}, kfLocks: map[string]*pathLock{}, clock: o.Clock,
 	}
 	if reaperWanted && o.Reaper != "" {
@@ -466,15 +480,27 @@ func (m *Manager) Get(id string) (*Session, bool) {
 	return s, ok
 }
 
-// Delete stops and removes a session; false if there was none. For a direct
-// play (see Direct) it only drops it from the count: the client reading the file
-// is not ours to stop, and counts again with its next request if there is room.
-func (m *Manager) Delete(id string) bool {
+// Delete stops and removes a session, on purpose (someone asked: DELETE); false
+// if there was none. It is remembered for StoppedTTL (Stopped), so that its player,
+// when it asks again, is told that it was stopped and not that the session is
+// lost. For a direct play (see Direct) it only drops it from the count: the client
+// reading the file is not ours to stop, but for StoppedTTL its requests for the
+// file are refused as stopped (ErrStopped), unless it announces a play again
+// (CheckDirect).
+func (m *Manager) Delete(id string) bool { return m.end(id, true) }
+
+// end is Delete, and for a session that ply ends itself (idle, a Create that
+// failed) with onPurpose false: that one is lost, not stopped.
+func (m *Manager) end(id string, onPurpose bool) bool {
 	m.mu.Lock()
+	now := m.clock()
 	s, ok := m.sessions[id]
 	if ok {
 		delete(m.sessions, id)
-		m.stopping[id] = stopInfo{since: m.clock(), kind: s.kind}
+		m.stopping[id] = stopInfo{since: now, kind: s.kind}
+		if onPurpose {
+			m.stoppedIDs[id] = now
+		}
 	}
 	dropped := false
 	if !ok {
@@ -482,10 +508,15 @@ func (m *Manager) Delete(id string) bool {
 			if d.id == id {
 				delete(m.direct, k)
 				delete(m.recentDirect, k) // stopped on purpose: no grace
+				if onPurpose {
+					m.stoppedIDs[id] = now
+					m.stoppedDirect[k] = now
+				}
 				dropped = true
 			}
 		}
 	}
+	m.pruneStoppedLocked(now)
 	m.loadDirty = m.loadDirty || ok || dropped
 	m.unlock()
 	if ok {
@@ -612,7 +643,7 @@ func (m *Manager) Create(ctx context.Context, r Request) (*Session, error) {
 	err = s.startRunLocked(plan.Segments[startSeg].First)
 	s.mu.Unlock()
 	if err != nil {
-		m.Delete(id)
+		m.end(id, false)
 		return nil, err
 	}
 	return s, nil

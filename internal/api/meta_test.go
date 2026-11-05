@@ -432,7 +432,7 @@ func TestMatchingAFilePutAndDelete(t *testing.T) {
 		27205: {Title: store.Title{Kind: store.KindMovie, TMDBID: 27205, Title: "Inception", Year: 2010, Poster: "tmdb:/inc.jpg"},
 			Genres: []store.Genre{{ID: 28, Name: "Action"}}},
 	}
-	m.fake.FindMovies = map[string][]metadata.Candidate{"imdb_id:tt1375666": {{TMDBID: 27205, Title: "Inception"}}}
+	m.fake.FindMovies = map[string][]metadata.Candidate{"imdb_id:tt1375666": {{ID: 27205, Title: "Inception"}}}
 	path := fmt.Sprintf("/api/items/%d/match", m.multi)
 
 	// By TMDB id.
@@ -447,7 +447,7 @@ func TestMatchingAFilePutAndDelete(t *testing.T) {
 	if rec.Code != 400 {
 		t.Errorf("a tt0133093 with trailing space and upper case: %d %s (tt0133093 is unknown to the fake; want a clean 400)", rec.Code, rec.Body.String())
 	}
-	m.fake.FindMovies["imdb_id:tt0133093"] = []metadata.Candidate{{TMDBID: 603, Title: "The Matrix"}}
+	m.fake.FindMovies["imdb_id:tt0133093"] = []metadata.Candidate{{ID: 603, Title: "The Matrix"}}
 	rec = m.do("PUT", path, `{"imdbId": "TT0133093 "}`)
 	wantStatus(t, rec, 200)
 	if d := decode[ItemDetail](t, rec); d.Meta == nil || d.Meta.TMDBID != 603 {
@@ -525,7 +525,7 @@ func TestMatchingAShow(t *testing.T) {
 		1399: {Title: store.Title{Kind: store.KindSeries, TMDBID: 1399, Title: "Other Show", Year: 2011, Poster: "tmdb:/os.jpg"},
 			Seasons: []store.Season{{Number: 1, Name: "Book One"}}},
 	}
-	m.fake.FindSeries = map[string][]metadata.Candidate{"imdb_id:tt0944947": {{TMDBID: 1399, Title: "Other Show"}}}
+	m.fake.FindSeries = map[string][]metadata.Candidate{"imdb_id:tt0944947": {{ID: 1399, Title: "Other Show"}}}
 
 	rec := m.do("PUT", "/api/shows/Cool%20Show/match", `{"tmdbId": 1399}`)
 	wantStatus(t, rec, 200)
@@ -676,10 +676,10 @@ func TestStatusAndReview(t *testing.T) {
 func TestMetadataSearch(t *testing.T) {
 	m := newMetaEnv(t, apiToken)
 	m.fake.MovieSearch = map[string][]metadata.Candidate{"the matrix": {
-		{TMDBID: 603, Title: "The Matrix", OriginalTitle: "The Matrix", Year: 1999, Overview: "A hacker.", Poster: "tmdb:/p603.jpg", Popularity: 80},
-		{TMDBID: 604, Title: "The Matrix Reloaded", Year: 2003, Popularity: 40},
+		{ID: 603, Title: "The Matrix", OriginalTitle: "The Matrix", Year: 1999, Overview: "A hacker.", Poster: "tmdb:/p603.jpg", Popularity: 80},
+		{ID: 604, Title: "The Matrix Reloaded", Year: 2003, Popularity: 40},
 	}}
-	m.fake.SeriesSearch = map[string][]metadata.Candidate{"cool show": {{TMDBID: 1396, Title: "Cool Show", Year: 2008, Popularity: 9}}}
+	m.fake.SeriesSearch = map[string][]metadata.Candidate{"cool show": {{ID: 1396, Title: "Cool Show", Year: 2008, Popularity: 9}}}
 
 	got := decode[[]Candidate](t, m.get("/api/metadata/search?kind=movie&q=The+Matrix&year=1999"))
 	if len(got) != 2 || got[0].TMDBID != 603 || got[0].Title != "The Matrix" || got[0].Year != 1999 || got[0].Overview != "A hacker." ||

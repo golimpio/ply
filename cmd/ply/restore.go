@@ -27,7 +27,8 @@ var (
 	restoreRetries = 3
 )
 
-// restoreKey names a manual match to apply.
+// restoreKey names a manual match to apply. tmdbID is the id the person chose: TMDB's, or
+// TVDB's when kind is store.KindSeriesTVDB (a show matched through TVDB).
 type restoreKey struct {
 	itemID, tmdbID int64
 	kind           string // store.KindMovie, or store.KindSeries for the item's show
@@ -125,23 +126,25 @@ func (r *matchRestorer) drain(ctx context.Context) {
 			r.finished(req)
 		case ctx.Err() != nil:
 			return
-		case errors.Is(err, metadata.ErrLookupsOff):
-			// No key, or the privacy switch is off: the match waits in the archive for
-			// the day there is one (the scanner reports it again once lookups are on).
-			r.log.Debug("a restored file's TMDB match waits for online lookups", "item", req.itemID, "tmdb", req.tmdbID)
+		case errors.Is(err, metadata.ErrLookupsOff), errors.Is(err, metadata.ErrNoTMDB), errors.Is(err, metadata.ErrNoTVDB):
+			// The provider the match is at has no key (a TMDB id needs a TMDB key, a TVDB id a TVDB
+			// key: the gate of the scanner, Settings.Resolve(ctx).Online(), says yes to either), or the
+			// privacy switch is off: the match waits in the archive for the day there is one. The
+			// scanner reports it again after its next scan, and at once when the gate was closed.
+			r.log.Debug("a restored file's match waits for online lookups", "item", req.itemID, "id", req.tmdbID, "kind", req.kind)
 			r.finished(req)
 		case metadata.IsTransient(err) && req.tries < restoreRetries:
 			req.tries++
 			time.AfterFunc(restoreRetry, func() { r.push(req) }) // still on the books until then
 		case errors.Is(err, metadata.ErrNoSuchTitle):
-			// TMDB does not know the title any more: no later try will find it.
-			r.log.Warn("the TMDB title of a restored file's match is gone; the match is dropped", "item", req.itemID,
-				"tmdb", req.tmdbID, "kind", req.kind)
+			// The provider does not know the title any more: no later try will find it.
+			r.log.Warn("the title of a restored file's match is gone; the match is dropped", "item", req.itemID,
+				"id", req.tmdbID, "kind", req.kind)
 			r.forget(ctx, path, req.kind)
 			r.finished(req)
 		default:
-			r.log.Warn("could not give a restored file its TMDB match back; it stays in the archive", "item", req.itemID,
-				"tmdb", req.tmdbID, "kind", req.kind, "err", err)
+			r.log.Warn("could not give a restored file its match back; it stays in the archive", "item", req.itemID,
+				"id", req.tmdbID, "kind", req.kind, "err", err)
 			r.finished(req)
 		}
 	}
@@ -163,15 +166,19 @@ func (r *matchRestorer) apply(ctx context.Context, req restoreReq, done map[stri
 	if err != nil {
 		return "", err
 	}
+	// A show matched through TVDB is matched through TVDB again: req.tmdbID is its TVDB id.
 	ref := metadata.Ref{TMDBID: req.tmdbID}
+	if req.kind == store.KindSeriesTVDB {
+		ref = metadata.Ref{TVDBID: req.tmdbID}
+	}
 	switch req.kind {
 	case store.KindMovie:
 		return e.Path, r.m.MatchMovie(ctx, req.itemID, ref)
-	case store.KindSeries:
+	case store.KindSeries, store.KindSeriesTVDB:
 		if e.Kind != store.KindEpisode {
 			return "", errors.New("the file is no longer an episode")
 		}
-		key := fmt.Sprintf("%s\x00%d", e.Show, req.tmdbID)
+		key := fmt.Sprintf("%s\x00%s\x00%d", e.Show, req.kind, req.tmdbID)
 		if done[key] {
 			return e.Path, nil
 		}

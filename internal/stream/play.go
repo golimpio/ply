@@ -3,6 +3,7 @@ package stream
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -35,6 +36,22 @@ const StopGrace = 10 * time.Second
 // DefaultBeatTimeout is how long a session whose player sends heartbeats (every
 // 10 s) is kept after its last heartbeat or request. See Options.BeatTimeout.
 const DefaultBeatTimeout = 30 * time.Second
+
+// DefaultPausedBeatTimeout is that time for a session whose last heartbeat said
+// the player is paused (until it requests something or beats unpaused), and
+// MaxPausedBeatTimeout the most it can be made. See Options.PausedBeatTimeout.
+const (
+	DefaultPausedBeatTimeout = 3 * time.Minute
+	MaxPausedBeatTimeout     = 5 * time.Minute
+)
+
+// StoppedTTL is how long what was stopped on purpose (Delete) is remembered as
+// that, for Stopped.
+const StoppedTTL = 2 * time.Minute
+
+// ErrStopped is what Direct returns for a client whose play was stopped on purpose
+// less than StoppedTTL ago, unless it has announced a play since (CheckDirect).
+var ErrStopped = errors.New("stream: stopped on purpose")
 
 // Default limits (Options.MaxSessions, Options.MaxTranscodes).
 const (
@@ -136,6 +153,7 @@ func (m *Manager) Limits() (streams, transcodes int) {
 // returns the time it used.
 func (m *Manager) pruneDirectLocked() time.Time {
 	now := m.clock()
+	m.pruneStoppedLocked(now)
 	for k, d := range m.direct {
 		if d.inflight == 0 && now.Sub(d.seen) >= DirectTTL {
 			delete(m.direct, k)
@@ -149,6 +167,32 @@ func (m *Manager) pruneDirectLocked() time.Time {
 		}
 	}
 	return now
+}
+
+// pruneStoppedLocked forgets what was stopped on purpose StoppedTTL ago.
+func (m *Manager) pruneStoppedLocked(now time.Time) {
+	for id, at := range m.stoppedIDs {
+		if now.Sub(at) >= StoppedTTL {
+			delete(m.stoppedIDs, id)
+		}
+	}
+	for k, at := range m.stoppedDirect {
+		if now.Sub(at) >= StoppedTTL {
+			delete(m.stoppedDirect, k)
+		}
+	}
+}
+
+// Stopped says whether the session or direct play id was stopped on purpose (by
+// Delete) less than StoppedTTL ago. That is what tells it from one that is
+// unknown, or that ply ended because nothing was heard from it: the API answers
+// 410 for the first and 404 for the others, and a player restarts on a 404.
+func (m *Manager) Stopped(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pruneStoppedLocked(m.clock())
+	_, ok := m.stoppedIDs[id]
+	return ok
 }
 
 // stuckStoppingLocked counts the sessions that have taken more than StopGrace to
@@ -199,6 +243,8 @@ func (m *Manager) CheckDirect(k DirectKey) error {
 	m.mu.Lock()
 	defer m.unlock()
 	m.pruneDirectLocked()
+	// Announcing a play is asking for one: a client that was stopped may play again.
+	delete(m.stoppedDirect, k)
 	if _, ok := m.direct[k]; ok {
 		return nil
 	}
@@ -235,6 +281,9 @@ func (m *Manager) DirectFile(k DirectKey, title, client, path string, pos float6
 		return "", nil, ErrClosed
 	}
 	now := m.pruneDirectLocked()
+	if _, stopped := m.stoppedDirect[k]; stopped {
+		return "", nil, ErrStopped
+	}
 	d, counted := m.direct[k]
 	if !counted {
 		_, returning := m.recentDirect[k]

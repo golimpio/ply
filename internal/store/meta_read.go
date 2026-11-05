@@ -64,6 +64,7 @@ type TitleDetail struct {
 	Cast          []CastMember
 	Crew          []CrewMember
 	Source        string
+	EpisodeOrder  string // a show's: aired, dvd or absolute
 	Locked        bool
 	FetchedAt     int64
 
@@ -278,7 +279,7 @@ func getTitleDetail(ctx context.Context, q queryer, id int64) (TitleDetail, erro
 		OriginalTitle: t.OriginalTitle, SortTitle: t.SortTitle, Overview: t.Overview, Tagline: t.Tagline,
 		ReleaseDate: t.ReleaseDate, EndDate: t.EndDate, Status: t.Status, RuntimeMin: t.RuntimeMin,
 		VoteCount: t.VoteCount, Certification: t.Certification, Logo: t.Logo,
-		Source: t.Source, Locked: t.Locked, FetchedAt: t.FetchedAt,
+		Source: t.Source, EpisodeOrder: t.EpisodeOrder, Locked: t.Locked, FetchedAt: t.FetchedAt,
 	}
 	if d.Genres, err = titleGenres(ctx, q, id); err != nil {
 		return TitleDetail{}, err
@@ -440,17 +441,17 @@ type PersonDetail struct {
 	Credits []PersonCredit
 }
 
-const personCols = `id, tmdb_id, name, profile, biography, birthday, deathday, place_of_birth, known_for,
+const personCols = `id, tmdb_id, tvdb_id, name, profile, biography, birthday, deathday, place_of_birth, known_for,
 	imdb_id, fetched_at`
 
 func scanPerson(sc scanner) (Person, error) {
 	var (
-		p    Person
-		tmdb sql.NullInt64
+		p          Person
+		tmdb, tvdb sql.NullInt64
 	)
-	err := sc.Scan(&p.ID, &tmdb, &p.Name, &p.Profile, &p.Biography, &p.Birthday, &p.Deathday,
+	err := sc.Scan(&p.ID, &tmdb, &tvdb, &p.Name, &p.Profile, &p.Biography, &p.Birthday, &p.Deathday,
 		&p.PlaceOfBirth, &p.KnownFor, &p.IMDbID, &p.FetchedAt)
-	p.TMDBID = tmdb.Int64
+	p.TMDBID, p.TVDBID = tmdb.Int64, tvdb.Int64
 	return p, err
 }
 

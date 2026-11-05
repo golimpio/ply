@@ -17,6 +17,7 @@ export type Route =
   | { name: 'genre'; id: number }
   | { name: 'collection'; id: number }
   | { name: 'settings' }
+  | { name: 'activity' }
   | { name: 'notfound' };
 
 const SORTS: Sort[] = ['title', 'added', 'year', 'duration'];
@@ -31,7 +32,7 @@ function libraryView(q: URLSearchParams, fallback: Sort): LibraryView {
 /**
  * Hash forms: #/ (home), #/movies[?sort=&f=], #/shows[?sort=&f=], #/shows/<name>[?s=<season>],
  * #/item/<id>, #/play/<id>[?t=<resume seconds>], #/person/<id>, #/genre/<id>,
- * #/collection/<id>, #/settings.
+ * #/collection/<id>, #/settings, #/activity.
  */
 export function parseRoute(hash: string): Route {
   const [path, query = ''] = hash.replace(/^#\/?/, '').split('?');
@@ -50,7 +51,8 @@ export function parseRoute(hash: string): Route {
         return { name: 'show', show: decodeURIComponent(arg), season: Number.isInteger(season) ? season : undefined };
       }
       case 'settings':
-        if (!arg) return { name: 'settings' };
+      case 'activity':
+        if (!arg) return { name: head };
         break;
       case 'person':
       case 'genre':
@@ -112,4 +114,5 @@ export const href = {
   genre: (id: number) => `#/genre/${id}`,
   collection: (id: number) => `#/collection/${id}`,
   settings: '#/settings',
+  activity: '#/activity',
 };

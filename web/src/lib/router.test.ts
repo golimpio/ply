@@ -27,6 +27,8 @@ describe('parseRoute', () => {
     ['#/collection/x', notfound],
     ['#/settings', { name: 'settings' }],
     ['#/settings/extra', notfound],
+    ['#/activity', { name: 'activity' }],
+    ['#/activity/7', notfound],
   ])('%s', (hash, want) => {
     expect(parseRoute(hash)).toEqual(want);
   });
@@ -75,5 +77,6 @@ describe('href', () => {
     expect(parseRoute(href.genre(18))).toEqual({ name: 'genre', id: 18 });
     expect(parseRoute(href.collection(9))).toEqual({ name: 'collection', id: 9 });
     expect(parseRoute(href.settings)).toEqual({ name: 'settings' });
+    expect(parseRoute(href.activity)).toEqual({ name: 'activity' });
   });
 });

@@ -140,6 +140,11 @@ async function open(browser, opts = {}) {
     if (m === 'GET' && p === '/api/scan') return json(route, { running: false, itemCount: 1 });
     if (m === 'GET' && p === '/api/items') return json(route, []); // the item page's neighbours
     if (m === 'GET' && p === '/api/shows') return json(route, []); // loaded with the library since M6
+    // The header's activity feed (M9), opened on every page but the player's: an idle queue.
+    const idleQueue = { paused: false, running: [], queued: [], history: [], tier: { playback: {}, browsing: false, hold: { held: false } } };
+    if (m === 'GET' && p === '/api/jobs') return json(route, idleQueue);
+    if (m === 'GET' && p === '/api/events')
+      return route.fulfill({ contentType: 'text/event-stream', body: `retry: 5000\n\nevent: snapshot\ndata: ${JSON.stringify(idleQueue)}\n\n` });
     if (m === 'GET' && p === `/api/items/${ITEM}`) return json(route, detail(opts.item));
     if (m === 'GET' && p.endsWith('.vtt')) return route.fulfill({ status: 200, contentType: 'text/vtt', body: 'WEBVTT\n\n' });
     if (m === 'PUT' && p === `/api/items/${ITEM}/progress`) {
@@ -164,6 +169,11 @@ async function open(browser, opts = {}) {
       const s = sessions.get(sid[1]);
       if (s) s.deleted = true;
       return route.fulfill({ status: 204 });
+    }
+    // The player's heartbeat (M9; e2e/player-limits.mjs tests it): alive while not deleted.
+    if (sid && m === 'POST' && sid[2] === 'heartbeat') {
+      const s = sessions.get(sid[1]);
+      return s && !s.deleted ? route.fulfill({ status: 204 }) : json(route, { error: 'session not found' }, 404);
     }
     if (sid && m === 'GET' && sid[2]) {
       const s = sessions.get(sid[1]);

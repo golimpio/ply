@@ -96,7 +96,7 @@ func newWEnv(t *testing.T, mod ...func(*metadata.WorkerOptions)) *wenv {
 	}))
 	e.fake.ImageBase = e.imgSrv.URL
 	e.src = metadata.NewStaticSource(e.fake)
-	e.images, err = metadata.NewImageCache(metadata.ImageOptions{Dir: e.imgDir, URL: e.src.ImageURL})
+	e.images, err = metadata.NewImageCache(metadata.ImageOptions{Dir: e.imgDir, URL: e.src.ImageURL, TVDBURL: e.src.TVDBImageURL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +204,7 @@ func matrix() *store.TitleInput {
 
 func (e *wenv) withMatrix() {
 	e.fake.MovieSearch = map[string][]metadata.Candidate{
-		"the matrix": {{TMDBID: 603, Title: "The Matrix", OriginalTitle: "The Matrix", Year: 1999, Popularity: 80}},
+		"the matrix": {{ID: 603, Title: "The Matrix", OriginalTitle: "The Matrix", Year: 1999, Popularity: 80}},
 	}
 	e.fake.Movies = map[int64]*store.TitleInput{603: matrix()}
 }
@@ -222,7 +222,7 @@ func breakingBad() *store.TitleInput {
 
 func (e *wenv) withBreakingBad() {
 	e.fake.SeriesSearch = map[string][]metadata.Candidate{
-		"breaking bad": {{TMDBID: 1396, Title: "Breaking Bad", OriginalTitle: "Breaking Bad", Year: 2008, Popularity: 150}},
+		"breaking bad": {{ID: 1396, Title: "Breaking Bad", OriginalTitle: "Breaking Bad", Year: 2008, Popularity: 150}},
 	}
 	e.fake.Shows = map[int64]*store.TitleInput{1396: breakingBad()}
 }
@@ -273,9 +273,9 @@ func TestWorkerFlagsDoubtfulMatchesAndUnmatchesTheRest(t *testing.T) {
 	e := newWEnv(t)
 	e.fake.MovieSearch = map[string][]metadata.Candidate{
 		// Right title, wrong year: 0.6 + 0 + 0.1 = 0.7.
-		"dune": {{TMDBID: 438631, Title: "Dune", Year: 2021, Popularity: 100}},
+		"dune": {{ID: 438631, Title: "Dune", Year: 2021, Popularity: 100}},
 		// Nothing like it.
-		"foo bar baz": {{TMDBID: 11111, Title: "Foo", Year: 2005, Popularity: 3}},
+		"foo bar baz": {{ID: 11111, Title: "Foo", Year: 2005, Popularity: 3}},
 	}
 	e.fake.Movies = map[int64]*store.TitleInput{
 		438631: {Title: store.Title{Kind: store.KindMovie, TMDBID: 438631, Title: "Dune", Year: 2021}},
@@ -369,7 +369,8 @@ func TestWorkerHonoursRetryAfterOverTheBackoff(t *testing.T) {
 // A show that TVDB answers 403 for (it is for subscribers only) is a final
 // failure of that show alone, not a refused key: it is put off with the usual
 // backoff, the pass goes on, and the shows after it are matched. A 403 that does
-// refuse the key or PIN ends the pass, as a refused TMDB key does.
+// refuse the key or PIN does not end it either: the show waits an hour for TVDB, and what is
+// at TMDB goes on (a refused TMDB key does end the pass: TestWorkerStopsWhenTheKeyIsRefused).
 func TestWorkerCarriesOnPastARecordTVDBForbids(t *testing.T) {
 	// "A Forbidden Show" is the first the worker takes (fresh shows go by name), so
 	// a pass that ended on it would leave the other two untouched.
@@ -378,7 +379,7 @@ func TestWorkerCarriesOnPastARecordTVDBForbids(t *testing.T) {
 		e.withBreakingBad()
 		wire := breakingBad()
 		wire.TMDBID, wire.Title.Title = 1438, "The Wire"
-		e.fake.SeriesSearch["the wire"] = []metadata.Candidate{{TMDBID: 1438, Title: "The Wire", OriginalTitle: "The Wire", Year: 2002, Popularity: 100}}
+		e.fake.SeriesSearch["the wire"] = []metadata.Candidate{{ID: 1438, Title: "The Wire", OriginalTitle: "The Wire", Year: 2002, Popularity: 100}}
 		e.fake.Shows[1438] = wire
 		e.fake.Hook = func(_ context.Context, call string) error {
 			if strings.Contains(call, "Forbidden Show") {
@@ -424,20 +425,28 @@ func TestWorkerCarriesOnPastARecordTVDBForbids(t *testing.T) {
 		t.Errorf("%d searches for the forbidden show after two passes, want 2", n)
 	}
 
-	// Control: the 403 that says the key or PIN was rejected ends the pass at the
-	// first show and leaves the rest alone.
+	// The 403 that says the key or PIN was rejected is TVDB's refusal, not the end of the pass: the
+	// show waits an hour, the others are matched, and the status says what happened.
 	refused := &metadata.TVDBError{Op: "POST /login", Status: 403, Message: "TVDB rejected the key or PIN"}
 	if !metadata.IsUnauthorized(refused) {
 		t.Fatal("a 403 refusing the key is not unauthorized")
 	}
 	r := setup(refused)
+	rstart := r.clock.Now()
 	r.once()
-	if n := r.fake.Count("SearchSeries"); n != 1 {
-		t.Errorf("%d searches after a refused key, want 1: the pass ends on it", n)
+	for show, tmdb := range map[string]int64{"Breaking Bad": 1396, "The Wire": 1438} {
+		if sm := r.series(show); sm.State != store.MatchMatched || sm.TitleID == 0 || r.title(sm.TitleID).TMDBID != tmdb {
+			t.Errorf("%s after a refused TVDB key: %+v; the pass should have gone on", show, sm)
+		}
 	}
-	if st := r.w.Status(r.ctx); !strings.Contains(st.LastError, "TVDB rejected the key or PIN") {
-		t.Errorf("status last error = %q", st.LastError)
+	if sm := r.series("A Forbidden Show"); sm.State != store.MatchPending || sm.TitleID != 0 || sm.Attempts != 1 || sm.NextAttemptAt != rstart.Add(time.Hour).Unix() {
+		t.Errorf("the show TVDB refused the key for: %+v; want it pending and put off an hour", sm.Match)
 	}
+	if n := r.fake.Count(`SearchSeries("A Forbidden Show"`); n != 1 {
+		t.Errorf("%d searches after a refused key, want 1 (not asked again within the pass)", n)
+	}
+	// (The status says "TVDB unreachable" meanwhile: trackHealth marks TVDB down on a refusal. A pass
+	// that goes on to the end clears the last error, as it does after any failure it got past.)
 }
 
 func TestWorkerStopsWhenTheKeyIsRefused(t *testing.T) {
@@ -564,7 +573,7 @@ func TestWorkerNFOIdsAndOverlay(t *testing.T) {
 	}
 
 	// A wrong id in the NFO: fall back to the name.
-	e.fake.MovieSearch["wrong"] = []metadata.Candidate{{TMDBID: 603, Title: "Wrong", Year: 2000}}
+	e.fake.MovieSearch["wrong"] = []metadata.Candidate{{ID: 603, Title: "Wrong", Year: 2000}}
 	bad := e.addMovie("Movies/wrong/wrong.mkv", "wrong", 2000)
 	e.write("Movies/wrong/wrong.nfo", `<movie><uniqueid type="tmdb">999999</uniqueid></movie>`)
 	calls := len(e.fake.Calls())
@@ -698,7 +707,7 @@ func TestWorkerRefreshKeepsLockedTextButRefreshesTheRest(t *testing.T) {
 
 	// Positive control: an unlocked title takes the new text.
 	other := e.addMovie("Movies/Other (2000).mkv", "Other", 2000)
-	e.fake.MovieSearch["other"] = []metadata.Candidate{{TMDBID: 7, Title: "Other", Year: 2000, Popularity: 1}}
+	e.fake.MovieSearch["other"] = []metadata.Candidate{{ID: 7, Title: "Other", Year: 2000, Popularity: 1}}
 	e.fake.Movies[7] = &store.TitleInput{Title: store.Title{Kind: store.KindMovie, TMDBID: 7, Title: "Other", Year: 2000, Overview: "old"}}
 	e.once()
 	e.fake.Movies[7] = &store.TitleInput{Title: store.Title{Kind: store.KindMovie, TMDBID: 7, Title: "Other", Year: 2000, Overview: "new"}}
@@ -1198,7 +1207,7 @@ func TestWorkerPrunesOrphansAfterABatch(t *testing.T) {
 
 func TestWorkerStatus(t *testing.T) {
 	e := newWEnv(t)
-	e.fake.MovieSearch = map[string][]metadata.Candidate{"dune": {{TMDBID: 1, Title: "Dune", Year: 2021, Popularity: 1}}}
+	e.fake.MovieSearch = map[string][]metadata.Candidate{"dune": {{ID: 1, Title: "Dune", Year: 2021, Popularity: 1}}}
 	e.fake.Movies = map[int64]*store.TitleInput{1: {Title: store.Title{Kind: store.KindMovie, TMDBID: 1, Title: "Dune"}}}
 	e.addMovie("Movies/Dune (1990).mkv", "Dune", 1990)       // review
 	e.addMovie("Movies/Nothing (2000).mkv", "Nothing", 2000) // unmatched
@@ -1217,7 +1226,7 @@ func TestWorkerStatus(t *testing.T) {
 func TestWorkerManualMatchUnmatchAndSearch(t *testing.T) {
 	e := newWEnv(t)
 	e.withMatrix()
-	e.fake.FindMovies = map[string][]metadata.Candidate{"imdb_id:tt0133093": {{TMDBID: 603, Title: "The Matrix"}}}
+	e.fake.FindMovies = map[string][]metadata.Candidate{"imdb_id:tt0133093": {{ID: 603, Title: "The Matrix"}}}
 	id := e.addMovie("Movies/Something Else (1990).mkv", "Something Else", 1990)
 	show := e.addEpisode("Breaking Bad", 1, 1)
 	e.withBreakingBad()
@@ -1286,9 +1295,9 @@ func TestWorkerManualMatchUnmatchAndSearch(t *testing.T) {
 	}
 
 	// Search.
-	e.fake.MovieSearch["something"] = []metadata.Candidate{{TMDBID: 1, Title: "Something", Year: 1990, Popularity: 1}}
+	e.fake.MovieSearch["something"] = []metadata.Candidate{{ID: 1, Title: "Something", Year: 1990, Popularity: 1}}
 	res, err := e.w.Search(e.ctx, metadata.Query{Kind: store.KindMovie, Title: "Something", Year: 1990})
-	if err != nil || len(res) != 1 || res[0].TMDBID != 1 || res[0].Score < 0.9 {
+	if err != nil || len(res) != 1 || res[0].ID != 1 || res[0].Score < 0.9 {
 		t.Errorf("Search = %+v, %v", res, err)
 	}
 
@@ -1397,7 +1406,7 @@ func TestWorkerManualIsNeverRequeued(t *testing.T) {
 	e := newWEnv(t)
 	e.withMatrix()
 	e.withBreakingBad()
-	e.fake.MovieSearch["something"] = []metadata.Candidate{{TMDBID: 603, Title: "The Matrix", OriginalTitle: "The Matrix", Year: 1999, Popularity: 80}}
+	e.fake.MovieSearch["something"] = []metadata.Candidate{{ID: 603, Title: "The Matrix", OriginalTitle: "The Matrix", Year: 1999, Popularity: 80}}
 
 	manual := e.addMovie("Movies/The Matrix (1999)/The Matrix (1999).mkv", "The Matrix", 1999)
 	lost := e.addMovie("Movies/Lost (2000)/Lost (2000).mkv", "Lost", 2000)
@@ -1767,7 +1776,7 @@ func TestWorkerRefreshAllRequeuesUnmatchedAndRefreshesTitles(t *testing.T) {
 	if got := e.entry(lost); got.MatchState != store.MatchUnmatched {
 		t.Fatalf("lost: %+v", got.Item)
 	}
-	e.fake.MovieSearch["lost"] = []metadata.Candidate{{TMDBID: 55, Title: "Lost", Year: 2000, Popularity: 1}}
+	e.fake.MovieSearch["lost"] = []metadata.Candidate{{ID: 55, Title: "Lost", Year: 2000, Popularity: 1}}
 	e.fake.Movies[55] = &store.TitleInput{Title: store.Title{Kind: store.KindMovie, TMDBID: 55, Title: "Lost", Year: 2000}}
 	e.fake.Movies[1] = &store.TitleInput{Title: store.Title{Kind: store.KindMovie, TMDBID: 1, Title: "fresh", Year: 2000, ReleaseDate: "2000-01-01", Overview: "v3"}}
 
@@ -1803,7 +1812,7 @@ func TestWorkerUsesEmbeddedTagsAndCovers(t *testing.T) {
 	}
 
 	// A movie TMDB has no poster for takes the cover inside the file.
-	e.fake.MovieSearch["no poster"] = []metadata.Candidate{{TMDBID: 8, Title: "No Poster", Year: 2000, Popularity: 1}}
+	e.fake.MovieSearch["no poster"] = []metadata.Candidate{{ID: 8, Title: "No Poster", Year: 2000, Popularity: 1}}
 	e.fake.Movies[8] = &store.TitleInput{Title: store.Title{Kind: store.KindMovie, TMDBID: 8, Title: "No Poster", Year: 2000}}
 	np := e.addMovie("Movies/No Poster (2000).mkv", "No Poster", 2000)
 	e.once()
@@ -2128,7 +2137,7 @@ func TestWorkerNeverFetchesAnNFOActorThumb(t *testing.T) {
 	}
 	// Even with TMDB on and a match, nothing is fetched from the NFO.
 	e.src.Set(e.fake, true)
-	e.fake.MovieSearch = map[string][]metadata.Candidate{"home": {{TMDBID: 5, Title: "Home", Year: 2011, Popularity: 1}}}
+	e.fake.MovieSearch = map[string][]metadata.Candidate{"home": {{ID: 5, Title: "Home", Year: 2011, Popularity: 1}}}
 	e.fake.Movies = map[int64]*store.TitleInput{5: {Title: store.Title{Kind: store.KindMovie, TMDBID: 5, Title: "Home", Year: 2011}}}
 	e.w.Reload()
 	e.once()

@@ -9,6 +9,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -94,11 +95,32 @@ type heartbeatRequest struct {
 	Paused      *bool    `json:"paused"`
 }
 
+// writeStopped answers 410 Gone, {"error": "stopped", "stoppedBy": "another
+// device"}: what a player is told when its session was stopped on purpose (by
+// DELETE). Unlike 404 (unknown, or ended because nothing was heard from it), it
+// does not mean "start another".
+func writeStopped(w http.ResponseWriter) {
+	writeJSON(w, http.StatusGone, map[string]string{"error": "stopped", "stoppedBy": "another device"})
+}
+
+// stoppedOnPurpose answers 410 and reports true if the session or direct play id
+// was stopped by DELETE a short while ago (stream.StoppedTTL); the routes of a
+// session use it where they would answer 404.
+func (s *Server) stoppedOnPurpose(w http.ResponseWriter, id string) bool {
+	if s.Streams == nil || !s.Streams.Stopped(id) {
+		return false
+	}
+	writeStopped(w)
+	return true
+}
+
 // handleSessionHeartbeat is POST /api/sessions/{sid}/heartbeat: the player says
-// it is alive, where it is and whether it is paused. A session that has had
-// neither a heartbeat nor a request for a segment in StreamIdle is stopped, so a
-// player beats while it lives, paused or not (every 10 s). The body may be
-// empty. 204, or 404 if the session is gone (the player then starts another).
+// it is alive, where it is and whether it is paused. A session whose player has
+// beaten is stopped 30 s after its last heartbeat or request (3 min while the last
+// heartbeat said it is paused), so a player beats while it lives (every 10 s). The
+// body may be empty. 204; 404 if the session is unknown or ply ended it because
+// nothing was heard from it (the player then starts another); 410 if it was
+// stopped on purpose, by DELETE, less than two minutes ago (the player stops).
 func (s *Server) handleSessionHeartbeat(w http.ResponseWriter, r *http.Request) {
 	var req heartbeatRequest
 	body := http.MaxBytesReader(w, r.Body, 1<<16)
@@ -111,6 +133,9 @@ func (s *Server) handleSessionHeartbeat(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if s.Streams == nil || !s.Streams.Heartbeat(r.PathValue("sid"), stream.Beat{Position: req.PositionSec, Paused: req.Paused}) {
+		if s.stoppedOnPurpose(w, r.PathValue("sid")) {
+			return
+		}
 		writeError(w, http.StatusNotFound, "session not found")
 		return
 	}
@@ -147,6 +172,10 @@ func (s *Server) admitDirect(w http.ResponseWriter, r *http.Request, e store.Ent
 	var le *stream.LimitError
 	if errors.As(err, &le) {
 		writeLimit(w, r, le)
+		return nothing, false
+	}
+	if errors.Is(err, stream.ErrStopped) { // dropped by DELETE a moment ago: not to come back by itself
+		writeStopped(w)
 		return nothing, false
 	}
 	if err != nil {
@@ -285,12 +314,12 @@ func (s *Server) storedLimit(ctx context.Context, key string, ceiling int) (int,
 func (s *Server) checkLimitChange(ctx context.Context, w http.ResponseWriter, req settingsRequest) bool {
 	cur := s.playLimits(ctx)
 	for _, c := range []struct {
-		name, flag, source string
-		value              *int
-		ceiling            int
+		name, flag, env, source string
+		value                   *int
+		ceiling                 int
 	}{
-		{"maxStreams", "-max-streams or PLY_MAX_STREAMS", cur.streamsSource, req.MaxStreams, config.MaxStreamsCeiling},
-		{"maxTranscodes", "-max-transcodes or PLY_MAX_TRANSCODES", cur.transcodesSource, req.MaxTranscodes, config.MaxTranscodesCeiling},
+		{"maxStreams", "-max-streams", config.MaxStreamsEnv, cur.streamsSource, req.MaxStreams, config.MaxStreamsCeiling},
+		{"maxTranscodes", "-max-transcodes", config.MaxTranscodesEnv, cur.transcodesSource, req.MaxTranscodes, config.MaxTranscodesCeiling},
 	} {
 		switch {
 		case c.value == nil:
@@ -298,7 +327,13 @@ func (s *Server) checkLimitChange(ctx context.Context, w http.ResponseWriter, re
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("%s must be a whole number from 1 to %d", c.name, c.ceiling))
 			return false
 		case c.source == limitFromFlag:
-			writeError(w, http.StatusConflict, fmt.Sprintf("%s is set by %s and cannot be changed here", c.name, c.flag))
+			// (A flag and its variable give the same limit and ply is not told which one
+			// it was: the one that is in the environment is named first.)
+			by := c.flag + " or " + c.env
+			if os.Getenv(c.env) != "" {
+				by = c.env + " (or " + c.flag + ")"
+			}
+			writeError(w, http.StatusConflict, fmt.Sprintf("%s is set by %s and cannot be changed here", c.name, by))
 			return false
 		}
 	}

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"ply/internal/config"
 	"ply/internal/hwaccel"
 	"ply/internal/stream"
 )
@@ -108,10 +109,11 @@ func TestHeartbeatRoute(t *testing.T) {
 	wantJSONError(t, e.post(beat, `{"positionSec": "soon"}`, auth), 400)
 	wantJSONError(t, e.post(beat, `{}`, nil), 401) // like everything else under /api
 
-	// A session that is gone: 404, which tells the player to start another.
+	// A session that is unknown: 404, which tells the player to start another. One
+	// that was stopped on purpose is 410 (TestAStoppedSessionAnswers410).
 	wantJSONError(t, e.post("/api/sessions/nosuchsession/heartbeat", `{}`, auth), 404)
 	wantStatus(t, e.do("DELETE", "/api/sessions/"+sid, auth, ""), 204)
-	wantJSONError(t, e.post(beat, `{"positionSec": 5}`, auth), 404)
+	wantJSONError(t, e.post(beat, `{"positionSec": 5}`, auth), 410)
 }
 
 func TestHeartbeatWithoutStreams(t *testing.T) {
@@ -626,6 +628,8 @@ func TestPrivatePaths(t *testing.T) {
 		"/api/sessions/abc/index.m3u8": false, "/api/sessions/abc/init.mp4": false, "/api/sessions/abc/seg00001.m4s": false,
 		"/api/sessions/abc/heartbeat/x": false, "/api/sessionsx": false, "/api/items": false, "/api/items/1/file": false,
 		"/api/settings": false, "/": false,
+		// What logs in to a provider with a key the page cannot see.
+		"/api/settings/test": true, "/api/settings/test/": true, "/api/settings/../settings/test": true, "/api/settings/testx": false,
 	} {
 		if got := private(path); got != want {
 			t.Errorf("private(%q) = %v, want %v", path, got, want)
@@ -742,5 +746,163 @@ func TestLimitListIsNotShownToOtherSites(t *testing.T) {
 		if lr.Playing == nil || len(lr.Playing) != 0 {
 			t.Errorf("%s: playing = %+v, want an empty list", name, lr.Playing)
 		}
+	}
+}
+
+// wantStopped checks what a player is told when its session was stopped on
+// purpose: 410, {"error": "stopped", "stoppedBy": "another device"}.
+func wantStopped(t *testing.T, rec *httptest.ResponseRecorder, what string) {
+	t.Helper()
+	if rec.Code != 410 {
+		t.Errorf("%s = %d %s, want 410", what, rec.Code, rec.Body)
+		return
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || len(body) != 2 || body["error"] != "stopped" || body["stoppedBy"] != "another device" {
+		t.Errorf("%s: body %s, want {\"error\":\"stopped\",\"stoppedBy\":\"another device\"}", what, rec.Body)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("%s: Content-Type %q", what, ct)
+	}
+}
+
+// A session stopped on purpose (DELETE: the Activity page, the cap panel) is told
+// so, 410, by its heartbeat and its playlist, init and segments, for two minutes;
+// a player restarts on a 404, which is for a session that is unknown or that ply
+// ended because nothing was heard from it.
+func TestAStoppedSessionAnswers410(t *testing.T) {
+	e := newEnv(t, "")
+	clk := newClock()
+	m := e.withStreams(fakeFFmpeg(t, "exec sleep 60"), func(o *stream.Options) { o.Clock = clk.Now })
+	stopped := e.startSession("", `{}`).SessionID
+	lost := e.startSession("", `{}`).SessionID
+	paths := func(sid string) map[string]string {
+		base := "/api/sessions/" + sid
+		return map[string]string{"playlist": base + "/index.m3u8", "init": base + "/init.mp4", "segment": base + "/seg00001.m4s"}
+	}
+
+	// Positive controls: both are alive and answer.
+	for _, sid := range []string{stopped, lost} {
+		wantStatus(t, e.get(paths(sid)["playlist"]), 200)
+		wantStatus(t, e.post("/api/sessions/"+sid+"/heartbeat", `{}`, nil), 204)
+	}
+
+	wantStatus(t, e.do("DELETE", "/api/sessions/"+stopped, nil, ""), 204)
+	wantStopped(t, e.post("/api/sessions/"+stopped+"/heartbeat", `{"positionSec": 5}`, nil), "heartbeat of a stopped session")
+	for what, p := range paths(stopped) {
+		wantStopped(t, e.get(p), what+" of a stopped session")
+	}
+	wantJSONError(t, e.do("DELETE", "/api/sessions/"+stopped, nil, ""), 404) // there is nothing to stop any more
+	wantJSONError(t, e.post("/api/sessions/nosuchsession/heartbeat", `{}`, nil), 404)
+
+	// A session that ply ended for its silence is lost, not stopped: 404, and the
+	// player starts another.
+	clk.Advance(61 * time.Second) // (the player of `lost` beat once: 30 s is its limit)
+	waitFor(t, "the silent session to be ended", func() bool { _, ok := m.Get(lost); return !ok })
+	wantJSONError(t, e.post("/api/sessions/"+lost+"/heartbeat", `{}`, nil), 404)
+	for _, p := range paths(lost) {
+		wantJSONError(t, e.get(p), 404)
+	}
+	wantStopped(t, e.post("/api/sessions/"+stopped+"/heartbeat", `{}`, nil), "the stopped one, 61 s on")
+
+	// And two minutes after the stop it is a session like any that is gone.
+	clk.Advance(stream.StoppedTTL - 61*time.Second - time.Nanosecond)
+	wantStopped(t, e.post("/api/sessions/"+stopped+"/heartbeat", `{}`, nil), "a nanosecond before the end of the 2 minutes")
+	clk.Advance(time.Nanosecond)
+	wantJSONError(t, e.post("/api/sessions/"+stopped+"/heartbeat", `{}`, nil), 404)
+	wantJSONError(t, e.get(paths(stopped)["playlist"]), 404)
+}
+
+// A direct play dropped by DELETE gets 410 for its next request for the file, and
+// for its id; another client is not affected, and a client that announces a play
+// again (POST /playback) may have the file again.
+func TestADirectPlayStoppedOnPurposeGets410(t *testing.T) {
+	e := newEnv(t, "")
+	clk := newClock()
+	e.withStreams(fakeFFmpeg(t, "exec sleep 60"), func(o *stream.Options) { o.Clock = clk.Now })
+	wantStatus(t, e.file(e.mp4, safari), 206)
+	var id string
+	for _, p := range e.sessions() {
+		if p.Kind == "direct" {
+			id = p.ID
+		}
+	}
+	if id == "" {
+		t.Fatalf("setup: no direct play in %+v", e.sessions())
+	}
+	wantStatus(t, e.post("/api/sessions/"+id+"/heartbeat", `{"paused": true}`, nil), 204) // positive control: it is beaten
+
+	wantStatus(t, e.do("DELETE", "/api/sessions/"+id, nil, ""), 204)
+	wantStopped(t, e.file(e.mp4, safari), "the next request for the file")
+	wantStopped(t, e.post("/api/sessions/"+id+"/heartbeat", `{}`, nil), "the heartbeat of the dropped play")
+	if n := len(e.sessions()); n != 0 {
+		t.Errorf("a refused request counted as a play: %+v", e.sessions())
+	}
+	wantStatus(t, e.file(e.mp4, chrome), 206) // another client
+
+	// The user plays it again from this client: the page asks for a play first.
+	wantStatus(t, e.start(e.mp4, `{}`, safari), 200)
+	wantStatus(t, e.file(e.mp4, safari), 206)
+
+	// Or the two minutes pass.
+	var again string
+	for _, p := range e.sessions() {
+		if p.Client == "192.0.2.1 · Safari" {
+			again = p.ID
+		}
+	}
+	wantStatus(t, e.do("DELETE", "/api/sessions/"+again, nil, ""), 204)
+	wantStopped(t, e.file(e.mp4, safari), "the file after the second stop")
+	clk.Advance(stream.StoppedTTL)
+	wantStatus(t, e.file(e.mp4, safari), 206)
+}
+
+// A hidden tab beats about once a minute; a paused player has 3 minutes from its
+// last beat, and the 30 s are back when it plays.
+func TestAPausedPlayerIsKeptThreeMinutes(t *testing.T) {
+	e := newEnv(t, "")
+	clk := newClock()
+	m := e.withStreams(fakeFFmpeg(t, "exec sleep 60"), func(o *stream.Options) { o.Clock = clk.Now })
+	sid := e.startSession("", `{}`).SessionID
+	beat := "/api/sessions/" + sid + "/heartbeat"
+	wantStatus(t, e.post(beat, `{"positionSec": 600, "paused": true}`, nil), 204)
+
+	clk.Advance(170 * time.Second) // one beat a minute is enough, a few late
+	time.Sleep(100 * time.Millisecond)
+	if _, ok := m.Get(sid); !ok {
+		t.Fatal("a paused player that beat 170 s ago was stopped")
+	}
+	wantStatus(t, e.post(beat, `{"paused": false}`, nil), 204) // it plays again
+	clk.Advance(31 * time.Second)
+	waitFor(t, "the player that plays, silent for 31 s, to be stopped", func() bool { _, ok := m.Get(sid); return !ok })
+	wantJSONError(t, e.post(beat, `{}`, nil), 404) // lost, not stopped
+}
+
+// A limit given by a flag or an environment variable cannot be changed in the
+// settings, and the 409 says which of the two to look at.
+func TestTheLimitConflictNamesTheEnvironmentVariable(t *testing.T) {
+	for _, c := range []struct {
+		env, field, flag string
+	}{
+		{config.MaxStreamsEnv, "maxStreams", "-max-streams"},
+		{config.MaxTranscodesEnv, "maxTranscodes", "-max-transcodes"},
+	} {
+		t.Run(c.field, func(t *testing.T) {
+			e := newEnv(t, "")
+			t.Setenv(c.env, "")
+			e.srv.MaxStreamsFlag, e.srv.MaxTranscodesFlag = 5, 2
+			body := fmt.Sprintf(`{%q: 1}`, c.field)
+			rec := e.do("PATCH", "/api/settings", nil, body)
+			wantJSONError(t, rec, 409)
+			if msg := rec.Body.String(); !strings.Contains(msg, c.flag+" or "+c.env) {
+				t.Errorf("the 409 for a flag is %s, want it to name %s and %s", msg, c.flag, c.env)
+			}
+			t.Setenv(c.env, "3") // the variable is what is in use
+			rec = e.do("PATCH", "/api/settings", nil, body)
+			wantJSONError(t, rec, 409)
+			if msg := rec.Body.String(); !strings.Contains(msg, c.env+" (or "+c.flag+")") {
+				t.Errorf("the 409 with %s set is %s, want it to name the variable first", c.env, msg)
+			}
+		})
 	}
 }

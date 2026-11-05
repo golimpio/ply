@@ -1,0 +1,105 @@
+{
+  "status": "success",
+  "data": {
+    "id": 900001,
+    "name": "Test Anime",
+    "slug": "test-anime",
+    "image": "https://artworks.thetvdb.com/banners/posters/900001-1.jpg",
+    "nameTranslations": [
+      "eng",
+      "por"
+    ],
+    "overviewTranslations": [
+      "eng",
+      "por"
+    ],
+    "aliases": [],
+    "firstAired": "2020-04-01",
+    "lastAired": "2026-12-01",
+    "nextAired": "2026-12-01",
+    "score": 1000,
+    "status": {
+      "id": 1,
+      "name": "Continuing",
+      "recordType": "series",
+      "keepUpdated": true
+    },
+    "originalCountry": "jpn",
+    "originalLanguage": "jpn",
+    "defaultSeasonType": 1,
+    "isOrderRandomized": false,
+    "lastUpdated": "2026-10-30 10:00:00",
+    "averageRuntime": 24,
+    "overview": "A fictional series for ply's tests. Its episodes are numbered through (absolute) and by season (aired).",
+    "year": "2020",
+    "episodes": [
+      {
+        "id": 9000001,
+        "seriesId": 900001,
+        "name": "Awakening",
+        "aired": "2020-04-01",
+        "runtime": 24,
+        "overview": "Awakening (overview).",
+        "image": "/banners/episodes/900001/9000001.jpg",
+        "isMovie": 0,
+        "number": 1,
+        "absoluteNumber": 1,
+        "seasonNumber": 1,
+        "finaleType": null,
+        "year": "2020"
+      },
+      {
+        "id": 9000002,
+        "seriesId": 900001,
+        "name": "The Road",
+        "aired": "2020-04-08",
+        "runtime": 24,
+        "overview": "The Road (overview).",
+        "image": "/banners/episodes/900001/9000002.jpg",
+        "isMovie": 0,
+        "number": 2,
+        "absoluteNumber": 2,
+        "seasonNumber": 1,
+        "finaleType": null,
+        "year": "2020"
+      },
+      {
+        "id": 9000003,
+        "seriesId": 900001,
+        "name": "Return",
+        "aired": "2021-04-01",
+        "runtime": 24,
+        "overview": "Return (overview).",
+        "image": "/banners/episodes/900001/9000003.jpg",
+        "isMovie": 0,
+        "number": 3,
+        "absoluteNumber": 3,
+        "seasonNumber": 1,
+        "finaleType": null,
+        "year": "2021"
+      },
+      {
+        "id": 9000004,
+        "seriesId": 900001,
+        "name": "Reckoning",
+        "aired": "2026-12-01",
+        "runtime": 24,
+        "overview": "Reckoning (overview).",
+        "image": "/banners/episodes/900001/9000004.jpg",
+        "isMovie": 0,
+        "number": 4,
+        "absoluteNumber": 4,
+        "seasonNumber": 1,
+        "finaleType": null,
+        "year": "2026"
+      }
+    ]
+  },
+  "links": {
+    "prev": null,
+    "self": "https://api4.thetvdb.com/v4/series/900001/episodes/absolute/eng?page=0",
+    "next": null,
+    "total_items": 4,
+    "page_size": 500
+  }
+}

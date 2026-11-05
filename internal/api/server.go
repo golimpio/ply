@@ -20,11 +20,13 @@ import (
 
 	"ply/internal/art"
 	"ply/internal/hwaccel"
+	"ply/internal/jobs"
 	"ply/internal/library"
 	"ply/internal/metadata"
 	"ply/internal/store"
 	"ply/internal/stream"
 	"ply/internal/subs"
+	"ply/internal/tier"
 	"ply/internal/watch"
 )
 
@@ -61,7 +63,7 @@ type Options struct {
 	// Metadata (M6). Each may be nil: the endpoints that need it then answer
 	// 503, and the lists carry no metadata.
 	Metadata *metadata.Worker   // matching, refreshing, fixing matches
-	Settings *metadata.Settings // the TMDB key, the privacy switch, the language
+	Settings *metadata.Settings // the TMDB and TVDB keys, the privacy switch, the language
 	Images   *metadata.ImageCache
 	// Now is the clock; nil means time.Now. (GET /api/upcoming asks which day it is.)
 	Now func() time.Time
@@ -96,6 +98,11 @@ type Options struct {
 	// that was given cannot be changed through the settings. ApplyLimits makes the
 	// session manager follow them, the settings and the defaults.
 	MaxStreamsFlag, MaxTranscodesFlag int
+
+	// The background queue and the tier governor (M9, docs/M9-ARCHITECTURE.md). Jobs
+	// nil: the Activity endpoints answer 503. Governor nil: browsing holds nothing.
+	Jobs     *jobs.Queue
+	Governor *tier.Governor
 }
 
 // Server is the HTTP handler for the whole application.
@@ -144,6 +151,7 @@ func New(o Options) *Server {
 	mux.HandleFunc("GET /api/collections/{id}", s.handleCollection)
 	mux.HandleFunc("GET /api/upcoming", s.handleUpcoming)
 	mux.HandleFunc("GET /api/images/tmdb/{size}/{file}", s.handleTMDBImage)
+	mux.HandleFunc("GET /api/images/tvdb/{size}/{path...}", s.handleTVDBImage)
 	mux.HandleFunc("GET /api/images/local/{kind}/{id}/{slot}", s.handleLocalImage)
 	mux.HandleFunc("GET /api/metadata/search", s.handleMetadataSearch)
 	mux.HandleFunc("GET /api/metadata/status", s.handleMetadataStatus)
@@ -152,6 +160,7 @@ func New(o Options) *Server {
 	mux.HandleFunc("GET /api/settings", s.handleSettings)
 	mux.HandleFunc("PATCH /api/settings", s.handlePatchSettings)
 	mux.HandleFunc("PUT /api/settings", s.handlePatchSettings) // what the settings page sends
+	mux.HandleFunc("POST /api/settings/test", s.handleTestSettings)
 	mux.HandleFunc("POST /api/scan", s.handleScanStart)
 	mux.HandleFunc("GET /api/scan", s.handleScanStatus)
 	mux.HandleFunc("GET /api/folders", s.handleFolders)
@@ -159,12 +168,21 @@ func New(o Options) *Server {
 	mux.HandleFunc("PATCH /api/folders/{id}", s.handlePatchFolder)
 	mux.HandleFunc("DELETE /api/folders/{id}", s.handleDeleteFolder)
 	mux.HandleFunc("GET /api/fs", s.handleFS)
+	mux.HandleFunc("GET /api/jobs", s.handleJobs)
+	mux.HandleFunc("POST /api/jobs/{id}/{action}", s.handleJobAction)
+	mux.HandleFunc("POST /api/queue/pause", s.handleQueuePause)
+	mux.HandleFunc("POST /api/queue/resume", s.handleQueuePause)
+	mux.HandleFunc("GET /api/events", s.handleEvents)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
 	})
 	mux.Handle("/", spaHandler(o.UI))
 
-	s.handler = middleware(mux, o.Token, o.AllowedHosts)
+	var inner http.Handler = mux
+	if o.Governor != nil {
+		inner = o.Governor.Track(isBrowse)(mux) // browsing holds the background queue
+	}
+	s.handler = middleware(inner, o.Token, o.AllowedHosts)
 	return s
 }
 
@@ -184,7 +202,7 @@ func middleware(next http.Handler, token string, hosts []string) http.Handler {
 
 // private reports whether the path is one of the endpoints that show or change
 // the folders ply serves: /api/folders and /api/fs, which lists the server's
-// directories; or what is being watched and by whom: /api/sessions (titles and
+// directories; /api/settings/test, which acts with the keys; or what is being watched and by whom: /api/sessions (titles and
 // the addresses of the clients), and the two calls that act on one session,
 // DELETE /api/sessions/{sid} and POST /api/sessions/{sid}/heartbeat. They are for
 // the server's own pages and for native clients, never for a page of another
@@ -193,7 +211,10 @@ func middleware(next http.Handler, token string, hosts []string) http.Handler {
 // Cast and AirPlay receivers fetch them from another origin.
 func private(urlPath string) bool {
 	p := path.Clean(urlPath)
-	for _, root := range []string{"/api/folders", "/api/fs"} {
+	if p == "/api/settings/test" { // it makes the server log in to a provider with a key the page cannot see
+		return true
+	}
+	for _, root := range []string{"/api/folders", "/api/fs", "/api/jobs", "/api/queue", "/api/events"} {
 		if p == root || strings.HasPrefix(p, root+"/") {
 			return true
 		}

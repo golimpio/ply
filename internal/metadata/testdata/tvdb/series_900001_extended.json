@@ -1,0 +1,245 @@
+{
+  "status": "success",
+  "data": {
+    "id": 900001,
+    "name": "Test Anime",
+    "slug": "test-anime",
+    "image": "https://artworks.thetvdb.com/banners/posters/900001-1.jpg",
+    "nameTranslations": [
+      "eng",
+      "por"
+    ],
+    "overviewTranslations": [
+      "eng",
+      "por"
+    ],
+    "aliases": [],
+    "firstAired": "2020-04-01",
+    "lastAired": "2026-12-01",
+    "nextAired": "2026-12-01",
+    "score": 1000,
+    "status": {
+      "id": 1,
+      "name": "Continuing",
+      "recordType": "series",
+      "keepUpdated": true
+    },
+    "originalCountry": "jpn",
+    "originalLanguage": "jpn",
+    "defaultSeasonType": 1,
+    "isOrderRandomized": false,
+    "lastUpdated": "2026-10-30 10:00:00",
+    "averageRuntime": 24,
+    "overview": "A fictional series for ply's tests. Its episodes are numbered through (absolute) and by season (aired).",
+    "year": "2020",
+    "artworks": [
+      {
+        "id": 1,
+        "image": "https://artworks.thetvdb.com/banners/posters/900001-1.jpg",
+        "thumbnail": "https://artworks.thetvdb.com/banners/posters/900001-1_t.jpg",
+        "language": "eng",
+        "type": 2,
+        "score": 100,
+        "width": 680,
+        "height": 1000,
+        "includesText": true
+      },
+      {
+        "id": 2,
+        "image": "https://artworks.thetvdb.com/banners/posters/900001-2.jpg",
+        "thumbnail": "https://artworks.thetvdb.com/banners/posters/900001-2_t.jpg",
+        "language": "jpn",
+        "type": 2,
+        "score": 500,
+        "width": 680,
+        "height": 1000,
+        "includesText": true
+      },
+      {
+        "id": 3,
+        "image": "https://artworks.thetvdb.com/banners/fanart/original/900001-1.jpg",
+        "thumbnail": "https://artworks.thetvdb.com/banners/fanart/original/900001-1_t.jpg",
+        "language": null,
+        "type": 3,
+        "score": 90,
+        "width": 680,
+        "height": 1000,
+        "includesText": false
+      },
+      {
+        "id": 4,
+        "image": "https://artworks.thetvdb.com/banners/clearlogo/900001.png",
+        "thumbnail": "https://artworks.thetvdb.com/banners/clearlogo/900001.png",
+        "language": "eng",
+        "type": 23,
+        "score": 50,
+        "width": 680,
+        "height": 1000,
+        "includesText": true
+      }
+    ],
+    "genres": [
+      {
+        "id": 12,
+        "name": "Drama",
+        "slug": "drama"
+      },
+      {
+        "id": 27,
+        "name": "Anime",
+        "slug": "anime"
+      }
+    ],
+    "remoteIds": [
+      {
+        "id": "tt9000001",
+        "type": 2,
+        "sourceName": "IMDB"
+      },
+      {
+        "id": "900101",
+        "type": 12,
+        "sourceName": "TheMovieDB.com"
+      }
+    ],
+    "characters": [
+      {
+        "id": 1,
+        "name": "Hero",
+        "peopleId": 296140,
+        "seriesId": 900001,
+        "type": 3,
+        "image": null,
+        "sort": 2,
+        "isFeatured": true,
+        "peopleType": "Actor",
+        "personName": "Bryan Cranston",
+        "personImgURL": "https://artworks.thetvdb.com/banners/v4/actor/296140/photo/bryan.jpg"
+      },
+      {
+        "id": 2,
+        "name": "Sidekick",
+        "peopleId": 777001,
+        "seriesId": 900001,
+        "type": 3,
+        "image": null,
+        "sort": 1,
+        "isFeatured": false,
+        "peopleType": "Actor",
+        "personName": "Tess Voice",
+        "personImgURL": ""
+      },
+      {
+        "id": 3,
+        "name": "",
+        "peopleId": 777002,
+        "seriesId": 900001,
+        "type": 1,
+        "image": null,
+        "sort": 1,
+        "isFeatured": false,
+        "peopleType": "Director",
+        "personName": "Dana Director",
+        "personImgURL": ""
+      },
+      {
+        "id": 4,
+        "name": "",
+        "peopleId": 777003,
+        "seriesId": 900001,
+        "type": 2,
+        "image": null,
+        "sort": 1,
+        "isFeatured": false,
+        "peopleType": "Creator",
+        "personName": "Casey Creator",
+        "personImgURL": ""
+      },
+      {
+        "id": 5,
+        "name": "",
+        "peopleId": 777004,
+        "seriesId": 900001,
+        "type": 9,
+        "image": null,
+        "sort": 1,
+        "isFeatured": false,
+        "peopleType": "Crew",
+        "personName": "Not Kept",
+        "personImgURL": ""
+      }
+    ],
+    "seasons": [
+      {
+        "id": 1,
+        "seriesId": 900001,
+        "type": {
+          "id": 1,
+          "name": "Aired Order",
+          "type": "official"
+        },
+        "number": 1,
+        "image": "https://artworks.thetvdb.com/banners/seasons/900001-1.jpg"
+      },
+      {
+        "id": 2,
+        "seriesId": 900001,
+        "type": {
+          "id": 1,
+          "name": "Aired Order",
+          "type": "official"
+        },
+        "number": 2,
+        "image": "https://artworks.thetvdb.com/banners/seasons/900001-2.jpg"
+      },
+      {
+        "id": 3,
+        "seriesId": 900001,
+        "type": {
+          "id": 3,
+          "name": "Absolute Order",
+          "type": "absolute"
+        },
+        "number": 1,
+        "image": "https://artworks.thetvdb.com/banners/seasons/900001-abs.jpg"
+      }
+    ],
+    "contentRatings": [
+      {
+        "id": 1,
+        "name": "TV-14",
+        "country": "usa"
+      },
+      {
+        "id": 2,
+        "name": "12",
+        "country": "gbr"
+      }
+    ],
+    "translations": {
+      "nameTranslations": [
+        {
+          "language": "eng",
+          "name": "Test Anime",
+          "isPrimary": true
+        },
+        {
+          "language": "por",
+          "name": "Anime de Teste"
+        }
+      ],
+      "overviewTranslations": [
+        {
+          "language": "eng",
+          "overview": "A fictional series for ply's tests.",
+          "isPrimary": true
+        },
+        {
+          "language": "por",
+          "overview": "Uma s\u00e9rie fict\u00edcia."
+        }
+      ]
+    },
+    "episodes": null
+  }
+}

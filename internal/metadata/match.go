@@ -42,7 +42,8 @@ type Scored struct {
 
 // Result is the outcome of Match.
 type Result struct {
-	TMDBID      int64 // 0 when nothing matched
+	ID          int64  // 0 when nothing matched
+	Source      string // whose id ID is: SourceTMDB | SourceTVDB
 	Score       float64
 	State       string // store.MatchMatched | store.MatchUnmatched
 	NeedsReview bool
@@ -50,18 +51,19 @@ type Result struct {
 	Candidates  []Scored // what was scored, best first (none for an id hint)
 }
 
-// Match finds the TMDB title for a query. An id hint (TMDB id, IMDb id, TVDB
-// id for shows) decides it with score 1; an IMDb or TVDB id that TMDB does not
-// know falls through to the search. A TMDB id hint is trusted as it is: the
-// fetch that follows tells whether it exists.
+// Match finds the title for a query at one provider. An id hint decides it with
+// score 1: at TMDB a TMDB id, an IMDb id or, for shows, a TVDB id; at TVDB a
+// TVDB id or an IMDb id (a TMDB id means nothing to it). An IMDb or TVDB id that
+// TMDB does not know falls through to the search. A hint that is the provider's
+// own id is trusted as it is: the fetch that follows tells whether it exists.
 //
 // A transient provider error is returned as it is: a file is never
-// unmatched because TMDB was out of reach.
+// unmatched because a provider was out of reach.
 func Match(ctx context.Context, p Provider, q Query) (Result, error) {
 	if id, ok, err := matchByID(ctx, p, q); err != nil {
 		return Result{}, err
 	} else if ok {
-		return Result{TMDBID: id, Score: 1, State: store.MatchMatched, ByID: true}, nil
+		return Result{ID: id, Source: p.Name(), Score: 1, State: store.MatchMatched, ByID: true}, nil
 	}
 	scored, err := Search(ctx, p, q)
 	if err != nil {
@@ -72,9 +74,9 @@ func Match(ctx context.Context, p Provider, q Query) (Result, error) {
 	}
 	best := scored[0]
 	state, review := Classify(best.Score)
-	res := Result{Score: best.Score, State: state, NeedsReview: review, Candidates: scored}
+	res := Result{Source: p.Name(), Score: best.Score, State: state, NeedsReview: review, Candidates: scored}
 	if state == store.MatchMatched {
-		res.TMDBID = best.TMDBID
+		res.ID = best.ID
 	}
 	return res, nil
 }
@@ -92,7 +94,14 @@ func Classify(score float64) (state string, needsReview bool) {
 
 func matchByID(ctx context.Context, p Provider, q Query) (id int64, ok bool, err error) {
 	h := q.Hints
-	if h.TMDB != 0 {
+	tvdb := p.Name() == SourceTVDB
+	if tvdb && q.Kind != store.KindSeries {
+		return 0, false, nil // TVDB has no movies
+	}
+	if tvdb && h.TVDB != 0 {
+		return h.TVDB, true, nil
+	}
+	if !tvdb && h.TMDB != 0 {
 		return h.TMDB, true, nil
 	}
 	pick := func(movies, series []Candidate) []Candidate {
@@ -107,24 +116,24 @@ func matchByID(ctx context.Context, p Provider, q Query) (id int64, ok bool, err
 			return 0, false, err
 		}
 		if c := pick(movies, series); len(c) > 0 {
-			return c[0].TMDBID, true, nil
+			return c[0].ID, true, nil
 		}
 	}
-	if h.TVDB != 0 && q.Kind == store.KindSeries {
+	if !tvdb && h.TVDB != 0 && q.Kind == store.KindSeries {
 		_, series, err := p.Find(ctx, ExternalTVDB, strconv.FormatInt(h.TVDB, 10))
 		if err != nil {
 			return 0, false, err
 		}
 		if len(series) > 0 {
-			return series[0].TMDBID, true, nil
+			return series[0].ID, true, nil
 		}
 	}
 	return 0, false, nil
 }
 
-// Search runs the searches for a query and returns the top candidates, best
-// first. It tries the title with the year, then without it, then a simplified
-// title (with the year, then without), and scores the results of the first
+// Search runs the searches for a query at one provider and returns the top
+// candidates, best first. It tries the title with the year, then without it, then a
+// simplified title (with the year, then without), and scores the results of the first
 // search that finds anything. It is also what the "fix match" dialog lists.
 func Search(ctx context.Context, p Provider, q Query) ([]Scored, error) {
 	for _, try := range searchPlan(q) {
@@ -141,6 +150,11 @@ func Search(ctx context.Context, p Provider, q Query) ([]Scored, error) {
 			return nil, err
 		}
 		if len(cands) > 0 {
+			for i := range cands {
+				if cands[i].Source == "" {
+					cands[i].Source = p.Name()
+				}
+			}
 			return ScoreCandidates(q, cands), nil
 		}
 	}

@@ -2,6 +2,7 @@
   import { openSearch } from '../lib/palette.svelte';
   import { href, router } from '../lib/router.svelte';
   import { app, rescan, scan } from '../lib/state.svelte';
+  import ActivityIndicator from './ActivityIndicator.svelte';
   import Icon from './Icon.svelte';
 
   // Clear over a hero, frosted once the page scrolls under it.
@@ -26,6 +27,7 @@
     <span class="hint">Search</span>
     <kbd>{mac ? '⌘' : 'Ctrl'} K</kbd>
   </button>
+  <ActivityIndicator current={section === 'activity'} />
   <button
     class="btn icon"
     onclick={rescan}
