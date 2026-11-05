@@ -147,6 +147,8 @@
     'scan.full': 'Library scans',
     'scan.dirs': 'New files to read',
     'meta.match': 'Details to look up',
+    'ratings.imdb': 'IMDb ratings',
+    'ratings.mdblist': 'Ratings from MDBList',
     'cache.prune': 'Cache tidying',
   };
   const PLAY_KIND = { direct: 'Direct', remux: 'Remux', transcode: 'Transcode' };

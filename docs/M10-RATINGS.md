@@ -245,3 +245,37 @@ machine is let off), and a redirect is an error.
   at a time, which costs the same in the worst case and cannot lose a rating to a guessed shape.
 - **The part file is flushed (`fsync`) before the rename, but no test can see that**: it is the one line of the fetch with
   no mutant that a test kills.
+
+## As built (web UI, 2026-11-05)
+
+- **Helpers** (`web/src/lib/ratings.ts`): the number as each source shows it (IMDb and TMDB "8.7", Letterboxd "4.1",
+  Rotten Tomatoes and Trakt "93%", Metacritic "74"), votes in short form ("1.2M"), Metacritic's bands (61 and up good,
+  40 to 60 mixed, under 40 bad), Rotten Tomatoes' state (the server's word, else the 60% line), the label read aloud,
+  the tooltip ("IMDb, 1,234,567 votes. Rated 3 days ago."), `orderShown` (the entries in `ratingsShown` order; all of
+  them, in the server's order, when the settings can't be read), and `ratingScore` (score100, -1 for none) for sorting
+  and filtering. `api.ts` normalises Go's nulls (`ratings: null` → `[]`) and drops an entry of a source it does not know.
+- **Detail pages** (`components/Ratings.svelte`, `Rating.svelte`, `RatingGlyph.svelte`): a row of chips under the title's
+  facts, in `ratingsShown` order, each the source's short name ("IMDb", "Critics", "Audience", "Metacritic"...) and
+  its number, with IMDb's votes; a link to the source in a new tab when the entry has an https URL. The glyphs are our
+  own drawings (a tomato or a splat, a bucket of popcorn upright or spilled, a star for Letterboxd, a box coloured by
+  band for Metacritic), decoration only: the name and number are text, and each chip has its full label for screen
+  readers. The page reads `ratingsShown` from `GET /api/settings` (once per library version, and only when there are
+  ratings to order). An episode's page shows its own chips (IMDb) and keeps TMDB's number beside the star.
+- **Cards and rows**: the primary rating (`rating`) at the start of the second line of a card (Movies, Shows, genres,
+  collections, a person's credits; not the Home rails), and an episode's IMDb rating in the Show page's episode list, in
+  the quiet form: the glyph (or the short name) and the number, never a link.
+- **Movies and Shows**: "Rating" in the sort, and a minimum (Any rating, 60+, 70+, 80+) on score100, in the URL hash
+  (`#/movies?sort=rating&min=70`). Both pages sort and filter the library they already hold, so they don't use the
+  server's `sort=rating`/`minRating` (and can't get its 400).
+- **Settings → Ratings** (`components/RatingsSettings.svelte`): the MDBList key as the TMDB and TVDB keys (password field
+  kept from password managers, Remove only for a key stored here, Test with `provider: "mdblist"`); the primary rating
+  (a select of the primary sources this install has); the shown sources as a checklist with move up and down (an
+  unticked source goes to the end); every change saved at once (the client's `PUT /api/settings`), one save at a time
+  with the latest choice sent last (answers can't cross), said in a `role=status` line, and put back with the server's
+  words when refused; a confirmed primary refreshes the cards; once a choice is made the card keeps its own state, so a
+  GET of the settings that started before a save can't undo it; the focus stays on the moved row's button (or its
+  twin, at the top or bottom) at once; IMDb's and MDBList's notices as the server
+  words them, with their links; and "IMDb ratings updated <date>" or "IMDb ratings not downloaded yet".
+- **Activity**: `ratings.imdb` is "IMDb ratings" and `ratings.mdblist` "Ratings from MDBList".
+- **Tests**: `lib/ratings.test.ts`, the ratings part of `lib/meta-api.test.ts`, `sortCards` in `lib/credits.test.ts`, and
+  `web/e2e/ratings-ui.mjs` (mocked; each scenario names the mutant it kills).

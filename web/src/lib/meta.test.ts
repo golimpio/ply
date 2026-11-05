@@ -100,6 +100,14 @@ describe('labels', () => {
     expect(ratingLabel(8)).toBe('8.0');
     expect(ratingLabel(0)).toBe('');
     expect(ratingLabel(undefined)).toBe('');
+    expect(ratingLabel(null)).toBe('');
+  });
+
+  it('a rating entry (M10) reads as its source shows it, not as nothing', () => {
+    const at = '2026-11-01T00:00:00Z';
+    expect(ratingLabel({ source: 'imdb', value: 8.66, scale: 10, score100: 87, url: '', fetchedAt: at })).toBe('8.7');
+    expect(ratingLabel({ source: 'rt_critics', value: 93, scale: 100, score100: 93, url: '', fetchedAt: at })).toBe('93%');
+    expect(ratingLabel({ source: 'metacritic', value: 74, scale: 100, score100: 74, url: '', fetchedAt: at })).toBe('74');
   });
 
   it('air dates in words, as local calendar days', () => {

@@ -562,3 +562,119 @@ describe('the scan status', () => {
     expect(st.watching?.[0]).toEqual({ root: '/media', watching: true, dirs: 12 });
   });
 });
+
+describe('ratings (M10)', () => {
+  const at = '2026-11-02T10:00:00Z';
+  const imdb = { source: 'imdb', value: 8.7, scale: 10, score100: 87, votes: 1200, url: 'https://www.imdb.com/title/tt1/', fetchedAt: at };
+  const rt = { source: 'rt_critics', value: 93, scale: 100, score100: 93, state: 'fresh', url: '', fetchedAt: at };
+
+  it("list rows keep their rating entry; an episode's null ratings are []", async () => {
+    stubFetch(
+      json([
+        { id: 1, kind: 'movie', title: 'Heat', rating: imdb },
+        { id: 2, kind: 'episode', title: 'Lost', rating: null, ratings: null },
+        { id: 3, kind: 'episode', title: 'Lost', rating: rt, ratings: [imdb] },
+      ]),
+    );
+    const [film, ep, ep2] = await m.api.items();
+    expect(film.rating).toEqual(imdb);
+    expect(film.ratings).toBeUndefined(); // a movie has none of its own
+    expect(ep.rating).toBeNull();
+    expect(ep.ratings).toEqual([]);
+    expect(ep2.ratings).toEqual([imdb]);
+  });
+
+  it("a title's null ratings are [], and an entry of a source the page does not know is dropped", async () => {
+    stubFetch(
+      json({
+        id: 9, kind: 'movie', title: 'Heat', durationSec: 1, streams: [], subtitles: [], playback: { method: 'direct', reasons: [] },
+        meta: { id: 4, kind: 'movie', title: 'Heat', genres: null, cast: null, crew: null, rating: { ...imdb, source: 'myanimelist' }, ratings: null },
+        episodeInfo: { name: 'x', rating: 7.5, ratings: null },
+      }),
+    );
+    const d = await m.api.item(9);
+    expect(d.meta?.ratings).toEqual([]);
+    expect(d.meta?.rating).toBeNull();
+    expect(d.meta?.genres).toEqual([]);
+    expect(d.episodeInfo?.ratings).toEqual([]);
+    expect(d.episodeInfo?.rating).toBe(7.5); // still TMDB's number
+  });
+
+  it('cards of titles, collections and credits, and show rows, carry their entry', async () => {
+    stubFetch(json([{ id: 1, kind: 'movie', title: 'A', year: 1, rating: rt }]));
+    expect((await m.api.titles())[0].rating).toEqual(rt);
+    stubFetch(json({ id: 2, name: 'C', titles: [{ id: 1, kind: 'movie', title: 'A', year: 1, rating: null }] }));
+    expect((await m.api.collection(2)).titles[0].rating).toBeNull();
+    stubFetch(json([{ show: 'Lost', seasons: null, episodeCount: 1, rating: imdb }]));
+    expect((await m.api.shows())[0].rating).toEqual(imdb);
+    stubFetch(json({ show: 'Lost', episodeCount: 1, seasons: null, meta: { id: 3, kind: 'series', title: 'Lost', ratings: [imdb, rt] } }));
+    expect((await m.api.show('Lost')).meta?.ratings).toEqual([imdb, rt]);
+  });
+
+  it("the settings' null lists are []; an older server's settings are left as they are", async () => {
+    stubFetch(json({ tmdbKeySet: true, ratingsPrimary: 'imdb', ratingsShown: null, ratingsAvailable: null, imdbDatasetUpdatedAt: null }));
+    const s = await m.api.settings();
+    expect(s.ratingsShown).toEqual([]);
+    expect(s.ratingsAvailable).toEqual([]);
+    stubFetch(json({ tmdbKeySet: true }));
+    expect((await m.api.settings()).ratingsShown).toBeUndefined();
+  });
+
+  it('saves the MDBList key and the choices, and tests MDBList by name', async () => {
+    let fn = stubFetch(json({ ratingsPrimary: 'metacritic', ratingsShown: ['metacritic'], ratingsAvailable: [] }));
+    await m.api.saveSettings({ ratingsPrimary: 'metacritic', ratingsShown: ['metacritic'] });
+    expect(sent(fn)).toEqual({ ratingsPrimary: 'metacritic', ratingsShown: ['metacritic'] });
+    fn = stubFetch(json({ ok: false, error: 'MDBList rejected the key' }));
+    expect(await m.api.testKey('mdblist')).toEqual({ ok: false, error: 'MDBList rejected the key' });
+    expect(call(fn)[0]).toBe('/api/settings/test');
+    expect(sent(fn)).toEqual({ provider: 'mdblist' });
+  });
+});
+
+describe('a save with a timeout', () => {
+  // A server that never answers: the request is only ever ended by its signal.
+  function hang() {
+    const fn = vi.fn(
+      (_path: string, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+        }),
+    );
+    vi.stubGlobal('fetch', fn);
+    return fn;
+  }
+
+  it('gives up after the time given, as "the server didn\'t answer"', async () => {
+    vi.useFakeTimers();
+    try {
+      hang();
+      const p = m.api.saveSettings({ ratingsShown: ['imdb'] }, 15_000);
+      const settled = expect(p).rejects.toMatchObject({ status: 0, message: m.NO_ANSWER });
+      await vi.advanceTimersByTimeAsync(14_999);
+      await vi.advanceTimersByTimeAsync(1);
+      await settled;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('waits on its own until the time, and a save without one sends no signal', async () => {
+    vi.useFakeTimers();
+    try {
+      const fn = hang();
+      let done = false;
+      void m.api.saveSettings({ ratingsShown: ['imdb'] }, 15_000).catch(() => (done = true));
+      await vi.advanceTimersByTimeAsync(14_000);
+      expect(done).toBe(false); // positive control for the test above: not before the time
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(done).toBe(true);
+      stubFetch(json({ tmdbKeySet: true }));
+      const plain = vi.mocked(fetch);
+      await m.api.saveSettings({ language: 'en-GB' });
+      expect((plain.mock.calls[0] as unknown as FetchCall)[1].signal).toBeUndefined();
+      expect(fn).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

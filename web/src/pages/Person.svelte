@@ -123,6 +123,7 @@
               href={cardHref(card) ?? href.home}
               title={card.title}
               sub={[card.year || undefined, role]}
+              rating={card.rating}
             />
           {/each}
         </div>

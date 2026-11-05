@@ -1,9 +1,11 @@
-export type Sort = 'title' | 'added' | 'year' | 'duration';
+export type Sort = 'title' | 'added' | 'year' | 'duration' | 'rating';
 export type Filter = '4k' | 'hdr' | 'unwatched';
 
 export interface LibraryView {
   sort: Sort;
   filters: Filter[];
+  /** The minimum rating, on score100 (1 to 100); 0 for any. */
+  minRating: number;
 }
 
 export type Route =
@@ -20,17 +22,19 @@ export type Route =
   | { name: 'activity' }
   | { name: 'notfound' };
 
-const SORTS: Sort[] = ['title', 'added', 'year', 'duration'];
+const SORTS: Sort[] = ['title', 'added', 'year', 'duration', 'rating'];
 const FILTERS: Filter[] = ['4k', 'hdr', 'unwatched'];
 
 function libraryView(q: URLSearchParams, fallback: Sort): LibraryView {
   const s = q.get('sort') as Sort;
   const filters = (q.get('f') ?? '').split(',').filter((f): f is Filter => FILTERS.includes(f as Filter));
-  return { sort: SORTS.includes(s) ? s : fallback, filters };
+  const min = q.get('min') ?? '';
+  const minRating = /^\d{1,3}$/.test(min) && Number(min) <= 100 ? Number(min) : 0;
+  return { sort: SORTS.includes(s) ? s : fallback, filters, minRating };
 }
 
 /**
- * Hash forms: #/ (home), #/movies[?sort=&f=], #/shows[?sort=&f=], #/shows/<name>[?s=<season>],
+ * Hash forms: #/ (home), #/movies[?sort=&f=&min=], #/shows[?sort=&f=&min=], #/shows/<name>[?s=<season>],
  * #/item/<id>, #/play/<id>[?t=<resume seconds>], #/person/<id>, #/genre/<id>,
  * #/collection/<id>, #/settings, #/activity.
  */
@@ -93,6 +97,7 @@ function viewQuery(v: Partial<LibraryView>, fallback: Sort): string {
   const p = new URLSearchParams();
   if (v.sort && v.sort !== fallback) p.set('sort', v.sort);
   if (v.filters?.length) p.set('f', v.filters.join(','));
+  if (v.minRating && v.minRating > 0) p.set('min', String(v.minRating));
   const s = p.toString();
   return s ? `?${s}` : '';
 }

@@ -52,7 +52,7 @@ type Queue struct {
 	// closed is set (under enqMu) once Run has returned: an enqueue then fails with
 	// ErrClosed instead of writing to a store that is being closed.
 	closed bool
-	ready chan struct{}
+	ready  chan struct{}
 
 	mu        sync.Mutex
 	live      map[int64]*entry // queued and running
@@ -466,10 +466,11 @@ func (q *Queue) next() (start *entry, due time.Duration, held bool) {
 			q.publish(Event{Type: "job.held", Job: &changed[i]})
 		}
 	}()
-	for _, e := range cands {
+	for _, c := range cands {
+		e := c.e
 		h := tier.Hold{}
 		if q.o.Gate != nil {
-			h = q.o.Gate.Check(e.need)
+			h = q.o.Gate.Check(c.need) // the copy: a merge may change e.need meanwhile
 		}
 		q.mu.Lock()
 		if h.Browsing {
@@ -507,11 +508,19 @@ func (q *Queue) next() (start *entry, due time.Duration, held bool) {
 	return nil, due, held
 }
 
+// candidate is a job that could start, with its need as it was under q.mu: the
+// gate is asked outside the lock, while an enqueue merging into the job may set
+// a new need (setNeed).
+type candidate struct {
+	e    *entry
+	need tier.Need
+}
+
 // candidates are the jobs that could start now (due, lane free, key not
 // running), best first, and how long until the next retry is due. A queued job
 // that is no candidate no longer waits for the gate: its Held is cleared (the
 // cleared ones are returned, to publish).
-func (q *Queue) candidates() (out []*entry, due time.Duration, cleared []Job) {
+func (q *Queue) candidates() (out []candidate, due time.Duration, cleared []Job) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	now := q.o.Now()
@@ -531,9 +540,9 @@ func (q *Queue) candidates() (out []*entry, due time.Duration, cleared []Job) {
 			}
 			continue
 		}
-		out = append(out, e)
+		out = append(out, candidate{e: e, need: e.need})
 	}
-	slices.SortFunc(out, compare)
+	slices.SortFunc(out, func(a, b candidate) int { return compare(a.e, b.e) })
 	return out, due, cleared
 }
 

@@ -1,15 +1,17 @@
 <script lang="ts">
-  import type { ItemSummary } from '../lib/api';
+  import type { ItemSummary, RatingEntry } from '../lib/api';
   import { posterImg, wideImg, type Img } from '../lib/meta';
   import { morph } from '../lib/nav';
   import { progressOf } from '../lib/ui-types';
   import Badges from './Badges.svelte';
   import Picture from './Picture.svelte';
+  import Rating from './Rating.svelte';
 
   // A card: picture, title under it, an optional second line, and a
   // watch-progress bar when the item has been started. `wide` is 16:9 (frame
   // grab, still or backdrop), `poster` is 2:3; `img` overrides the picture
-  // (a show's poster, a title's). `note` is a short flag over the picture.
+  // (a show's poster, a title's). `note` is a short flag over the picture. `rating` is the title's
+  // primary rating, shown quietly at the start of the second line.
   let {
     item = undefined,
     img = undefined,
@@ -19,6 +21,7 @@
     sub = '',
     label = '',
     note = '',
+    rating = null,
   }: {
     item?: ItemSummary;
     img?: Img | null;
@@ -28,6 +31,7 @@
     sub?: string | (string | number | null | undefined)[];
     label?: string;
     note?: string;
+    rating?: RatingEntry | null;
   } = $props();
 
   const progress = $derived(item ? progressOf(item) : 0);
@@ -52,7 +56,12 @@
     {/if}
   </div>
   <div class="title">{title}</div>
-  {#if parts.length}<div class="sub">{#each parts as p, i (i)}<span>{p}</span>{/each}</div>{/if}
+  {#if parts.length || rating}
+    <div class="sub">
+      {#if rating}<span class="rating"><Rating entry={rating} compact /></span>{/if}
+      {#each parts as p, i (i)}<span>{p}</span>{/each}
+    </div>
+  {/if}
 </a>
 
 <style>
@@ -141,6 +150,9 @@
   /* The last part (a character, an episode title) gives way, with an ellipsis. */
   .sub span {
     flex: none;
+  }
+  .rating {
+    color: var(--text);
   }
   .sub span:last-child {
     flex: 0 1 auto;

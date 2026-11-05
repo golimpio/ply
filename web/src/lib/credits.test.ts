@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { PersonCredit, TitleCard } from './api';
+import type { PersonCredit, RatingEntry, RatingSource, TitleCard } from './api';
 import { cardHref, formatDate, groupCredits, groupOf, lifeSpan, sortCards, yearSpan } from './credits';
 
 let nextId = 1;
@@ -10,6 +10,9 @@ const card = (over: Partial<TitleCard> = {}): TitleCard => {
 const cast = (title: TitleCard, character = ''): PersonCredit => ({ titleId: title.id, kind: 'cast', character, title });
 const crew = (title: TitleCard, job: string): PersonCredit => ({ titleId: title.id, kind: 'crew', job, title });
 const ids = (list: { id: number }[]) => list.map((c) => c.id);
+const rated = (source: RatingSource, value: number, scale: number): RatingEntry => ({
+  source, value, scale, score100: Math.round((value / scale) * 100), url: '', fetchedAt: '2026-11-01T00:00:00Z',
+});
 
 describe('groupOf', () => {
   it('cast is Acting, whatever else the credit carries', () => {
@@ -115,10 +118,10 @@ describe('cardHref', () => {
 });
 
 describe('sortCards', () => {
-  const a = card({ title: 'Alien', year: 1979, rating: 8.4 });
-  const b = card({ title: 'Blade Runner', year: 1982, rating: 7.9 });
-  const c = card({ title: 'Cube', year: 0 });
-  const d = card({ title: 'Dune', year: 2021, rating: 8.4 });
+  const a = card({ title: 'Alien', year: 1979, rating: rated('imdb', 8.4, 10) });
+  const b = card({ title: 'Blade Runner', year: 1982, rating: rated('imdb', 7.9, 10) });
+  const c = card({ title: 'Cube', year: 0, rating: null });
+  const d = card({ title: 'Dune', year: 2021, rating: rated('imdb', 8.4, 10) });
   const list = [a, b, c, d];
   const titles = (l: TitleCard[]) => l.map((x) => x.title);
 
@@ -134,7 +137,23 @@ describe('sortCards', () => {
   });
 
   it('rating puts the best first, unrated last, and ties keep the list order', () => {
+    // Cube (null) first in the list: the sort must move it, not leave it where NaN would.
+    expect(titles(sortCards([c, b, a, d], 'rating'))).toEqual(['Alien', 'Dune', 'Blade Runner', 'Cube']);
     expect(titles(sortCards(list, 'rating'))).toEqual(['Alien', 'Dune', 'Blade Runner', 'Cube']);
+  });
+
+  it('rating goes by score100 across sources, not by each source\'s own value', () => {
+    // RT critics 75% (value 75) is below IMDb 8.0 (value 8, score 80); Letterboxd 4.5/5 is 90.
+    const rt = card({ title: 'Rotten', rating: rated('rt_critics', 75, 100) });
+    const imdb = card({ title: 'Imdb', rating: rated('imdb', 8, 10) });
+    const lb = card({ title: 'Boxd', rating: rated('letterboxd', 4.5, 5) });
+    expect(titles(sortCards([rt, imdb, lb], 'rating'))).toEqual(['Boxd', 'Imdb', 'Rotten']);
+  });
+
+  it('an absent rating (an older server) is last too', () => {
+    const none = card({ title: 'Old' });
+    delete none.rating;
+    expect(titles(sortCards([none, b], 'rating'))).toEqual(['Blade Runner', 'Old']);
   });
 });
 

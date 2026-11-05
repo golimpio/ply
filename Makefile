@@ -123,8 +123,8 @@ test-web: $(WEB_DEPS) ## Web unit tests (vitest)
 e2e: e2e-web e2e-player ## All browser checks (needs Google Chrome)
 
 .PHONY: e2e-web
-e2e-web: web ## Browser checks against a mocked API (player, metadata, TVDB, folders, activity)
-	cd web && node e2e/player-wiring.mjs && node e2e/metadata-ui.mjs && node e2e/folders-ui.mjs && node e2e/activity-ui.mjs && node e2e/player-limits.mjs && node e2e/tvdb-ui.mjs
+e2e-web: web ## Browser checks against a mocked API (player, metadata, TVDB, ratings, folders, activity)
+	cd web && node e2e/player-wiring.mjs && node e2e/metadata-ui.mjs && node e2e/folders-ui.mjs && node e2e/activity-ui.mjs && node e2e/player-limits.mjs && node e2e/tvdb-ui.mjs && node e2e/ratings-ui.mjs
 
 .PHONY: e2e-player
 e2e-player: build ## Browser checks of the player against a real ply (throwaway library)

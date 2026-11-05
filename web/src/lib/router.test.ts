@@ -7,10 +7,15 @@ describe('parseRoute', () => {
   it.each([
     ['', { name: 'home' }],
     ['#/', { name: 'home' }],
-    ['#/movies', { name: 'movies', sort: 'title', filters: [] }],
-    ['#/movies?sort=added&f=4k,hdr,bogus', { name: 'movies', sort: 'added', filters: ['4k', 'hdr'] }],
-    ['#/movies?sort=nonsense', { name: 'movies', sort: 'title', filters: [] }],
-    ['#/shows?sort=added', { name: 'shows', sort: 'added', filters: [] }],
+    ['#/movies', { name: 'movies', sort: 'title', filters: [], minRating: 0 }],
+    ['#/movies?sort=added&f=4k,hdr,bogus', { name: 'movies', sort: 'added', filters: ['4k', 'hdr'], minRating: 0 }],
+    ['#/movies?sort=nonsense', { name: 'movies', sort: 'title', filters: [], minRating: 0 }],
+    ['#/shows?sort=added', { name: 'shows', sort: 'added', filters: [], minRating: 0 }],
+    ['#/movies?sort=rating&min=70', { name: 'movies', sort: 'rating', filters: [], minRating: 70 }],
+    ['#/shows?sort=rating&min=80', { name: 'shows', sort: 'rating', filters: [], minRating: 80 }],
+    ['#/movies?min=101', { name: 'movies', sort: 'title', filters: [], minRating: 0 }],
+    ['#/movies?min=-5', { name: 'movies', sort: 'title', filters: [], minRating: 0 }],
+    ['#/movies?min=7.5', { name: 'movies', sort: 'title', filters: [], minRating: 0 }],
     ['#/item/12', { name: 'item', id: 12 }],
     ['#/item/0', notfound],
     ['#/item/1.5', notfound],
@@ -60,9 +65,12 @@ describe('href', () => {
   );
 
   it('round-trips library views and leaves the default sort out of the URL', () => {
-    const view: LibraryView = { sort: 'year', filters: ['hdr', 'unwatched'] };
+    const view: LibraryView = { sort: 'year', filters: ['hdr', 'unwatched'], minRating: 0 };
     expect(parseRoute(href.moviesWith(view))).toEqual({ name: 'movies', ...view });
-    expect(href.moviesWith({ sort: 'title', filters: [] })).toBe('#/movies');
+    const rated: LibraryView = { sort: 'rating', filters: ['4k'], minRating: 60 };
+    expect(parseRoute(href.showsWith(rated))).toEqual({ name: 'shows', ...rated });
+    expect(href.moviesWith({ sort: 'title', filters: [], minRating: 0 })).toBe('#/movies');
+    expect(href.moviesWith({ sort: 'rating', minRating: 70 })).toBe('#/movies?sort=rating&min=70');
     expect(href.showsWith({ sort: 'added' })).toBe('#/shows?sort=added');
   });
 

@@ -30,6 +30,7 @@
     folder: 'M3.5 6.5h6l2 2h9v10h-17z',
     plus: 'M12 5v14M5 12h14',
     up: 'M12 19V5M6 11l6-6 6 6',
+    down: 'M12 5v14M6 13l6 6 6-6',
     activity: 'M3 12h4l2.5-6.5 5 13 2.5-6.5h4',
     stop: 'M7 7h10v10H7z',
     check: 'M5 12.5l4.5 4.5L19 7.5',

@@ -2,6 +2,7 @@
 // credits sorted into the groups the page shows, how a title card links and
 // reads, and the dates of a life.
 import type { PersonCredit, TitleCard } from './api';
+import { ratingScore } from './ratings';
 import { href } from './router.svelte';
 
 // ---- a person's credits -------------------------------------------------------
@@ -81,12 +82,13 @@ export type TitleSort = 'title' | 'year' | 'rating';
  * A copy of the cards in the order asked for. Title keeps the order of the list
  * (the server sorts by sort title, so "The Godfather" files under G); year and
  * rating put the newest and the best first, the ones with none last, and break
- * ties in the order of the list.
+ * ties in the order of the list. Rating goes by score100, so that an IMDb 8.0
+ * (80) beats a Tomatometer of 75%.
  */
 export function sortCards(cards: TitleCard[], sort: TitleSort): TitleCard[] {
   const out = [...cards];
   if (sort === 'year') return out.sort((a, b) => yearRank(b) - yearRank(a));
-  if (sort === 'rating') return out.sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
+  if (sort === 'rating') return out.sort((a, b) => ratingScore(b) - ratingScore(a));
   return out;
 }
 

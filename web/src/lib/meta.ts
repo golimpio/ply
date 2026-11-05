@@ -1,7 +1,18 @@
 // What the pages show of the M6 metadata: which picture goes where, and the
 // small labels around it. Every helper copes with the metadata being absent
 // (no TMDB key, nothing matched yet): the frame grab and the file name stand in.
-import { imageSrcset, imageUrl, mediaUrl, type CrewMember, type ItemSummary, type MetadataStatus, type TitleCard, type TitleDetail } from './api';
+import {
+  imageSrcset,
+  imageUrl,
+  mediaUrl,
+  type CrewMember,
+  type ItemSummary,
+  type MetadataStatus,
+  type RatingEntry,
+  type TitleCard,
+  type TitleDetail,
+} from './api';
+import { ratingValue } from './ratings';
 import { href } from './router.svelte';
 import { artOf } from './ui-types';
 
@@ -107,9 +118,13 @@ export function airLabel(date: string, now: Date = new Date()): string {
   });
 }
 
-/** "7.8" for a rating out of 10; '' when there is none. */
-export function ratingLabel(r: number | undefined | null): string {
-  return r && r > 0 ? (Math.round(r * 10) / 10).toFixed(1) : '';
+/**
+ * "7.8" for a rating out of 10 (an episode's TMDB score); for a rating entry (M10) its number as
+ * its source shows it ("8.7", "93%", "74"). '' when there is none.
+ */
+export function ratingLabel(r: number | RatingEntry | undefined | null): string {
+  if (r && typeof r === 'object') return r.score100 >= 0 ? ratingValue(r) : '';
+  return typeof r === 'number' && r > 0 ? (Math.round(r * 10) / 10).toFixed(1) : '';
 }
 
 /** "2h 16m" for a runtime in minutes; '' when unknown. */

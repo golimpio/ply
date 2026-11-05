@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api } from '../lib/api';
+  import { api, type KeyProvider } from '../lib/api';
 
   // "Test": asks the server to use the key in use (from wherever it comes) now. The page never
   // sees the key; only whether it works, and why not.
@@ -11,7 +11,7 @@
     about,
     onworks,
   }: {
-    provider: 'tmdb' | 'tvdb';
+    provider: KeyProvider;
     name: string;
     /** A save is under way: the key may be about to change. */
     busy?: boolean;

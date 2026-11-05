@@ -21,10 +21,42 @@
   --tint: var(--accent); /* set per page from artwork; see lib/ambient */
   --radius: 10px;
   --radius-lg: 16px;
+  --radius-sm: 4px;
+  --radius-pill: 999px;
+  /* Glass: what sits on a picture (badges, rating chips). */
+  --glass: rgb(16 14 12 / 0.55);
+  --glass-line: rgb(255 255 255 / 0.16);
+  --glass-line-hover: rgb(255 255 255 / 0.45);
+  --glass-blur: blur(6px);
   --gutter: clamp(1rem, 4vw, 3rem);
   --bar-h: 3.5rem;
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  /* Type: the family and the sizes components use (a redesign swaps these). */
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --fs-2xs: 0.72rem;
+  --fs-xs: 0.8rem;
+  --fs-sm: 0.875rem;
+  --fs-md: 0.925rem;
+  --fs-base: 1rem;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+  /* Ratings (M10). Colour is only a hint: every number and name is also text. */
+  --rating-good: var(--ok); /* Metacritic 61 and up */
+  --rating-mixed: var(--warn); /* 40 to 60 */
+  --rating-bad: var(--danger); /* under 40 */
+  --on-rating: #15110c; /* text on a band's colour */
+  --rating-fresh: #f0674a; /* the tomato */
+  --rating-certified: var(--accent); /* the ring of a certified tomato */
+  --rating-leaf: var(--ok);
+  --rating-rotten: #a3bf52; /* the splat */
+  --rating-bucket: #e0543c; /* the popcorn's bucket */
+  --rating-kernel: #f7e6b5;
+  --rating-star: var(--accent);
+  --chip-h: 2rem; /* a rating chip */
+  --chip-pad: 0.2rem 0.7rem;
+  --chip-gap: 0.4rem;
+  font-family: var(--font-sans);
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
 }
@@ -270,6 +302,113 @@ code {
   color: var(--bg);
   background: var(--text);
   border-color: var(--text);
+}
+
+/* A raised card of the settings, in parts divided by a line. Named so that no component's own
+   .panel (the search palette, Activity, the sign-in prompt) picks it up. */
+.settings-panel {
+  display: grid;
+  gap: 1.1rem;
+  padding: 1.1rem 1.25rem;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+.settings-panel p {
+  margin: 0;
+}
+.settings-panel h3 {
+  margin: 0 0 0.15rem;
+  font-size: var(--fs-base);
+}
+.settings-panel-part {
+  display: grid;
+  gap: 0.9rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--line);
+}
+.settings-panel .hint {
+  font-size: var(--fs-sm);
+}
+.settings-panel .ok {
+  color: var(--ok);
+}
+/* Text fields and selects on a settings panel. */
+.settings-input {
+  min-height: 2.5rem;
+  padding: 0.45rem 0.85rem;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.settings-input:focus-visible {
+  border-color: var(--text);
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
+/* Ratings (M10): one chip per source on a detail page, and the quiet form of cards and rows. */
+.score-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--chip-gap);
+  min-height: var(--chip-h);
+  padding: var(--chip-pad);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  color: var(--text);
+  background: var(--glass);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+  backdrop-filter: var(--glass-blur);
+}
+a.score-chip:hover {
+  border-color: var(--glass-line-hover);
+}
+.score-chip .score-name {
+  font-weight: var(--fw-semibold);
+  color: var(--muted);
+}
+.score-chip .score-votes {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  color: var(--muted);
+}
+/* The quiet form: no frame, the size of the text around it. */
+.score-chip.compact {
+  min-height: 0;
+  padding: 0;
+  gap: 0.25rem;
+  font-size: inherit;
+  font-weight: var(--fw-semibold);
+  background: none;
+  border: 0;
+  backdrop-filter: none;
+}
+/* A Metascore in a box coloured by its band. */
+.score-box {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.9em;
+  padding: 0.05em 0.3em;
+  font-weight: var(--fw-bold);
+  line-height: 1.35;
+  color: var(--on-rating);
+  border-radius: var(--radius-sm);
+}
+.score-box[data-band='good'] {
+  background: var(--rating-good);
+}
+.score-box[data-band='mixed'] {
+  background: var(--rating-mixed);
+}
+.score-box[data-band='bad'] {
+  background: var(--rating-bad);
 }
 
 /* Tables (technical details) */

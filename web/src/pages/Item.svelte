@@ -13,6 +13,7 @@
   } from '../lib/format';
   import { ensureLibrary, findItem, library } from '../lib/library.svelte';
   import { CREDIT_LINES, crewWith, logoSrc, ratingLabel, runtimeLabel, versionLabel, yearOf } from '../lib/meta';
+  import { titleRatings } from '../lib/ratings';
   import { href } from '../lib/router.svelte';
   import { resource } from '../lib/resource.svelte';
   import { app } from '../lib/state.svelte';
@@ -26,6 +27,7 @@
   import Menu from '../components/Menu.svelte';
   import PersonCard from '../components/PersonCard.svelte';
   import Rail from '../components/Rail.svelte';
+  import Ratings from '../components/Ratings.svelte';
   import SourceBadge from '../components/SourceBadge.svelte';
 
   let { id }: { id: number } = $props();
@@ -74,7 +76,10 @@
   const logo = $derived(isEpisode ? '' : logoSrc(meta));
   const year = $derived(isEpisode ? undefined : (yearOf(meta) ?? item?.year));
   const runtime = $derived(meta?.runtimeMin && !isEpisode ? runtimeLabel(meta.runtimeMin) : formatDuration(item?.durationSec ?? 0));
-  const rating = $derived(ratingLabel(isEpisode ? ep?.rating : (meta?.rating ?? item?.rating)));
+  // An episode's TMDB score (a number, as before M10) beside its own chips (IMDb); a film's chips
+  // are every rating of its title, the card's one until the detail has come.
+  const epScore = $derived(isEpisode ? ratingLabel(ep?.rating) : '');
+  const ratings = $derived(isEpisode ? (ep?.ratings ?? item?.ratings ?? []) : titleRatings(meta, item));
   const overview = $derived(isEpisode ? ep?.overview || item?.overview : meta?.overview);
   const credits = $derived(
     CREDIT_LINES.map((l) => ({ ...l, people: crewWith(meta, l.jobs) })).filter((l) => l.people.length),
@@ -166,9 +171,10 @@
       {#if year}<span>{year}</span>{/if}
       {#if meta?.certification}<span class="cert">{meta.certification}</span>{/if}
       {#if runtime}<span>{runtime}</span>{/if}
-      {#if rating}<span class="rating"><Icon name="star" filled /><span class="sr-only">Rated</span>{rating}</span>{/if}
+      {#if epScore}<span class="rating" title="TMDB"><Icon name="star" filled /><span class="sr-only">Rated on TMDB</span>{epScore}</span>{/if}
       <span class="badges"><Badges {item} /><SourceBadge source={meta?.source} /></span>
     </div>
+    <Ratings {ratings} />
     <div class="actions">
       {#if resumeAt}
         <a class="btn primary" href={href.play(item.id, resumeAt)}>
@@ -399,7 +405,7 @@
   .rating :global(svg) {
     width: 0.95em;
     height: 0.95em;
-    color: var(--accent);
+    color: var(--rating-star);
   }
   .actions {
     display: flex;

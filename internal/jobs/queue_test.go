@@ -326,6 +326,26 @@ func TestALightKindWithADiskNeedRunsBesideAHeavyJob(t *testing.T) {
 	}
 }
 
+// Enqueues that merge into a job the gate holds (an artwork request repeated
+// during a film) change its need while the dispatcher asks the gate about it:
+// that must not race (run with -race).
+func TestMergingIntoAHeldJobDoesNotRace(t *testing.T) {
+	g := newGate()
+	g.hold("a video is playing from the same disk")
+	q, _ := start(t, Options{Gate: g}, Spec{Kind: "art",
+		Need: func(p json.RawMessage) tier.Need { return tier.Need{Disks: []string{"/nas/" + string(p)}} },
+		Run:  func(context.Context, *Run) error { return nil }})
+	ctx := context.Background()
+	for i := range 200 {
+		if _, err := q.Enqueue(ctx, "art", Opt{Key: "item:7", Payload: i}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := len(q.Snapshot().Running) + len(q.Snapshot().Queued); n != 1 {
+		t.Fatalf("%d jobs for one key", n) // positive control: it merged, so the race path ran
+	}
+}
+
 func TestRetriesThenFails(t *testing.T) {
 	var attempts atomic.Int32
 	mem := newMem()

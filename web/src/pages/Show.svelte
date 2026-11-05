@@ -3,8 +3,10 @@
   import { useAmbient } from '../lib/ambient.svelte';
   import { episodeLabel, formatDuration, seasonLabel } from '../lib/format';
   import { ensureLibrary, library, showMeta, showsOf } from '../lib/library.svelte';
-  import { backdropOf, CREDIT_LINES, crewWith, logoSrc, ratingLabel, yearSpan } from '../lib/meta';
+  import { backdropOf, CREDIT_LINES, crewWith, logoSrc, yearSpan } from '../lib/meta';
   import { morph } from '../lib/nav';
+  import { ensureRatingPrefs, ratingPrefs } from '../lib/ratingprefs.svelte';
+  import { orderShown, titleRatings } from '../lib/ratings';
   import { href } from '../lib/router.svelte';
   import { resource } from '../lib/resource.svelte';
   import { app } from '../lib/state.svelte';
@@ -19,6 +21,8 @@
   import Menu from '../components/Menu.svelte';
   import PersonCard from '../components/PersonCard.svelte';
   import Rail from '../components/Rail.svelte';
+  import Rating from '../components/Rating.svelte';
+  import Ratings from '../components/Ratings.svelte';
   import SourceBadge from '../components/SourceBadge.svelte';
 
   let { show, season }: { show: string; season?: number } = $props();
@@ -58,7 +62,13 @@
   const seasonName = (n: number) => detail.data?.seasons.find((s) => s.season === n)?.name || seasonLabel(n);
   const logo = $derived(logoSrc(meta));
   const years = $derived(yearSpan(meta, summary?.year));
-  const rating = $derived(ratingLabel(meta?.rating ?? summary?.rating));
+  const ratings = $derived(titleRatings(meta, summary));
+  // An episode's own rating (IMDb), when the settings show that source.
+  const epRating = (e: ItemSummary) => orderShown(e.ratings ?? [], ratingPrefs.shown)[0];
+  $effect(() => {
+    void app.libraryVersion;
+    if (list.some((e) => e.ratings?.length)) void ensureRatingPrefs();
+  });
   const credits = $derived(CREDIT_LINES.map((l) => ({ ...l, people: crewWith(meta, l.jobs) })).filter((l) => l.people.length));
   const needsReview = $derived(!!(meta?.needsReview ?? summary?.needsReview));
 
@@ -167,10 +177,10 @@
       {#if meta?.certification}<span class="cert">{meta.certification}</span>{/if}
       <span>{plural(seasons.filter((s) => s !== 0).length || seasons.length, 'season')}</span>
       <span>{plural(episodes.length, 'episode')}</span>
-      {#if rating}<span class="rating"><Icon name="star" filled /><span class="sr-only">Rated</span>{rating}</span>{/if}
       {#if meta?.status && status[meta.status]}<span>{status[meta.status]}</span>{/if}
       {#if meta}<SourceBadge source={meta.source} />{/if}
     </div>
+    <Ratings {ratings} />
     <div class="actions">
       {#if next}
         <a class="btn primary" href={href.play(next.id, resumeAt(next))}>
@@ -243,6 +253,7 @@
       <ol class="episodes" role={seasons.length > 1 ? 'tabpanel' : undefined}>
         {#each list as ep (ep.id)}
           {@const p = progressOf(ep)}
+          {@const r = epRating(ep)}
           <li>
             <a class="ep" href={href.item(ep.id)} onclick={morph}>
               <div class="thumb">
@@ -257,6 +268,7 @@
                 </div>
                 <div class="meta small">
                   {#if ep.durationSec}<span>{formatDuration(ep.durationSec)}</span>{/if}
+                  {#if r}<Rating entry={r} compact />{/if}
                   <span class="badges"><Badges item={ep} notable /></span>
                 </div>
                 {#if ep.overview}<p class="ep-overview">{ep.overview}</p>{/if}
@@ -297,18 +309,6 @@
     line-height: 1.5;
     border: 1px solid currentColor;
     border-radius: 4px;
-  }
-  .rating {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    color: var(--text);
-    font-weight: 650;
-  }
-  .rating :global(svg) {
-    width: 0.95em;
-    height: 0.95em;
-    color: var(--accent);
   }
   .actions {
     display: flex;

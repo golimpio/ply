@@ -10,6 +10,7 @@
   import LibraryFolders from '../components/LibraryFolders.svelte';
   import Picture from '../components/Picture.svelte';
   import PlaybackLimits from '../components/PlaybackLimits.svelte';
+  import RatingsSettings from '../components/RatingsSettings.svelte';
   import TvdbKey from '../components/TvdbKey.svelte';
 
   const settings = resource(() => {
@@ -284,6 +285,18 @@
       </div>
     {/if}
   </section>
+
+  <!-- Not from a server older than M10, which has no ratings. -->
+  {#if settings.data?.ratingsPrimary !== undefined}
+    <section aria-labelledby="ratings-h">
+      <h2 id="ratings-h">Ratings</h2>
+      <p class="muted lead">
+        Scores from IMDb, Rotten Tomatoes, Metacritic, Letterboxd, Trakt and TMDB, beside each title. IMDb’s files are downloaded
+        whole; MDBList is sent only a title’s IMDb or TMDB id, never your files or their names.
+      </p>
+      <RatingsSettings settings={settings.data} />
+    </section>
+  {/if}
 
   <section aria-labelledby="review-h">
     <h2 id="review-h">

@@ -1,4 +1,5 @@
 // Typed client for the ply HTTP API (see docs/DESIGN.md "HTTP API").
+import { normaliseRating, normaliseRatings } from './ratings';
 
 export type Kind = 'movie' | 'episode';
 export type Method = 'direct' | 'remux' | 'transcode';
@@ -23,6 +24,26 @@ export interface ArtUrls {
   color?: string;
 }
 
+/** A source of ratings (M10). */
+export type RatingSource = 'imdb' | 'tmdb' | 'rt_critics' | 'rt_audience' | 'metacritic' | 'letterboxd' | 'trakt';
+
+/**
+ * A rating from one source (M10, docs/M10-RATINGS.md). `value` is on the source's own `scale` (IMDb
+ * 10, Letterboxd 5, Metacritic 100); `score100` is value / scale × 100, rounded, and is what lists
+ * sort and filter by. `state` only on Rotten Tomatoes' two: fresh, rotten or certified (critics),
+ * upright, spilled or verified_hot (audience). `url` is '' when unknown; `fetchedAt` is RFC 3339.
+ */
+export interface RatingEntry {
+  source: RatingSource;
+  value: number;
+  scale: number;
+  score100: number;
+  votes?: number;
+  state?: string;
+  url: string;
+  fetchedAt: string;
+}
+
 /** Where a file stands with the metadata matcher (M6). */
 export type MatchState = 'pending' | 'matched' | 'unmatched' | 'manual' | 'disabled';
 
@@ -36,7 +57,8 @@ export interface MetaFields {
   poster?: string;
   backdrop?: string;
   logo?: string;
-  rating?: number;
+  /** The primary source's rating, else the first there is in the fixed order (M10); null for none. */
+  rating?: RatingEntry | null;
   certification?: string;
   genres?: string[];
   matchState: MatchState;
@@ -69,6 +91,8 @@ export interface ItemSummary extends Partial<MetaFields> {
   /** An episode's overview and still, when the metadata has them. */
   overview?: string;
   still?: string;
+  /** An episode's own ratings (its IMDb rating, or []); absent on movies. */
+  ratings?: RatingEntry[];
 }
 
 export interface Stream {
@@ -153,7 +177,8 @@ export interface TitleCard {
   year: number;
   poster?: string;
   backdrop?: string;
-  rating?: number;
+  /** The primary source's rating, else the first there is in the fixed order (M10); null for none. */
+  rating?: RatingEntry | null;
   /** Movies: the first file. */
   itemId?: number;
   /** Shows: the show's name in the library. */
@@ -215,6 +240,8 @@ export interface TitleDetail extends TitleCard {
   locked: boolean;
   matchState: MatchState;
   needsReview: boolean;
+  /** Every rating the title has (M10), in the fixed order: IMDb, RT critics, RT audience, Metacritic, Letterboxd, Trakt, TMDB. */
+  ratings?: RatingEntry[];
 }
 
 /** The episode of a show that airs next. */
@@ -243,7 +270,10 @@ export interface EpisodeInfo {
   overview?: string;
   airDate?: string;
   still?: string;
+  /** The episode's TMDB score out of 10, as before M10. */
   rating?: number;
+  /** The episode's IMDb rating, or [] (M10). */
+  ratings?: RatingEntry[];
 }
 
 export interface PersonCard {
@@ -386,6 +416,24 @@ export interface Settings {
   /** The notice TVDB's terms ask for, to be shown as it is, with a link to tvdbAttributionUrl. */
   tvdbAttribution?: string;
   tvdbAttributionUrl?: string;
+  /** MDBList (M10; absent from an older server): Rotten Tomatoes, Metacritic, Letterboxd and Trakt. */
+  mdblistKeySet?: boolean;
+  mdblistKeySource?: KeySource;
+  /** Like tmdbKeyChecked, for an MDBList key. */
+  mdblistKeyChecked?: boolean;
+  /** The source whose rating cards show. */
+  ratingsPrimary?: RatingSource;
+  /** The sources a detail page shows, in order. */
+  ratingsShown?: RatingSource[];
+  /** The sources this install can have, given its keys and the privacy switch. */
+  ratingsAvailable?: RatingSource[];
+  /** The notices to show as they are, each with a link to its URL. */
+  imdbAttribution?: string;
+  imdbAttributionUrl?: string;
+  mdblistAttribution?: string;
+  mdblistAttributionUrl?: string;
+  /** When the IMDb dataset in use was published (RFC 3339); null until the first download. */
+  imdbDatasetUpdatedAt?: string | null;
 }
 
 export type LimitSource = 'flag' | 'settings' | 'default';
@@ -403,7 +451,38 @@ export interface SettingsUpdate {
   tvdbKey?: string;
   /** The subscriber PIN that goes with a user-supported key; "" removes it. */
   tvdbPin?: string;
+  /** "" removes the stored key. The server checks a new key with MDBList. */
+  mdblistKey?: string;
+  ratingsPrimary?: RatingSource;
+  /** Each source once, in order; [] shows none. */
+  ratingsShown?: RatingSource[];
 }
+
+/** The settings with Go's nulls in the ratings lists as []. */
+export function normaliseSettings(s: Settings): Settings {
+  if (s.ratingsPrimary === undefined) return s; // a server older than M10
+  return { ...s, ratingsShown: s.ratingsShown ?? [], ratingsAvailable: s.ratingsAvailable ?? [] };
+}
+
+/**
+ * A list row (or a card) with its rating normalised, when it has one (a server older than M10
+ * sends none): an entry of a source the page does not know as null, an episode's ratings null as [].
+ */
+function normaliseRow<T extends { rating?: unknown; ratings?: unknown; kind?: string }>(r: T): T {
+  const out = { ...r };
+  if ('rating' in r) out.rating = normaliseRating(r.rating as RatingEntry | null);
+  if ('ratings' in r || (r.kind === 'episode' && 'rating' in r)) out.ratings = normaliseRatings(r.ratings as RatingEntry[] | null);
+  return out;
+}
+
+function normaliseTitle<T extends TitleDetail>(t: T): T {
+  const out = normaliseRow({ ...t, genres: t.genres ?? [], cast: t.cast ?? [], crew: t.crew ?? [] });
+  if ('ratings' in t) out.ratings = normaliseRatings(t.ratings);
+  return out;
+}
+
+/** The services whose key POST /api/settings/test can check. */
+export type KeyProvider = 'tmdb' | 'tvdb' | 'mdblist';
 
 /** POST /api/settings/test: whether the key in use works. error never holds the key. */
 export interface KeyTest {
@@ -830,11 +909,38 @@ export function parseMatchRef(input: string): MatchRef | null {
 
 // ---- transport -------------------------------------------------------------
 
-async function request<T>(method: string, path: string, body?: unknown, keepalive = false): Promise<T> {
+/** The message of an ApiError (status 0) for a request given up on after its timeout. */
+export const NO_ANSWER = 'The server didn’t answer.';
+
+/**
+ * timeoutMs (optional, 0 for none): give up on a request the server has not answered by then, as
+ * ApiError(0, NO_ANSWER). The answer's body is read within the same time.
+ */
+async function request<T>(method: string, path: string, body?: unknown, keepalive = false, timeoutMs = 0): Promise<T> {
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;
   if (body !== undefined) headers['Content-Type'] = 'application/json';
 
+  const abort = timeoutMs > 0 ? new AbortController() : null;
+  const timer = abort ? setTimeout(() => abort.abort(), timeoutMs) : undefined;
+  try {
+    return await send<T>(method, path, headers, body, keepalive, abort?.signal);
+  } catch (e) {
+    if (abort?.signal.aborted) throw new ApiError(0, NO_ANSWER);
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function send<T>(
+  method: string,
+  path: string,
+  headers: Record<string, string>,
+  body: unknown,
+  keepalive: boolean,
+  signal: AbortSignal | undefined,
+): Promise<T> {
   let res: Response;
   try {
     res = await fetch(path, {
@@ -842,6 +948,7 @@ async function request<T>(method: string, path: string, body?: unknown, keepaliv
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
       keepalive,
+      ...(signal ? { signal } : {}),
     });
   } catch {
     throw new ApiError(0, 'Cannot reach the ply server');
@@ -881,12 +988,12 @@ export const api = {
 
   // Go encodes nil slices as null; normalise so callers can iterate safely.
   async items(params: { kind?: Kind; show?: string } = {}): Promise<ItemSummary[]> {
-    return (await request<ItemSummary[] | null>('GET', `/api/items${qs(params)}`)) ?? [];
+    return ((await request<ItemSummary[] | null>('GET', `/api/items${qs(params)}`)) ?? []).map(normaliseRow);
   },
 
   async shows(): Promise<ShowSummary[]> {
     const list = (await request<ShowSummary[] | null>('GET', '/api/shows')) ?? [];
-    return list.map((s) => ({ ...s, seasons: s.seasons ?? [] }));
+    return list.map((s) => normaliseRow({ ...s, seasons: s.seasons ?? [] }));
   },
 
   /** `playback` in the result is for a built-in profile (avplayer), not for this browser. */
@@ -895,10 +1002,15 @@ export const api = {
     // Defensive: if the server opened a session just to describe this decision, release it.
     if (d.playback?.sessionId) void api.deleteSession(d.playback.sessionId);
     return {
-      ...d,
+      ...normaliseRow(d),
       streams: d.streams ?? [],
       subtitles: d.subtitles ?? [],
       playback: d.playback && { ...d.playback, reasons: d.playback.reasons ?? [] },
+      ...(d.meta ? { meta: normaliseTitle(d.meta) } : {}),
+      // episodeInfo.rating is TMDB's number: only its ratings list is normalised.
+      ...(d.episodeInfo
+        ? { episodeInfo: { ...d.episodeInfo, ...('ratings' in d.episodeInfo ? { ratings: normaliseRatings(d.episodeInfo.ratings) } : {}) } }
+        : {}),
     };
   },
 
@@ -945,7 +1057,7 @@ export const api = {
     request<Progress | null>('PUT', `/api/items/${id}/progress`, { positionSec, durationSec }, keepalive),
 
   async continueWatching(): Promise<ItemSummary[]> {
-    return (await request<ItemSummary[] | null>('GET', '/api/continue')) ?? [];
+    return ((await request<ItemSummary[] | null>('GET', '/api/continue')) ?? []).map(normaliseRow);
   },
 
   // ---- metadata (M6) ----
@@ -953,7 +1065,7 @@ export const api = {
   /** A show with its seasons (names, posters and air dates when known) and its title. */
   async show(name: string): Promise<ShowDetail> {
     const d = await request<ShowDetail>('GET', `/api/shows/${encodeURIComponent(name)}`);
-    return { ...d, seasons: d.seasons ?? [] };
+    return { ...normaliseRow(d), seasons: d.seasons ?? [], ...(d.meta ? { meta: normaliseTitle(d.meta) } : {}) };
   },
 
   /** People with a title in the library, by name (at most 20). */
@@ -963,7 +1075,7 @@ export const api = {
 
   async person(id: number): Promise<Person> {
     const p = await request<Person>('GET', `/api/people/${id}`);
-    return { ...p, credits: p.credits ?? [] };
+    return { ...p, credits: (p.credits ?? []).map((c) => ({ ...c, title: normaliseRow(c.title) })) };
   },
 
   async genres(): Promise<GenreCount[]> {
@@ -978,12 +1090,12 @@ export const api = {
       collection: f.collection ? String(f.collection) : undefined,
       person: f.person ? String(f.person) : undefined,
     });
-    return (await request<TitleCard[] | null>('GET', `/api/titles${q}`)) ?? [];
+    return ((await request<TitleCard[] | null>('GET', `/api/titles${q}`)) ?? []).map(normaliseRow);
   },
 
   async collection(id: number): Promise<CollectionDetail> {
     const c = await request<CollectionDetail>('GET', `/api/collections/${id}`);
-    return { ...c, titles: c.titles ?? [] };
+    return { ...c, titles: (c.titles ?? []).map(normaliseRow) };
   },
 
   /** Shows of the library whose next episode airs today or later, soonest first (at most 50). */
@@ -997,8 +1109,7 @@ export const api = {
    * ApiError 409 for no TVDB key or no episodes in that order, 502 when TVDB can't be reached.
    */
   async patchTitle(id: number, patch: TitlePatch): Promise<TitleDetail> {
-    const t = await request<TitleDetail>('PATCH', `/api/titles/${id}`, patch);
-    return { ...t, genres: t.genres ?? [], cast: t.cast ?? [], crew: t.crew ?? [] };
+    return normaliseTitle(await request<TitleDetail>('PATCH', `/api/titles/${id}`, patch));
   },
 
   // fixing matches
@@ -1071,16 +1182,18 @@ export const api = {
     return { ...d, path: d.path ?? '', parent: d.parent ?? '', dirs: d.dirs ?? [], places: d.places ?? undefined };
   },
 
-  settings: () => request<Settings>('GET', '/api/settings'),
+  settings: async () => normaliseSettings(await request<Settings>('GET', '/api/settings')),
 
   /**
    * Change the TMDB key, the online switch or the language. A new key is checked against TMDB:
-   * ApiError 400 says why it was refused, 502 that TMDB could not be reached.
+   * ApiError 400 says why it was refused, 502 that TMDB could not be reached. With timeoutMs, an
+   * answer that takes longer is ApiError(0, NO_ANSWER) (the server may still have stored it).
    */
-  saveSettings: (u: SettingsUpdate) => request<Settings>('PUT', '/api/settings', u),
+  saveSettings: async (u: SettingsUpdate, timeoutMs = 0) =>
+    normaliseSettings(await request<Settings>('PUT', '/api/settings', u, false, timeoutMs)),
 
   /** Checks the key in use (TVDB: a login, with the PIN). A key that does not work is { ok: false }, not an error. */
-  async testKey(provider: 'tmdb' | 'tvdb'): Promise<KeyTest> {
+  async testKey(provider: KeyProvider): Promise<KeyTest> {
     const r = await request<Partial<KeyTest> | null>('POST', '/api/settings/test', { provider });
     return { ok: r?.ok === true, ...(r?.error ? { error: r.error } : {}) };
   },
