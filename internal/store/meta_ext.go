@@ -374,7 +374,9 @@ func linkPrio(expect string) prio {
 }
 
 // LinkSeriesTitle is LinkItemTitle for a show. A show with no row yet counts as
-// pending. ErrNotFound for a show without episodes.
+// pending. ErrNotFound for a show without episodes. The worker's result (expect is set)
+// that is not from TVDB (a TMDB fallback match) does not change a title that is stored from
+// TVDB: the show is linked to it as it is. A person's pick does.
 func (s *Store) LinkSeriesTitle(ctx context.Context, show string, in *TitleInput, m Match, expect string) (titleID int64, ok bool, err error) {
 	if err := m.validate(); err != nil {
 		return 0, false, err
@@ -393,6 +395,11 @@ func (s *Store) LinkSeriesTitle(ctx context.Context, show string, in *TitleInput
 		}
 		if expect != "" && state != expect {
 			return nil
+		}
+		if expect != "" { // the worker's own result: it does not turn a show from TVDB into TMDB's
+			own := *in
+			own.keepTVDB = true
+			in = &own
 		}
 		if titleID, err = upsertTitleTx(ctx, tx, in); err != nil {
 			return err

@@ -74,6 +74,7 @@ type Resolved struct {
 	key, tvdbKey, tvdbPIN string
 	KeySource             KeySource // of the TMDB key
 	TVDBKeySource         KeySource
+	TVDBPINSource         KeySource // flag, env, settings, or none
 	// Enabled is the privacy switch: false when -metadata=false was given or the
 	// setting turned it off. Nothing leaves the machine then.
 	Enabled bool
@@ -81,8 +82,9 @@ type Resolved struct {
 	ForcedOff bool
 	Language  string
 	// TVDBDown is set while the last thing asked of TVDB failed for the network's
-	// or the key's sake: the status line says so.
-	TVDBDown bool
+	// sake; TVDBRefused while TVDB refused the key or the PIN. The status line says
+	// which. A key that is refused is not an outage: it does not get better by itself.
+	TVDBDown, TVDBRefused bool
 }
 
 // KeySet reports whether there is a TMDB key at all.
@@ -164,7 +166,8 @@ type SettingsOptions struct {
 type Settings struct {
 	o SettingsOptions
 
-	tvdbDown atomic.Bool // the last thing asked of TVDB failed
+	tvdbDown    atomic.Bool // the last thing asked of TVDB failed for the network's sake
+	tvdbRefused atomic.Bool // the last thing asked of TVDB was refused: the key or the PIN
 
 	mu         sync.Mutex
 	cached     Provider
@@ -218,14 +221,14 @@ func (s *Settings) setting(ctx context.Context, key string) string {
 
 // Resolve reads the settings table and combines it with the fixed sources.
 func (s *Settings) Resolve(ctx context.Context) Resolved {
-	r := Resolved{Enabled: !s.o.Disabled, ForcedOff: s.o.Disabled, Language: s.o.Language, TVDBDown: s.tvdbDown.Load()}
+	r := Resolved{Enabled: !s.o.Disabled, ForcedOff: s.o.Disabled, Language: s.o.Language, TVDBDown: s.tvdbDown.Load(), TVDBRefused: s.tvdbRefused.Load()}
 	r.key, r.KeySource = pick(
 		cand{s.o.KeyFlag, KeyFromFlag}, cand{s.o.KeyEnv, KeyFromEnv},
 		cand{s.setting(ctx, SettingTMDBKey), KeyFromSettings}, cand{s.o.KeyDefault, KeyFromDefault})
 	r.tvdbKey, r.TVDBKeySource = pick(
 		cand{s.o.TVDBKeyFlag, KeyFromFlag}, cand{s.o.TVDBKeyEnv, KeyFromEnv},
 		cand{s.setting(ctx, SettingTVDBKey), KeyFromSettings}, cand{s.o.TVDBKeyDefault, KeyFromDefault})
-	r.tvdbPIN, _ = pick(cand{s.o.TVDBPINFlag, KeyFromFlag}, cand{s.o.TVDBPINEnv, KeyFromEnv},
+	r.tvdbPIN, r.TVDBPINSource = pick(cand{s.o.TVDBPINFlag, KeyFromFlag}, cand{s.o.TVDBPINEnv, KeyFromEnv},
 		cand{s.setting(ctx, SettingTVDBPIN), KeyFromSettings})
 	if v, ok, err := s.o.Store.GetSetting(ctx, SettingEnabled); err == nil && ok && v == "false" {
 		r.Enabled = false
@@ -268,7 +271,7 @@ func (s *Settings) Provider(ctx context.Context) (*Providers, Resolved) {
 	}
 	if r.tvdbKey != "" {
 		if by := [3]string{r.tvdbKey, r.tvdbPIN, r.Language}; s.cachedTVDB == nil || s.tvdbBy != by {
-			s.cachedTVDB, s.tvdbBy = trackHealth(s.newTVDB(r.tvdbKey, r.tvdbPIN, r.Language), &s.tvdbDown), by
+			s.cachedTVDB, s.tvdbBy = trackHealth(s.newTVDB(r.tvdbKey, r.tvdbPIN, r.Language), &s.tvdbDown, &s.tvdbRefused), by
 		}
 		tvdb = s.cachedTVDB
 	}
@@ -329,9 +332,11 @@ type Update struct {
 // everything is valid. With -metadata=false nothing may leave the machine, so a key
 // is stored as it is given, unchecked (its format is still checked).
 //
-// A TVDB key where there was none makes the next pass of the worker move the shows that
+// A TVDB key in use where there was none makes the next pass of the worker move the shows that
 // came from TMDB over to TVDB (see Worker): the note that it has done so is cleared here, as
-// it is when the key is removed. A key that replaces another does not clear it.
+// it is when the key in use is gone. The key in use is the flag's, the environment's, the stored
+// one or the build's, in that order: a key that replaces another, or a stored one that comes or
+// goes under one of the others, does not clear it.
 func (s *Settings) Update(ctx context.Context, u Update) error {
 	key, err := cleanSecret(u.Key, keyValidationMsg)
 	if err != nil {
@@ -370,6 +375,9 @@ func (s *Settings) Update(ctx context.Context, u Update) error {
 		if err := s.checkTVDB(ctx, newKey, newPIN, lang); err != nil {
 			return err
 		}
+		// It logged in: the refusal, or the outage, that the status line may be telling of is over.
+		s.tvdbDown.Store(false)
+		s.tvdbRefused.Store(false)
 	}
 
 	if u.Language != nil {
@@ -383,8 +391,12 @@ func (s *Settings) Update(ctx context.Context, u Update) error {
 		}
 	}
 	if u.TVDBKey != nil {
-		if tvdbKey != cur.tvdbKey && (tvdbKey == "" || cur.tvdbKey == "") {
-			// No key, then one (or one, then none): the shows are moved to TVDB again by the next
+		// The key in use after this change: the stored one may be shadowed by a flag, the environment
+		// or the build's, and then changing it changes nothing about TVDB.
+		after, _ := pick(cand{s.o.TVDBKeyFlag, KeyFromFlag}, cand{s.o.TVDBKeyEnv, KeyFromEnv},
+			cand{tvdbKey, KeyFromSettings}, cand{s.o.TVDBKeyDefault, KeyFromDefault})
+		if (cur.tvdbKey == "") != (after == "") {
+			// No key in use, then one (or one, then none): the shows are moved to TVDB again by the next
 			// pass. One key replaced by another is the same TVDB: it moves nothing again, and the
 			// shows that a person picked at TMDB while TVDB was on stay there.
 			for _, key := range []string{SettingTVDBSwitched, SettingTVDBSwitchUpTo} {
@@ -468,6 +480,7 @@ func (s *Settings) checkTVDB(ctx context.Context, key, pin, language string) err
 // does it. nil means the key works. The errors are ErrInvalidSetting for another provider,
 // ErrLookupsOff when nothing may leave the machine, ErrNoTMDB or ErrNoTVDB for no key, and
 // what Update says of a key that is refused or cannot be checked. None holds a key or a PIN.
+// A TVDB key that logs in clears what the status line says of TVDB (refused, unreachable).
 func (s *Settings) Test(ctx context.Context, provider string) error {
 	if provider != SourceTMDB && provider != SourceTVDB {
 		return fmt.Errorf("%w: provider must be tmdb or tvdb", ErrInvalidSetting)
@@ -483,31 +496,32 @@ func (s *Settings) Test(ctx context.Context, provider string) error {
 	case provider == SourceTMDB:
 		return s.checkKey(ctx, r.key, r.Language)
 	}
-	return s.checkTVDB(ctx, r.tvdbKey, r.tvdbPIN, r.Language)
+	err := s.checkTVDB(ctx, r.tvdbKey, r.tvdbPIN, r.Language)
+	if err == nil {
+		// It logged in: the refusal, or the outage, that the status line tells of is over.
+		s.tvdbDown.Store(false)
+		s.tvdbRefused.Store(false)
+	}
+	return err
 }
 
 // health is what trackHealth keeps: whether the last thing asked of TVDB failed
-// for the network's or the key's sake.
+// for the network's sake (down) or was refused for the key's (refused).
 type healthProvider struct {
 	Provider
-	down *atomic.Bool
+	down, refused *atomic.Bool
 }
 
-// trackHealth makes p report to down: set by a transient failure or a refused key,
-// cleared by an answer. A 404 is an answer.
-func trackHealth(p Provider, down *atomic.Bool) Provider {
-	return &healthProvider{Provider: p, down: down}
+// trackHealth makes p report to down and refused: down is set by a transient failure,
+// refused by a refusal of the key or the PIN, and each is cleared by any other answer
+// (a 404 is an answer). At most one is set.
+func trackHealth(p Provider, down, refused *atomic.Bool) Provider {
+	return &healthProvider{Provider: p, down: down, refused: refused}
 }
 
 func (h *healthProvider) note(err error) error {
-	switch {
-	case err == nil:
-		h.down.Store(false)
-	case IsTransient(err) || IsUnauthorized(err):
-		h.down.Store(true)
-	default:
-		h.down.Store(false)
-	}
+	h.refused.Store(err != nil && IsUnauthorized(err))
+	h.down.Store(err != nil && !IsUnauthorized(err) && IsTransient(err))
 	return err
 }
 
@@ -570,6 +584,7 @@ type StaticSource struct {
 	tvdb     Provider
 	disabled bool
 	down     atomic.Bool
+	refused  atomic.Bool
 }
 
 // NewStaticSource returns a source that always answers p (TMDB).
@@ -587,7 +602,7 @@ func (s *StaticSource) SetTVDB(p Provider) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if p != nil {
-		p = trackHealth(p, &s.down)
+		p = trackHealth(p, &s.down, &s.refused)
 	}
 	s.tvdb = p
 }
@@ -596,7 +611,7 @@ func (s *StaticSource) SetTVDB(p Provider) {
 func (s *StaticSource) Provider(context.Context) (*Providers, Resolved) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r := Resolved{Enabled: !s.disabled, Language: DefaultLanguage, TVDBDown: s.down.Load()}
+	r := Resolved{Enabled: !s.disabled, Language: DefaultLanguage, TVDBDown: s.down.Load(), TVDBRefused: s.refused.Load()}
 	if s.p != nil {
 		r.key, r.KeySource = "static", KeyFromSettings
 	}

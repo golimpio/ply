@@ -41,19 +41,32 @@ them in the UI. This builds on M6 and M8. The IDs needed are already stored: `ti
 `title_ratings(title_id, source, value REAL, scale REAL, votes INTEGER, state TEXT, url TEXT, fetched_at INTEGER,
 PRIMARY KEY (title_id, source))`.
 - `source` is one of: imdb, tmdb, rt_critics, rt_audience, metacritic, letterboxd, trakt.
-- `state` is for Rotten Tomatoes: fresh, rotten or certified.
+- `state` is for Rotten Tomatoes. On `rt_critics` it is fresh, rotten or certified; on `rt_audience` it is upright, spilled or verified_hot. Each entry has its own vocabulary, and there is no separate field.
 
 Episodes get `episode_ratings(episode_id, source, …)` for IMDb only.
 
 ## API
-- **Title detail:** `ratings: [{source, value, scale, votes?, state?, url}]`, in a fixed order: IMDb, Rotten Tomatoes critics, RT audience, Metacritic, Letterboxd, Trakt, TMDB.
-- **Episodes:** `ratings` from IMDb.
-- **Lists and cards:** a single `rating` field: the primary source's value, or the next available one.
-- **Settings:**
-  - `mdblistKeySet`, `mdblistKeySource`, plus a test (extending `POST /api/settings/test` with `provider: "mdblist"`);
-  - `ratingsPrimary` (imdb|rt_critics|metacritic|tmdb), the source used on cards and for sorting;
-  - `ratingsShown`, the sources to show.
-- **Lists:** sort by rating (the primary source), and filter by a minimum rating.
+A rating entry is `{source, value, scale, score100, votes?, state?, url, fetchedAt}`.
+- `score100` is value/scale × 100, rounded. Sorting and filtering use it, so the UI never needs a source's scale.
+- `fetchedAt` is RFC 3339.
+
+Where entries appear:
+- **Title detail:** `ratings: [entry…]`, in a fixed order: IMDb, Rotten Tomatoes critics, RT audience, Metacritic, Letterboxd, Trakt, TMDB.
+- **Episodes:** each episode in the season/episodes answer the Show page already loads carries `ratings` (IMDb), so there are no N+1 requests.
+- **Lists and cards:** `rating: entry | null`, the primary source's entry. If the title has none from that source, it's the first available in the fixed order; the entry's `source` says which.
+- **List query:**
+  - `sort=rating`: by `rating.score100`, descending, with titles that have no rating last;
+  - `minRating=N`: `rating.score100 >= N`. A title with no rating is excluded.
+
+Settings:
+- **The MDBList key:** `mdblistKeySet` and `mdblistKeySource`, tested with `POST /api/settings/test` and `provider: "mdblist"`.
+- **Choices:**
+  - `ratingsPrimary` (imdb|rt_critics|metacritic|letterboxd|trakt|tmdb);
+  - `ratingsShown`: an ordered array, which can be PATCHed.
+- **Read only:**
+  - `ratingsAvailable`: the sources this install can produce, given its keys and the privacy switch;
+  - `imdbAttribution`, `imdbAttributionUrl`, `mdblistAttribution`, `mdblistAttributionUrl`;
+  - `imdbDatasetUpdatedAt`, which is null until the first download.
 
 ## UI (rare-tiger)
 - **Detail pages:** a row of rating chips under the title, each a link to the source: the IMDb logo-text with 8.7 and the vote count, a tomato with 93% (fresh/rotten/certified art), a popcorn with 91%, a Metacritic box with 74 coloured by band, Letterboxd ★4.1.

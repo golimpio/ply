@@ -181,8 +181,15 @@ export interface CrewMember {
   profile?: string;
 }
 
+/** Where a title's details come from: TVDB or TMDB, an .nfo file, or TMDB with an .nfo on top. */
+export type TitleSource = 'tvdb' | 'tmdb' | 'nfo' | 'mixed';
+
+/** How a TVDB show's files map to its episodes. */
+export type EpisodeOrder = 'aired' | 'dvd' | 'absolute';
+
 export interface TitleDetail extends TitleCard {
   tmdbId?: number;
+  tvdbId?: number;
   imdbId?: string;
   originalTitle?: string;
   sortTitle: string;
@@ -199,7 +206,11 @@ export interface TitleDetail extends TitleCard {
   collection?: { id: number; name: string };
   cast: CastMember[];
   crew: CrewMember[];
-  source: 'tmdb' | 'nfo' | 'mixed';
+  source: TitleSource;
+  /** Only for a show whose source is 'tvdb': the order PATCH /api/titles/{id} can change. */
+  episodeOrder?: EpisodeOrder;
+  /** Only in the answer to a PATCH that changed the order: the episode files that have no episode in it. */
+  unmapped?: number;
   /** The user edited the text: a refresh keeps it. */
   locked: boolean;
   matchState: MatchState;
@@ -256,6 +267,8 @@ export interface Person extends PersonCard {
   deathday?: string;
   placeOfBirth?: string;
   imdbId?: string;
+  tmdbId?: number;
+  tvdbId?: number;
   /** Only titles in the library, newest first. */
   credits: PersonCredit[];
 }
@@ -293,9 +306,13 @@ export interface ShowDetail extends Partial<MetaFields> {
   seasons: SeasonInfo[];
 }
 
-/** A TMDB title the "fix match" dialog offers. */
+/** A TVDB or TMDB title the "fix match" dialog offers. */
 export interface MatchCandidate {
-  tmdbId: number;
+  source: 'tvdb' | 'tmdb';
+  /** The id at its source; of tmdbId and tvdbId only the one of the source is set. */
+  id: number;
+  tmdbId?: number;
+  tvdbId?: number;
   title: string;
   originalTitle?: string;
   year: number;
@@ -328,6 +345,12 @@ export interface MetadataStatus {
   needsReview: number;
   lastRefresh?: string | null;
   lastError: string;
+  /** There is a TVDB key (keySet is TMDB's only). Absent from a server older than M8. */
+  tvdbKeySet?: boolean;
+  /** Where shows come from: 'tvdb', 'tmdb' (no TVDB key) or '' (nothing may be asked). */
+  shows?: 'tvdb' | 'tmdb' | '';
+  /** The sentence for the status line ("Shows: TVDB", "TVDB unreachable"), shown as it is; '' for none. */
+  showsLine?: string;
 }
 
 export type KeySource = 'flag' | 'env' | 'settings' | 'default' | '';
@@ -352,6 +375,17 @@ export interface Settings {
   /** 'flag': set on the command line or in the environment, so it cannot be changed here (409). */
   maxStreamsSource?: LimitSource;
   maxTranscodesSource?: LimitSource;
+  /** TheTVDB (M8; absent from an older server). The key and the PIN are never in it either. */
+  tvdbKeySet?: boolean;
+  tvdbPinSet?: boolean;
+  tvdbKeySource?: KeySource;
+  /** 'flag' or 'env': the PIN can't be changed or removed here (409). Absent from servers before it was added. */
+  tvdbPinSource?: 'flag' | 'env' | 'settings' | '';
+  /** Like tmdbKeyChecked, for a TVDB key (a PIN alone does not set it). */
+  tvdbKeyChecked?: boolean;
+  /** The notice TVDB's terms ask for, to be shown as it is, with a link to tvdbAttributionUrl. */
+  tvdbAttribution?: string;
+  tvdbAttributionUrl?: string;
 }
 
 export type LimitSource = 'flag' | 'settings' | 'default';
@@ -365,10 +399,23 @@ export interface SettingsUpdate {
   maxStreams?: number;
   /** 1..16; the same. */
   maxTranscodes?: number;
+  /** "" removes the stored key. The server checks a new key with a login at TVDB. */
+  tvdbKey?: string;
+  /** The subscriber PIN that goes with a user-supported key; "" removes it. */
+  tvdbPin?: string;
 }
 
-/** A TMDB or IMDb id, to link a file or show to. */
-export type MatchRef = { tmdbId: number } | { imdbId: string };
+/** POST /api/settings/test: whether the key in use works. error never holds the key. */
+export interface KeyTest {
+  ok: boolean;
+  error?: string;
+}
+
+/**
+ * What to link a file or show to: a TMDB, IMDb or TVDB id, or what was typed to name a show at
+ * TVDB ("tvdb:81189", a thetvdb.com address), which the server reads.
+ */
+export type MatchRef = { tmdbId: number } | { imdbId: string } | { tvdbId: number } | { tvdb: string };
 
 export interface TitlePatch {
   title?: string;
@@ -376,6 +423,8 @@ export interface TitlePatch {
   year?: number;
   overview?: string;
   tagline?: string;
+  /** A TVDB show only: re-maps every season at once (it does not lock the title). */
+  episodeOrder?: EpisodeOrder;
 }
 
 export interface WatchRoot {
@@ -633,45 +682,111 @@ export function mediaUrl(rel: string): string {
   return u.toString();
 }
 
-/** The TMDB image sizes the server serves (its allowlist), by width. */
+/** The TMDB image sizes the server serves (its allowlist, TVDB's images too), by width. */
 export const IMAGE_SIZES = { w92: 92, w185: 185, w342: 342, w500: 500, w780: 780, w1280: 1280 } as const;
 export type ImageSize = keyof typeof IMAGE_SIZES | 'original';
 
 const TMDB_IMAGE = /^(\/api\/images\/tmdb\/)(w92|w185|w342|w500|w780|w1280|original)(\/[A-Za-z0-9_-]+\.(?:jpg|png|svg))(\?.*)?$/;
+// TVDB's paths have directories (/banners/posters/81189-1.jpg). As the server's TVDBImagePath: letters,
+// digits, "_", "." and "-"; no "." segment and no ".." anywhere; a jpg, jpeg or png in any case.
+const TVDB_IMAGE =
+  /^(\/api\/images\/tvdb\/)(w92|w185|w342|w500|w780|w1280|original)(?![^?]*\.\.)((?:\/(?!\.(?:\/|$))[A-Za-z0-9_.-]+)+\.(?:[jJ][pP][eE]?[gG]|[pP][nN][gG]))(\?.*)?$/;
+
+const sizedImage = (rel: string) => TMDB_IMAGE.exec(rel) ?? TVDB_IMAGE.exec(rel);
 
 /**
- * An image URL from the API as an absolute URL with the token, optionally at another TMDB size
- * (the server links posters at w342, backdrops at w1280). Sidecar and other URLs keep their size.
- * Empty or missing gives ''.
+ * An image URL from the API as an absolute URL with the token, optionally at another size (the
+ * server links posters at w342, backdrops at w1280; TMDB and TVDB images alike). Sidecar and other
+ * URLs keep their size. Empty or missing gives ''.
  */
 export function imageUrl(rel: string | null | undefined, size?: ImageSize): string {
   if (!rel) return '';
-  const m = size ? TMDB_IMAGE.exec(rel) : null;
+  const m = size ? sizedImage(rel) : null;
   return mediaUrl(m ? `${m[1]}${size}${m[3]}${m[4] ?? ''}` : rel);
 }
 
 /**
- * A srcset for a TMDB image at the given sizes ("…/w185/x.jpg 185w, …"); for any other URL a
- * single candidate, so that the attribute is still valid.
+ * A srcset for a TMDB or TVDB image at the given sizes ("…/w185/x.jpg 185w, …"); for any other URL
+ * a single candidate, so that the attribute is still valid.
  */
 export function imageSrcset(rel: string | null | undefined, sizes: Exclude<ImageSize, 'original'>[] = ['w185', 'w342', 'w500']): string {
   if (!rel) return '';
-  if (!TMDB_IMAGE.test(rel)) return mediaUrl(rel);
+  if (!sizedImage(rel)) return mediaUrl(rel);
   return sizes.map((sz) => `${imageUrl(rel, sz)} ${IMAGE_SIZES[sz]}w`).join(', ');
+}
+
+/** A show at TVDB, named by its id or (an address with no id) by its slug. */
+export interface TvdbRef {
+  /** 0 when only the slug is known. */
+  id: number;
+  slug: string;
 }
 
 /** What the "fix match" box was given: an id, and the kind of title when the link says so. */
 export interface MatchInput {
   ref: MatchRef;
-  /** From a themoviedb.org /movie/ or /tv/ link; absent for IMDb ids and tmdb:N. */
+  /** From a themoviedb.org /movie/ or /tv/ link, or anything TVDB's (shows only); absent for IMDb ids and tmdb:N. */
   kind?: TitleKind;
+  /** For a TVDB reference: what it names, to say so. */
+  tvdb?: TvdbRef;
+}
+
+const TVDB_SLUG = /^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/;
+// Up to 15 digits: the server reads an int64; past that a number in JS is no longer exact.
+const positiveId = (s: string | null) => (s && /^\d{1,15}$/.test(s) && Number(s) > 0 ? Number(s) : 0);
+
+/**
+ * Reads a show named at TVDB the way the server does (metadata.ParseTVDBRef): "tvdb:81189",
+ * "TVDB : 81189", "tvdb 81189" or "tvdb81189", or the address of a series at thetvdb.com ("thetvdb.com/series/breaking-bad",
+ * "https://www.thetvdb.com/series/81189/allseasons/official", the old "?tab=series&id=81189"),
+ * with or without the scheme. null for anything else, an address at any other host included.
+ */
+export function parseTvdbRef(input: string): TvdbRef | null {
+  const s = input.trim();
+  const tagged = /^tvdb\s*:?\s*(\d{1,10})$/i.exec(s);
+  // The server refuses any port, the default one too, which URL would drop without a word.
+  const authority = /^(?:[A-Za-z][A-Za-z0-9+.-]*:\/\/)?([^/?#]*)/.exec(s)?.[1] ?? '';
+  if (tagged) {
+    const id = positiveId(tagged[1]);
+    return id ? { id, slug: '' } : null;
+  }
+  if (!s || /\s/.test(s)) return null;
+  let u: URL;
+  try {
+    u = new URL(s.includes('://') ? s : `https://${s}`);
+  } catch {
+    return null;
+  }
+  if ((u.protocol !== 'https:' && u.protocol !== 'http:') || u.username || u.password || u.port || authority.includes(':')) return null;
+  if (u.hostname !== 'thetvdb.com' && u.hostname !== 'www.thetvdb.com') return null;
+  let segs = u.pathname.replace(/^\/+|\/+$/g, '').split('/');
+  if (segs.length >= 2 && segs[0] === 'dereferrer') segs = segs.slice(1);
+  if (segs.length >= 2 && segs[0] === 'series') {
+    let name: string;
+    try {
+      name = decodeURIComponent(segs[1]); // the server reads the decoded path
+    } catch {
+      return null;
+    }
+    const id = positiveId(name);
+    if (id) return { id, slug: '' };
+    return TVDB_SLUG.test(name) && !/^\d+$/.test(name) ? { id: 0, slug: name.toLowerCase() } : null;
+  }
+  if (u.searchParams.get('tab') === 'series') {
+    const id = positiveId(u.searchParams.get('id'));
+    if (id) return { id, slug: '' };
+  }
+  return null;
 }
 
 /**
  * Reads what a person pastes into the "fix match" box: a themoviedb.org movie or tv URL, an
- * imdb.com title URL, an IMDb id (tt0133093), or a TMDB id said as such ("tmdb:603", "tmdb 603").
- * A bare number is not an id: it is a title to search for ("1917", "300", "24"). null when the
- * input is none of those.
+ * imdb.com title URL, an IMDb id (tt0133093), a TMDB id said as such ("tmdb:603", "tmdb 603"), or
+ * a TVDB show (see parseTvdbRef). A bare number is not an id: it is a title to search for ("1917",
+ * "300", "24"). null when the input is none of those.
+ *
+ * A TVDB reference is sent as typed ({tvdb}) for the server to read, an address as it is and an id
+ * as "tvdb:N" (the form every version of the server takes).
  */
 export function parseMatchInput(input: string): MatchInput | null {
   const s = input.trim();
@@ -681,7 +796,31 @@ export function parseMatchInput(input: string): MatchInput | null {
   if (url) return { ref: { tmdbId: Number(url[2]) }, kind: url[1].toLowerCase() === 'tv' ? 'series' : 'movie' };
   const tagged = /^tmdb(?:\s*:\s*|\s+)(\d{1,10})$/i.exec(s);
   if (tagged && Number(tagged[1]) > 0) return { ref: { tmdbId: Number(tagged[1]) } };
+  const tvdb = parseTvdbRef(s);
+  if (tvdb) return { ref: { tvdb: /^tvdb/i.test(s) ? `tvdb:${tvdb.id}` : s }, kind: 'series', tvdb };
   return null;
+}
+
+/** What choosing a search result sends: the id of its own source. */
+export function candidateRef(c: Pick<MatchCandidate, 'source' | 'id' | 'tmdbId' | 'tvdbId'>): MatchRef {
+  return c.source === 'tvdb' ? { tvdbId: c.tvdbId || c.id } : { tmdbId: c.tmdbId || c.id };
+}
+
+/** A search result with its source and id filled in (a server older than M8 sends tmdbId only). */
+function normaliseCandidate(c: Partial<MatchCandidate> & { title: string }): MatchCandidate {
+  const source = c.source === 'tvdb' ? 'tvdb' : 'tmdb';
+  const id = c.id || (source === 'tvdb' ? c.tvdbId : c.tmdbId) || 0;
+  return { year: 0, score: 0, ...c, source, id };
+}
+
+/**
+ * The person a 404 of GET /api/people/{id} says the asked-for one was merged into
+ * ({"error": "merged", "into": N}), or 0 for any other error, a plain 404 included.
+ */
+export function mergedInto(e: unknown): number {
+  if (!(e instanceof ApiError) || e.status !== 404) return 0;
+  const b = e.body as { error?: unknown; into?: unknown } | null | undefined;
+  return b?.error === 'merged' && typeof b.into === 'number' && Number.isInteger(b.into) && b.into > 0 ? b.into : 0;
 }
 
 /** The id in what was pasted into the "fix match" box (see parseMatchInput), or null. */
@@ -852,15 +991,26 @@ export const api = {
     return (await request<UpcomingShow[] | null>('GET', '/api/upcoming')) ?? [];
   },
 
-  /** Edit a title's text; the title is then locked, so that a refresh keeps the edit. */
-  patchTitle: (id: number, patch: TitlePatch) => request<TitleDetail>('PATCH', `/api/titles/${id}`, patch),
+  /**
+   * Edit a title's text; the title is then locked, so that a refresh keeps the edit. With
+   * episodeOrder (a TVDB show) every season is mapped again and the answer has `unmapped`;
+   * ApiError 409 for no TVDB key or no episodes in that order, 502 when TVDB can't be reached.
+   */
+  async patchTitle(id: number, patch: TitlePatch): Promise<TitleDetail> {
+    const t = await request<TitleDetail>('PATCH', `/api/titles/${id}`, patch);
+    return { ...t, genres: t.genres ?? [], cast: t.cast ?? [], crew: t.crew ?? [] };
+  },
 
   // fixing matches
 
-  /** TMDB titles a query could mean, best first. 409 (ApiError) when lookups are off. */
+  /**
+   * Titles a query could mean, best first; for shows with TVDB on, TVDB's before TMDB's. "tvdb:81189"
+   * or a thetvdb.com address gives that one show. 409 (ApiError) when lookups (or TVDB) are off.
+   */
   async searchMetadata(kind: TitleKind, q: string, year?: number): Promise<MatchCandidate[]> {
     const path = `/api/metadata/search${qs({ kind, q, year: year ? String(year) : undefined })}`;
-    return (await request<MatchCandidate[] | null>('GET', path)) ?? [];
+    const list = (await request<(Partial<MatchCandidate> & { title: string })[] | null>('GET', path)) ?? [];
+    return list.map(normaliseCandidate);
   },
 
   /** Link a movie file to a TMDB title (by hand: it is never re-matched on its own). */
@@ -928,6 +1078,12 @@ export const api = {
    * ApiError 400 says why it was refused, 502 that TMDB could not be reached.
    */
   saveSettings: (u: SettingsUpdate) => request<Settings>('PUT', '/api/settings', u),
+
+  /** Checks the key in use (TVDB: a login, with the PIN). A key that does not work is { ok: false }, not an error. */
+  async testKey(provider: 'tmdb' | 'tvdb'): Promise<KeyTest> {
+    const r = await request<Partial<KeyTest> | null>('POST', '/api/settings/test', { provider });
+    return { ok: r?.ok === true, ...(r?.error ? { error: r.error } : {}) };
+  },
 
   // ---- background queue (M9) ----
   // Actions: ApiError 404 for a job the queue no longer has, 409 when its state does not allow it.

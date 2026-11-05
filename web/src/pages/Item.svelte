@@ -26,6 +26,7 @@
   import Menu from '../components/Menu.svelte';
   import PersonCard from '../components/PersonCard.svelte';
   import Rail from '../components/Rail.svelte';
+  import SourceBadge from '../components/SourceBadge.svelte';
 
   let { id }: { id: number } = $props();
 
@@ -138,7 +139,12 @@
   }
 
   const epTitle = (e: ItemSummary) => e.episodeTitle || `Episode ${e.episode ?? ''}`.trim();
-  const sources: Record<string, string> = { tmdb: 'TMDB', nfo: 'the .nfo file next to it', mixed: 'TMDB and the .nfo file' };
+  const sources: Record<string, string> = {
+    tvdb: 'TheTVDB',
+    tmdb: 'TMDB',
+    nfo: 'the .nfo file next to it',
+    mixed: 'TMDB and the .nfo file',
+  };
 </script>
 
 {#if !item && detail.error}
@@ -161,7 +167,7 @@
       {#if meta?.certification}<span class="cert">{meta.certification}</span>{/if}
       {#if runtime}<span>{runtime}</span>{/if}
       {#if rating}<span class="rating"><Icon name="star" filled /><span class="sr-only">Rated</span>{rating}</span>{/if}
-      <span class="badges"><Badges {item} /></span>
+      <span class="badges"><Badges {item} /><SourceBadge source={meta?.source} /></span>
     </div>
     <div class="actions">
       {#if resumeAt}

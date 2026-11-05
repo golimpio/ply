@@ -1,16 +1,32 @@
 <script lang="ts">
-  import { api } from '../lib/api';
+  import { api, ApiError, mergedInto, type Person } from '../lib/api';
   import { cardHref, groupCredits, lifeSpan } from '../lib/credits';
   import { backdropOf, posterImg, prefersPosters, profileImg } from '../lib/meta';
   import { resource } from '../lib/resource.svelte';
   import { href } from '../lib/router.svelte';
+  import { openSearch } from '../lib/palette.svelte';
   import MediaCard from '../components/MediaCard.svelte';
   import Picture from '../components/Picture.svelte';
 
   let { id }: { id: number } = $props();
 
-  const detail = resource(() => api.person(id));
-  const person = $derived(detail.data);
+  // A person of TVDB that TMDB knows too is merged into the TMDB person the first time the page
+  // is opened: that answer is the survivor's (another id), and after it the old id is a 404
+  // {"error": "merged", "into": N}. Any other 404 is a person the library doesn't have.
+  type Missing = { into: number };
+  const detail = resource<Person | Missing>(() =>
+    api.person(id).catch((e: unknown) => {
+      if (e instanceof ApiError && e.status === 404) return { into: mergedInto(e) };
+      throw e;
+    }),
+  );
+  const person = $derived(detail.data && !('into' in detail.data) ? detail.data : undefined);
+  const missing = $derived(detail.data && 'into' in detail.data ? detail.data : undefined);
+  $effect(() => {
+    // The page's address follows the merge, so that it can be kept and shared.
+    const to = missing?.into || (person && person.id !== id ? person.id : 0);
+    if (to && to !== id) location.replace(href.person(to));
+  });
 
   // Only credits that can be opened: a film with a file, a series with a show.
   const credits = $derived((person?.credits ?? []).filter((c) => cardHref(c.title)));
@@ -38,7 +54,17 @@
   });
 </script>
 
-{#if !person && detail.error}
+{#if missing?.into}
+  <div class="page center">
+    <p>This person was merged into another.</p>
+    <p><a class="btn" href={href.person(missing.into)}>Open their page</a></p>
+  </div>
+{:else if missing}
+  <div class="page center">
+    <p>This person isn’t in the library.</p>
+    <p><button class="btn" onclick={openSearch}>Search for them</button></p>
+  </div>
+{:else if !person && detail.error}
   <div class="page center">
     <p class="error">{detail.error}</p>
     <p><a href={href.home}>Back to the library</a></p>

@@ -266,6 +266,7 @@ type SettingsView struct {
 	TVDBKeySet      bool   `json:"tvdbKeySet"`
 	TVDBPINSet      bool   `json:"tvdbPinSet"`
 	TVDBKeySource   string `json:"tvdbKeySource"`
+	TVDBPINSource   string `json:"tvdbPinSource"` // flag | env | settings | "": a PIN from a flag or env cannot be removed here (409)
 	TVDBKeyChecked  *bool  `json:"tvdbKeyChecked,omitempty"`
 	TVDBAttribution string `json:"tvdbAttribution"`
 	// TVDBAttributionURL is the link that goes with the attribution text (TVDB asks for a

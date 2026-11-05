@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -126,16 +128,17 @@ func TestWorkerTVDBOutageInARefreshDoesNotStallWhatIsAtTMDB(t *testing.T) {
 	}
 }
 
-// A refused TVDB key in the changes feed is not the end of the refresh either: the titles that are
-// old are refreshed, the poll time stays where it was, and the pass goes on to the end.
-func TestWorkerRefusedTVDBKeyInTheFeedGoesByAge(t *testing.T) {
-	e := newTEnv(t)
+// feedEnv is a worker with a show from TVDB (500) and a show from TMDB (600), both fresh and matched, and a first
+// refresh behind it, which has set the poll times.
+func feedEnv(t *testing.T) (e *tenv, titles map[string]int64) {
+	t.Helper()
+	e = newTEnv(t)
 	tvdbShow := &store.TitleInput{Title: store.Title{Kind: store.KindSeries, TVDBID: 500, Title: "Same Number", Source: store.SourceTVDB, Overview: "v1"}}
 	tmdbShow := &store.TitleInput{Title: store.Title{Kind: store.KindSeries, TMDBID: 600, Title: "Other Number", Source: store.SourceTMDB, Overview: "v1"},
 		Seasons: []store.Season{{Number: 1, Episodes: []store.Episode{{Season: 1, Number: 1}}}}}
 	e.tvdb.Shows = map[int64]*store.TitleInput{500: {Title: store.Title{Kind: store.KindSeries, TVDBID: 500, Title: "Same Number", Source: store.SourceTVDB, Overview: "v2"}}}
 	e.fake.Shows = map[int64]*store.TitleInput{600: {Title: store.Title{Kind: store.KindSeries, TMDBID: 600, Title: "Other Number", Source: store.SourceTMDB, Overview: "v2"}}}
-	titles := map[string]int64{}
+	titles = map[string]int64{}
 	for _, s := range []struct {
 		show string
 		in   *store.TitleInput
@@ -151,29 +154,204 @@ func TestWorkerRefusedTVDBKeyInTheFeedGoesByAge(t *testing.T) {
 		}
 		titles[s.show] = id
 	}
-	e.once() // the first pass sets the poll time
-	poll, ok, _ := e.st.GetSetting(e.ctx, metadata.SettingChangesPoll)
-	if !ok {
-		t.Fatal("setup: no poll time")
+	return e, titles
+}
+
+// setting reads a settings row ("" for none).
+func (e *wenv) setting(key string) string {
+	e.t.Helper()
+	v, _, err := e.st.GetSetting(e.ctx, key)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return v
+}
+
+// A refused TVDB key in the updates feed holds back TVDB's share of the refresh and nobody else's: what TMDB's
+// feed lists is refreshed and its poll moves; TVDB's poll stays, TVDB's feed is not asked again for an hour, and
+// the status line says that the key is rejected (an outage is another thing). Once the key works, only TVDB's
+// share is done, and the refresh is complete.
+func TestWorkerRefusedTVDBKeyInTheFeedHoldsBackOnlyTVDBsShare(t *testing.T) {
+	e, titles := feedEnv(t)
+	e.once() // the first pass sets the poll times
+	tmdbPoll, tvdbPoll, last := e.setting(metadata.SettingChangesPoll), e.setting(metadata.SettingTVDBChangesPoll), e.setting(metadata.SettingLastRefresh)
+	if tmdbPoll == "" || tvdbPoll == "" || last == "" {
+		t.Fatalf("setup: poll times %q %q, last refresh %q", tmdbPoll, tvdbPoll, last)
+	}
+	if tmdbPoll != tvdbPoll {
+		t.Fatalf("setup: the two polls differ: %q %q", tmdbPoll, tvdbPoll)
 	}
 
-	e.clock.Advance(8 * 24 * time.Hour) // the data is a week old, and the poll is within the feed's reach
+	e.clock.Advance(25 * time.Hour)
 	e.tvdb.SetError(tvdbRefusedKey)
+	e.fake.ChangedShows = []int64{600}
 	e.once()
 	if got := overview(t, e.wenv, titles["Other Number"]); got != "v2" {
-		t.Errorf("the show at TMDB after TVDB's feed refused the key: %q; the refresh should have gone by age", got)
+		t.Errorf("the show at TMDB after TVDB's feed refused the key: %q; TMDB's changes should have been refreshed", got)
 	}
 	if got := overview(t, e.wenv, titles["Same Number"]); got != "v1" {
 		t.Errorf("the show from TVDB was refreshed (%q) though TVDB refuses the key", got)
 	}
-	if st := e.w.Status(e.ctx); st.LastError != "" {
-		t.Errorf("last error = %q: the pass ended on a refusal that is TVDB's alone", st.LastError)
+	if st := e.w.Status(e.ctx); st.ShowsLine != "TVDB rejected the key or PIN" {
+		t.Errorf("status line = %q, want it to say the key is rejected", st.ShowsLine)
 	}
-	if got, _, _ := e.st.GetSetting(e.ctx, metadata.SettingChangesPoll); got != poll {
-		t.Errorf("the poll time moved to %q (was %q): the feed was not read", got, poll)
+	if got := e.setting(metadata.SettingChangesPoll); got == tmdbPoll {
+		t.Errorf("TMDB's poll time did not move (%q): its share was done", got)
+	}
+	if got := e.setting(metadata.SettingTVDBChangesPoll); got != tvdbPoll {
+		t.Errorf("TVDB's poll time moved to %q (was %q): its feed was not read", got, tvdbPoll)
+	}
+	if got := e.setting(metadata.SettingLastRefresh); got != last {
+		t.Errorf("the refresh is marked complete (%q): TVDB's share is not", got)
 	}
 	if e.tvdb.Count("Changes(") != 1 {
 		t.Errorf("TVDB's feed was asked %d times, want 1", e.tvdb.Count("Changes("))
+	}
+
+	// Within the hour TVDB's feed is not asked again, and TMDB's share, which is done, is not either.
+	e.clock.Advance(30 * time.Minute)
+	tmdbFeed := e.fake.Count("Changes(")
+	e.once()
+	if e.tvdb.Count("Changes(") != 1 || e.fake.Count("Changes(") != tmdbFeed {
+		t.Errorf("a pass within the hour asked TVDB's feed %d times in all and TMDB's %d more", e.tvdb.Count("Changes("), e.fake.Count("Changes(")-tmdbFeed)
+	}
+
+	// The key is accepted: TVDB's share is done, TVDB's show is refreshed, and the refresh is complete.
+	e.tvdb.SetError(nil)
+	e.tvdb.ChangedShows = []int64{500}
+	e.clock.Advance(31 * time.Minute)
+	e.once()
+	if got := overview(t, e.wenv, titles["Same Number"]); got != "v2" {
+		t.Errorf("the show from TVDB once the key is accepted: %q", got)
+	}
+	if got := e.setting(metadata.SettingTVDBChangesPoll); got == tvdbPoll {
+		t.Errorf("TVDB's poll time did not move once its share was done")
+	}
+	if got := e.setting(metadata.SettingLastRefresh); got == last {
+		t.Errorf("the refresh is not marked complete")
+	}
+	if e.fake.Count("Changes(") != tmdbFeed {
+		t.Errorf("TMDB's feed was asked %d more times: only TVDB's share was left", e.fake.Count("Changes(")-tmdbFeed)
+	}
+	if st := e.w.Status(e.ctx); st.ShowsLine != "Shows: TVDB" {
+		t.Errorf("status line = %q once TVDB answered", st.ShowsLine)
+	}
+}
+
+// TVDB's updates feed out of reach (an outage, not a refused key) does not stall TMDB's refresh: its changed
+// movie is refreshed. TVDB's share is tried again soon, and only it.
+func TestWorkerTVDBOutageInTheFeedDoesNotStallTMDBsRefresh(t *testing.T) {
+	e := newTEnv(t)
+	e.withBBBoth()
+	e.withMatrix()
+	e.addEpisode("Breaking Bad", 1, 1)
+	e.addMovie("Movies/The Matrix (1999).mkv", "The Matrix", 1999)
+	e.once() // matches them, and sets the poll times
+	bb := e.series("Breaking Bad").TitleID
+	tmdbPoll, tvdbPoll, last := e.setting(metadata.SettingChangesPoll), e.setting(metadata.SettingTVDBChangesPoll), e.setting(metadata.SettingLastRefresh)
+	if tmdbPoll == "" || tvdbPoll == "" || last == "" {
+		t.Fatalf("setup: poll times %q %q, last refresh %q", tmdbPoll, tvdbPoll, last)
+	}
+
+	e.clock.Advance(48 * time.Hour)
+	e.fake.ChangedMovies = []int64{603}
+	e.tvdb.Shows[81189].Overview = "Changed at TVDB"
+	e.tvdb.Offline()
+	before := e.fake.Count("Movie(603)")
+	e.once()
+	if got := e.fake.Count("Movie(603)") - before; got != 1 {
+		t.Errorf("TMDB's changed movie was fetched %d times with TVDB's feed down, want 1", got)
+	}
+	if st := e.w.Status(e.ctx); st.ShowsLine != "TVDB unreachable" {
+		t.Errorf("status line = %q, want an outage (the key is not rejected)", st.ShowsLine)
+	}
+	if got := e.setting(metadata.SettingChangesPoll); got == tmdbPoll {
+		t.Error("TMDB's poll time did not move")
+	}
+	if got := e.setting(metadata.SettingTVDBChangesPoll); got != tvdbPoll {
+		t.Errorf("TVDB's poll time moved to %q (was %q)", got, tvdbPoll)
+	}
+	if got := e.setting(metadata.SettingLastRefresh); got != last {
+		t.Errorf("the refresh is marked complete (%q)", got)
+	}
+
+	// TVDB is back and the retry time has come: only TVDB's share is done.
+	e.tvdb.SetError(nil)
+	e.tvdb.ChangedShows = []int64{81189}
+	e.clock.Advance(16 * time.Minute)
+	tmdbFeed, movies := e.fake.Count("Changes("), e.fake.Count("Movie(")
+	e.once()
+	if got := e.title(bb).Overview; got != "Changed at TVDB" {
+		t.Errorf("the show from TVDB after the retry: %q", got)
+	}
+	if e.fake.Count("Changes(") != tmdbFeed || e.fake.Count("Movie(") != movies {
+		t.Errorf("TMDB was asked again for its share, which was done: %q", e.fake.Calls()[len(e.fake.Calls())-2:])
+	}
+	if got := e.setting(metadata.SettingLastRefresh); got == last {
+		t.Error("the refresh is not marked complete")
+	}
+	if st := e.w.Status(e.ctx); st.ShowsLine != "Shows: TVDB" {
+		t.Errorf("status line = %q once TVDB answered", st.ShowsLine)
+	}
+}
+
+// A new key may be what the refresh was waiting for: Reload ends the wait of a part that was put off.
+func TestWorkerReloadEndsTheWaitOfARefreshThatWasPutOff(t *testing.T) {
+	e, titles := feedEnv(t)
+	e.once()
+	e.clock.Advance(25 * time.Hour)
+	e.tvdb.SetError(tvdbRefusedKey)
+	e.tvdb.ChangedShows = []int64{500}
+	e.once()
+	if got := overview(t, e.wenv, titles["Same Number"]); got != "v1" {
+		t.Fatalf("control: the show from TVDB was refreshed: %q", got)
+	}
+	// The key is replaced a minute later (the wait is an hour): the settings call Reload.
+	e.tvdb.SetError(nil)
+	e.clock.Advance(time.Minute)
+	e.once()
+	if got := overview(t, e.wenv, titles["Same Number"]); got != "v1" {
+		t.Fatalf("control: the show was refreshed within the wait: %q", got)
+	}
+	e.w.Reload()
+	e.once()
+	if got := overview(t, e.wenv, titles["Same Number"]); got != "v2" {
+		t.Errorf("the show from TVDB after Reload: %q; the wait was not ended", got)
+	}
+}
+
+// On the age path (no poll within the feed's reach) a refused key leaves the shows from TVDB as they are, and
+// then neither TVDB's poll time nor the time of the last refresh may move: nothing was refreshed for them.
+func TestWorkerRefusedTVDBKeyOnTheAgePathMovesNeitherPollNorLastRefresh(t *testing.T) {
+	e, titles := feedEnv(t)             // (no pass yet: no poll times)
+	e.clock.Advance(8 * 24 * time.Hour) // the data is a week old
+	e.tvdb.SetError(tvdbRefusedKey)
+	e.once()
+	if got := overview(t, e.wenv, titles["Other Number"]); got != "v2" {
+		t.Errorf("the show at TMDB: %q; it is old, and TMDB is not the one refusing", got)
+	}
+	if got := overview(t, e.wenv, titles["Same Number"]); got != "v1" {
+		t.Errorf("the show from TVDB was refreshed: %q", got)
+	}
+	if e.setting(metadata.SettingChangesPoll) == "" {
+		t.Error("TMDB's poll time was not set: its share is done")
+	}
+	if got := e.setting(metadata.SettingTVDBChangesPoll); got != "" {
+		t.Errorf("TVDB's poll time was set to %q though its titles were passed over", got)
+	}
+	if got := e.setting(metadata.SettingLastRefresh); got != "" {
+		t.Errorf("the refresh is marked complete (%q) though TVDB's titles were passed over", got)
+	}
+
+	// Positive control: once the key is accepted, the same titles are refreshed and the times are set.
+	e.tvdb.SetError(nil)
+	e.clock.Advance(61 * time.Minute)
+	e.once()
+	if got := overview(t, e.wenv, titles["Same Number"]); got != "v2" {
+		t.Errorf("the show from TVDB once the key is accepted: %q", got)
+	}
+	if e.setting(metadata.SettingTVDBChangesPoll) == "" || e.setting(metadata.SettingLastRefresh) == "" {
+		t.Error("the times were not set once TVDB's share was done")
 	}
 }
 
@@ -688,5 +866,125 @@ func TestWorkerPaceThatRefusesRequeuesTheSidecarNotifications(t *testing.T) {
 	e.once()
 	if rest := e.fake.Calls()[calls:]; len(rest) != 0 {
 		t.Errorf("a notification was handled twice: %q", rest)
+	}
+}
+
+// Another folder or name of a show that is on TVDB already, which TVDB does not find and TMDB does (the
+// fallback), is linked to the show's TVDB row: the match does not turn the show into TMDB's, with its
+// episodes dropped.
+func TestWorkerFallbackMatchOfAnotherNameKeepsTheShowOnTVDB(t *testing.T) {
+	e := newTEnv(t)
+	e.withBBBoth()
+	e.addEpisode("Breaking Bad", 1, 1)
+	e.once()
+	first := e.series("Breaking Bad").TitleID
+	if got := e.title(first); got.Source != store.SourceTVDB || got.Overview != "From TVDB" {
+		t.Fatalf("setup: %+v", got)
+	}
+
+	// TVDB has nothing for the second name; TMDB has the same show under it.
+	e.fake.SeriesSearch["breaking bad extra"] = []metadata.Candidate{{ID: 1396, Title: "Breaking Bad Extra", OriginalTitle: "Breaking Bad Extra", Year: 2008, Popularity: 9}}
+	e.addEpisode("Breaking Bad Extra", 1, 1)
+	e.once()
+	sm := e.series("Breaking Bad Extra")
+	if sm.State != store.MatchMatched || sm.TitleID != first {
+		t.Fatalf("the second name = %+v; want it matched to the TVDB row %d", sm.Match, first)
+	}
+	if e.fake.Count("Series(1396") == 0 {
+		t.Error("control: TMDB was not asked for the show, so this was no fallback")
+	}
+	got := e.title(first)
+	if got.Source != store.SourceTVDB || got.Overview != "From TVDB" || got.EpisodeOrder != store.OrderAired {
+		t.Errorf("the show after the fallback match of its second name: %+v", got)
+	}
+	if eps := episodesOf(t, e.wenv, first); len(eps) != 3 || eps[1].Name != "TVDB S1E2" {
+		t.Errorf("episodes = %+v; the show lost TVDB's", eps)
+	}
+	// Nothing was stored, so TMDB's artwork was not fetched for it (the show's own is TVDB's).
+	if _, err := os.Stat(filepath.Join(e.imgDir, "tmdb", "w342", "bb.jpg")); err == nil {
+		t.Error("TMDB's poster was prefetched for a link that stored nothing")
+	}
+	if _, err := os.Stat(filepath.Join(e.imgDir, "tvdb", "w342", "banners", "posters", "81189-10.jpg")); err != nil {
+		t.Errorf("control: TVDB's own poster was not prefetched: %v", err)
+	}
+	if sm := e.series("Breaking Bad"); sm.TitleID != first || sm.State != store.MatchMatched {
+		t.Errorf("the first name = %+v", sm.Match)
+	}
+
+	// A person who picks TMDB's title for the second name does turn it into TMDB's.
+	if err := e.w.MatchShow(e.ctx, "Breaking Bad Extra", metadata.Ref{TMDBID: 1396}); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.title(first); got.Source != store.SourceTMDB {
+		t.Errorf("after a person's pick of TMDB's: %+v", got)
+	}
+}
+
+// TVDB refuses the key for days. TMDB's share of the refresh has its own period: it starts a new one every
+// time, however long TVDB's share stays undone (it was held back, as a share done while the other was not,
+// from the second cycle on).
+func TestWorkerLongTVDBRefusalDoesNotStarveTMDBRefreshCycles(t *testing.T) {
+	e := newTEnv(t)
+	e.withBBBoth()
+	e.withMatrix()
+	e.addEpisode("Breaking Bad", 1, 1)
+	e.addMovie("Movies/The Matrix (1999).mkv", "The Matrix", 1999)
+	e.once()
+	first := e.setting(metadata.SettingLastRefresh)
+	if first == "" {
+		t.Fatal("setup: no refresh was recorded")
+	}
+	e.clock.Advance(25 * time.Hour)
+	e.tvdb.SetError(tvdbRefusedKey)
+	e.fake.ChangedMovies = []int64{603}
+	var got []int
+	for range 4 {
+		before := e.fake.Count("Movie(603)")
+		e.once()
+		got = append(got, e.fake.Count("Movie(603)")-before)
+		e.clock.Advance(25 * time.Hour) // a new refresh period each time; TVDB still refuses
+	}
+	for i, n := range got {
+		if n != 1 {
+			t.Errorf("cycle %d: TMDB's changed movie was refreshed %d times, want 1 (%v)", i, n, got)
+		}
+	}
+	// The time of the last refresh is the older of the two: TVDB's share was never done again.
+	if now := e.setting(metadata.SettingLastRefresh); now != first {
+		t.Errorf("the refresh is marked complete at %q (was %q): TVDB's share is not done", now, first)
+	}
+	if tmdb, tvdb := e.setting(metadata.SettingTMDBLastRefresh), e.setting(metadata.SettingTVDBLastRefresh); tmdb == first || tvdb != first {
+		t.Errorf("the shares' times: TMDB %q TVDB %q, want TMDB moved on and TVDB at %q", tmdb, tvdb, first)
+	}
+
+	// Positive control: once TVDB answers, its share is done and the refresh is complete again.
+	e.tvdb.SetError(nil)
+	e.clock.Advance(time.Hour)
+	e.once()
+	if now := e.setting(metadata.SettingLastRefresh); now == first {
+		t.Error("the refresh is not marked complete when TVDB's share is done")
+	}
+}
+
+// An install from before the shares had each a time of their own has the one time of the refresh: a share with
+// none takes it, so nothing is refreshed ahead of its period.
+func TestWorkerAShareWithNoTimeOfItsOwnTakesTheTimeOfTheRefresh(t *testing.T) {
+	e, titles := feedEnv(t)
+	e.once() // sets everything
+	for _, k := range []string{metadata.SettingTMDBLastRefresh, metadata.SettingTVDBLastRefresh} {
+		if err := e.st.DeleteSetting(e.ctx, k); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.fake.ChangedShows = []int64{600}
+	e.clock.Advance(time.Hour) // (the refresh of the one time was an hour ago)
+	e.once()
+	if got := overview(t, e.wenv, titles["Other Number"]); got != "v1" {
+		t.Errorf("the show at TMDB was refreshed (%q) an hour after the last refresh", got)
+	}
+	e.clock.Advance(24 * time.Hour)
+	e.once()
+	if got := overview(t, e.wenv, titles["Other Number"]); got != "v2" {
+		t.Errorf("the show at TMDB a period later: %q", got)
 	}
 }

@@ -179,6 +179,11 @@ type TitleInput struct {
 	// fetched), the seasons are left out: the stored ones are in the new order already. A
 	// refresh sets it, and leaves EpisodeOrder empty so as not to write the order it began with.
 	ExpectOrder string
+	// keepTVDB makes the worker's own result (LinkSeriesTitle with a state to expect) leave a
+	// show that is stored from TVDB as it is: a second folder or name of it that matched at
+	// TMDB by the fallback is linked to the TVDB row and does not turn it into TMDB's. A person's
+	// own pick of a TMDB title is not that, and does.
+	keepTVDB bool
 }
 
 const titleCols = `id, kind, tmdb_id, imdb_id, tvdb_id, title, original_title, sort_title, year,
@@ -236,6 +241,9 @@ func upsertTitleTx(ctx context.Context, tx *sql.Tx, in *TitleInput) (int64, erro
 	if err != nil {
 		return 0, err
 	}
+	if plan.keep { // a show stored from TVDB stays as it is: not its title, genres, credits or seasons
+		return id, nil
+	}
 	if err := setGenres(ctx, tx, id, in.Genres); err != nil {
 		return 0, err
 	}
@@ -261,8 +269,9 @@ func upsertTitleTx(ctx context.Context, tx *sql.Tx, in *TitleInput) (int64, erro
 // seasonsPlan is what the row says about the seasons of the input: skip them (they are
 // numbered in an episode order that is not the stored one any more: a person changed it
 // while they were being fetched), or wipe the stored ones first (the title left TVDB, whose
-// numbering the stored episodes still have).
-type seasonsPlan struct{ skip, wipe bool }
+// numbering the stored episodes still have). keep: the row is a show from TVDB and the input
+// is not (see TitleInput.keepTVDB): nothing is written, not even the title.
+type seasonsPlan struct{ skip, wipe, keep bool }
 
 // upsertTitleRow writes the title row and says in plan what the seasons are to do.
 func upsertTitleRow(ctx context.Context, tx *sql.Tx, in *TitleInput, plan *seasonsPlan) (int64, error) {
@@ -335,6 +344,10 @@ func upsertTitleRow(ctx context.Context, tx *sql.Tx, in *TitleInput, plan *seaso
 	if err := tx.QueryRowContext(ctx, `SELECT episode_order, source FROM titles WHERE id = ?`, id).Scan(&oldOrder, &oldSource); err != nil {
 		return 0, err
 	}
+	if in.keepTVDB && oldSource == SourceTVDB && source != SourceTVDB {
+		plan.keep = true
+		return id, nil
+	}
 	plan.skip = in.ExpectOrder != "" && oldOrder != in.ExpectOrder
 	plan.wipe = oldSource == SourceTVDB && source != SourceTVDB
 
@@ -359,7 +372,10 @@ func upsertTitleRow(ctx context.Context, tx *sql.Tx, in *TitleInput, plan *seaso
 			backdrop = CASE WHEN ? <> '' THEN ? ELSE backdrop END,
 			logo     = CASE WHEN ? <> '' THEN ? ELSE logo     END,
 			collection_id = ?, source = ?, next_air_date = NULLIF(?, ''),
-			next_episode_season = ?, next_episode_number = ?, next_episode_name = ?,
+			-- the next episode of a fetch that is not in the stored order is not the next one
+			next_episode_season = CASE WHEN ? THEN next_episode_season ELSE ? END,
+			next_episode_number = CASE WHEN ? THEN next_episode_number ELSE ? END,
+			next_episode_name   = CASE WHEN ? THEN next_episode_name   ELSE ? END,
 			episode_order = CASE WHEN ? = 'tvdb' THEN COALESCE(NULLIF(?, ''), episode_order) ELSE 'aired' END,
 			fetched_at = ?, updated_at = ?
 		WHERE id = ?`,
@@ -367,7 +383,8 @@ func upsertTitleRow(ctx context.Context, tx *sql.Tx, in *TitleInput, plan *seaso
 		in.Title.Title, in.SortTitle, in.Year, in.Overview, in.Tagline,
 		in.ReleaseDate, in.EndDate, in.Status, in.RuntimeMin, in.Rating, in.VoteCount, in.Certification,
 		in.Poster, in.Poster, in.Backdrop, in.Backdrop, in.Logo, in.Logo,
-		collection, source, in.NextAirDate, in.NextEpisodeSeason, in.NextEpisodeNumber, in.NextEpisodeName,
+		collection, source, in.NextAirDate,
+		plan.skip, in.NextEpisodeSeason, plan.skip, in.NextEpisodeNumber, plan.skip, in.NextEpisodeName,
 		source, in.EpisodeOrder, fetched, now, id)
 	return id, err
 }

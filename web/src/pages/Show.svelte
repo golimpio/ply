@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, type ItemSummary } from '../lib/api';
+  import { api, ApiError, type EpisodeOrder, type ItemSummary } from '../lib/api';
   import { useAmbient } from '../lib/ambient.svelte';
   import { episodeLabel, formatDuration, seasonLabel } from '../lib/format';
   import { ensureLibrary, library, showMeta, showsOf } from '../lib/library.svelte';
@@ -19,6 +19,7 @@
   import Menu from '../components/Menu.svelte';
   import PersonCard from '../components/PersonCard.svelte';
   import Rail from '../components/Rail.svelte';
+  import SourceBadge from '../components/SourceBadge.svelte';
 
   let { show, season }: { show: string; season?: number } = $props();
 
@@ -76,6 +77,50 @@
     }
   }
 
+  // A show from TVDB can be numbered in another of TVDB's orders: every season is mapped again.
+  const ORDERS: [EpisodeOrder, string][] = [
+    ['aired', 'Aired'],
+    ['dvd', 'DVD'],
+    ['absolute', 'Absolute'],
+  ];
+  // Once changed here, the order is what the last PATCH answered: a fetch of the page that started
+  // before it (or is still on its way) can't snap the picker back, or swallow a change back. It is
+  // about the show's match at the time only: a new match (another TVDB show, or TMDB and back, which
+  // keep the title's id) starts at the server's order again, which the match resets to aired. The
+  // match of a show is fixed from this page (any other page remounts it), so opening the Fix dialog
+  // drops it.
+  let changed = $state<EpisodeOrder>();
+  const order = $derived(meta?.source === 'tvdb' ? (changed ?? meta.episodeOrder ?? 'aired') : undefined);
+  $effect(() => {
+    if (fixing) changed = undefined;
+  });
+  let ordering = $state(false);
+  let orderNote = $state('');
+  let orderError = $state('');
+
+  async function changeOrder(e: Event & { currentTarget: HTMLSelectElement }) {
+    const select = e.currentTarget;
+    const next = select.value as EpisodeOrder;
+    if (!meta || next === order) return;
+    const was = order ?? 'aired';
+    ordering = true;
+    orderNote = '';
+    orderError = '';
+    try {
+      const t = await api.patchTitle(meta.id, { episodeOrder: next });
+      changed = t.episodeOrder ?? next;
+      const n = t.unmapped ?? 0;
+      if (n > 0) orderNote = n === 1 ? '1 episode doesn’t fit this order.' : `${n} episodes don’t fit this order.`;
+      app.libraryVersion++; // the episodes are numbered anew: the seasons, the list and the library
+    } catch (err) {
+      select.value = was;
+      if (err instanceof ApiError && err.status === 502) orderError = 'TVDB can’t be reached right now.';
+      else orderError = err instanceof Error ? err.message : String(err);
+    } finally {
+      ordering = false;
+    }
+  }
+
   const menu = $derived([
     {
       label: 'Fix the match',
@@ -124,6 +169,7 @@
       <span>{plural(episodes.length, 'episode')}</span>
       {#if rating}<span class="rating"><Icon name="star" filled /><span class="sr-only">Rated</span>{rating}</span>{/if}
       {#if meta?.status && status[meta.status]}<span>{status[meta.status]}</span>{/if}
+      {#if meta}<SourceBadge source={meta.source} />{/if}
     </div>
     <div class="actions">
       {#if next}
@@ -166,6 +212,20 @@
           </dl>
         {/if}
       </section>
+    {/if}
+
+    {#if order}
+      <div class="order">
+        <label for="episode-order">Episode order</label>
+        <select id="episode-order" value={order} disabled={ordering} aria-describedby="episode-order-hint" onchange={changeOrder}>
+          {#each ORDERS as [value, label] (value)}<option {value}>{label}</option>{/each}
+        </select>
+        <span id="episode-order-hint" class="muted">
+          {ordering ? 'Numbering the episodes again…' : 'How your files are numbered: as aired, as on DVD, or straight through.'}
+        </span>
+      </div>
+      {#if orderError}<p class="error order-msg" role="alert">{orderError}</p>{/if}
+      {#if orderNote}<p class="muted order-msg" role="status">{orderNote}</p>{/if}
     {/if}
 
     <section class="season">
@@ -292,6 +352,38 @@
   }
   .notice {
     margin: 0;
+  }
+  .order {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+  }
+  .order label {
+    font-weight: 650;
+  }
+  .order select {
+    min-height: 2.5rem;
+    padding: 0.45rem 0.85rem;
+    font: inherit;
+    color: var(--text);
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+  }
+  .order select:focus-visible {
+    border-color: var(--text);
+    outline: 2px solid var(--text);
+    outline-offset: 2px;
+  }
+  .order select:disabled {
+    opacity: 0.6;
+  }
+  .order .muted {
+    font-size: 0.875rem;
+  }
+  .order-msg {
+    margin: -1.25rem 0 0;
   }
   .about {
     display: grid;

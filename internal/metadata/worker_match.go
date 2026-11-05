@@ -108,15 +108,25 @@ func (w *Worker) linkMovie(ctx context.Context, id int64, in *store.TitleInput, 
 	return ok
 }
 
-func (w *Worker) linkSeries(ctx context.Context, show string, in *store.TitleInput, m store.Match, nfoPath string) bool {
+// linkSeries links a show to its title. ok says it was linked; wrote that the title was
+// stored: it was not when the show was linked to a show that is stored from TVDB as it is
+// (a fallback match at TMDB of another name of it, see store.LinkSeriesTitle), so that there
+// is nothing to prefetch or to remember the NFO of.
+func (w *Worker) linkSeries(ctx context.Context, show string, in *store.TitleInput, m store.Match, nfoPath string) (ok, wrote bool) {
 	titleID, ok, err := w.o.Store.LinkSeriesTitle(ctx, show, in, m, store.MatchPending)
 	if err != nil && !errors.Is(err, store.ErrNotFound) && ctx.Err() == nil {
 		w.noteError(err)
 	}
-	if ok && hasRemote(in.Title) {
+	if !ok {
+		return false, false
+	}
+	if t, err := w.o.Store.GetTitle(ctx, titleID); err == nil && t.Source == store.SourceTVDB && in.Source != store.SourceTVDB {
+		return true, false
+	}
+	if hasRemote(in.Title) {
 		w.noteNFO(titleID, nfoPath)
 	}
-	return ok
+	return true, true
 }
 
 // matchMovie settles one movie that is due. It reports whether it did.
@@ -256,7 +266,8 @@ func (w *Worker) matchSeries(ctx context.Context, p *Providers, d store.DueSerie
 			NextAttemptAt: w.now().Add(idleRecheck).Unix()}
 		if in, ok := localSeries(); ok {
 			w.adoptLocal(ctx, existing, in)
-			return w.linkSeries(ctx, d.Show, in, m, "")
+			ok, _ := w.linkSeries(ctx, d.Show, in, m, "")
+			return ok
 		}
 		ok, _ := w.o.Store.SetSeriesMatchIfPending(ctx, d.Show, m)
 		return ok
@@ -301,15 +312,16 @@ func (w *Worker) matchSeries(ctx context.Context, p *Providers, d store.DueSerie
 		m := store.Match{State: store.MatchUnmatched, Score: res.Score, Attempts: d.Attempts}
 		if lt, ok := localSeries(); ok {
 			w.adoptLocal(ctx, existing, lt)
-			return w.linkSeries(ctx, d.Show, lt, m, "")
+			ok, _ := w.linkSeries(ctx, d.Show, lt, m, "")
+			return ok
 		}
 		ok, _ := w.o.Store.SetSeriesMatchIfPending(ctx, d.Show, m)
 		return ok
 	}
 
 	overlayNFO(in, nfo)
-	ok := w.linkSeries(ctx, d.Show, in, store.Match{State: store.MatchMatched, NeedsReview: res.NeedsReview, Score: res.Score}, loc.NFO)
-	if ok {
+	ok, wrote := w.linkSeries(ctx, d.Show, in, store.Match{State: store.MatchMatched, NeedsReview: res.NeedsReview, Score: res.Score}, loc.NFO)
+	if wrote {
 		w.prefetch(ctx, in)
 	}
 	return ok

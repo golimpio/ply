@@ -275,12 +275,13 @@ func (p *TVDBProvider) Brief(ctx context.Context, id int64) (Candidate, error) {
 }
 
 var (
-	reTVDBPrefix = regexp.MustCompile(`(?i)^tvdb\s*:\s*(\d{1,10})$`)
+	reTVDBPrefix = regexp.MustCompile(`(?i)^tvdb\s*:?\s*(\d{1,10})$`)
 	reTVDBSlug   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$`)
 )
 
-// ParseTVDBRef reads what a person types to name a show at TVDB: "tvdb:81189", or the
-// address of its page at thetvdb.com ("https://thetvdb.com/series/breaking-bad",
+// ParseTVDBRef reads what a person types to name a show at TVDB: "tvdb:81189" (in any case,
+// with the colon, a space, both or neither: "TVDB 81189", "tvdb : 81189", "tvdb81189"; the
+// id is digits only), or the address of its page at thetvdb.com ("https://thetvdb.com/series/breaking-bad",
 // with or without the scheme and "www", with a trailing "/allseasons/official" or a
 // query; the old "?tab=series&id=81189" form). It gives the id, or the slug when the
 // address has no id; ok is false for anything else, including an address at any other

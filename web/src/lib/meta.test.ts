@@ -224,6 +224,12 @@ describe('isMatching', () => {
     expect(isMatching(st({ keySet: false, running: true }))).toBe(false);
   });
 
+  it('with only a TVDB key: on while a pass runs, never for the movies that wait for TMDB', () => {
+    expect(isMatching(st({ keySet: false, tvdbKeySet: true, running: true, pending: 3 }))).toBe(true);
+    expect(isMatching(st({ keySet: false, tvdbKeySet: true, pending: 3 }))).toBe(false);
+    expect(isMatching(st({ enabled: false, keySet: false, tvdbKeySet: true, running: true }))).toBe(false);
+  });
+
   it('is off with lookups off, and before the status has arrived', () => {
     expect(isMatching(st({ enabled: false, running: true, pending: 3 }))).toBe(false);
     expect(isMatching(undefined)).toBe(false);

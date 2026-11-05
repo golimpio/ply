@@ -74,7 +74,7 @@ func TestSettingsDefaultsAndShape(t *testing.T) {
 	raw := decode[map[string]any](t, rec)
 	want := map[string]any{"tmdbKeySet": false, "tmdbKeySource": "", "metadataEnabled": true, "metadataForcedOff": false, "language": "en-US",
 		"maxStreams": 4.0, "maxTranscodes": 1.0, "maxStreamsSource": "default", "maxTranscodesSource": "default",
-		"tvdbKeySet": false, "tvdbPinSet": false, "tvdbKeySource": "", "tvdbAttribution": tvdbAttribution, "tvdbAttributionUrl": tvdbAttributionURL}
+		"tvdbKeySet": false, "tvdbPinSet": false, "tvdbKeySource": "", "tvdbPinSource": "", "tvdbAttribution": tvdbAttribution, "tvdbAttributionUrl": tvdbAttributionURL}
 	for k, v := range want {
 		if raw[k] != v {
 			t.Errorf("settings[%s] = %v, want %v", k, raw[k], v)

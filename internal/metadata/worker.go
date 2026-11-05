@@ -32,8 +32,17 @@ const (
 
 // Settings rows the worker keeps.
 const (
-	SettingLastRefresh = "metadata_last_refresh" // unix seconds of the last completed refresh
-	SettingChangesPoll = "metadata_changes_poll" // unix seconds of the last changes-feed poll
+	// SettingLastRefresh is the unix time of the last completed refresh: the older of the two
+	// shares' (SettingTMDBLastRefresh, SettingTVDBLastRefresh), once both have been done.
+	SettingLastRefresh = "metadata_last_refresh"
+	// Each provider's share of the refresh has its own time, so that one that cannot be done
+	// (TVDB refusing the key for days) does not keep the other from starting its next period.
+	SettingTMDBLastRefresh = "metadata_tmdb_last_refresh"
+	SettingTVDBLastRefresh = "metadata_tvdb_last_refresh"
+	SettingChangesPoll     = "metadata_changes_poll" // unix seconds of the last poll of TMDB's changes feed
+	// SettingTVDBChangesPoll is the same for TVDB's updates feed: the two are kept apart, so that one
+	// provider being out of reach does not make the other's poll start again.
+	SettingTVDBChangesPoll = "metadata_tvdb_changes_poll"
 )
 
 // WorkerOptions configures NewWorker.
@@ -73,7 +82,8 @@ type Status struct {
 	// TVDBKeySet says there is a TVDB key. Shows is where shows come from: "tvdb",
 	// "tmdb" (no TVDB key), or "" (nothing may be asked). ShowsLine is the sentence for
 	// the status line: "Shows: TVDB", "Shows: TMDB (no TVDB key)", "TVDB unreachable"
-	// (TVDB's last answer was a failure of the network or the key), or "".
+	// (TVDB's last answer was a failure of the network), "TVDB rejected the key or PIN"
+	// (it was a refusal), or "".
 	TVDBKeySet  bool       `json:"tvdbKeySet"`
 	Shows       string     `json:"shows"`
 	ShowsLine   string     `json:"showsLine"`
@@ -99,7 +109,7 @@ type Worker struct {
 	reload         bool
 	running        bool
 	lastError      string
-	retryRefreshAt time.Time
+	retryRefreshAt map[string]time.Time // by provider (SourceTMDB, SourceTVDB): when its part of the refresh may be tried again
 	probes         map[int64]probeEntry
 	seasonTried    map[seasonKey]time.Time
 	nfoApplied     map[int64]string // title id -> stamp of the NFO last laid over it
@@ -165,7 +175,7 @@ func NewWorker(o WorkerOptions) *Worker {
 	}
 	w := &Worker{
 		o: o, log: o.Logger, wake: make(chan struct{}, 1),
-		sidecars: map[int64]struct{}{}, probes: map[int64]probeEntry{}, seasonTried: map[seasonKey]time.Time{},
+		sidecars: map[int64]struct{}{}, retryRefreshAt: map[string]time.Time{}, probes: map[int64]probeEntry{}, seasonTried: map[seasonKey]time.Time{},
 		nfoApplied: map[int64]string{}, personFailed: map[int64]personFailure{}, switchTried: map[int64]bool{},
 	}
 	w.bgCtx, w.bgCancel = context.WithCancel(context.Background())
@@ -241,6 +251,7 @@ func (w *Worker) Reload() {
 	clear(w.personFailed) // a new key may find what the old one could not
 	clear(w.switchTried)
 	w.switchRetryAt = time.Time{}
+	clear(w.retryRefreshAt) // a new key may be what the refresh was waiting for
 	w.mu.Unlock()
 	w.signal()
 }
@@ -271,7 +282,10 @@ func (w *Worker) Status(ctx context.Context) Status {
 	case !res.Enabled:
 	case res.TVDBKeySet():
 		st.Shows, st.ShowsLine = SourceTVDB, "Shows: TVDB"
-		if res.TVDBDown {
+		switch {
+		case res.TVDBRefused:
+			st.ShowsLine = "TVDB rejected the key or PIN"
+		case res.TVDBDown:
 			st.ShowsLine = "TVDB unreachable"
 		}
 	case res.KeySet():

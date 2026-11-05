@@ -235,9 +235,16 @@ export function filmPasses(g: TitleGroup, f: FilmFilter): boolean {
  * Whether titles are being looked up on TMDB: lookups are on, there is a key to make them with, and
  * a pass is running or titles are waiting. With no key (or lookups off) the queue never drains and
  * `running` only means a pass over the local files, so none of it is "matching".
+ *
+ * With a TVDB key and no TMDB key, shows are matched while a pass runs; the movies stay pending for
+ * ever (they need TMDB), so pending alone is not matching then.
  */
-export function isMatching(s: Pick<MetadataStatus, 'enabled' | 'keySet' | 'running' | 'pending'> | undefined | null): boolean {
-  return !!s && s.enabled && s.keySet && (s.running || s.pending > 0);
+export function isMatching(
+  s: Pick<MetadataStatus, 'enabled' | 'keySet' | 'running' | 'pending' | 'tvdbKeySet'> | undefined | null,
+): boolean {
+  if (!s || !s.enabled) return false;
+  if (s.keySet) return s.running || s.pending > 0;
+  return !!s.tvdbKeySet && s.running;
 }
 
 /** A short label telling versions apart: "4K HDR10, MKV", "1080p, MP4". */

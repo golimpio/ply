@@ -1,13 +1,16 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { api, ApiError, imageUrl, type ReviewEntry, type TitleKind } from '../lib/api';
   import { isMatching } from '../lib/meta';
   import { href } from '../lib/router.svelte';
   import { resource } from '../lib/resource.svelte';
   import { app, rescan, scan } from '../lib/state.svelte';
   import FixMatch from '../components/FixMatch.svelte';
+  import KeyTest from '../components/KeyTest.svelte';
   import LibraryFolders from '../components/LibraryFolders.svelte';
   import Picture from '../components/Picture.svelte';
   import PlaybackLimits from '../components/PlaybackLimits.svelte';
+  import TvdbKey from '../components/TvdbKey.svelte';
 
   const settings = resource(() => {
     void app.libraryVersion;
@@ -22,6 +25,8 @@
     return api.metadataStatus();
   });
   const matching = $derived(isMatching(status.data));
+  // A Test that works clears the server's "TVDB rejected the key" at once: ask for the status line again.
+  const refreshStatus = () => pollTick++;
   let wasMatching = false;
   $effect(() => {
     if (!matching) {
@@ -67,12 +72,17 @@
   let key = $state('');
   let saving = $state(false);
   let message = $state<{ ok: boolean; text: string } | null>(null);
+  let messageEl = $state<HTMLElement>();
+  // Key saves that reached the server: a key replaced by another looks the same in the settings.
+  let keySaves = $state(0);
 
-  async function save(update: Parameters<typeof api.saveSettings>[0], done: string) {
+  /** keepFocus: from the key form, whose Save is disabled and whose Remove goes away after it. */
+  async function save(update: Parameters<typeof api.saveSettings>[0], done: string, keepFocus = false) {
     saving = true;
     message = null;
     try {
       const s = await api.saveSettings(update);
+      if (update.tmdbKey !== undefined) keySaves++;
       // With lookups switched off nothing is sent to TMDB, the key included:
       // it is stored as it is and checked once lookups are on again.
       const unchecked = !!update.tmdbKey && s.tmdbKeyChecked === false;
@@ -87,12 +97,15 @@
     } finally {
       saving = false;
     }
+    if (!keepFocus) return;
+    await tick();
+    messageEl?.focus();
   }
 
   function saveKey(e: Event) {
     e.preventDefault();
     const k = key.trim();
-    if (k) void save({ tmdbKey: k }, 'Key saved. Matching starts in the background.');
+    if (k) void save({ tmdbKey: k }, 'Key saved. Matching starts in the background.', true);
   }
 
   let refreshNote = $state('');
@@ -135,7 +148,8 @@
   <section aria-labelledby="meta-h">
     <h2 id="meta-h">Movie and show details</h2>
     <p class="muted lead">
-      ply fills in posters, plots, cast and more from TMDB. It sends only titles and years, never your files.
+      ply fills in posters, plots, cast and more from TMDB, and TV shows from TheTVDB once it has a TVDB key. It sends
+      only titles and years, never your files.
       <code>.nfo</code> files and artwork next to your media are used first and need no key.
     </p>
 
@@ -166,18 +180,33 @@
             id="tmdb-key"
             bind:value={key}
             type="password"
-            autocomplete="off"
+            autocomplete="new-password"
+            data-1p-ignore
+            data-lpignore="true"
+            data-bwignore
             spellcheck="false"
             placeholder={s.tmdbKeySet ? 'Paste a new key to replace it' : 'Paste your key'}
           />
           <button class="btn primary" disabled={saving || !key.trim()}>{saving ? 'Checking…' : 'Save key'}</button>
           {#if s.tmdbKeySet && s.tmdbKeySource === 'settings'}
-            <button type="button" class="btn" disabled={saving} onclick={() => save({ tmdbKey: '' }, 'Key removed.')}>
+            <button type="button" class="btn" disabled={saving} onclick={() => save({ tmdbKey: '' }, 'Key removed.', true)}>
               Remove
             </button>
           {/if}
         </form>
-        {#if message}<p class:error={!message.ok} class:ok={message.ok} role="status">{message.text}</p>{/if}
+        {#if message}
+          <p bind:this={messageEl} class:error={!message.ok} class:ok={message.ok} role="status" tabindex="-1">{message.text}</p>
+        {/if}
+        <div class="key-test">
+          <KeyTest
+            provider="tmdb"
+            name="TMDB"
+            busy={saving}
+            about={[s.tmdbKeySet, s.tmdbKeySource, s.metadataEnabled, s.metadataForcedOff, keySaves].join('|')}
+            onworks={refreshStatus}
+            unavailable={!s.tmdbKeySet ? 'Set a key to test it.' : s.metadataForcedOff || !s.metadataEnabled ? 'Online lookups are off.' : ''}
+          />
+        </div>
 
         <div class="row">
           <div>
@@ -215,16 +244,23 @@
           </select>
         </div>
       </div>
+
+      <!-- Not from a server older than M8, which knows nothing of TVDB. -->
+      {#if s.tvdbKeySet !== undefined}<TvdbKey settings={s} onworks={refreshStatus} />{/if}
     {/if}
 
     {#if status.data}
       {@const m = status.data}
+      {@const anyKey = m.keySet || !!m.tvdbKeySet}
       <div class="card status">
         <p>
           {#if !m.enabled}
             Matching is off.
+          {:else if !anyKey}
+            No TMDB key and no TVDB key, so only local .nfo files and artwork are used.
           {:else if !m.keySet}
-            No TMDB key, so only local .nfo files and artwork are used.
+            <!-- With TVDB alone, movies wait for TMDB for ever: only a running pass is "matching" (and polled). -->
+            No TMDB key, so movies wait for one. {matching ? 'Looking up shows on TVDB…' : 'Shows are looked up on TVDB.'}
           {:else if matching}
             Matching {plural(m.pending, 'title')}…
           {:else}
@@ -232,10 +268,16 @@
           {/if}
           {#if m.lastRefresh}<span class="muted">Last refreshed {when(m.lastRefresh)}.</span>{/if}
         </p>
+        <!-- The server's own sentence: "Shows: TVDB", "Shows: TMDB (no TVDB key)", "TVDB unreachable"... -->
+        {#if m.enabled && m.showsLine}
+          <p class="shows-line" class:muted={m.showsLine.startsWith('Shows:')} class:warn={!m.showsLine.startsWith('Shows:')}>
+            {m.showsLine}
+          </p>
+        {/if}
         {#if m.lastError}<p class="error">{m.lastError}</p>{/if}
         <div class="buttons">
           <!-- With no key the server only re-reads the local files of unmatched titles: nothing to refresh. -->
-          <button class="btn" onclick={refreshAll} disabled={!m.enabled || !m.keySet}>Refresh all details</button>
+          <button class="btn" onclick={refreshAll} disabled={!m.enabled || !anyKey}>Refresh all details</button>
           <button class="btn" onclick={rescan} disabled={scan.running}>{scan.running ? 'Scanning…' : 'Scan the library now'}</button>
         </div>
         {#if refreshNote}<p class="muted" role="status">{refreshNote}</p>{/if}
@@ -374,8 +416,7 @@
     gap: 1rem 2rem;
   }
   .row + .row,
-  .key + .row,
-  [role='status'] + .row {
+  .key-test + .row {
     padding-top: 1.1rem;
     border-top: 1px solid var(--line);
   }
@@ -404,6 +445,9 @@
   }
   .ok {
     color: var(--ok);
+  }
+  .warn {
+    color: var(--warn);
   }
   /* An on/off switch: role="switch" with aria-checked. */
   .switch {

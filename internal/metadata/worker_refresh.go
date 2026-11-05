@@ -104,26 +104,28 @@ func (w *Worker) rereadRemoteTitle(ctx context.Context, p *Providers, t store.Ti
 	w.refreshTitles(ctx, p, []store.Title{t}, false)
 }
 
-// refreshTitles refreshes each title and reports whether it got through them all. It
-// stops at the first failure of TMDB that may pass (out of reach); a refused TMDB key ends
-// the pass. TVDB is not so much in the way: a show from TVDB that cannot be refreshed because
-// TVDB refuses the key, or cannot be reached, is passed over, as are the others from TVDB
-// after it in this call, and the titles at TMDB go on (the call reports false for an outage,
-// so that it is tried again soon). A title whose provider is not set up is passed over.
+// refreshTitles refreshes each title and reports whether it got through them all, and whether
+// the titles from TVDB were passed over because TVDB refuses the key. It stops at the first
+// failure of TMDB that may pass (out of reach); a refused TMDB key ends the pass. TVDB is not so
+// much in the way: a show from TVDB that cannot be refreshed because TVDB refuses the key, or
+// cannot be reached, is passed over, as are the others from TVDB after it in this call, and the
+// titles at TMDB go on (complete is false for an outage, so that it is tried again soon). A title
+// whose provider is not set up is passed over.
 //
 // paced asks Pace before each title; a refresh that is one item of the inbox has been
 // paced as that item, and says false.
-func (w *Worker) refreshTitles(ctx context.Context, p *Providers, titles []store.Title, paced bool) bool {
-	tvdbOff, complete := false, true
+func (w *Worker) refreshTitles(ctx context.Context, p *Providers, titles []store.Title, paced bool) (complete, tvdbRefused bool) {
+	tvdbOff := false
+	complete = true
 	for _, t := range titles {
 		if ctx.Err() != nil || w.aborted {
-			return false
+			return false, tvdbRefused
 		}
 		if tvdbOff && t.Source == store.SourceTVDB {
 			continue
 		}
 		if paced && !w.pace(ctx) {
-			return false
+			return false, tvdbRefused
 		}
 		err := w.refreshTitle(ctx, p, t)
 		// A show from TVDB is fetched from TVDB alone: what fails is TVDB's, whatever the error is.
@@ -132,28 +134,34 @@ func (w *Worker) refreshTitles(ctx context.Context, p *Providers, titles []store
 		case err == nil, errors.Is(err, errSkip):
 		case fromTVDB && IsUnauthorized(err):
 			w.noteError(err)
-			tvdbOff = true
+			tvdbOff, tvdbRefused = true, true
 		case fromTVDB && IsTransient(err):
 			w.noteError(err)
 			tvdbOff, complete = true, false
 		case IsUnauthorized(err):
 			w.abort(err)
-			return false
+			return false, tvdbRefused
 		case IsTransient(err):
 			w.noteError(err)
-			return false
+			return false, tvdbRefused
 		default:
 			w.noteError(err)
 		}
 	}
-	return complete
+	return complete, tvdbRefused
+}
+
+// refreshParts are the two shares of a refresh, one for each provider's titles, each with its
+// own changes-feed poll time and its own time of the last refresh: a provider out of reach, or
+// refusing the key, holds back its own share and nobody else's, however long it lasts.
+var refreshParts = []struct{ source, poll, last string }{
+	{SourceTMDB, SettingChangesPoll, SettingTMDBLastRefresh},     // movies, and the shows that are not from TVDB
+	{SourceTVDB, SettingTVDBChangesPoll, SettingTVDBLastRefresh}, // the shows from TVDB
 }
 
 // refreshDue refreshes what is due. Shows whose next episode has aired are
-// always looked at. Everything else follows the -metadata-refresh period: the
-// titles in TMDB's changes feed (TVDB's updates feed, for the shows from TVDB) since
-// the last poll, or, when there is no poll within the feed's reach, the titles whose
-// data is old.
+// always looked at. Everything else follows the -metadata-refresh period, a provider
+// at a time (refreshPart).
 func (w *Worker) refreshDue(ctx context.Context, p *Providers) {
 	if w.o.Refresh <= 0 {
 		return
@@ -168,64 +176,150 @@ func (w *Worker) refreshDue(ctx context.Context, p *Providers) {
 		return
 	}
 
-	if last := w.settingTime(ctx, SettingLastRefresh); !last.IsZero() && now.Sub(last) < w.o.Refresh {
-		return
-	}
-	w.mu.Lock()
-	retryAt := w.retryRefreshAt
-	w.mu.Unlock()
-	if now.Before(retryAt) {
-		return
-	}
-
 	var (
-		titles []store.Title
-		err    error
+		old     []store.Title // the titles whose data is old: read once, when a part needs it
+		oldRead bool
 	)
-	poll := w.settingTime(ctx, SettingChangesPoll)
-	advancePoll := true
+	byAge := func(source string) ([]store.Title, error) {
+		if !oldRead {
+			var err error
+			if old, err = w.o.Store.TitlesDueForRefresh(ctx, now, 1<<20); err != nil {
+				return nil, err
+			}
+			oldRead = true
+		}
+		var mine []store.Title
+		for _, t := range old {
+			if (t.Source == store.SourceTVDB) == (source == SourceTVDB) {
+				mine = append(mine, t)
+			}
+		}
+		return mine, nil
+	}
+	for _, part := range refreshParts {
+		if ctx.Err() != nil || w.aborted {
+			return
+		}
+		if p.For(part.source) == nil {
+			continue // not set up: nothing of its own to refresh
+		}
+		// A share is due once a period after its own last time (an install from before the
+		// shares had each their own time has the one time of the refresh).
+		last := w.settingTime(ctx, part.last)
+		if last.IsZero() {
+			last = w.settingTime(ctx, SettingLastRefresh)
+		}
+		if !last.IsZero() && now.Sub(last) < w.o.Refresh || w.refreshPutOff(part.source, now) {
+			continue
+		}
+		if w.refreshPart(ctx, p, part.source, part.poll, now, byAge) {
+			w.setSettingTime(ctx, part.last, now)
+		}
+	}
+	if ctx.Err() == nil && !w.aborted {
+		w.setLastRefresh(ctx, p)
+	}
+}
+
+// setLastRefresh keeps SettingLastRefresh, the time of the last completed refresh, at the
+// older of the shares' times, once every share that can be done has one.
+func (w *Worker) setLastRefresh(ctx context.Context, p *Providers) {
+	var oldest time.Time
+	for _, part := range refreshParts {
+		if p.For(part.source) == nil {
+			continue
+		}
+		t := w.settingTime(ctx, part.last)
+		if t.IsZero() {
+			return // a share that has not been done yet: the refresh is not complete
+		}
+		if oldest.IsZero() || t.Before(oldest) {
+			oldest = t
+		}
+	}
+	if !oldest.IsZero() {
+		w.setSettingTime(ctx, SettingLastRefresh, oldest)
+	}
+}
+
+// refreshPart refreshes the titles of one provider that are due: those its changes feed lists
+// since the last poll, or, when there is no poll within the feed's reach, those whose data is
+// old. It reports whether the part is done. When it is not (the provider is out of reach, or
+// refuses the key, and the titles that need it were passed over) the part is put off for a while
+// (only it: the other provider's part is not held back by it) and its poll time stays where it was,
+// so that the next try asks the feed for everything since then.
+func (w *Worker) refreshPart(ctx context.Context, p *Providers, source, pollSetting string, now time.Time,
+	byAge func(source string) ([]store.Title, error)) bool {
+	var (
+		titles  []store.Title
+		err     error
+		advance = true
+	)
+	poll := w.settingTime(ctx, pollSetting)
 	if poll.IsZero() || now.Sub(poll) > ChangesWindow {
-		titles, err = w.o.Store.TitlesDueForRefresh(ctx, now, 1<<20)
-	} else if titles, err = w.changedTitles(ctx, p, poll, now); err != nil && !IsTransient(err) && (!IsUnauthorized(err) || tvdbKeyRefused(err)) && ctx.Err() == nil {
-		// The feed cannot be used (it refuses us, or it is too long to follow): go
-		// by age instead, and leave the poll time where it is, so that the next
-		// refresh asks the feed for everything since then. (TMDB's feed refusing the key
-		// ends the pass below; TVDB's does not.)
+		titles, err = byAge(source)
+	} else if titles, err = w.changedTitles(ctx, p, source, poll, now); err != nil && ctx.Err() == nil {
+		switch {
+		case source == SourceTVDB && IsUnauthorized(err):
+			// TVDB refuses the key: the shows from TVDB wait, and what is at TMDB went on.
+			w.noteError(err)
+			w.putOffRefresh(source, now, tvdbRefusedDelay)
+			return false
+		case IsTransient(err):
+			w.noteError(err)
+			w.putOffRefresh(source, now, refreshRetry)
+			return false
+		case IsUnauthorized(err):
+			w.abort(err)
+			return false
+		}
+		// The feed cannot be used (it is too long to follow): go by age instead, and leave the poll
+		// time where it is, so that the next refresh asks the feed for everything since then.
 		w.noteError(err)
-		advancePoll = false
-		titles, err = w.o.Store.TitlesDueForRefresh(ctx, now, 1<<20)
+		advance = false
+		titles, err = byAge(source)
 	}
 	if err != nil {
-		if IsUnauthorized(err) {
-			w.abort(err)
-		} else if ctx.Err() == nil {
+		if ctx.Err() == nil {
 			w.noteError(err)
-			w.setRetryRefresh(now)
+			w.putOffRefresh(source, now, refreshRetry)
 		}
-		return
+		return false
 	}
-	if !w.refreshTitles(ctx, p, titles, true) {
-		if ctx.Err() == nil && !w.aborted {
-			w.setRetryRefresh(now)
-		}
-		return
+	complete, refused := w.refreshTitles(ctx, p, titles, true)
+	switch {
+	case ctx.Err() != nil || w.aborted:
+		return false
+	case refused: // the shows from TVDB were passed over: they are not refreshed, so the poll does not move
+		w.putOffRefresh(source, now, tvdbRefusedDelay)
+		return false
+	case !complete:
+		w.putOffRefresh(source, now, refreshRetry)
+		return false
 	}
-	if advancePoll {
-		w.setSettingTime(ctx, SettingChangesPoll, now)
+	if advance {
+		w.setSettingTime(ctx, pollSetting, now)
 	}
-	w.setSettingTime(ctx, SettingLastRefresh, now)
+	return true
 }
 
-func (w *Worker) setRetryRefresh(now time.Time) {
+func (w *Worker) putOffRefresh(source string, now time.Time, d time.Duration) {
 	w.mu.Lock()
-	w.retryRefreshAt = now.Add(refreshRetry)
+	w.retryRefreshAt[source] = now.Add(d)
 	w.mu.Unlock()
 }
 
-// changedTitles returns the titles of the library that the changes feeds list
-// between since and now: TMDB's for movies and for the shows from TMDB, TVDB's
-// updates for the shows from TVDB.
-func (w *Worker) changedTitles(ctx context.Context, p *Providers, since, now time.Time) ([]store.Title, error) {
+// refreshPutOff reports whether the part of the refresh for a provider has been put off, and not yet for long enough.
+func (w *Worker) refreshPutOff(source string, now time.Time) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return now.Before(w.retryRefreshAt[source])
+}
+
+// changedTitles returns the titles of the library that one provider's changes feed lists
+// between since and now: TMDB's for movies and for the shows from TMDB, TVDB's updates
+// for the shows from TVDB (source is SourceTMDB or SourceTVDB).
+func (w *Worker) changedTitles(ctx context.Context, p *Providers, source string, since, now time.Time) ([]store.Title, error) {
 	// changed is keyed by what the ids are: the kind for TMDB's, "tvdb" for TVDB's.
 	changed := map[string]map[int64]bool{}
 	feed := func(key string, prov Provider, kind string) error {
@@ -243,13 +337,16 @@ func (w *Worker) changedTitles(ctx context.Context, p *Providers, since, now tim
 		changed[key] = set
 		return nil
 	}
-	for _, kind := range []string{store.KindMovie, store.KindSeries} {
-		if err := feed(kind, p.For(SourceTMDB), kind); err != nil {
+	if source == SourceTVDB {
+		if err := feed(SourceTVDB, p.For(SourceTVDB), store.KindSeries); err != nil {
 			return nil, err
 		}
-	}
-	if err := feed(SourceTVDB, p.For(SourceTVDB), store.KindSeries); err != nil {
-		return nil, err
+	} else {
+		for _, kind := range []string{store.KindMovie, store.KindSeries} {
+			if err := feed(kind, p.For(SourceTMDB), kind); err != nil {
+				return nil, err
+			}
+		}
 	}
 	refs, err := w.o.Store.LibraryTitleRefs(ctx)
 	if err != nil {
@@ -257,7 +354,10 @@ func (w *Worker) changedTitles(ctx context.Context, p *Providers, since, now tim
 	}
 	var titles []store.Title
 	for _, r := range refs {
-		if r.Source == store.SourceTVDB {
+		if (r.Source == store.SourceTVDB) != (source == SourceTVDB) {
+			continue // the other provider's, with its own feed
+		}
+		if source == SourceTVDB {
 			if !changed[SourceTVDB][r.TVDBID] {
 				continue
 			}

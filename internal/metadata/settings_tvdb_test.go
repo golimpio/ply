@@ -9,7 +9,10 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
+
+	"ply/internal/store"
 )
 
 // Every key and PIN below is made up. The ones in the output of the tests are looked for by
@@ -509,5 +512,188 @@ func TestSettingsTestChecksTheKeyInUse(t *testing.T) {
 		if err := s.Test(ctx, bad); !errors.Is(err, ErrInvalidSetting) {
 			t.Errorf("Test(%q) = %v, want ErrInvalidSetting", bad, err)
 		}
+	}
+}
+
+// errProvider answers every Series with err.
+type errProvider struct {
+	Provider
+	err error
+}
+
+func (p *errProvider) Series(context.Context, int64, string, []int) (*store.TitleInput, error) {
+	return nil, p.err
+}
+
+// A refusal of the key and an outage are two things: each answer sets one flag and clears the other,
+// and any other answer (a 404 is one) clears both.
+func TestTrackHealthKeepsARefusalApartFromAnOutage(t *testing.T) {
+	var down, refused atomic.Bool
+	p := &errProvider{}
+	h := trackHealth(p, &down, &refused)
+	for _, c := range []struct {
+		name         string
+		err          error
+		down, refuse bool
+	}{
+		{"refused", &TVDBError{Op: "POST /login", Status: 401, Message: "TVDB rejected the key or PIN"}, false, true},
+		{"outage", &TVDBError{Op: "GET /series", Transient: true, Message: "connection refused"}, true, false},
+		{"refused as 403", &TVDBError{Op: "POST /login", Status: 403, Message: "TVDB rejected the key or PIN"}, false, true},
+		{"an answer", nil, false, false},
+		{"refused again", &TVDBError{Op: "POST /login", Status: 401, Message: "TVDB rejected the key or PIN"}, false, true},
+		{"not found is an answer", &TVDBError{Op: "GET /series", Status: 404, Message: "not found"}, false, false},
+		{"outage again", &TVDBError{Op: "GET /series", Transient: true, Message: "timeout"}, true, false},
+		{"a refusal after an outage", &TVDBError{Op: "POST /login", Status: 401}, false, true},
+	} {
+		p.err = c.err
+		h.Series(context.Background(), 1, "aired", nil)
+		if down.Load() != c.down || refused.Load() != c.refuse {
+			t.Errorf("%s: down %v refused %v, want %v %v", c.name, down.Load(), refused.Load(), c.down, c.refuse)
+		}
+	}
+}
+
+// The resolved settings carry both flags, and a key that logs in clears what the status line says of
+// the old one.
+func TestSettingsReportsARefusedKeyApartFromAnOutageAndClearsItWhenAKeyLogsIn(t *testing.T) {
+	ctx := context.Background()
+	var check error
+	s, _ := newTVDBSettings(t, &check, func(o *SettingsOptions) { o.TVDBKeyFlag = secretKey })
+	str := func(v string) *string { return &v }
+	if r := s.Resolve(ctx); r.TVDBDown || r.TVDBRefused {
+		t.Fatalf("control: a new Settings is %+v", r)
+	}
+	s.tvdbRefused.Store(true)
+	if r := s.Resolve(ctx); !r.TVDBRefused || r.TVDBDown {
+		t.Errorf("a refusal: down %v refused %v", r.TVDBDown, r.TVDBRefused)
+	}
+	s.tvdbRefused.Store(false)
+	s.tvdbDown.Store(true)
+	if r := s.Resolve(ctx); r.TVDBRefused || !r.TVDBDown {
+		t.Errorf("an outage: down %v refused %v", r.TVDBDown, r.TVDBRefused)
+	}
+
+	// A key that does not log in leaves the flags; one that does clears them.
+	s.tvdbRefused.Store(true)
+	check = &TVDBError{Op: "POST /login", Status: 401, Message: "TVDB rejected the key or PIN"}
+	s2, _ := newTVDBSettings(t, &check)
+	s2.tvdbRefused.Store(true)
+	if err := s2.Update(ctx, Update{TVDBKey: str("new-key-1")}); err == nil || !s2.Resolve(ctx).TVDBRefused {
+		t.Errorf("a key that is refused: err %v, refused %v; the flag should stay", err, s2.Resolve(ctx).TVDBRefused)
+	}
+	check = nil
+	s3, _ := newTVDBSettings(t, &check)
+	s3.tvdbRefused.Store(true)
+	s3.tvdbDown.Store(true)
+	if err := s3.Update(ctx, Update{TVDBKey: str("new-key-2")}); err != nil {
+		t.Fatal(err)
+	}
+	if r := s3.Resolve(ctx); r.TVDBRefused || r.TVDBDown {
+		t.Errorf("after a key that logs in: down %v refused %v", r.TVDBDown, r.TVDBRefused)
+	}
+}
+
+// The PIN has a source, like the key (flag, env or settings), and none when there is no PIN.
+func TestTVDBPINSourceIsWhereThePINComesFrom(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name                string
+		flag, env, stored   string
+		wantPIN, wantSource string
+	}{
+		{"flag beats env and settings", "pFLAG", "pENV", "pSTORED", "pFLAG", "flag"},
+		{"env beats settings", "", "pENV", "pSTORED", "pENV", "env"},
+		{"settings", "", "", "pSTORED", "pSTORED", "settings"},
+		{"none", "", "", "", "", ""},
+	} {
+		var check error
+		s, env := newTVDBSettings(t, &check, func(o *SettingsOptions) { o.TVDBPINFlag, o.TVDBPINEnv = tc.flag, tc.env })
+		if tc.stored != "" {
+			env.st.SetSetting(ctx, SettingTVDBPIN, tc.stored)
+		}
+		r := s.Resolve(ctx)
+		if r.TVDBPIN() != tc.wantPIN || string(r.TVDBPINSource) != tc.wantSource || r.TVDBPINSet() != (tc.wantPIN != "") {
+			t.Errorf("%s: PIN %q from %q, want %q from %q", tc.name, r.TVDBPIN(), r.TVDBPINSource, tc.wantPIN, tc.wantSource)
+		}
+	}
+}
+
+// A test that logs in clears what the status line tells of TVDB; one that does not leaves it.
+func TestSettingsTestOfTVDBClearsTheStatusFlagsOnlyWhenItLogsIn(t *testing.T) {
+	ctx := context.Background()
+	var check error
+	check = &TVDBError{Op: "POST /login", Status: 401, Message: "TVDB rejected the key or PIN"}
+	s2, _ := newTVDBSettings(t, &check, func(o *SettingsOptions) { o.TVDBKeyFlag = secretKey })
+	s2.tvdbRefused.Store(true)
+	if err := s2.Test(ctx, SourceTVDB); err == nil || !s2.Resolve(ctx).TVDBRefused {
+		t.Errorf("a test that is refused: err %v, refused %v; the flag should stay", err, s2.Resolve(ctx).TVDBRefused)
+	}
+	check = nil
+	s3, _ := newTVDBSettings(t, &check, func(o *SettingsOptions) { o.TVDBKeyFlag = secretKey })
+	s3.tvdbRefused.Store(true)
+	s3.tvdbDown.Store(true)
+	if err := s3.Test(ctx, SourceTVDB); err != nil {
+		t.Fatal(err)
+	}
+	if r := s3.Resolve(ctx); r.TVDBRefused || r.TVDBDown {
+		t.Errorf("after a test that logs in: down %v refused %v", r.TVDBDown, r.TVDBRefused)
+	}
+}
+
+// The move to TVDB is re-armed by the key IN USE going from none to one or back, not by the stored one
+// changing: a stored key that comes or goes under a flag, the environment or the build's key changes nothing
+// about TVDB, and the shows a person picked at TMDB meanwhile must not be moved.
+func TestTVDBUpdateReArmsTheMoveOnlyWhenTheKeyInUseAppearsOrGoes(t *testing.T) {
+	ctx := context.Background()
+	str := func(s string) *string { return &s }
+	for _, tc := range []struct {
+		name string
+		mod  func(*SettingsOptions)
+	}{
+		{"the build's key", func(o *SettingsOptions) { o.TVDBKeyDefault = "default-project-key" }},
+		{"a flag", func(o *SettingsOptions) { o.TVDBKeyFlag = "flag-key" }},
+		{"the environment", func(o *SettingsOptions) { o.TVDBKeyEnv = "env-key" }},
+	} {
+		var check error
+		s, env := newTVDBSettings(t, &check, tc.mod)
+		marked := func() bool {
+			_, a, _ := env.st.GetSetting(ctx, SettingTVDBSwitched)
+			_, b, _ := env.st.GetSetting(ctx, SettingTVDBSwitchUpTo)
+			return a || b
+		}
+		mark := func() {
+			env.st.SetSetting(ctx, SettingTVDBSwitched, "1")
+			env.st.SetSetting(ctx, SettingTVDBSwitchUpTo, "7")
+		}
+		// A key is stored under it, and taken away again: TVDB is on all the time.
+		mark()
+		if err := s.Update(ctx, Update{TVDBKey: str("my-own-key")}); err != nil || !marked() {
+			t.Errorf("%s: storing a key under it re-armed the move: %v, marked %v", tc.name, err, marked())
+		}
+		if r := s.Resolve(ctx); !r.TVDBKeySet() {
+			t.Fatalf("%s: control: no key in use", tc.name)
+		}
+		if err := s.Update(ctx, Update{TVDBKey: str("")}); err != nil || !marked() {
+			t.Errorf("%s: removing the stored key re-armed the move though the key in use is still set: %v, marked %v", tc.name, err, marked())
+		}
+		if r := s.Resolve(ctx); !r.TVDBKeySet() {
+			t.Fatalf("%s: control: no key in use after the removal", tc.name)
+		}
+	}
+
+	// Positive control: with nothing under it, the key in use does appear and go, and each re-arms the move.
+	var check error
+	s, env := newTVDBSettings(t, &check)
+	marked := func() bool {
+		_, a, _ := env.st.GetSetting(ctx, SettingTVDBSwitched)
+		return a
+	}
+	env.st.SetSetting(ctx, SettingTVDBSwitched, "1")
+	if err := s.Update(ctx, Update{TVDBKey: str("my-own-key")}); err != nil || marked() {
+		t.Errorf("a key where there was none did not re-arm the move: %v, marked %v", err, marked())
+	}
+	env.st.SetSetting(ctx, SettingTVDBSwitched, "1")
+	if err := s.Update(ctx, Update{TVDBKey: str("")}); err != nil || marked() || s.Resolve(ctx).TVDBKeySet() {
+		t.Errorf("the key in use going did not re-arm the move: %v, marked %v", err, marked())
 	}
 }

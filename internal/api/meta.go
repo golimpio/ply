@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"ply/internal/config"
 	"ply/internal/metadata"
 	"ply/internal/store"
 )
@@ -92,6 +93,7 @@ func (s *Server) handlePerson(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	asked := id
 	if s.Metadata != nil {
 		// The details are fetched the first time anyone opens the page. A
 		// failure only means the page has less on it.
@@ -106,6 +108,11 @@ func (s *Server) handlePerson(w http.ResponseWriter, r *http.Request) {
 	}
 	d, err := s.Store.GetPerson(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) {
+		// A person of TVDB whom TMDB knows too is folded into the TMDB one: the old id says so.
+		if into, merr := s.Store.MergedPerson(r.Context(), asked); merr == nil {
+			writeJSON(w, http.StatusNotFound, mergedPerson{Error: "merged", Into: into})
+			return
+		}
 		writeError(w, http.StatusNotFound, "person not found")
 		return
 	}
@@ -123,6 +130,13 @@ func (s *Server) handlePerson(w http.ResponseWriter, r *http.Request) {
 			Title: s.titleCard(c.Title)})
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// mergedPerson is the 404 of GET /api/people/{id} for a person who was merged into another:
+// {"error": "merged", "into": <the id to ask for>}.
+type mergedPerson struct {
+	Error string `json:"error"`
+	Into  int64  `json:"into"`
 }
 
 func (s *Server) handlePeople(w http.ResponseWriter, r *http.Request) {
@@ -791,7 +805,7 @@ func (s *Server) settingsView(ctx context.Context) SettingsView {
 		r := s.Settings.Resolve(ctx)
 		v = SettingsView{TMDBKeySet: r.KeySet(), TMDBKeySource: string(r.KeySource), MetadataEnabled: r.Enabled,
 			MetadataForcedOff: r.ForcedOff, Language: r.Language,
-			TVDBKeySet: r.TVDBKeySet(), TVDBPINSet: r.TVDBPINSet(), TVDBKeySource: string(r.TVDBKeySource)}
+			TVDBKeySet: r.TVDBKeySet(), TVDBPINSet: r.TVDBPINSet(), TVDBKeySource: string(r.TVDBKeySource), TVDBPINSource: string(r.TVDBPINSource)}
 	}
 	v.TVDBAttribution, v.TVDBAttributionURL = tvdbAttribution, tvdbAttributionURL
 	l := s.playLimits(ctx)
@@ -838,7 +852,7 @@ func (s *Server) handlePatchSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "settings are not available")
 		return
 	}
-	if !s.checkLimitChange(r.Context(), w, req) {
+	if !s.checkPINChange(r.Context(), w, req) || !s.checkLimitChange(r.Context(), w, req) {
 		return
 	}
 	if metadataChange {
@@ -877,6 +891,27 @@ func (s *Server) handlePatchSettings(w http.ResponseWriter, r *http.Request) {
 		view.TVDBKeyChecked = ptr(!view.MetadataForcedOff)
 	}
 	writeJSON(w, http.StatusOK, view)
+}
+
+// checkPINChange refuses (409) to remove a TVDB PIN that a flag or the environment gives, as
+// checkLimitChange does for the limits a flag fixes: removing the stored one would change
+// nothing, and the page would say it had. It has answered, and reports false, if so. Storing a
+// PIN is allowed (the flag still beats it), as it is for the key.
+func (s *Server) checkPINChange(ctx context.Context, w http.ResponseWriter, req settingsRequest) bool {
+	if req.TVDBPIN == nil || strings.TrimSpace(*req.TVDBPIN) != "" || s.Settings == nil {
+		return true
+	}
+	var by string
+	switch s.Settings.Resolve(ctx).TVDBPINSource {
+	case metadata.KeyFromFlag:
+		by = "-tvdb-pin"
+	case metadata.KeyFromEnv:
+		by = config.TVDBPINEnv
+	default:
+		return true
+	}
+	writeError(w, http.StatusConflict, fmt.Sprintf("tvdbPin is set by %s and cannot be removed here", by))
+	return false
 }
 
 // SettingsTest is the answer of POST /api/settings/test.

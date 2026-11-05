@@ -510,6 +510,10 @@ func TestPersonOfTVDBIsMergedWhenTVDBGivesTheTMDBId(t *testing.T) {
 	if p.ID == tvdbPerson || p.TMDBID != 17419 || p.TVDBID != 296140 || p.Biography != "From TVDB." || p.Name != "Bryan Cranston" {
 		t.Errorf("person = %+v; the page of the TVDB person is the merged person's", p)
 	}
-	// The old id is gone.
-	wantJSONError(t, m.get(fmt.Sprintf("/api/people/%d", tvdbPerson)), 404)
+	// The old id is gone, and says where the person went.
+	rec := m.get(fmt.Sprintf("/api/people/%d", tvdbPerson))
+	wantStatus(t, rec, 404)
+	if got, want := strings.TrimSpace(rec.Body.String()), fmt.Sprintf(`{"error":"merged","into":%d}`, p.ID); got != want {
+		t.Errorf("the old id answers %s, want %s", got, want)
+	}
 }

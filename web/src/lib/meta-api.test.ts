@@ -62,6 +62,27 @@ describe('imageUrl', () => {
     expect(m.imageUrl('/api/items/5/art/thumb?v=1', 'w500')).toBe(`${location.origin}/api/items/5/art/thumb?v=1`);
   });
 
+  it('switches the size of a TVDB image, whose path has directories', () => {
+    m.setToken('t');
+    expect(m.imageUrl('/api/images/tvdb/w342/banners/posters/81189-1.jpg?token=t', 'w780')).toBe(
+      `${location.origin}/api/images/tvdb/w780/banners/posters/81189-1.jpg?token=t`,
+    );
+    expect(m.imageUrl('/api/images/tvdb/w1280/banners/v4/series/81189/backdrops/5f8c.jpeg', 'w500')).toContain(
+      '/api/images/tvdb/w500/banners/v4/series/81189/backdrops/5f8c.jpeg',
+    );
+    expect(m.imageSrcset('/api/images/tvdb/w342/banners/p/1.png', ['w185', 'w500'])).toBe(
+      `${location.origin}/api/images/tvdb/w185/banners/p/1.png?token=t 185w, ${location.origin}/api/images/tvdb/w500/banners/p/1.png?token=t 500w`,
+    );
+    // What the server's TVDBImagePath takes: dots inside names, an upper-case extension.
+    expect(m.imageUrl('/api/images/tvdb/w342/banners/v4.1/x.y.JPG', 'w500')).toContain('/api/images/tvdb/w500/banners/v4.1/x.y.JPG');
+    // a traversal anywhere, a "." segment and a size off the list stay as they are
+    expect(m.imageUrl('/api/images/tvdb/w342/banners/../x.jpg', 'w500')).not.toContain('/w500/');
+    expect(m.imageUrl('/api/images/tvdb/w342/banners/a..b.jpg', 'w500')).not.toContain('/w500/');
+    expect(m.imageUrl('/api/images/tvdb/w342/banners/./x.jpg', 'w500')).not.toContain('/w500/');
+    expect(m.imageUrl('/api/images/tvdb/w100/banners/x.jpg', 'w500')).not.toContain('/w500/');
+    expect(m.imageUrl('/api/images/tvdb/w342/banners/x.gif', 'w500')).not.toContain('/w500/');
+  });
+
   it('does not rewrite what is not a TMDB image path', () => {
     // a size outside the allowlist, a traversal and an odd name stay as they are
     expect(m.imageUrl('/api/images/tmdb/w100/abc.jpg', 'w500')).toBe(`${location.origin}/api/images/tmdb/w100/abc.jpg`);
@@ -121,6 +142,47 @@ describe('parseMatchRef', () => {
     // An IMDb id inside other text counts only on imdb.com (or alone).
     ['https://example.com/title/tt0133093/', null],
     ['see tt0133093 there', null],
+    // TVDB (M8): sent for the server to read; an id said as such always as "tvdb:N", an address as it
+    // was typed. The forms ParseTVDBRef takes: "tvdb:N", "TVDB:N", "tvdb N", "tvdb : N", "tvdbN".
+    ['tvdb:81189', { tvdb: 'tvdb:81189' }],
+    ['TVDB: 81189', { tvdb: 'tvdb:81189' }],
+    ['tvdb 81189', { tvdb: 'tvdb:81189' }],
+    ['  tvdb:81189  ', { tvdb: 'tvdb:81189' }],
+    ['tvdb:0', null],
+    ['tvdb:', null],
+    ['tvdb81189', { tvdb: 'tvdb:81189' }],
+    ['TVDB:81189', { tvdb: 'tvdb:81189' }],
+    ['tvdb : 81189', { tvdb: 'tvdb:81189' }],
+    ['tvdb:81189x', null],
+    ['tvdb::81189', null],
+    ['tvdbx81189', null],
+    ['my tvdb 81189', null],
+    ['https://thetvdb.com/series/breaking-bad', { tvdb: 'https://thetvdb.com/series/breaking-bad' }],
+    ['thetvdb.com/series/breaking-bad', { tvdb: 'thetvdb.com/series/breaking-bad' }],
+    ['https://www.thetvdb.com/series/breaking-bad/allseasons/official', { tvdb: 'https://www.thetvdb.com/series/breaking-bad/allseasons/official' }],
+    ['https://thetvdb.com/series/81189', { tvdb: 'https://thetvdb.com/series/81189' }],
+    ['https://thetvdb.com/dereferrer/series/81189', { tvdb: 'https://thetvdb.com/dereferrer/series/81189' }],
+    ['https://thetvdb.com/?tab=series&id=81189', { tvdb: 'https://thetvdb.com/?tab=series&id=81189' }],
+    ['https://www.thetvdb.com/index.php?tab=series&id=81189&lid=7', { tvdb: 'https://www.thetvdb.com/index.php?tab=series&id=81189&lid=7' }],
+    ['https://thetvdb.com/?tab=series&id=0', null],
+    ['https://thetvdb.com/?id=81189', null],
+    ['https://thetvdb.com/movies/the-matrix', null],
+    ['https://thetvdb.com/series/', null],
+    ['https://thetvdb.com/series/-bad', null],
+    ['https://thetvdb.com.evil.com/series/breaking-bad', null],
+    ['https://evil.com/thetvdb.com/series/breaking-bad', null],
+    ['https://user@thetvdb.com/series/breaking-bad', null],
+    ['https://thetvdb.com:8080/series/breaking-bad', null],
+    ['ftp://thetvdb.com/series/breaking-bad', null],
+    ['thetvdb.com/series/breaking bad', null],
+    // As ParseTVDBRef: any port is refused, the default one too; the path is read decoded; an id
+    // in an address may be longer than ten digits.
+    ['https://thetvdb.com:443/series/breaking-bad', null],
+    ['thetvdb.com:443/series/breaking-bad', null],
+    ['https://thetvdb.com/series/breaking%2Dbad', { tvdb: 'https://thetvdb.com/series/breaking%2Dbad' }],
+    ['https://thetvdb.com/series/breaking%20bad', null],
+    ['https://thetvdb.com/series/%E0%A4%A', null],
+    ['https://thetvdb.com/series/123456789012', { tvdb: 'https://thetvdb.com/series/123456789012' }],
   ];
   for (const [input, want] of cases) {
     it(`reads ${JSON.stringify(input)}`, () => {
@@ -134,6 +196,46 @@ describe('parseMatchRef', () => {
     expect(m.parseMatchInput('tmdb:603')).toEqual({ ref: { tmdbId: 603 } });
     expect(m.parseMatchInput('tt0133093')).toEqual({ ref: { imdbId: 'tt0133093' } });
     expect(m.parseMatchInput('1917')).toBeNull();
+  });
+
+  it('says a TVDB reference is a show, and what it names', () => {
+    expect(m.parseMatchInput('tvdb:81189')).toEqual({ ref: { tvdb: 'tvdb:81189' }, kind: 'series', tvdb: { id: 81189, slug: '' } });
+    expect(m.parseMatchInput('https://thetvdb.com/series/Breaking-Bad')).toEqual({
+      ref: { tvdb: 'https://thetvdb.com/series/Breaking-Bad' },
+      kind: 'series',
+      tvdb: { id: 0, slug: 'breaking-bad' },
+    });
+    expect(m.parseTvdbRef('https://thetvdb.com/?tab=series&id=81189')).toEqual({ id: 81189, slug: '' });
+    // Positive control for the hosts refused above: the same path at thetvdb.com is read.
+    expect(m.parseTvdbRef('https://thetvdb.com/series/breaking-bad')).toEqual({ id: 0, slug: 'breaking-bad' });
+    expect(m.parseTvdbRef('https://thetvdb.com/series/breaking%2Dbad')).toEqual({ id: 0, slug: 'breaking-bad' });
+    expect(m.parseTvdbRef('https://thetvdb.com/series/123456789012')).toEqual({ id: 123456789012, slug: '' });
+  });
+});
+
+describe('mergedInto', () => {
+  it('reads the 404 of a merged person, and nothing else', () => {
+    expect(m.mergedInto(new m.ApiError(404, 'merged', undefined, { error: 'merged', into: 8 }))).toBe(8);
+    expect(m.mergedInto(new m.ApiError(404, 'person not found', undefined, { error: 'person not found' }))).toBe(0);
+    expect(m.mergedInto(new m.ApiError(404, 'merged', undefined, { error: 'merged', into: 0 }))).toBe(0);
+    expect(m.mergedInto(new m.ApiError(404, 'merged', undefined, { error: 'merged', into: '8' }))).toBe(0);
+    expect(m.mergedInto(new m.ApiError(500, 'merged', undefined, { error: 'merged', into: 8 }))).toBe(0);
+    expect(m.mergedInto(new Error('merged'))).toBe(0);
+  });
+
+  it('gets the body through the request', async () => {
+    stubFetch(json({ error: 'merged', into: 8 }, 404));
+    const e = await m.api.person(5).catch((x: unknown) => x);
+    expect(m.mergedInto(e)).toBe(8);
+  });
+});
+
+describe('candidateRef', () => {
+  it('sends the id of the result’s own source', () => {
+    expect(m.candidateRef({ source: 'tvdb', id: 81189, tvdbId: 81189 })).toEqual({ tvdbId: 81189 });
+    expect(m.candidateRef({ source: 'tmdb', id: 1396, tmdbId: 1396 })).toEqual({ tmdbId: 1396 });
+    // Only id given: still its source's field.
+    expect(m.candidateRef({ source: 'tvdb', id: 81189 })).toEqual({ tvdbId: 81189 });
   });
 });
 
@@ -248,6 +350,61 @@ describe('metadata requests', () => {
     }
   });
 
+  it('keeps each search result’s source and id, and reads an older server’s as TMDB’s', async () => {
+    stubFetch(
+      json([
+        { source: 'tvdb', id: 81189, tvdbId: 81189, title: 'Breaking Bad', year: 2008, score: 0.98 },
+        { source: 'tmdb', id: 1396, tmdbId: 1396, title: 'Breaking Bad', year: 2008, score: 0.95 },
+        { tmdbId: 603, title: 'The Matrix', year: 1999, score: 0.9 }, // no source: a server older than M8
+      ]),
+    );
+    const res = await m.api.searchMetadata('series', 'Breaking Bad');
+    expect(res.map((r) => [r.source, r.id])).toEqual([
+      ['tvdb', 81189],
+      ['tmdb', 1396],
+      ['tmdb', 603],
+    ]);
+    expect(res.map(m.candidateRef)).toEqual([{ tvdbId: 81189 }, { tmdbId: 1396 }, { tmdbId: 603 }]);
+  });
+
+  it('changes a TVDB show’s episode order, and reads the unmapped count and Go’s nulls', async () => {
+    const fn = stubFetch(json({ id: 9, source: 'tvdb', episodeOrder: 'dvd', unmapped: 3, genres: null, cast: null, crew: null }));
+    const t = await m.api.patchTitle(9, { episodeOrder: 'dvd' });
+    expect(call(fn)[0]).toBe('/api/titles/9');
+    expect(call(fn)[1].method).toBe('PATCH');
+    expect(sent(fn)).toEqual({ episodeOrder: 'dvd' });
+    expect(t.unmapped).toBe(3);
+    expect(t.episodeOrder).toBe('dvd');
+    expect([t.genres, t.cast, t.crew]).toEqual([[], [], []]);
+    stubFetch(json({ error: 'TVDB has no episodes for this show in that order' }, 409));
+    await expect(m.api.patchTitle(9, { episodeOrder: 'absolute' })).rejects.toMatchObject({
+      status: 409,
+      message: 'TVDB has no episodes for this show in that order',
+    });
+  });
+
+  it('sends a TVDB match as the server takes it', async () => {
+    let fn = stubFetch(json({ show: 'Breaking Bad', episodeCount: 1, seasons: [] }));
+    await m.api.matchShow('Breaking Bad', { tvdbId: 81189 });
+    expect(sent(fn)).toEqual({ tvdbId: 81189 });
+    fn = stubFetch(json({ show: 'Breaking Bad', episodeCount: 1, seasons: [] }));
+    await m.api.matchShow('Breaking Bad', { tvdb: 'https://thetvdb.com/series/breaking-bad' });
+    expect(sent(fn)).toEqual({ tvdb: 'https://thetvdb.com/series/breaking-bad' });
+  });
+
+  it('tests a key by provider, never sending one', async () => {
+    let fn = stubFetch(json({ ok: true }));
+    expect(await m.api.testKey('tvdb')).toEqual({ ok: true });
+    expect(call(fn)[0]).toBe('/api/settings/test');
+    expect(call(fn)[1].method).toBe('POST');
+    expect(sent(fn)).toEqual({ provider: 'tvdb' });
+    fn = stubFetch(json({ ok: false, error: 'TVDB rejected the key or PIN' }));
+    expect(await m.api.testKey('tmdb')).toEqual({ ok: false, error: 'TVDB rejected the key or PIN' });
+    expect(sent(fn)).toEqual({ provider: 'tmdb' });
+    stubFetch(json(null));
+    expect(await m.api.testKey('tvdb')).toEqual({ ok: false });
+  });
+
   it('searches TMDB with the kind, the text and the year', async () => {
     let fn = stubFetch(json([{ tmdbId: 603, title: 'The Matrix', year: 1999, score: 1 }]));
     const res = await m.api.searchMetadata('movie', 'The Matrix', 1999);
@@ -326,6 +483,43 @@ describe('metadata requests', () => {
     expect((await m.api.saveSettings({ tmdbKey: 'abc' })).tmdbKeyChecked).toBe(false);
     stubFetch(json(s));
     expect((await m.api.saveSettings({ language: 'pt-BR' })).tmdbKeyChecked).toBeUndefined();
+  });
+
+  it('reads the TVDB settings and saves a TVDB key and PIN', async () => {
+    const tvdb = {
+      tmdbKeySet: false,
+      tmdbKeySource: '',
+      metadataEnabled: true,
+      metadataForcedOff: false,
+      language: 'en-US',
+      tvdbKeySet: true,
+      tvdbPinSet: false,
+      tvdbKeySource: 'env',
+      tvdbAttribution: 'Metadata provided by TheTVDB. Please consider adding missing information or subscribing.',
+      tvdbAttributionUrl: 'https://thetvdb.com',
+    };
+    stubFetch(json(tvdb));
+    const s = await m.api.settings();
+    expect([s.tvdbKeySet, s.tvdbPinSet, s.tvdbKeySource]).toEqual([true, false, 'env']);
+    expect(s.tvdbAttributionUrl).toBe('https://thetvdb.com');
+    const fn = stubFetch(json({ ...tvdb, tvdbKeySource: 'settings', tvdbKeyChecked: true }));
+    const after = await m.api.saveSettings({ tvdbKey: 'fake-key', tvdbPin: 'fake-pin' });
+    expect(sent(fn)).toEqual({ tvdbKey: 'fake-key', tvdbPin: 'fake-pin' });
+    expect(after.tvdbKeyChecked).toBe(true);
+    stubFetch(json({ error: 'TVDB rejected the key or PIN' }, 400));
+    await expect(m.api.saveSettings({ tvdbKey: 'bad' })).rejects.toMatchObject({ status: 400, message: 'TVDB rejected the key or PIN' });
+  });
+
+  it('reads the TVDB part of the status', async () => {
+    stubFetch(json({ enabled: true, keySet: false, tvdbKeySet: true, shows: 'tvdb', showsLine: 'Shows: TVDB', running: false, pending: 0, unmatched: 0, needsReview: 0, lastError: '' }));
+    const st = await m.api.metadataStatus();
+    expect([st.keySet, st.tvdbKeySet, st.shows, st.showsLine]).toEqual([false, true, 'tvdb', 'Shows: TVDB']);
+  });
+
+  it('reads a person’s TMDB and TVDB ids', async () => {
+    stubFetch(json({ id: 4, name: 'Bryan Cranston', tmdbId: 17419, tvdbId: 251010, credits: null }));
+    const p = await m.api.person(4);
+    expect([p.tmdbId, p.tvdbId, p.credits]).toEqual([17419, 251010, []]);
   });
 });
 

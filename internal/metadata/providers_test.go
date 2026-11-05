@@ -280,6 +280,30 @@ func TestParseTVDBRef(t *testing.T) {
 	}{
 		{"tvdb:81189", 81189, "", true},
 		{"  TVDB : 81189 ", 81189, "", true},
+		{"TVDB:81189", 81189, "", true},
+		{"tvdb 81189", 81189, "", true},
+		{"TVDB 81189", 81189, "", true},
+		{"Tvdb   81189", 81189, "", true},
+		{"tvdb\t81189", 81189, "", true},
+		{"tvdb : 81189", 81189, "", true},
+		{"tvdb :81189", 81189, "", true},
+		{"tvdb81189", 81189, "", true},
+		{"  tvdb 81189\n", 81189, "", true},
+		{"tvdb 0", 0, "", false},
+		{"tvdb 000", 0, "", false},
+		{"tvdb -5", 0, "", false},
+		{"tvdb 12345678901", 0, "", false},
+		{"tvdb 81189x", 0, "", false},
+		{"tvdb x81189", 0, "", false},
+		{"tvdb 81189 81190", 0, "", false},
+		{"tvdb 8118 9", 0, "", false},
+		{"tvdb ٨١١٨٩", 0, "", false}, // digits of another script are not digits here
+		{"tvdb ８１１８９", 0, "", false},
+		{"tvdb::81189", 0, "", false},
+		{"tvdb", 0, "", false},
+		{"tvdb:", 0, "", false},
+		{"tvdb 81189 breaking bad", 0, "", false},
+		{"not tvdb 81189", 0, "", false},
 		{"tvdb:0", 0, "", false},
 		{"tvdb:-5", 0, "", false},
 		{"tvdb:12345678901", 0, "", false},
@@ -313,7 +337,7 @@ func TestParseTVDBRef(t *testing.T) {
 }
 
 func FuzzParseTVDBRef(f *testing.F) {
-	for _, s := range []string{"tvdb:1", "thetvdb.com/series/x", "https://thetvdb.com/?tab=series&id=2", "%", "http://[::1", "tvdb:\x00"} {
+	for _, s := range []string{"tvdb:1", "thetvdb.com/series/x", "https://thetvdb.com/?tab=series&id=2", "%", "http://[::1", "tvdb:\x00", "tvdb 1", "TVDB:1", "tvdb1", "tvdb \t 9", "tvdb : ", "tvdb ٣"} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, s string) {

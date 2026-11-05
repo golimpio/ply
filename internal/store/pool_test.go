@@ -303,6 +303,7 @@ func reads() []routed {
 		{name: "GetTitleDetail", call: func(ctx context.Context, s *Store) error { _, err := s.GetTitleDetail(ctx, 1); return nf(err) }},
 		{name: "Genres", call: func(ctx context.Context, s *Store) error { _, err := s.Genres(ctx); return err }},
 		{name: "GetCollection", call: func(ctx context.Context, s *Store) error { _, err := s.GetCollection(ctx, 1); return nf(err) }},
+		{name: "MergedPerson", call: func(ctx context.Context, s *Store) error { _, err := s.MergedPerson(ctx, 1); return nf(err) }},
 		{name: "GetPerson", call: func(ctx context.Context, s *Store) error { _, err := s.GetPerson(ctx, 1); return nf(err) }},
 		{name: "SearchPeople", call: func(ctx context.Context, s *Store) error { _, err := s.SearchPeople(ctx, "x", 10); return err }},
 		{name: "ReviewList", call: func(ctx context.Context, s *Store) error { _, err := s.ReviewList(ctx); return err }},

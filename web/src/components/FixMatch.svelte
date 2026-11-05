@@ -1,14 +1,14 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { api, ApiError, imageUrl, parseMatchInput, type MatchCandidate, type MatchRef, type TitleKind } from '../lib/api';
+  import { api, ApiError, candidateRef, imageUrl, parseMatchInput, type MatchCandidate, type MatchInput, type MatchRef, type TitleKind } from '../lib/api';
   import { href } from '../lib/router.svelte';
   import { app } from '../lib/state.svelte';
   import Dialog from './Dialog.svelte';
   import Picture from './Picture.svelte';
 
-  // "Fix match": search TMDB for the right film or show (or paste its TMDB or
-  // IMDb link) and link the file, or the whole show, to it. A match made here
-  // is never replaced by the automatic matcher.
+  // "Fix match": search TMDB (and TVDB, for shows) for the right film or show,
+  // or paste its TMDB, TVDB or IMDb link, and link the file, or the whole show,
+  // to it. A match made here is never replaced by the automatic matcher.
   let {
     open = $bindable(false),
     kind,
@@ -65,17 +65,35 @@
 
   const pasted = $derived(parseMatchInput(query));
   const what = $derived(kind === 'movie' ? 'film' : 'show');
-  // A themoviedb.org link to the other kind of title (a show's link in a film's dialog).
+  // A themoviedb.org link to the other kind of title (a show's link in a film's dialog), or TVDB's in a film's.
   const wrongKind = $derived(!!pasted?.kind && pasted.kind !== kind);
+  const hint = $derived(kind === 'movie' ? 'Title, or a TMDB or IMDb link' : 'Title, or a TVDB, TMDB or IMDb link');
+
+  function pastedLabel(p: MatchInput): string {
+    if (p.tvdb) return `TVDB show ${p.tvdb.id || p.tvdb.slug}`;
+    if ('imdbId' in p.ref) return `IMDb ${p.ref.imdbId}`;
+    return 'tmdbId' in p.ref ? `TMDB ${what} ${p.ref.tmdbId}` : '';
+  }
   // A bare number is searched as a title ("1917"); it may also be a TMDB id.
   const numeric = $derived(/^\d{1,10}$/.test(query.trim()) && Number(query.trim()) > 0 ? Number(query.trim()) : 0);
 
   function explain(e: unknown): string {
+    // The server's words (internal/api/meta.go): 409 "online metadata lookups are off: …" or
+    // "TheTVDB is not set up: …" / "TMDB is not set up: …"; 502 "TVDB refused the key" or
+    // "could not reach TVDB: …" (TMDB alike).
+    offline = false;
     if (e instanceof ApiError && e.status === 409) {
       offline = true;
-      return 'Online lookups are off, so there is nothing to search.';
+      return /\bis not set up\b/.test(e.message) ? e.message : 'Online lookups are off, so there is nothing to search.';
     }
-    if (e instanceof ApiError && e.status === 502) return 'TMDB could not be reached. Try again in a moment.';
+    if (e instanceof ApiError && e.status === 502) {
+      const refused = /^(TVDB|TMDB) refused the key/.exec(e.message);
+      if (refused) {
+        offline = true; // the settings are where the key is fixed
+        return `${refused[1]} refused the key. Check it in the settings.`;
+      }
+      return `${/could not reach TVDB/.test(e.message) ? 'TVDB' : 'TMDB'} could not be reached. Try again in a moment.`;
+    }
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -145,12 +163,12 @@
 <Dialog bind:open title={kind === 'movie' ? 'Fix the match' : 'Fix the show’s match'} wide>
   <form class="search" onsubmit={search}>
     <label class="q">
-      <span class="sr-only">Title, or a TMDB or IMDb link</span>
+      <span class="sr-only">{hint}</span>
       <input
         bind:this={input}
         bind:value={query}
         type="search"
-        placeholder="Title, or a TMDB or IMDb link"
+        placeholder={hint}
         autocomplete="off"
         onkeydown={closeOnEscape}
       />
@@ -164,13 +182,15 @@
 
   {#if pasted && wrongKind}
     <p class="error" role="alert">
-      That is a link to a {pasted.kind === 'series' ? 'show' : 'film'}; this needs a {what}.
+      {#if pasted.tvdb}
+        TVDB has shows only; this needs a {what}.
+      {:else}
+        That is a link to a {pasted.kind === 'series' ? 'show' : 'film'}; this needs a {what}.
+      {/if}
     </p>
   {:else if pasted}
     <div class="pasted">
-      <p>
-        {'imdbId' in pasted.ref ? `IMDb ${pasted.ref.imdbId}` : `TMDB ${what} ${pasted.ref.tmdbId}`}
-      </p>
+      <p>{pastedLabel(pasted)}</p>
       <button class="btn primary" disabled={busy} onclick={() => apply(pasted.ref)}>Use this {what}</button>
     </div>
   {/if}
@@ -184,14 +204,19 @@
 
   {#if !pasted}
     <ul class="results" aria-busy={busy}>
-      {#each results as r (r.tmdbId)}
+      {#each results as r (`${r.source}:${r.id}`)}
         <li>
-          <button class="result" disabled={busy} onclick={() => apply({ tmdbId: r.tmdbId })}>
+          <button class="result" disabled={busy} onclick={() => apply(candidateRef(r))}>
             <div class="poster">
               <Picture img={r.poster ? { src: imageUrl(r.poster, 'w185') } : null} ratio="2 / 3" label={r.title} />
             </div>
             <div class="text">
-              <div class="title">{r.title}{#if r.year}<span class="year">{r.year}</span>{/if}</div>
+              <div class="title">
+                {r.title}{#if r.year}<span class="year">{r.year}</span>{/if}<span
+                  class="badge source"
+                  title={r.source === 'tvdb' ? 'From TheTVDB' : 'From TMDB'}>{r.source === 'tvdb' ? 'TVDB' : 'TMDB'}</span
+                >
+              </div>
               {#if r.originalTitle && r.originalTitle !== r.title}<div class="muted orig">{r.originalTitle}</div>{/if}
               {#if r.overview}<p class="overview">{r.overview}</p>{/if}
             </div>
@@ -199,7 +224,9 @@
         </li>
       {:else}
         {#if searched && !busy && !error}
-          <li class="none muted">Nothing found. Try the original title, or paste the {what}’s TMDB link.</li>
+          <li class="none muted">
+            Nothing found. Try the original title, or paste the {what}’s {kind === 'movie' ? 'TMDB' : 'TVDB or TMDB'} link.
+          </li>
         {/if}
       {/each}
     </ul>
@@ -296,6 +323,10 @@
   }
   .title {
     font-weight: 650;
+  }
+  .title .badge {
+    margin-left: 0.5rem;
+    vertical-align: 0.1em;
   }
   .year {
     margin-left: 0.5rem;

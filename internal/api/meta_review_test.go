@@ -2,13 +2,16 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"ply/internal/config"
 	"ply/internal/metadata"
+	"ply/internal/store"
 )
 
 // The independent review of M8 (Q4 and the nits that are the API's).
@@ -253,5 +256,199 @@ func TestEpisodeOrderIsExposedOnlyForTVDBAndPatchReportsUnmappedFiles(t *testing
 	d := decode[ShowDetail](t, m.get("/api/shows/Test%20Anime"))
 	if d.Meta == nil || d.Meta.Source != "tmdb" || d.Meta.EpisodeOrder != "" {
 		t.Errorf("after the pick of TMDB's: %+v", d.Meta)
+	}
+}
+
+// A merged person's old id answers 404 {"error": "merged", "into": newId}; an unknown id, and an id
+// whose survivor is gone, the plain 404.
+func TestPersonOldIDAnswersMergedWithTheNewID(t *testing.T) {
+	m, titleID, files := newTVDBEnv(t)
+	ctx := context.Background()
+	d, err := m.store.GetTitleDetail(ctx, titleID)
+	if err != nil || len(d.Cast) != 1 {
+		t.Fatalf("detail = %+v, %v", d, err)
+	}
+	old := d.Cast[0].PersonID
+	// A Bryan Cranston by TMDB's id 17419 is in a movie too.
+	if _, err := m.store.UpsertTitle(ctx, &store.TitleInput{Title: store.Title{Kind: store.KindMovie, TMDBID: 1000, Title: "Cameo"},
+		Credits: []store.Credit{{Person: store.Person{TMDBID: 17419, Name: "Bryan Cranston"}, Kind: store.CreditCast}}}); err != nil {
+		t.Fatal(err)
+	}
+	path := func(id int64) string { return fmt.Sprintf("/api/people/%d", id) }
+
+	// Before the page is opened the old id is a person.
+	if _, err := m.store.GetPerson(ctx, old); err != nil {
+		t.Fatalf("control: %v", err)
+	}
+	survivor := decode[Person](t, m.get(path(old))).ID // (opening the page merges the person)
+	if survivor == old {
+		t.Fatal("control: the person was not merged")
+	}
+	wantStatus(t, m.get(path(survivor)), 200)
+
+	rec := m.get(path(old))
+	wantStatus(t, rec, 404)
+	if got, want := strings.TrimSpace(rec.Body.String()), fmt.Sprintf(`{"error":"merged","into":%d}`, survivor); got != want {
+		t.Errorf("the old id answers %s, want %s", got, want)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("Content-Type = %q", ct)
+	}
+	// What the answer says is an id that answers.
+	var body struct {
+		Into int64 `json:"into"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	wantStatus(t, m.get(path(body.Into)), 200)
+
+	// An id that never was a person: the plain 404.
+	rec = m.get(path(99999))
+	wantJSONError(t, rec, 404)
+	if got := strings.TrimSpace(rec.Body.String()); got != `{"error":"person not found"}` {
+		t.Errorf("an unknown id answers %s", got)
+	}
+
+	// The survivor goes (the library no longer has them): the alias goes with it, and the old id is a plain 404.
+	if err := m.store.DeleteItems(ctx, []int64{files[1], files[2], files[3]}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.store.PruneMetadata(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.store.GetPerson(ctx, survivor); err == nil {
+		t.Fatal("control: the survivor is still there")
+	}
+	for _, id := range []int64{old, survivor} {
+		rec = m.get(path(id))
+		wantJSONError(t, rec, 404)
+		if got := strings.TrimSpace(rec.Body.String()); got != `{"error":"person not found"}` {
+			t.Errorf("%d after the survivor went answers %s", id, got)
+		}
+	}
+}
+
+// ---- tvdbPinSource ----
+
+func TestSettingsTVDBPinSourceAndTheRemovalOfAPinAFlagGives(t *testing.T) {
+	view := func(se *settingsEnv) SettingsView { return decode[SettingsView](t, se.get("/api/settings")) }
+
+	// Where the PIN comes from, in the order the key's does; "" for none. It is a field of the answer
+	// even when there is no PIN.
+	for _, tc := range []struct {
+		name              string
+		flag, env, stored string
+		want              string
+	}{
+		{"none", "", "", "", ""},
+		{"settings", "", "", "stored-pin-1", "settings"},
+		{"env beats settings", "", "env-pin-1", "stored-pin-1", "env"},
+		{"flag beats the others", "flag-pin-1", "env-pin-1", "stored-pin-1", "flag"},
+	} {
+		se := newTVDBSettingsEnv(t, func(o *metadata.SettingsOptions) { o.TVDBPINFlag, o.TVDBPINEnv = tc.flag, tc.env })
+		if tc.stored != "" {
+			se.store.SetSetting(context.Background(), metadata.SettingTVDBPIN, tc.stored)
+		}
+		rec := se.get("/api/settings")
+		raw := decode[map[string]any](t, rec)
+		if got, has := raw["tvdbPinSource"]; !has || got != tc.want {
+			t.Errorf("%s: tvdbPinSource = %v (present %v), want %q", tc.name, got, has, tc.want)
+		}
+		if v := view(se); v.TVDBPINSet != (tc.want != "") {
+			t.Errorf("%s: tvdbPinSet = %v", tc.name, v.TVDBPINSet)
+		}
+		for _, pin := range []string{tc.flag, tc.env, tc.stored} {
+			if pin != "" && strings.Contains(rec.Body.String(), pin) {
+				t.Errorf("%s: the PIN %q is in the answer", tc.name, pin)
+			}
+		}
+	}
+
+	// A PIN from a flag or the environment cannot be removed here: 409, nothing stored, whatever
+	// else the request has. Storing one is allowed (the flag still beats it).
+	for _, by := range []struct{ name, flag, env, msg string }{
+		{"flag", "flag-pin-1", "", "-tvdb-pin"},
+		{"env", "", "env-pin-1", config.TVDBPINEnv},
+	} {
+		se := newTVDBSettingsEnv(t, func(o *metadata.SettingsOptions) { o.TVDBPINFlag, o.TVDBPINEnv = by.flag, by.env })
+		ctx := context.Background()
+		se.store.SetSetting(ctx, metadata.SettingTVDBPIN, "stored-pin-1")
+		for _, method := range []string{"PATCH", "PUT"} {
+			for _, body := range []string{`{"tvdbPin": ""}`, `{"tvdbPin": "   "}`, `{"language": "fr-FR", "tvdbPin": ""}`, `{"maxStreams": 3, "tvdbPin": ""}`} {
+				rec := se.do(method, "/api/settings", body)
+				wantJSONError(t, rec, 409)
+				if msg := decode[map[string]string](t, rec)["error"]; !strings.Contains(msg, by.msg) || !strings.Contains(msg, "tvdbPin") ||
+					strings.Contains(msg, "flag-pin-1") || strings.Contains(msg, "env-pin-1") {
+					t.Errorf("%s %s %s: message %q", by.name, method, body, msg)
+				}
+			}
+		}
+		if v, ok, _ := se.store.GetSetting(ctx, metadata.SettingTVDBPIN); !ok || v != "stored-pin-1" {
+			t.Errorf("%s: the stored PIN is %q, %v after refused removals", by.name, v, ok)
+		}
+		if v := view(se); v.Language != "en-US" || v.MaxStreams == 3 {
+			t.Errorf("%s: a refused request changed other settings: %+v", by.name, v)
+		}
+		// Positive control: a PIN is stored (checked with the key, if there is one).
+		wantStatus(t, se.do("PATCH", "/api/settings", `{"tvdbPin": "newer-pin-2"}`), 200)
+		if v, _, _ := se.store.GetSetting(ctx, metadata.SettingTVDBPIN); v != "newer-pin-2" {
+			t.Errorf("%s: a PIN given in the UI was not stored: %q", by.name, v)
+		}
+		if v := view(se); v.TVDBPINSource != by.name {
+			t.Errorf("%s: source after storing one = %q; the flag or env still beats it", by.name, v.TVDBPINSource)
+		}
+	}
+
+	// A PIN from the settings (or none) can be removed, as before.
+	se := newTVDBSettingsEnv(t)
+	se.store.SetSetting(context.Background(), metadata.SettingTVDBPIN, "stored-pin-1")
+	wantStatus(t, se.do("PATCH", "/api/settings", `{"tvdbPin": ""}`), 200)
+	if v := view(se); v.TVDBPINSet || v.TVDBPINSource != "" {
+		t.Errorf("after removing a stored PIN: %+v", v)
+	}
+	wantStatus(t, se.do("PATCH", "/api/settings", `{"tvdbPin": ""}`), 200) // none: nothing to remove, nothing wrong
+}
+
+// A key that works, tested, puts the status line right at once (and the worker retries what was put off).
+func TestSettingsTestOfTVDBPutsTheStatusLineRight(t *testing.T) {
+	se := newTVDBSettingsEnv(t)
+	ctx := context.Background()
+	wantStatus(t, se.do("PUT", "/api/settings", `{"tvdbKey": "`+apiTVDBKey+`"}`), 200)
+	line := func() string { return decode[metadata.Status](t, se.get("/api/metadata/status")).ShowsLine }
+	p, _ := se.settings.Provider(ctx)
+	if p == nil || p.TVDB == nil {
+		t.Fatal("no TVDB provider")
+	}
+
+	// TVDB refuses the key (as it can long after it was stored): the line says so.
+	se.tvdb.SetError(&metadata.TVDBError{Op: "POST /login", Status: 401, Message: "TVDB rejected the key or PIN"})
+	p.TVDB.SearchSeries(ctx, "x", 0)
+	if got := line(); got != "TVDB rejected the key or PIN" {
+		t.Fatalf("control: status line = %q", got)
+	}
+	// ... and an outage is another line.
+	se.tvdb.SetError(&metadata.TVDBError{Op: "GET /search", Transient: true, Message: "connection refused"})
+	p.TVDB.SearchSeries(ctx, "x", 0)
+	if got := line(); got != "TVDB unreachable" {
+		t.Fatalf("control: status line = %q", got)
+	}
+
+	// The key is tested and works: the line is right at once, without waiting for a pass.
+	se.tvdb.SetError(nil)
+	if got := decode[SettingsTest](t, se.postTest("tvdb")); !got.OK {
+		t.Fatalf("test = %+v", got)
+	}
+	if got := line(); got != "Shows: TVDB" {
+		t.Errorf("status line after a test that works = %q", got)
+	}
+
+	// A test that fails does not put it right.
+	se.tvdb.SetError(&metadata.TVDBError{Op: "POST /login", Status: 401, Message: "TVDB rejected the key or PIN"})
+	p.TVDB.SearchSeries(ctx, "x", 0)
+	se.store.SetSetting(ctx, metadata.SettingTVDBKey, "revoked-key-4411")
+	if got := decode[SettingsTest](t, se.postTest("tvdb")); got.OK {
+		t.Fatalf("test of a revoked key = %+v", got)
+	}
+	if got := line(); got != "TVDB rejected the key or PIN" {
+		t.Errorf("status line after a test that fails = %q", got)
 	}
 }

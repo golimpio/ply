@@ -34,6 +34,41 @@ func (s *Store) GetTitleByTVDB(ctx context.Context, tvdbID int64) (Title, error)
 	return t, err
 }
 
+// queryRower is what mergedInto reads with: a transaction, or the read pool.
+type queryRower interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// mergedInto is the person an id was merged into, following the chain, or 0 for an id that
+// was not.
+func mergedInto(ctx context.Context, q queryRower, id int64) (int64, error) {
+	var into sql.NullInt64
+	err := q.QueryRowContext(ctx, `
+		WITH RECURSIVE chain(id, depth) AS (
+			SELECT new_id, 1 FROM people_alias WHERE old_id = ?1
+			UNION ALL
+			SELECT a.new_id, c.depth + 1 FROM chain c JOIN people_alias a ON a.old_id = c.id WHERE c.depth < 32)
+		SELECT id FROM chain ORDER BY depth DESC LIMIT 1`, id).Scan(&into)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return into.Int64, err
+}
+
+// MergedPerson is the person that a person who is gone was merged into (a person of TVDB whom
+// TMDB knows too is folded into the TMDB one), following a chain of merges to its end; ErrNotFound
+// for an id that was not merged, or whose survivor is gone too.
+func (s *Store) MergedPerson(ctx context.Context, id int64) (int64, error) {
+	into, err := mergedInto(ctx, s.ro, id)
+	if err != nil {
+		return 0, err
+	}
+	if into == 0 {
+		return 0, ErrNotFound
+	}
+	return into, nil
+}
+
 // KindSeriesTVDB is, for the archive of a removed folder (PendingMatch, ForgetArchivedMatch,
 // RestoreArchived), the kind of a show's manual match made through TVDB: the id that goes
 // with it is a TVDB id. It is not a kind of title.
@@ -101,6 +136,11 @@ func (s *Store) SetPersonDetailsMerged(ctx context.Context, id int64, p Person, 
 		var tmdb, tvdb sql.NullInt64
 		err := tx.QueryRowContext(ctx, `SELECT tmdb_id, tvdb_id FROM people WHERE id = ?`, id).Scan(&tmdb, &tvdb)
 		if errors.Is(err, sql.ErrNoRows) {
+			// Merged into another meanwhile: that one is the answer (also when this fetch has no TMDB id).
+			if into, aerr := mergedInto(ctx, tx, id); aerr != nil || into != 0 {
+				survivor = into
+				return aerr
+			}
 			if p.TMDBID != 0 {
 				if other, _, oerr := personByTMDB(ctx, tx, p.TMDBID); oerr != nil || other != 0 {
 					survivor = other
@@ -171,6 +211,14 @@ func mergePeople(ctx context.Context, tx *sql.Tx, from, into int64, tvdb sql.Nul
 	if _, err := tx.ExecContext(ctx, `
 		INSERT OR IGNORE INTO credits (title_id, person_id, kind, job, character, ord)
 		SELECT title_id, ?, kind, job, character, ord FROM credits WHERE person_id = ?`, into, from); err != nil {
+		return 0, false, err
+	}
+	// The old id still answers: with into, and so do the ids that were merged into from (their alias
+	// is moved first, or it would go with from). A chain a, b, c is a, b -> c.
+	if _, err := tx.ExecContext(ctx, `UPDATE people_alias SET new_id = ? WHERE new_id = ?`, into, from); err != nil {
+		return 0, false, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO people_alias (old_id, new_id) VALUES (?, ?)`, from, into); err != nil {
 		return 0, false, err
 	}
 	// from goes first: its TVDB id is unique, and its credits go with it.

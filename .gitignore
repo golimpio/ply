@@ -1,5 +1,6 @@
 # Go build and test output
 /bin/
+/ply
 *.test
 *.prof
 /coverage/
