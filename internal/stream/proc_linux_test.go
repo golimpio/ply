@@ -1,7 +1,8 @@
 package stream
 
 import (
-	"bufio"
+	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -29,6 +30,29 @@ func TestFFmpegDiesWithItsParent(t *testing.T) {
 	}
 }
 
+// lockedBuffer is what a helper process says, read while it is still talking.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func firstLine(s string) string {
+	line, _, _ := strings.Cut(s, "\n")
+	return line
+}
+
 // A helper process, not a test: it starts a process the way a session starts
 // ffmpeg (ownGroup, startProcess), says its pid, and then goes on churning the Go
 // runtime for ever: goroutines that lock their threads and exit, which retires
@@ -38,7 +62,8 @@ func TestHelperStartsAProcessLikeASession(t *testing.T) {
 	if os.Getenv("PLY_TEST_PDEATHSIG_HELPER") == "" {
 		t.Skip("helper process of TestAProcessStartedLikeASessionDiesWithItsParent")
 	}
-	cmd := exec.Command("sleep", "300")
+	// (ownGroup sets Cancel, which only a command made with CommandContext may have.)
+	cmd := exec.CommandContext(context.Background(), "sleep", "300")
 	ownGroup(cmd)
 	if err := startProcess(cmd, func(error) {}); err != nil {
 		t.Fatal(err)
@@ -66,10 +91,8 @@ func TestHelperStartsAProcessLikeASession(t *testing.T) {
 func TestAProcessStartedLikeASessionDiesWithItsParent(t *testing.T) {
 	helper := exec.Command(os.Args[0], "-test.run=^TestHelperStartsAProcessLikeASession$")
 	helper.Env = append(os.Environ(), "PLY_TEST_PDEATHSIG_HELPER=1")
-	stdout, err := helper.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
+	said := &lockedBuffer{}
+	helper.Stdout, helper.Stderr = said, said
 	if err := helper.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -82,23 +105,21 @@ func TestAProcessStartedLikeASessionDiesWithItsParent(t *testing.T) {
 			_ = syscall.Kill(-child, syscall.SIGKILL)
 		}
 	})
-	line := make(chan string, 1)
-	go func() {
-		sc := bufio.NewScanner(stdout)
-		for sc.Scan() {
-			if _, err := strconv.Atoi(strings.TrimSpace(sc.Text())); err == nil {
-				line <- sc.Text()
-				break
-			}
-		}
-		_, _ = bufio.NewReader(stdout).Discard(1 << 20)
-	}()
 	go func() { _ = helper.Wait(); close(helperDone) }()
-	select {
-	case l := <-line:
-		child, _ = strconv.Atoi(strings.TrimSpace(l))
-	case <-time.After(20 * time.Second):
-		t.Fatal("the helper did not start its process")
+	// The helper says the pid of its child on a line of its own.
+	deadline := time.After(20 * time.Second)
+	for child == 0 {
+		if pid, err := strconv.Atoi(strings.TrimSpace(firstLine(said.String()))); err == nil {
+			child = pid
+			break
+		}
+		select {
+		case <-helperDone:
+			t.Fatalf("the helper ended before it started its process; it said:\n%s", said.String())
+		case <-deadline:
+			t.Fatalf("the helper did not start its process; it said:\n%s", said.String())
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 	gone := func() bool { return syscall.Kill(child, 0) != nil || strings.HasPrefix(procState(child), "Z") }
 

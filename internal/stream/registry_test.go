@@ -292,7 +292,10 @@ func TestRegistryFollowsTheSession(t *testing.T) {
 	}
 	seg.Close()
 	second := read()
-	if second.PID == first.PID || second.Start == first.Start {
+	// (The pid, not the start token: on Linux that is in clock ticks of 10 ms, and a
+	// restart takes less than that, so the two ffmpeg can have the same one. A pid
+	// that is reused within a tick is not a case: they are given out in turn.)
+	if second.PID == first.PID {
 		t.Errorf("the registry still names the replaced ffmpeg: %+v", second)
 	}
 	if pidAlive(first.PID) {
