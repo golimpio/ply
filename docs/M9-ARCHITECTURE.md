@@ -94,7 +94,70 @@ Target: about 1-2 s to first frame even over SMB.
    libx264). Uniform transcode-style segments are not valid for copy.
 4. **Subtitles:** pre-extract text tracks in the background index job, stream a VTT that is still being made, and
    never extract at full rate while a session reads the same volume.
+
+   **Built (2026-11-05, reviewed and reworked 2026-11-06):**
+   - `subs.preextract` (below, "Kinds in use"): after a file is indexed, and from a sweep at start and after each
+     scan, the queue reads the container once for all its text tracks (one ffmpeg run with one `-map` output per
+     track, so a film with five languages costs one read, not five) and writes them to the subs cache. It needs the
+     item's disk, steps aside through the queue's yield between its reads (each sidecar, then the container), and a
+     play that starts while ffmpeg reads *suspends* it (SIGSTOP to its group, SIGCONT after) instead of killing it:
+     a read that took 40 minutes is not thrown away. A play that is only being set up counts (`Manager.Create`
+     reserves its place at once: the keyframe scan of a first play is minutes of reading, and the governor is told
+     when the place is taken and when it is given up), and so does one that is paused, for its first two minutes.
+     Time spent suspended does not count against the run's limit (3 hours of running time, up from 10 minutes: a
+     7 GB remux at 2.5 MB/s takes 50); a run that uses it is a failure, not retried.
+   - **The sweep is not the library.** Reading every film's container over the NAS is about 8.5 days of the link for
+     263 films of 7 GB (at 2.5 MB/s), and most will never be played. The sweep queues the items somebody is part way
+     through (the 20 last played), and the next episode of each show they watch (20 at most); a new file is queued
+     when the scanner adds it, ahead of the rest, but only when a scan adds 20 or fewer: more is an import (a library
+     just added, a disk copied in), which is not a sign of what will be played. Any other film is extracted on its
+     first play (all its tracks, in one read).
+   - **Failures.** A file that cannot be read (the share is not mounted yet, or asleep: `ErrUnavailable`) is never a
+     failure: the job is retried with the queue's backoff (a minute, doubling to 30 minutes) up to 500 times, about ten
+     days, and the sweep queues it again after that. An ffmpeg failure is recorded next to the cache
+     (`<id>-<key>-<mtime>.fail`, pruned with the file), so that no start and no scan reads the film for an hour to find
+     out again; a track with a record is not taken along in anyone's run, but a person's request for the track itself
+     tries it anyway, and a success clears the record. A job cancelled in Activity counts as failed until ply
+     restarts. One track that makes ffmpeg fail does not cost the others: a run of several tracks that fails is tried
+     again with the first alone, and the tracks it gave up are free at once for a run of their own, if somebody asks
+     for one before the first track's read ends.
+   - A play that asks for a track that is not cached (`GET .../subtitles/{key}.vtt`) *joins* the run if there is one
+     (and promotes it: released if suspended, `sysprio.Foreground`), or starts one for that item: not demoted, and
+     extracting the item's other text tracks in the same read. When the last request that waits for a run leaves (the
+     page was closed) the run is background work again: demoted, and paced like any other. The answer is chunked: `200` once the
+     request has waited a second for the extraction to end, counted from the request, not from the start of a run it
+     joined (before that, `422` for a failure, `503` for a file that cannot be read, or the finished file with its
+     length), then each cue as ffmpeg writes it (`-flush_packets 1`, polled every
+     100 ms, whole cues only, `Cache-Control: no-store`) until the file is complete. ffmpeg writes the blank line
+     after a cue before the next one, so the last cue written is given out once the file has not grown for a poll. A
+     browser parses a `<track>` as it arrives (verified in Chromium), so the web player needs no change; a failure after
+     the first byte ends the answer at the last whole cue and the next request meets the remembered failure (`422`). An
+     extraction stopped by someone else (a job cancelled in Activity, ply stopping) is a `503` with `Retry-After`, not
+     an empty `200`. A `HEAD` of a track that is not cached does not start a run.
+   - The cues of the first minutes arrive after about that share of the file has been read: a play from the start
+     sees subtitles within seconds, a resume at 1:30:00 sees them when the read gets there. The pre-extraction job is
+     what makes the second case fast.
+   - Not covered: a sidecar-only item (an `.srt` next to the file) gets no job: it is a small file, converted on
+     its first play.
+   - **No orphans.** Every ffmpeg ply starts (playback, subtitles, artwork) goes through `internal/proc`: its own process
+     group, `Pdeathsig` on Linux, a reaper per group on macOS (`ply --reap`), stopped by ply when the group has ended.
+     A `kill -9` of ply leaves none, running or suspended (`TestKillMinus9LeavesNoSubtitleFFmpeg`, and the playback one).
 5. **Hold the art frame grab** for the item being started; serve TMDB/sidecar art first.
+
+   **Built (2026-11-05, reworked 2026-11-06):** `POST /playback` notes that the item is being set up (`api.playStarts`);
+   the hold lasts while the session is created, however long, and 10 s after it is. A film that plays from the same disk
+   holds every frame grab on that disk too (`Governor.Check`, the question the queue asks of `art.grab`; browsing alone
+   does not; the question is about the item's library folder, so that a page of a hundred films does not make the
+   governor look up the disk of each file), so the grid of a library page does not take the link from a film. In that time `GET /api/items/{id}/art/{kind}`
+   serves the image if it is cached; otherwise it answers `503` with `Retry-After` (at least a second; the placeholder the
+   page already shows for an image that is not there) and does *not* start ffmpeg. A play that was refused (the limit on
+   plays) holds nothing. A grab that is already running for the item when the play begins is stopped
+   (`art.Generator.Defer`; its waiters get the same `503`, nothing is remembered against the file). Whatever was put off
+   is queued as `art.grab` (key `art:<item>:<kind>`, needs the CPU and the item's disk), so it runs when no play reads
+   the disk; a grab that was stopped is queued again whatever was asked a moment ago, and repeated asks are passed on
+   once in 30 s. The job looks at the file when it runs: one that was replaced since (another mtime than the one it
+   was queued with) is left alone, the page asking again once the scanner has the new mtime. TMDB, sidecar and embedded art are chosen by the page from the item's `poster`/`backdrop`/`still` and
+   need no frame grab; the frame grab is only the fallback.
 6. ffmpeg input pre-roll: try `-analyzeduration 0 -probesize 1M` for mkv/mp4 inputs (measure first). hls.js
    `startFragPrefetch: true`.
 7. **Pre-index in the queue:** a low-priority `keyframes.index` job per new remux-candidate item, held while a
@@ -133,9 +196,10 @@ Design:
 
    **Built (steps 1 and 3 of the build order):** the registry, the startup sweep, the macOS reaper, `Pdeathsig`, the
    leak check, the caps and `GET /api/sessions` are in; see `docs/DESIGN.md` (Streaming) for the behaviour and
-   `internal/stream/{play,registry,reap_darwin,proc_linux}.go` for the code. Found while testing: the kernel ends a
-   *stopped* orphaned process group with SIGHUP, so only a running ffmpeg outlives a killed ply; the reaper and the
-   registry matter for those.
+   `internal/stream/{play,registry,reap_darwin}.go` and `internal/proc` (the process group, the `Pdeathsig` fork, the
+   reaper: shared with the subtitle and artwork extractions) for the code. Found while testing: the kernel ends a
+   *stopped* orphaned process group with SIGHUP in some cases only, so a running ffmpeg outlives a killed ply (and a
+   stopped one is not safe for sure); the reaper and the registry matter for those.
 5. A leak check in the manager's housekeeping (every 5 s): the registry files vs the sessions; a registered group (pid
    alive, started when the file says) that belongs to no session is killed. Not built, from the review, for later: a
    maximum time for a paused session; a flag for the heartbeat window; the client address behind a reverse proxy
@@ -274,6 +338,18 @@ Design:
     - `Spec.Light` keeps it in the light lane, so it never waits behind a full scan.
     - Outside a job (`paceFor`) the same pace waits on the governor directly.
   - `cache.prune` (50): after each scan.
+  - `subs.preextract` (50, key `subs:<itemID>`, light lane; `Need` and `YieldNeed` are the item's disk): writes an
+    item's text subtitles to the cache. It does not start while a play reads from the disk (a play being set up counts),
+    yields between its reads, and the run is suspended if a play starts. One job in the queue at a time
+    (`subsFeeder`: a job reads a whole film and two would hold up the lookups of new files), fed by the scanner's
+    `OnAdded` (new files first) and by a sweep of what is being watched (see item 4 above). It retries a file it cannot
+    reach (500 attempts with the queue's backoff: about ten days; the default is 5), and fails only for what ffmpeg
+    cannot do. The job says "Waiting: a video is playing from the same disk" while suspended, and stops saying it
+    when a viewer starts to wait for the run.
+  - The light lane holds 3 jobs (`Options.Light`, up from 2), so a subtitle extraction or a picture that takes minutes
+    leaves two for the lookups and the ratings.
+  - `art.grab` (50, key `art:<itemID>:<kind>`, light lane): the frame grab that `GET .../art/...` put off because a
+    play of the item was starting. Needs the CPU and the item's disk.
   - The scanner's own passes (a folder just added, a type changed) appear as a read-only `scan.folders` entry
     (`Options.Extra`, from `Scanner.Busy`). They pace through the governor directly.
 - The scanner yields per file: `Scanner.SetPace` is called before each probe (with done/total, which becomes the

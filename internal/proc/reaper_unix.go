@@ -1,6 +1,6 @@
 //go:build unix
 
-package stream
+package proc
 
 import (
 	"os"
@@ -9,10 +9,12 @@ import (
 	"syscall"
 )
 
-// startReaper starts `exe --reap <pgid> <our pid>`: detached (a session of its
+// StartReaper starts `exe --reap <pgid> <our pid>`: detached (a session of its
 // own, no terminal, no standard files, no inherited directory), so that it
-// survives ply. The caller kills it when the group ends first.
-func startReaper(exe string, pgid int) (*exec.Cmd, error) {
+// survives ply. When ply is gone it kills the process group pgid, stopped or not
+// (stream.ReapMain is what exe runs). The caller ends it with StopReaper once the
+// group has ended first.
+func StartReaper(exe string, pgid int) (*exec.Cmd, error) {
 	cmd := exec.Command(exe, "--reap", strconv.Itoa(pgid), strconv.Itoa(os.Getpid()))
 	cmd.Dir = "/"
 	cmd.Env = []string{}

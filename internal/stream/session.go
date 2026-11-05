@@ -15,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"ply/internal/proc"
 )
 
 // keepBehind is how many segments behind the player are kept on disk.
@@ -276,10 +278,10 @@ func (s *Session) startRunLocked(g int) error {
 	cmd.Dir = s.dir
 	cmd.Stderr = r.stderr
 	cmd.WaitDelay = 3 * time.Second
-	ownGroup(cmd)
+	proc.OwnGroup(cmd)
 	r.cmd, r.cancel = cmd, cancel
 	started := time.Now()
-	err := startProcess(cmd, func(waitErr error) {
+	err := proc.Start(cmd, func(waitErr error) {
 		r.err = waitErr
 		diedByItself := r.err != nil && ctx.Err() == nil // not stopped by us
 		cancel()
@@ -323,7 +325,7 @@ func (s *Session) recordRun(r *run) {
 		}
 	}
 	if s.m.reaperExe != "" {
-		rp, err := startReaper(s.m.reaperExe, pid)
+		rp, err := proc.StartReaper(s.m.reaperExe, pid)
 		if err != nil {
 			s.m.log.Warn("start the ffmpeg reaper", "session", s.ID, "err", err)
 		} else {
@@ -347,10 +349,7 @@ func (r *run) stopReaper() {
 	rp := r.reaper
 	r.reaper = nil
 	r.reaperMu.Unlock()
-	if rp != nil {
-		_ = rp.Process.Kill()
-		_ = rp.Wait()
-	}
+	proc.StopReaper(rp)
 }
 
 // fallBackLocked switches a failed GPU transcode to its software fallback,

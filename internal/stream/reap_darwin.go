@@ -9,11 +9,13 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"ply/internal/proc"
 )
 
 // reaperWanted says that a ply on this system starts a reaper for each ffmpeg:
 // macOS has no parent-death signal.
-const reaperWanted = true
+const reaperWanted = proc.ReaperWanted
 
 // reapPoll is how often the reaper looks for its group when nothing happens.
 const reapPoll = 3 * time.Second

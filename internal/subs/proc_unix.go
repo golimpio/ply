@@ -3,18 +3,10 @@
 package subs
 
 import (
-	"os/exec"
 	"syscall"
 
 	"ply/internal/sysprio"
 )
-
-// ownProcessGroup starts ffmpeg in its own process group and makes context
-// cancellation kill the whole group, so no child outlives the request.
-func ownProcessGroup(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-}
 
 // setNice demotes a background ffmpeg (niceness, and the macOS background
 // policy: throttled CPU and I/O). nice 0 is work somebody waits for (the
@@ -24,3 +16,16 @@ func setNice(pid, nice int) {
 		sysprio.Background(pid, nice)
 	}
 }
+
+// setForeground takes back the background policy of a conversion that somebody
+// has started to wait for (the niceness stays: only root may lower it).
+func setForeground(pid int) { sysprio.Foreground(pid) }
+
+// pauseGroup suspends ffmpeg and whatever it started, and resumeGroup lets them go
+// on. A suspended group is not safe from the death of ply for free: a running one
+// outlives it, and a stopped one is only ended by the kernel in some cases (an orphaned
+// group, with a stopped member, gets SIGHUP). What ends them every time is what
+// internal/proc starts with them: Pdeathsig on Linux, the reaper on macOS (both end a
+// stopped group too).
+func pauseGroup(pid int)  { _ = syscall.Kill(-pid, syscall.SIGSTOP) }
+func resumeGroup(pid int) { _ = syscall.Kill(-pid, syscall.SIGCONT) }

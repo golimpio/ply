@@ -50,7 +50,7 @@ type fakeRun struct {
 	release chan struct{}
 }
 
-func (f *fakeRun) run(ctx context.Context, args []string) (string, error) {
+func (f *fakeRun) run(ctx context.Context, args []string, _ *ctl) (string, error) {
 	f.calls.Add(1)
 	f.mu.Lock()
 	f.args = append(f.args, args)
@@ -153,9 +153,10 @@ func TestFailureIsRememberedUntilTheFileChanges(t *testing.T) {
 	if n := f.calls.Load(); n != 1 {
 		t.Errorf("ffmpeg ran %d times, want 1 (the failure is cached)", n)
 	}
+	// All it left is the record of the failure (Failed): no half-written file.
 	entries, _ := os.ReadDir(g.dir)
-	if len(entries) != 0 {
-		t.Errorf("a failed conversion left %d files behind", len(entries))
+	if len(entries) != 1 || entries[0].Name() != "1-4-5.fail" {
+		t.Errorf("a failed conversion left %v behind, want only its record 1-4-5.fail", entries)
 	}
 	src.MTime = 6
 	f.fail = nil
@@ -166,7 +167,7 @@ func TestFailureIsRememberedUntilTheFileChanges(t *testing.T) {
 
 func TestEmptyOutputIsAFailure(t *testing.T) {
 	g, _ := New(Options{Dir: t.TempDir()})
-	g.run = func(ctx context.Context, args []string) (string, error) {
+	g.run = func(ctx context.Context, args []string, _ *ctl) (string, error) {
 		return "", os.WriteFile(args[len(args)-1], nil, 0o644)
 	}
 	_, err := g.Path(t.Context(), Source{ItemID: 1, Key: "1", Input: "/m/a.mkv", Stream: 1, MTime: 1})
@@ -267,16 +268,20 @@ func existingFile(t *testing.T, name string) string {
 	return p
 }
 
-// A share that is asleep or unmounted makes ffmpeg fail, and says nothing
-// about the subtitle: the next request has to try again.
+// A share that is asleep or unmounted makes ffmpeg fail, and says nothing about the
+// subtitle: it is ErrUnavailable (not ErrConvert, which would end a job for good), nothing is
+// remembered, in memory or on disk, and the next request has to try again.
 func TestFailureOfAnUnreachableInputIsNotRemembered(t *testing.T) {
 	f := &fakeRun{fail: errors.New("exit status 1")}
 	g := newGen(t, f)
 	input := filepath.Join(t.TempDir(), "share", "a.mkv")
 	src := Source{ItemID: 1, Key: "4", Input: input, Stream: 4, MTime: 5}
 
-	if _, err := g.Path(t.Context(), src); !errors.Is(err, ErrConvert) {
-		t.Fatalf("with the share gone: err = %v, want ErrConvert", err)
+	if _, err := g.Path(t.Context(), src); !errors.Is(err, ErrUnavailable) || errors.Is(err, ErrConvert) {
+		t.Fatalf("with the share gone: err = %v, want ErrUnavailable and not ErrConvert", err)
+	}
+	if err := g.Failed(src); err != nil {
+		t.Errorf("an unreachable file was recorded as a failure: %v", err)
 	}
 	// The share comes back.
 	if err := os.MkdirAll(filepath.Dir(input), 0o755); err != nil {

@@ -27,6 +27,7 @@ import (
 	"ply/internal/library"
 	"ply/internal/metadata"
 	"ply/internal/probe"
+	"ply/internal/proc"
 	"ply/internal/store"
 	"ply/internal/stream"
 	"ply/internal/subs"
@@ -118,13 +119,23 @@ func run() error {
 	gov := tier.New(tier.Options{Playback: playbackLoad{streams}})
 	streams.OnLoadChange(gov.Notify)
 
-	artGen, err := art.New(ctx, art.Options{Dir: filepath.Join(cfg.Data, "art"), FFmpeg: ffmpegBin})
+	// The ffmpeg of subtitles and artwork are guarded as the playback ones are: by the kernel
+	// (Linux), or by a reaper each (macOS), the same link the stream manager makes.
+	reaper := ""
+	if self != "" && proc.ReaperWanted {
+		reaper = proc.ReaperLink(cfg.Data, self, log)
+	}
+
+	artGen, err := art.New(ctx, art.Options{Dir: filepath.Join(cfg.Data, "art"), FFmpeg: ffmpegBin, Reaper: reaper, Logger: log})
 	if err != nil {
 		log.Warn("artwork disabled", "err", err)
 		artGen = nil
 	}
 
-	subGen, err := subs.New(subs.Options{Dir: filepath.Join(cfg.Data, "subs"), FFmpeg: ffmpegBin})
+	// A viewer who asked for a track and left, or a play that starts while a film's subtitles
+	// are read, hold that read like any other background work (diskHold).
+	subGen, err := subs.New(subs.Options{Dir: filepath.Join(cfg.Data, "subs"), FFmpeg: ffmpegBin,
+		Reaper: reaper, Hold: newDiskHold(gov).check, Logger: log})
 	if err != nil {
 		log.Warn("text subtitles disabled", "err", err)
 		subGen = nil
@@ -181,6 +192,7 @@ func run() error {
 	// The worker's passes run as queue jobs: whatever wakes it (new files, a
 	// refresh asked for) queues one; queue is set before anything can wake it.
 	var queue *jobs.Queue
+	var subsFeed *subsFeeder // set with the queue; nil without text subtitles
 	worker := metadata.NewWorker(metadata.WorkerOptions{
 		Store: st, Source: settings, Images: images, Probe: prober.Probe, Refresh: cfg.MetadataRefresh, Logger: log,
 		// Each item of a pass waits while playback or browsing needs the machine.
@@ -195,7 +207,12 @@ func run() error {
 			}()
 		},
 	})
-	scanner.OnAdded(func([]int64) { worker.Notify() })
+	scanner.OnAdded(func(ids []int64) {
+		worker.Notify()
+		if subsFeed != nil {
+			subsFeed.Add(ids...) // a new file is the likelier to be played soon: its subtitles first
+		}
+	})
 	scanner.OnSidecarsChanged(worker.NotifySidecars)
 	// A folder that was removed and added back, or whose type was changed and
 	// changed back: the manual matches its files had are applied again, in the
@@ -215,6 +232,9 @@ func run() error {
 	active.roots = rootPaths(roots)
 	queue = newQueue(queueDeps{store: st, gov: gov, scanner: scanner, worker: worker, art: artGen, subs: subGen, ratings: ratings,
 		roots: func() []string { active.Lock(); defer active.Unlock(); return slices.Clone(active.roots) }, log: log})
+	if subGen != nil {
+		subsFeed = newSubsFeeder(st, queue, subGen, log)
+	}
 
 	// The scanner gets the folders' types last, with its settle time and its hooks
 	// in place: first the types they had before this start's flags, which it takes
@@ -232,8 +252,15 @@ func run() error {
 		log.Warn("metadata: releasing pending files", "err", err)
 	}
 
-	var bg sync.WaitGroup // the queue, its schedule, the watcher, the match restorer, the lookups check and the ratings schedule
+	var bg sync.WaitGroup // the queue, its schedule, the watcher, the match restorer, the lookups check, the ratings schedule and the subtitle feeder
 	bg.Add(5)
+	if subsFeed != nil {
+		bg.Add(1)
+		go func() {
+			defer bg.Done()
+			subsFeed.Run(ctx)
+		}()
+	}
 	go func() {
 		defer bg.Done()
 		scheduleRatings(ctx, queue, ratings, log)
@@ -311,6 +338,7 @@ func run() error {
 		MaxTranscodesFlag: cfg.MaxTranscodes,
 		HW:                hw,
 		Art:               artGen,
+		ArtLater:          artLater(ctx, queue, log),
 		Subs:              subGen,
 
 		Metadata: worker,
@@ -328,7 +356,11 @@ func run() error {
 	// The limits on plays: the flags, then the settings, then the defaults; the default
 	// number of transcodes needs the answer of the GPU probe, which may still be running.
 	handler.ApplyLimitsWhenReady(ctx)
-	go afterScans(ctx, scanner, queue, worker, log)
+	var rescanSubs func()
+	if subsFeed != nil {
+		rescanSubs = subsFeed.Rescan
+	}
+	go afterScans(ctx, scanner, queue, worker, rescanSubs, log)
 	srv := &http.Server{
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -354,7 +386,8 @@ func run() error {
 	case serveFailure = <-serveErr:
 	}
 	// Cancels the scanner and the queue, and gives the signals back: a second
-	// Ctrl-C now ends the process (the reaper and Pdeathsig take its ffmpeg along).
+	// Ctrl-C now ends the process, and takes its ffmpeg along (playback, subtitles and
+	// artwork alike: the kernel's Pdeathsig on Linux, a reaper for each group on macOS).
 	stop()
 
 	shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -519,10 +552,11 @@ func rootPaths(roots []library.Root) []string {
 
 // afterScans queues the housekeeping each time a scan finishes, whatever started
 // it (a job, the scanner's own pass for a folder just added): it wakes the
-// metadata worker (files may have been added) and queues the pruning of cached
-// artwork and subtitles of items that are gone or changed. The scanner has no
-// completion hook, so its status is polled.
-func afterScans(ctx context.Context, sc api.ScanController, q *jobs.Queue, worker *metadata.Worker, log *slog.Logger) {
+// metadata worker (files may have been added), has the subtitle feeder look at the
+// library again (files may have changed) and queues the pruning of cached artwork and
+// subtitles of items that are gone or changed. The scanner has no completion hook, so
+// its status is polled.
+func afterScans(ctx context.Context, sc api.ScanController, q *jobs.Queue, worker *metadata.Worker, rescanSubs func(), log *slog.Logger) {
 	var seen time.Time
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
@@ -538,6 +572,9 @@ func afterScans(ctx context.Context, sc api.ScanController, q *jobs.Queue, worke
 		}
 		seen = *s.LastFinished
 		worker.Notify()
+		if rescanSubs != nil {
+			rescanSubs() // files that changed since have subtitles to extract again
+		}
 		if _, err := q.Enqueue(ctx, kindCachePrune, jobs.Opt{Key: "prune"}); err != nil && ctx.Err() == nil {
 			log.Warn("queue: cache prune", "err", err)
 		}

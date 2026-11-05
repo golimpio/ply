@@ -54,6 +54,13 @@ type Options struct {
 	HW *hwaccel.Detector
 	// Art generates artwork on demand; nil disables it.
 	Art *art.Generator
+	// ArtLater is told to make an image later, when a play makes the frame grab wait: while a
+	// play of the item is being set up and for a few seconds after, and while a film plays from
+	// its disk, no frame is grabbed from its file (docs/M9-ARCHITECTURE.md,
+	// "Time-to-first-frame"). again says that a grab under way for it has just been stopped, so
+	// that a request for the same image a moment ago does not count as already asked for. It
+	// must not block. nil: nothing is made later (the next request for the image grabs it).
+	ArtLater func(src art.Source, k art.Kind, again bool)
 	// Subs converts text subtitles to WebVTT; nil disables the subtitle
 	// endpoint (tracks are then listed without a url).
 	Subs *subs.Generator
@@ -115,6 +122,11 @@ type Server struct {
 	handler http.Handler
 
 	foldersMu sync.Mutex // one change to the folders at a time: the checks and the write are one step
+
+	plays playStarts // the items being set up to play: no frame grab for them
+	// subsGrace is how long a request for an embedded subtitle waits for the extraction to
+	// finish before it starts to stream what is written so far (a variable for the tests).
+	subsGrace time.Duration
 }
 
 // New builds the server. The returned value is an http.Handler.
@@ -122,7 +134,7 @@ func New(o Options) *Server {
 	if o.Logger == nil {
 		o.Logger = slog.New(slog.DiscardHandler)
 	}
-	s := &Server{Options: o}
+	s := &Server{Options: o, subsGrace: time.Second}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/info", s.handleInfo)

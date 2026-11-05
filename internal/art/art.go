@@ -15,6 +15,7 @@ import (
 	"image"
 	"image/jpeg"
 	"io/fs"
+	"log/slog"
 	"math"
 	"os"
 	"os/exec"
@@ -24,6 +25,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"ply/internal/proc"
 )
 
 // Kind is an artwork variant.
@@ -48,6 +51,9 @@ var (
 	ErrUnavailable = errors.New("art: temporarily unavailable")
 	// ErrClosed is returned after Close.
 	ErrClosed = errors.New("art: generator closed")
+	// ErrDeferred reports a grab that was stopped (Defer) because the file is about to be
+	// played: it is not a failure, and nothing is remembered.
+	ErrDeferred = errors.New("art: deferred while the video starts")
 )
 
 // failureTTL is how long a transient failure is remembered, so a grid of tiles
@@ -86,6 +92,11 @@ type Options struct {
 	Niceness    int           // unix nice value for ffmpeg; default 10
 	Concurrency int           // simultaneous ffmpeg runs; default 2
 	Timeout     time.Duration // per image; default 30s
+	// Reaper is the program that runs `--reap` (ply itself): where there is no
+	// parent-death signal (macOS) one is started for every ffmpeg group, and kills it if
+	// ply dies. Empty starts none (Linux has Pdeathsig).
+	Reaper string
+	Logger *slog.Logger
 }
 
 // Generator creates artwork on demand and caches it on disk.
@@ -96,6 +107,8 @@ type Generator struct {
 	timeout  time.Duration
 	sem      chan struct{}
 	toneMap  string // filter chain applied to HDR sources; "" when ffmpeg lacks zscale
+	reaper   string
+	log      *slog.Logger
 
 	base   context.Context // parent of every generation; cancelled by Close
 	cancel context.CancelFunc
@@ -121,8 +134,11 @@ type colour struct {
 }
 
 type call struct {
-	done chan struct{}
-	err  error
+	done   chan struct{}
+	err    error
+	src    Source
+	kind   Kind
+	cancel context.CancelCauseFunc
 }
 
 // failure is a remembered generation error; a zero until never expires (it
@@ -152,12 +168,17 @@ func New(ctx context.Context, o Options) (*Generator, error) {
 	if o.Timeout <= 0 {
 		o.Timeout = 30 * time.Second
 	}
+	if o.Logger == nil {
+		o.Logger = slog.New(slog.DiscardHandler)
+	}
 	g := &Generator{
 		dir:      o.Dir,
 		ffmpeg:   o.FFmpeg,
 		niceness: o.Niceness,
 		timeout:  o.Timeout,
 		sem:      make(chan struct{}, o.Concurrency),
+		reaper:   o.Reaper,
+		log:      o.Logger,
 		inflight: map[string]*call{},
 		failed:   map[string]failure{},
 		colors:   map[int64]colour{},
@@ -214,12 +235,14 @@ func (g *Generator) Path(ctx context.Context, src Source, k Kind) (string, error
 	}
 	c, ok := g.inflight[key]
 	if !ok {
-		c = &call{done: make(chan struct{})}
+		c = &call{done: make(chan struct{}), src: src, kind: k}
+		var ctx context.Context
+		ctx, c.cancel = context.WithCancelCause(g.base)
 		g.inflight[key] = c
 		g.wg.Add(1)
 		// The work outlives the first request (a client navigating away must not
 		// throw away an image the next request will want) but not the generator.
-		go g.fill(c, key, src, k, name)
+		go g.fill(ctx, c, key, src, k, name)
 	}
 	g.mu.Unlock()
 
@@ -234,14 +257,19 @@ func (g *Generator) Path(ctx context.Context, src Source, k Kind) (string, error
 	return name, nil
 }
 
-func (g *Generator) fill(c *call, key string, src Source, k Kind, name string) {
+func (g *Generator) fill(ctx context.Context, c *call, key string, src Source, k Kind, name string) {
 	defer g.wg.Done()
-	c.err = g.generate(g.base, src, k, name)
+	defer c.cancel(nil)
+	c.err = g.generate(ctx, src, k, name)
+	if c.err != nil && errors.Is(context.Cause(ctx), ErrDeferred) {
+		c.err = ErrDeferred // whatever the killed ffmpeg said
+	}
 	g.mu.Lock()
 	delete(g.inflight, key)
 	switch {
-	case c.err == nil, g.base.Err() != nil, errors.Is(c.err, fs.ErrNotExist):
-		// Success, shutdown, or a missing file (cheap to re-check: no ffmpeg runs).
+	case c.err == nil, g.base.Err() != nil, errors.Is(c.err, fs.ErrNotExist), errors.Is(c.err, ErrDeferred):
+		// Success, shutdown, a missing file (cheap to re-check: no ffmpeg runs), or a grab
+		// that was put off.
 	case errors.Is(c.err, ErrNoFrame):
 		g.failed[key] = failure{err: c.err}
 	default:
@@ -249,6 +277,38 @@ func (g *Generator) fill(c *call, key string, src Source, k Kind, name string) {
 	}
 	g.mu.Unlock()
 	close(c.done)
+}
+
+// Cached returns the image of kind k for src if it has been made. It never starts a grab.
+func (g *Generator) Cached(src Source, k Kind) (string, bool) {
+	name := filepath.Join(g.dir, imageName(src.ID, k, src.MTime))
+	if _, err := os.Stat(name); err != nil {
+		return "", false
+	}
+	return name, true
+}
+
+// Grab is an image to be made.
+type Grab struct {
+	Src  Source
+	Kind Kind
+}
+
+// Defer stops the grabs under way for item id, so that a play that is starting has its
+// file to itself: the people waiting for them get ErrDeferred, and nothing is remembered
+// against the file. It returns the images that were being made, for the caller to make
+// when the play is over.
+func (g *Generator) Defer(id int64) []Grab {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var out []Grab
+	for _, c := range g.inflight {
+		if c.src.ID == id {
+			out = append(out, Grab{c.src, c.kind})
+			c.cancel(ErrDeferred)
+		}
+	}
+	return out
 }
 
 // Colour returns the dominant colour ("#rrggbb") of src's artwork if an image
@@ -373,16 +433,28 @@ func (g *Generator) exec(ctx context.Context, args []string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, g.ffmpeg, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	ownProcessGroup(cmd)
+	proc.OwnGroup(cmd)
 	cmd.WaitDelay = 2 * time.Second
-	if err := cmd.Start(); err != nil {
+	exited := make(chan error, 1)
+	if err := proc.Start(cmd, func(err error) { exited <- err }); err != nil {
 		return nil, fmt.Errorf("start %s: %w", g.ffmpeg, err)
+	}
+	// If ply is killed from here on, the group goes with it: by the kernel (Linux), or by
+	// the reaper (macOS).
+	var reaper *exec.Cmd
+	if g.reaper != "" {
+		var err error
+		if reaper, err = proc.StartReaper(g.reaper, cmd.Process.Pid); err != nil {
+			g.log.Warn("artwork: starting the ffmpeg reaper", "err", err)
+		}
 	}
 	setNice(cmd.Process.Pid, g.niceness) // best effort
 	if g.started != nil {
 		g.started(cmd.Process.Pid)
 	}
-	if err := cmd.Wait(); err != nil {
+	err := <-exited
+	proc.StopReaper(reaper)
+	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}

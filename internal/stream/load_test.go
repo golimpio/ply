@@ -301,14 +301,14 @@ func TestLoadHookFiresWhenPlaysStartAndEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	calls("a session started", 1)
+	calls("a session started (its place was reserved, then it was there)", 2)
 
 	k := DirectKey{ItemID: 5, IP: "10.0.0.2", UserAgent: "VLC"}
 	_, done, err := m.DirectFile(k, "Movie", "VLC", "/media/y.mkv", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	calls("a direct play began", 2)
+	calls("a direct play began", 3)
 	_, done2, err := m.DirectFile(k, "Movie", "VLC", "/media/y.mkv", 0) // another connection of the same player
 	if err != nil {
 		t.Fatal(err)
@@ -316,38 +316,138 @@ func TestLoadHookFiresWhenPlaysStartAndEnd(t *testing.T) {
 	done()
 	done2()
 	m.Heartbeat(s.ID, Beat{Paused: ptrTo(true)})
-	calls("more requests of a play already counted, and a heartbeat", 2)
+	calls("more requests of a play already counted, and a heartbeat", 3)
 
 	if !m.Delete(s.ID) {
 		t.Fatal("Delete found no session")
 	}
-	calls("a session ended", 3)
+	calls("a session ended", 4)
 
 	clk.Advance(DirectTTL)
 	if m.PlaybackLoad().Sessions != 0 {
 		t.Fatal("the direct play is still counted after DirectTTL")
 	}
-	calls("a direct play ran out", 4)
+	calls("a direct play ran out", 5)
 	m.PlaybackLoad()
 	m.Playing()
-	calls("looking again", 4)
+	calls("looking again", 5)
 
 	id, _, err := m.DirectFile(DirectKey{ItemID: 6, IP: "10.0.0.2", UserAgent: "VLC"}, "Movie", "VLC", "/media/z.mkv", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	calls("another direct play began", 5)
+	calls("another direct play began", 6)
 	if !m.Delete(id) {
 		t.Fatal("Delete found no direct play")
 	}
-	calls("a direct play was dropped", 6)
+	calls("a direct play was dropped", 7)
 
 	if _, err := m.Create(ctx, fakeRequest()); err != nil {
 		t.Fatal(err)
 	}
-	calls("a session started", 7)
+	calls("a session started", 9)
 	m.Close()
-	calls("the manager closed", 8)
+	calls("the manager closed", 10)
+}
+
+// gatedKeyframes is a keyframe cache that holds Create where the keyframe scan of a first
+// play would, until the test lets it go (or fails it).
+type gatedKeyframes struct {
+	entered chan struct{} // told when Create is inside
+	release chan error    // what Create is let go with: nil for the index, or why not
+}
+
+func (g gatedKeyframes) Keyframes(ctx context.Context, _ int64) ([]float64, bool, error) {
+	g.entered <- struct{}{}
+	select {
+	case err := <-g.release:
+		if err != nil {
+			return nil, false, err
+		}
+		return evenKeyframes(600, 2), true, nil
+	case <-ctx.Done():
+		return nil, false, ctx.Err()
+	}
+}
+func (gatedKeyframes) SetKeyframes(context.Context, int64, []float64) error { return nil }
+
+// A play is being set up from the moment Create reserves its place: the file is in the load
+// (and the governor told at once) while the keyframe index is being read, which on the first
+// play of a film over a slow share is minutes; and when Create gives up, it is out of it
+// again, and the governor is told that too.
+func TestPlaybackLoadCountsAPlayBeingSetUp(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		fail    error
+		wantErr bool
+		after   PlaybackLoad
+	}{
+		{"the session comes", nil, false, PlaybackLoad{Sessions: 1, Active: 1, Paths: []string{"/media/x.mkv"}}},
+		{"it ends without one", errors.New("disk gone"), true, PlaybackLoad{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gate := gatedKeyframes{entered: make(chan struct{}, 1), release: make(chan error, 1)}
+			m := fakeManager(t, sleepingFFmpeg(t), func(o *Options) { o.Cache = gate })
+			n := countLoadChanges(m)
+			checkLoad(t, m, "before the play", PlaybackLoad{}) // positive control
+
+			// The hook is counted before anything asks for the load: PlaybackLoad lets go of the
+			// lock as every change does, and would tell the governor of a change nobody told it of.
+			created := make(chan error, 1)
+			go func() { _, err := m.Create(context.Background(), fakeRequest()); created <- err }()
+			<-gate.entered
+			reserved := n.Load()
+			if reserved != 1 {
+				t.Errorf("hook called %d times when the place was reserved, want 1", reserved)
+			}
+			checkLoad(t, m, "while the index is read", PlaybackLoad{Sessions: 1, Active: 1, Paths: []string{"/media/x.mkv"}})
+			select {
+			case err := <-created:
+				t.Fatalf("Create returned (%v) before the index was read", err)
+			default:
+			}
+
+			gate.release <- tc.fail
+			err := <-created
+			all := n.Load() // before checkLoad, which would make up for a hook that was not called
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("Create = %v", err)
+			}
+			if all != 2 {
+				t.Errorf("hook called %d times in all, want 2: the place reserved, and then the session or the place given up", all)
+			}
+			checkLoad(t, m, "after Create", tc.after)
+			if got := n.Load(); got != all {
+				t.Errorf("asking for the load told the governor of %d more changes: nothing had changed since", got-all)
+			}
+		})
+	}
+}
+
+// Two plays of one file being set up are two plays; a refused one (at the limit) is none.
+func TestPlaybackLoadCountsEachPlayBeingSetUp(t *testing.T) {
+	gate := gatedKeyframes{entered: make(chan struct{}, 2), release: make(chan error, 2)}
+	m := fakeManager(t, sleepingFFmpeg(t), func(o *Options) { o.Cache = gate; o.MaxSessions = 2 })
+	created := make(chan error, 3)
+	for range 2 {
+		go func() { _, err := m.Create(context.Background(), fakeRequest()); created <- err }()
+	}
+	<-gate.entered
+	<-gate.entered
+	checkLoad(t, m, "two being set up", PlaybackLoad{Sessions: 2, Active: 2, Paths: []string{"/media/x.mkv"}})
+
+	var limit *LimitError
+	if _, err := m.Create(context.Background(), fakeRequest()); !errors.As(err, &limit) {
+		t.Fatalf("a third play at the limit = %v, want the limit", err)
+	}
+	checkLoad(t, m, "a refused play adds nothing", PlaybackLoad{Sessions: 2, Active: 2, Paths: []string{"/media/x.mkv"}})
+
+	gate.release <- errors.New("one fails")
+	gate.release <- nil
+	for range 2 {
+		<-created
+	}
+	checkLoad(t, m, "one failed, one became a session", PlaybackLoad{Sessions: 1, Active: 1, Paths: []string{"/media/x.mkv"}})
 }
 
 // The hook is called with no lock of the manager held: it may ask for the load.
@@ -383,6 +483,9 @@ func TestLoadHookMayCallBackIntoTheManager(t *testing.T) {
 		}
 	default:
 		t.Fatal("the hook was not called")
+	}
+	for len(seen) > 0 { // (it was told twice: the place reserved, and the session)
+		<-seen
 	}
 	m.OnLoadChange(nil) // removed
 	m.Close()

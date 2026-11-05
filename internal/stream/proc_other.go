@@ -9,8 +9,6 @@ import (
 	"time"
 )
 
-func ownGroup(cmd *exec.Cmd) {}
-
 func signalGroup(cmd *exec.Cmd, stop bool) error {
 	return errors.New("pausing ffmpeg is not supported on this platform")
 }

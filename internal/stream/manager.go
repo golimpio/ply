@@ -15,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"ply/internal/proc"
 )
 
 var (
@@ -217,6 +219,9 @@ type Manager struct {
 	mu       sync.Mutex
 	sessions map[string]*Session
 	reserved int
+	// The files of the sessions being set up (Create between its reservation and the
+	// session), with how many each; PlaybackLoad counts them as plays.
+	reservedPaths map[string]int
 	// Sessions taken out of sessions whose ffmpeg and files are not gone yet. They
 	// count in Count, and against the limits only once they have been stopping for
 	// more than StopGrace.
@@ -293,7 +298,7 @@ func NewManager(o Options) (*Manager, error) {
 		o: o, log: o.Logger, dir: dir, ctx: ctx, cancel: cancel,
 		sessions: map[string]*Session{}, stopping: map[string]stopInfo{}, direct: map[DirectKey]*directPlay{},
 		recentDirect: map[DirectKey]time.Time{}, stoppedIDs: map[string]time.Time{}, stoppedDirect: map[DirectKey]time.Time{},
-		maxStreams: o.MaxSessions, maxTranscodes: o.MaxTranscodes, reg: reg,
+		maxStreams: o.MaxSessions, maxTranscodes: o.MaxTranscodes, reg: reg, reservedPaths: map[string]int{},
 		kfCalls: map[string]*kfCall{}, kfDistrust: map[distrustKey]time.Time{}, kfLocks: map[string]*pathLock{}, clock: o.Clock,
 	}
 	if reaperWanted && o.Reaper != "" {
@@ -305,30 +310,14 @@ func NewManager(o Options) (*Manager, error) {
 }
 
 // reaperLink makes <data>/ply-reaper, a symbolic link to the program that is the
-// reaper (ply itself), and returns it: the process is then named ply-reaper, and
-// `killall ply` (or a script that kills every ply it finds) does not take the
-// reapers down with the server they are there to outlive. Where it cannot be made,
-// or there is no data directory to make it in, the program is run as it is.
+// reaper (ply itself), and returns it (see proc.ReaperLink). Without a data
+// directory to make it in, the program is run as it is.
 func reaperLink(o Options) string {
 	dir := o.Data
 	if dir == "" && o.RegistryDir != "" {
 		dir = filepath.Dir(o.RegistryDir)
 	}
-	if dir == "" {
-		return o.Reaper
-	}
-	link, tmp := filepath.Join(dir, "ply-reaper"), filepath.Join(dir, fmt.Sprintf(".ply-reaper-%d", os.Getpid()))
-	_ = os.Remove(tmp)
-	if err := os.Symlink(o.Reaper, tmp); err != nil {
-		o.Logger.Warn("cannot link the reaper; it will run under the name of the server", "err", err)
-		return o.Reaper
-	}
-	if err := os.Rename(tmp, link); err != nil { // replaces a link an earlier start made, atomically
-		_ = os.Remove(tmp)
-		o.Logger.Warn("cannot link the reaper; it will run under the name of the server", "err", err)
-		return o.Reaper
-	}
-	return link
+	return proc.ReaperLink(dir, o.Reaper, o.Logger)
 }
 
 // legacyRootOK reports whether root is a real directory of ours, one that
@@ -578,15 +567,24 @@ func (m *Manager) Create(ctx context.Context, r Request) (*Session, error) {
 	if transcode {
 		m.reservedTranscodes++
 	}
+	// The play is being set up from here: the governor must see its file at once, for the
+	// keyframe scan of a first play over a slow share is minutes of reading (PlaybackLoad).
+	m.reservedPaths[r.Path]++
+	m.loadDirty = true
 	m.unlock()
-	// unreserve gives back the place held for this session, with m.mu held.
+	// unreserve gives back the place held for this session, with m.mu held; whoever calls
+	// it lets go of the lock with m.unlock, which tells the governor.
 	unreserve := func() {
 		m.reserved--
 		if transcode {
 			m.reservedTranscodes--
 		}
+		if m.reservedPaths[r.Path]--; m.reservedPaths[r.Path] <= 0 {
+			delete(m.reservedPaths, r.Path)
+		}
+		m.loadDirty = true
 	}
-	release := func() { m.mu.Lock(); unreserve(); m.mu.Unlock() }
+	release := func() { m.mu.Lock(); unreserve(); m.unlock() }
 
 	var kf []float64
 	var source string
@@ -629,13 +627,12 @@ func (m *Manager) Create(ctx context.Context, r Request) (*Session, error) {
 	m.mu.Lock()
 	unreserve()
 	if m.closed {
-		m.mu.Unlock()
+		m.unlock()
 		_ = os.RemoveAll(dir)
 		return nil, ErrClosed
 	}
 	m.sessions[id] = s
 	m.wg.Add(1)
-	m.loadDirty = true
 	m.unlock()
 	go func() { defer m.wg.Done(); s.monitor() }()
 

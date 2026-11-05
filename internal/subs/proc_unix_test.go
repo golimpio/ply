@@ -30,9 +30,10 @@ func psInt(t *testing.T, field string, pid int) int {
 }
 
 // startHangingFFmpeg runs a conversion whose "ffmpeg" records its pid (and that
-// of a helper process it forks, if helper is set) and then hangs. It returns
-// the pids and the channel the request's result arrives on.
-func startHangingFFmpeg(t *testing.T, o Options, helper bool) (g *Generator, leader, child int, result <-chan error) {
+// of a helper process it forks, if helper is set) and then hangs. The conversion
+// is a play's (Path) or, with background, the library's (Fill). It returns the
+// pids and the channel the request's result arrives on.
+func startHangingFFmpeg(t *testing.T, o Options, helper, background bool) (g *Generator, leader, child int, result <-chan error) {
 	t.Helper()
 	dir := t.TempDir()
 	pids := filepath.Join(dir, "pids")
@@ -61,7 +62,15 @@ func startHangingFFmpeg(t *testing.T, o Options, helper bool) (g *Generator, lea
 
 	src := Source{ItemID: 1, Key: "2", Input: existingFile(t, "a.mkv"), Stream: 2, MTime: 5}
 	res := make(chan error, 1)
-	go func() { _, err := g.Path(context.Background(), src); res <- err }()
+	go func() {
+		var err error
+		if background {
+			err = g.Fill(context.Background(), []Source{src}, nil, nil)
+		} else {
+			_, err = g.Path(context.Background(), src)
+		}
+		res <- err
+	}()
 	waitFor(t, "ffmpeg to start", func() bool {
 		b, err := os.ReadFile(pids)
 		if err != nil {
@@ -73,37 +82,47 @@ func startHangingFFmpeg(t *testing.T, o Options, helper bool) (g *Generator, lea
 	return g, leader, child, res
 }
 
-// A conversion's ffmpeg runs at the configured priority (default 10): a
-// subtitle extraction reads a whole container and must not compete with
-// playback for the disk and the CPU.
+// A background conversion's ffmpeg runs at the configured priority (default 10):
+// a subtitle extraction reads a whole container and must not compete with
+// playback for the disk and the CPU. The one a play waits for is not demoted.
 func TestFFmpegRunsNiced(t *testing.T) {
 	baseline := psInt(t, "nice", os.Getpid())
 	if baseline > 0 {
 		t.Skipf("the test process itself runs at nice %d; cannot tell reniced children apart", baseline)
 	}
 	for _, tc := range []struct {
-		name string
-		o    Options
-		want int
+		name       string
+		o          Options
+		background bool
+		want       int
 	}{
-		{"default", Options{}, 10},
-		{"configured", Options{Niceness: 5}, 5},
+		{"default", Options{}, true, 10},
+		{"configured", Options{Niceness: 5}, true, 5},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, leader, _, _ := startHangingFFmpeg(t, tc.o, false)
+			_, leader, _, _ := startHangingFFmpeg(t, tc.o, false, tc.background)
 			// The parent renices the child just after starting it.
 			waitFor(t, fmt.Sprintf("ffmpeg to run at nice %d", tc.want), func() bool {
 				return psInt(t, "nice", leader) == tc.want
 			})
 		})
 	}
+
+	t.Run("a play's is not", func(t *testing.T) {
+		_, leader, _, _ := startHangingFFmpeg(t, Options{}, false, false)
+		time.Sleep(300 * time.Millisecond) // long enough for a renice to have happened (it does, above)
+		if n := psInt(t, "nice", leader); n != 0 {
+			t.Errorf("the subtitles a play waits for run at nice %d, want 0", n)
+		}
+	})
 }
 
-// A conversion that outlives Timeout is stopped with everything it started, and
-// the request gets the deadline error (not a conversion failure that would be
-// remembered against the file).
+// A conversion that outlives Timeout is stopped with everything it started, and is a
+// failure like any other (ErrConvert, saying why): remembered, in memory and on disk, so that
+// neither a request nor the next scan reads the film for hours again to find out.
+// (A run suspended for a play does not use its time: TestHeldTimeDoesNotCount….)
 func TestTimeoutKillsTheProcessGroup(t *testing.T) {
-	g, leader, helper, result := startHangingFFmpeg(t, Options{Timeout: 2 * time.Second}, true)
+	g, leader, helper, result := startHangingFFmpeg(t, Options{Timeout: 2 * time.Second}, true, false)
 	start := time.Now()
 
 	// Positive controls: both processes run, the leader leads its own group
@@ -120,8 +139,8 @@ func TestTimeoutKillsTheProcessGroup(t *testing.T) {
 
 	select {
 	case err := <-result:
-		if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrConvert) {
-			t.Errorf("Path = %v, want the deadline error", err)
+		if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, ErrConvert) {
+			t.Errorf("Path = %v, want a conversion failure that says the deadline passed", err)
 		}
 		if d := time.Since(start); d > 6*time.Second {
 			t.Errorf("a 2 s timeout took %v", d)
@@ -130,7 +149,10 @@ func TestTimeoutKillsTheProcessGroup(t *testing.T) {
 		t.Fatal("the conversion was not stopped by its timeout")
 	}
 	waitFor(t, "ffmpeg and its helper to be gone", func() bool { return !alive(leader) && !alive(helper) })
-	if len(g.failed) != 0 {
-		t.Errorf("a timeout was remembered as a failure: %v", g.failed)
+	if len(g.failed) != 1 {
+		t.Errorf("a timeout was not remembered as a failure: %v", g.failed)
+	}
+	if err := g.Failed(Source{ItemID: 1, Key: "2", Input: "/a.mkv", Stream: 2, MTime: 5}); !errors.Is(err, ErrConvert) {
+		t.Errorf("the failure is not on disk: Failed = %v", err)
 	}
 }

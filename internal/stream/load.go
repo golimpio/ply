@@ -19,8 +19,10 @@ type PlaybackLoad struct {
 
 // PlaybackLoad reports what is being played, from what the manager already
 // keeps: it takes the manager's lock for a short while and never waits for ffmpeg.
-// Sessions being stopped are not counted, as in Playing; neither are plays being
-// set up. A player that has not said it is paused counts as active.
+// Sessions being stopped are not counted, as in Playing. A play being set up is:
+// from the moment Create reserves its place, whatever the keyframe scan of a first
+// play (minutes, over a slow share) is reading is a play's reading, and the files it
+// will play are in Paths. A player that has not said it is paused counts as active.
 func (m *Manager) PlaybackLoad() PlaybackLoad {
 	m.mu.Lock()
 	m.pruneDirectLocked()
@@ -46,6 +48,11 @@ func (m *Manager) PlaybackLoad() PlaybackLoad {
 	for _, d := range m.direct {
 		add(d.path, d.paused)
 	}
+	for path, n := range m.reservedPaths {
+		for range n {
+			add(path, false)
+		}
+	}
 	l.Waiting = int(m.waiting.Load())
 	m.unlock()
 	slices.Sort(l.Paths)
@@ -54,7 +61,8 @@ func (m *Manager) PlaybackLoad() PlaybackLoad {
 
 // OnLoadChange sets the function called when PlaybackLoad may have changed
 // enough for a governor to look again: a play starts or ends (a session is
-// created or removed, a direct play begins or runs out) or the first request
+// created or removed, a direct play begins or runs out), a session begins to be set
+// up or that ends without one (Create reserves its place, and gives it up), or the first request
 // starts to wait for ffmpeg (Waiting goes from 0 to 1; more waiting is no news).
 // f runs on the goroutine that made the change, with no lock of the manager
 // held, so it may call back into the manager, but it must be quick and must not

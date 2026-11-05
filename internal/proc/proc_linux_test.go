@@ -1,4 +1,4 @@
-package stream
+package proc
 
 import (
 	"bytes"
@@ -16,17 +16,16 @@ import (
 )
 
 // On Linux the kernel kills ffmpeg when ply dies: without Pdeathsig an ffmpeg
-// outlives a ply that is killed (TestKilledServerLeavesNoFFmpeg checks that it
-// does not, with a real crash).
-func TestFFmpegDiesWithItsParent(t *testing.T) {
+// outlives a ply that is killed.
+func TestChildDiesWithItsParent(t *testing.T) {
 	cmd := exec.Command("ffmpeg")
-	ownGroup(cmd)
+	OwnGroup(cmd)
 	a := cmd.SysProcAttr
 	if a == nil || a.Pdeathsig != syscall.SIGKILL {
 		t.Errorf("SysProcAttr = %+v, want Pdeathsig SIGKILL", a)
 	}
 	if !a.Setpgid {
-		t.Error("ffmpeg does not get a process group of its own")
+		t.Error("the child does not get a process group of its own")
 	}
 }
 
@@ -53,19 +52,24 @@ func firstLine(s string) string {
 	return line
 }
 
+func procState(pid int) string {
+	out, _ := exec.Command("ps", "-o", "state=", "-p", strconv.Itoa(pid)).Output()
+	return strings.TrimSpace(string(out))
+}
+
 // A helper process, not a test: it starts a process the way a session starts
-// ffmpeg (ownGroup, startProcess), says its pid, and then goes on churning the Go
-// runtime for ever: goroutines that lock their threads and exit, which retires
-// those threads, and collections. A child whose Pdeathsig is tied to a thread
-// that retires would be killed by that, with its parent alive.
+// ffmpeg (OwnGroup, Start), says its pid, and then goes on churning the Go runtime
+// for ever: goroutines that lock their threads and exit, which retires those
+// threads, and collections. A child whose Pdeathsig is tied to a thread that retires
+// would be killed by that, with its parent alive.
 func TestHelperStartsAProcessLikeASession(t *testing.T) {
 	if os.Getenv("PLY_TEST_PDEATHSIG_HELPER") == "" {
 		t.Skip("helper process of TestAProcessStartedLikeASessionDiesWithItsParent")
 	}
-	// (ownGroup sets Cancel, which only a command made with CommandContext may have.)
+	// (OwnGroup sets Cancel, which only a command made with CommandContext may have.)
 	cmd := exec.CommandContext(context.Background(), "sleep", "300")
-	ownGroup(cmd)
-	if err := startProcess(cmd, func(error) {}); err != nil {
+	OwnGroup(cmd)
+	if err := Start(cmd, func(error) {}); err != nil {
 		t.Fatal(err)
 	}
 	fmt.Println(cmd.Process.Pid)
@@ -85,9 +89,9 @@ func TestHelperStartsAProcessLikeASession(t *testing.T) {
 	}
 }
 
-// The real thing: a process started through startProcess lives as long as its
-// parent does, whatever the runtime does with its threads, and dies with it when
-// it is killed (kill -9), at once and without anybody's help.
+// The real thing: a process started through Start lives as long as its parent
+// does, whatever the runtime does with its threads, and dies with it when it is
+// killed (kill -9), at once and without anybody's help.
 func TestAProcessStartedLikeASessionDiesWithItsParent(t *testing.T) {
 	helper := exec.Command(os.Args[0], "-test.run=^TestHelperStartsAProcessLikeASession$")
 	helper.Env = append(os.Environ(), "PLY_TEST_PDEATHSIG_HELPER=1")

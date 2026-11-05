@@ -1,12 +1,13 @@
 //go:build !unix
 
-package stream
+package proc
 
 import (
 	"errors"
 	"os/exec"
 )
 
-func startReaper(exe string, pgid int) (*exec.Cmd, error) {
+// StartReaper is not supported here.
+func StartReaper(exe string, pgid int) (*exec.Cmd, error) {
 	return nil, errors.New("not supported on this platform")
 }

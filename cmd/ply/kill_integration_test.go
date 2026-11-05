@@ -3,7 +3,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -385,6 +387,142 @@ func TestRegistrySweepFindsAnOrphanFromAnotherTmpdir(t *testing.T) {
 	case <-p2.exited:
 	case <-time.After(10 * time.Second):
 		t.Fatal("the second ply did not exit on SIGTERM")
+	}
+}
+
+// The ffmpeg of the subtitles is guarded like the ones of playback: a ply that is killed (kill -9, the
+// OOM killer) must not leave a film being read for an hour by an extraction nobody is waiting for. One
+// extraction is the background job that the scan of a film with a text track in its container queues;
+// the other is a request for a sidecar, which a viewer waits for; and a request for the container's
+// track joins the first. Running or suspended (a play holds it), they are gone within killWithin.
+func TestKillMinus9LeavesNoSubtitleFFmpeg(t *testing.T) {
+	for _, bin := range []string{"ffmpeg", "ffprobe"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not found on PATH", bin)
+		}
+	}
+	base := t.TempDir()
+	media := filepath.Join(base, "media")
+	bin := buildPly(t, base)
+	makeFixtures(t, media)
+	// A film with a text track in its container.
+	subbed := filepath.Join(media, "Movies", "Subbed (2023).mkv")
+	srtFile := filepath.Join(base, "subbed.srt")
+	if err := os.WriteFile(srtFile, []byte(srt), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=duration=3:size=160x120:rate=10",
+		"-i", srtFile, "-map", "0", "-map", "1", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:s", "srt", subbed).CombinedOutput(); err != nil {
+		t.Fatalf("making the film: %v\n%s", err, out)
+	}
+	old := time.Now().Add(-time.Minute)
+	if err := os.Chtimes(subbed, old, old); err != nil {
+		t.Fatal(err)
+	}
+	fake := filepath.Join(base, "ffmpeg")
+	if err := os.WriteFile(fake, []byte(sleepyFFmpeg), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, v := range []struct {
+		name    string
+		stopped bool // SIGSTOP the extractions first
+	}{{"running", false}, {"stopped", true}} {
+		t.Run(v.name, func(t *testing.T) {
+			dir := filepath.Join(base, v.name)
+			data, tmp := filepath.Join(dir, "data"), filepath.Join(dir, "tmp")
+			if err := os.MkdirAll(tmp, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			p := startPly(t, base, bin, tmp, "-movies", filepath.Join(media, "Movies"), "-shows", filepath.Join(media, "Shows"),
+				"-addr", "127.0.0.1:0", "-data", data, "-token", e2eToken, "-name", e2eName, "-scan-interval", "0", "-hwaccel", "none",
+				"-ffmpeg", fake)
+			c := &client{t: t, base: p.waitForURL(), http: &http.Client{Timeout: 60 * time.Second}}
+			bearer := map[string]string{"Authorization": "Bearer " + e2eToken}
+			c.waitForScan(3)
+			var items []item
+			_, body := c.do("GET", "/api/items", "", bearer)
+			mustJSON(t, body, &items)
+			var film, episode item
+			for _, it := range items {
+				switch {
+				case it.Title == "Subbed":
+					film = it
+				case it.Kind == "episode":
+					episode = it
+				}
+			}
+			if film.ID == 0 || episode.ID == 0 {
+				t.Fatalf("no film with subtitles, or no episode, in %s", body)
+			}
+
+			// The scan queued the background extraction of the film's track: an ffmpeg (here a sleep).
+			sleepers := func() []procInfo { return p.children("sleep") }
+			waitUntil(t, "the background extraction to start", 30*time.Second, func() bool { return len(sleepers()) == 1 })
+
+			// A viewer asks for the container's track (joins that run) and for a sidecar (a run of its own);
+			// neither answer ever comes, as the fake ffmpeg never writes.
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			for _, id := range []int64{film.ID, episode.ID} {
+				_, body := c.do("GET", fmt.Sprintf("/api/items/%d", id), "", bearer)
+				var det detail
+				mustJSON(t, body, &det)
+				if len(det.Subtitles) == 0 || det.Subtitles[0].URL == "" {
+					t.Fatalf("item %d lists no subtitle: %s", id, body)
+				}
+				req, err := http.NewRequestWithContext(ctx, "GET", c.base+det.Subtitles[0].URL, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				go func() {
+					if resp, err := http.DefaultClient.Do(req); err == nil {
+						_, _ = io.Copy(io.Discard, resp.Body)
+						resp.Body.Close()
+					}
+				}()
+			}
+			waitUntil(t, "the viewer's two extractions to be going", 30*time.Second, func() bool { return len(sleepers()) == 2 })
+			ffmpegs := sleepers()
+			for _, f := range ffmpegs {
+				if !processAlive(f.pid) || f.pgid != f.pid {
+					t.Fatalf("positive control: %v is not alive and leading a group of its own", f)
+				}
+			}
+			if runtime.GOOS == "darwin" { // one reaper each, detached
+				if rs := reapers(t, p.pid); len(rs) != len(ffmpegs) {
+					t.Fatalf("positive control: %d reapers for %d extractions: %v", len(rs), len(ffmpegs), rs)
+				}
+			}
+			if v.stopped {
+				stopGroups(t, ffmpegs)
+			} else {
+				for _, f := range ffmpegs {
+					_ = syscall.Kill(-f.pgid, syscall.SIGCONT)
+				}
+				for _, f := range ffmpegs {
+					if s := stateOf(f.pid); s == "" || strings.HasPrefix(s, "T") {
+						t.Fatalf("positive control: extraction %d is %q, want it running", f.pid, s)
+					}
+				}
+			}
+
+			killed := time.Now()
+			if err := p.cmd.Process.Kill(); err != nil { // SIGKILL: no handler, no cleanup
+				t.Fatal(err)
+			}
+			<-p.exited
+			took := waitDead(t, ffmpegs, killWithin, killed)
+			t.Logf("%s: both extractions gone %v after kill -9 of ply", v.name, took.Round(time.Millisecond))
+
+			deadline := time.Now().Add(3 * time.Second)
+			for len(mentioning(t, dir)) != 0 {
+				if time.Now().After(deadline) {
+					t.Fatalf("processes still reference %s: %v", dir, mentioning(t, dir))
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+		})
 	}
 }
 

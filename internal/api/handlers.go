@@ -163,6 +163,12 @@ func (s *Server) handlePlayback(w http.ResponseWriter, r *http.Request) {
 		}
 		opts.SubtitleIndex = *req.SubtitleIndex
 	}
+	// From here until the first seconds of the play are over, no frame is grabbed from this file:
+	// the grab would read it at the same time as the play.
+	endPlay := s.beginPlay(e.ID)
+	started := false
+	defer func() { endPlay(started) }()
+
 	d := decide(e, profile, opts)
 	pb := s.playbackFrom(e, d, req.StartSec)
 	if d.Method == playback.MethodDirect {
@@ -173,6 +179,7 @@ func (s *Server) handlePlayback(w http.ResponseWriter, r *http.Request) {
 	} else if !s.attachSession(w, r, e, d, profile, req.StartSec, &pb) {
 		return
 	}
+	started = true
 	writeJSON(w, http.StatusOK, pb)
 }
 

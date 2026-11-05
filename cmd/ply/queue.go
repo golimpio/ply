@@ -55,6 +55,7 @@ func newQueue(d queueDeps) *jobs.Queue {
 		Gate:    d.gov,
 		Logger:  d.log,
 		Extra:   scannerActivity(d.scanner),
+		Light:   3, // a subtitle extraction or picture can read for minutes, and must not take the lane from the lookups and ratings beside it
 	})
 
 	// The scanner asks before every file it reads. Under a job it reports the
@@ -147,6 +148,8 @@ func newQueue(d queueDeps) *jobs.Queue {
 		},
 	})
 	registerRatings(q, d)
+	registerSubs(q, d)
+	registerArtGrab(q, d)
 	return q
 }
 

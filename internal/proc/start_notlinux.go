@@ -1,6 +1,6 @@
 //go:build !linux
 
-package stream
+package proc
 
 import (
 	"os/exec"
@@ -11,9 +11,9 @@ import (
 // whose parent died. (On macOS ply starts a reaper for each group instead.)
 func dieWithParent(*syscall.SysProcAttr) {}
 
-// startProcess starts cmd and calls exited, on its own goroutine, with the
-// result of Wait once it has ended. It returns Start's error.
-func startProcess(cmd *exec.Cmd, exited func(error)) error {
+// Start starts cmd and calls exited, on its own goroutine, with the result of
+// Wait once it has ended. It returns Start's error.
+func Start(cmd *exec.Cmd, exited func(error)) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}

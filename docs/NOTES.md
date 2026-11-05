@@ -159,8 +159,16 @@ stop being true.
 - **WebVTT** (`internal/subs`). One niced ffmpeg run per track (`-map 0:<idx> -c:s webvtt` for embedded, plain
   `-i file` for sidecars), cached as `<data>/subs/<id>-<key>-<mtime>.vtt` (sidecars add a path hash, because the list
   behind ext0 can change; their mtime is the sidecar's own). Concurrent requests share a run; a failure is remembered
-  until the mtime changes (422 for the client). Embedded extraction reads the whole container once, so the first
-  request on a big remux is slow (10 min timeout; the run outlives the request). Pruned after each scan with the
+  until the mtime changes (422 for the client). Embedded extraction reads the whole container once, so a track that
+  is not cached is slow on a big remux; since M9 the answer is streamed as ffmpeg writes it, a run extracts all the
+  item's text tracks in one read (one `-map` output each), the queue does it ahead of time, and the limit is 3 hours
+  of running time (a run suspended for a play does not use it up). Without `-flush_packets 1` ffmpeg writes the
+  WebVTT in 32 KB steps, which for a film is the end of the run (measured 2026-11-05 with `-re`: no bytes for 12 s
+  without it, a cue at a time with it). Headless Chromium parses a `<track>` as it arrives (cues 1..6 over a
+  9 s chunked response, `readyState` LOADING until the end), so the player needed no change. The muxer writes the blank
+  line after a cue before the *next* cue (the file ends `...text\n`), so the follower gives out the last cue once the
+  file has not grown for a poll. A failed conversion leaves `<id>-<key>-<mtime>.fail` beside the cache (the generator's
+  `Failed`), a file that cannot be read is `ErrUnavailable` and leaves nothing. Pruned after each scan with the
   artwork cache. ffmpeg exits 0 after dropping the rest of a non-UTF-8 `.srt` ("maybe missing -sub_charenc"), so
   sidecars that are neither valid UTF-8 nor UTF-16 with a BOM get `-sub_charenc WINDOWS-1252`.
   Text codecs: subrip, ass, ssa, mov_text, webvtt (and `text`/`srt`). Image codecs are 404 here.
