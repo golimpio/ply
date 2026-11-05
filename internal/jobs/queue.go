@@ -49,6 +49,9 @@ type Queue struct {
 	specs map[string]*Spec
 	hub   *hub
 	enqMu sync.Mutex // one enqueue at a time: the merge check and the insert are one step
+	// closed is set (under enqMu) once Run has returned: an enqueue then fails with
+	// ErrClosed instead of writing to a store that is being closed.
+	closed bool
 	ready chan struct{}
 
 	mu        sync.Mutex
@@ -195,6 +198,9 @@ func (q *Queue) enqueue(ctx context.Context, kind string, o Opt, waiter chan out
 
 	q.enqMu.Lock()
 	defer q.enqMu.Unlock()
+	if q.closed {
+		return Job{}, ErrClosed
+	}
 	q.mu.Lock()
 	if o.Key != "" {
 		if e := q.queuedWithKey(kind, o.Key); e != nil {
@@ -298,6 +304,13 @@ func (q *Queue) poke() {
 func (q *Queue) Run(ctx context.Context) {
 	q.load(ctx)
 	close(q.ready)
+	// Last of all, once the running jobs are back in the queue: no more enqueues.
+	// (An enqueue while the jobs stop is fine: it is stored, and runs at the next start.)
+	defer func() {
+		q.enqMu.Lock()
+		q.closed = true
+		q.enqMu.Unlock()
+	}()
 	prune := time.NewTicker(time.Hour)
 	defer prune.Stop()
 	tierTick := time.NewTicker(time.Second)

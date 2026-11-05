@@ -187,6 +187,9 @@ var ErrCancelled = errors.New("cancelled")
 // ErrUnknownKind is returned for a kind nobody registered.
 var ErrUnknownKind = errors.New("jobs: unknown kind")
 
+// ErrClosed is returned by an enqueue after Run has returned (ply is stopping).
+var ErrClosed = errors.New("jobs: the queue has stopped")
+
 // ErrNotFound is returned for an id the queue does not have (or no longer has).
 var ErrNotFound = errors.New("jobs: no such job")
 

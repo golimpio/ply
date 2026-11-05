@@ -714,6 +714,29 @@ func (m *slowPausedMem) QueuePaused(ctx context.Context) (bool, error) {
 	return false, nil
 }
 
+// Once Run has returned (ply is stopping), an enqueue is refused instead of
+// writing to a store that is being closed.
+func TestNoEnqueueAfterTheQueueStopped(t *testing.T) {
+	mem := newMem()
+	q, stop := start(t, Options{Persist: mem}, Spec{Kind: "x", Run: func(context.Context, *Run) error { return nil }})
+	_ = q.SetPaused(context.Background(), true)
+	if _, err := q.Enqueue(context.Background(), "x", Opt{}); err != nil { // positive control
+		t.Fatalf("enqueue while running: %v", err)
+	}
+	stop()
+	mem.mu.Lock()
+	before := len(mem.rows)
+	mem.mu.Unlock()
+	if _, err := q.Enqueue(context.Background(), "x", Opt{}); !errors.Is(err, ErrClosed) {
+		t.Fatalf("enqueue after stop = %v, want ErrClosed", err)
+	}
+	mem.mu.Lock()
+	defer mem.mu.Unlock()
+	if len(mem.rows) != before {
+		t.Fatal("a refused enqueue still wrote to the store")
+	}
+}
+
 func TestPausedSurvivesARestart(t *testing.T) {
 	mem := newMem()
 	q, stop := start(t, Options{Persist: mem})
