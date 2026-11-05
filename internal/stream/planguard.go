@@ -93,8 +93,9 @@ func (g *planGuard) final() bool {
 
 // awaitPlan blocks until the plan can be relied on: confirmed, rebuilt, or given
 // up on after the deadline. It fails with the error of a session that has failed
-// or whose plan could not be rebuilt, and with ctx's when the caller leaves.
-func (s *Session) awaitPlan(ctx context.Context) error {
+// or whose plan could not be rebuilt, and with ctx's when the caller leaves. w
+// is the request, which counts as waiting for ffmpeg while this blocks.
+func (s *Session) awaitPlan(ctx context.Context, w *waiter) error {
 	g := s.guard
 	if g == nil {
 		return nil
@@ -119,6 +120,7 @@ func (s *Session) awaitPlan(ctx context.Context) error {
 			return g.err
 		}
 		s.touch() // somebody is waiting: the session is in use
+		w.block()
 		select {
 		case <-g.done:
 			return g.err

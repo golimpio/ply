@@ -143,7 +143,7 @@ func (s *Server) admitDirect(w http.ResponseWriter, r *http.Request, e store.Ent
 	if e.Progress != nil {
 		pos = e.Progress.PositionSec
 	}
-	_, done, err := s.Streams.Direct(directKey(e, r), playTitle(e), clientLabel(r), pos)
+	_, done, err := s.Streams.DirectFile(directKey(e, r), playTitle(e), clientLabel(r), e.Path, pos)
 	var le *stream.LimitError
 	if errors.As(err, &le) {
 		writeLimit(w, r, le)

@@ -90,6 +90,7 @@ type directPlay struct {
 	key      DirectKey
 	title    string
 	client   string
+	path     string // the file being read, for PlaybackLoad; empty if not told
 	started  time.Time
 	seen     time.Time // the last request started, ended or was beaten
 	inflight int       // requests being served
@@ -139,6 +140,7 @@ func (m *Manager) pruneDirectLocked() time.Time {
 		if d.inflight == 0 && now.Sub(d.seen) >= DirectTTL {
 			delete(m.direct, k)
 			m.recentDirect[k] = d.seen
+			m.loadDirty = true
 		}
 	}
 	for k, seen := range m.recentDirect {
@@ -195,7 +197,7 @@ func (m *Manager) admitLocked(transcode bool) *LimitError {
 // look the same.
 func (m *Manager) CheckDirect(k DirectKey) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	defer m.unlock()
 	m.pruneDirectLocked()
 	if _, ok := m.direct[k]; ok {
 		return nil
@@ -221,8 +223,14 @@ func (m *Manager) CheckDirect(k DirectKey) error {
 // on. title and client are for the listing; pos is where the play is thought to
 // be, kept until a heartbeat says otherwise.
 func (m *Manager) Direct(k DirectKey, title, client string, pos float64) (id string, done func(), err error) {
+	return m.DirectFile(k, title, client, "", pos)
+}
+
+// DirectFile is Direct for a play that says which file it reads (path), so that
+// PlaybackLoad can report it. A play already counted without a path takes it.
+func (m *Manager) DirectFile(k DirectKey, title, client, path string, pos float64) (id string, done func(), err error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	defer m.unlock()
 	if m.closed {
 		return "", nil, ErrClosed
 	}
@@ -242,6 +250,10 @@ func (m *Manager) Direct(k DirectKey, title, client string, pos float64) (id str
 		d = &directPlay{id: "d-" + hex.EncodeToString(b[:]), key: k, title: title, client: client, started: now, pos: pos}
 		m.direct[k] = d
 		delete(m.recentDirect, k)
+		m.loadDirty = true
+	}
+	if d.path == "" {
+		d.path = path
 	}
 	d.seen = now
 	d.inflight++
@@ -302,7 +314,7 @@ func (m *Manager) Heartbeat(id string, b Beat) bool {
 // is being stopped is not listed) and direct plays.
 func (m *Manager) Playing() []PlayInfo {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	defer m.unlock()
 	m.pruneDirectLocked()
 	return m.playingLocked(nil)
 }

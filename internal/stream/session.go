@@ -29,7 +29,10 @@ type Session struct {
 	plan Plan
 	dir  string
 
-	kind    string // KindTranscode or KindRemux
+	kind string // KindTranscode or KindRemux
+	// soft says the transcode encodes on the CPU (see PlaybackLoad); it changes
+	// when the GPU encoder fails and the software one takes over.
+	soft    atomic.Bool
 	title   string
 	client  string
 	started time.Time
@@ -138,6 +141,7 @@ func newSession(m *Manager, id, dir string, r Request, plan Plan) *Session {
 		kind: KindRemux, title: r.Title, client: r.Client, started: m.clock()}
 	if r.transcode() {
 		s.kind = KindTranscode
+		s.soft.Store(softwareEncoder(r.Video))
 	}
 	s.estPos.Store(math.Float64bits(finitePos(r.StartSec)))
 	s.touch()
@@ -198,7 +202,9 @@ func (s *Session) Playlist(ctx context.Context, suffix string) (string, error) {
 		return "", err
 	}
 	s.touch()
-	if err := s.awaitPlan(ctx); err != nil {
+	w := s.waiter()
+	defer w.done()
+	if err := s.awaitPlan(ctx, &w); err != nil {
 		return "", err
 	}
 	return s.Plan().Playlist(suffix), nil
@@ -342,6 +348,7 @@ func (s *Session) fallBackLocked(failure string) bool {
 	}
 	s.fellBack = true
 	s.req.Video = fb
+	s.soft.Store(softwareEncoder(fb))
 	s.m.log.Warn("GPU transcode failed, falling back to software", "session", s.ID, "err", failure)
 	return true
 }
@@ -594,7 +601,7 @@ func (s *Session) beyondRunLocked(r *run, g int) bool {
 // happens to reach them, or take over when the newer requests are done, or
 // time out). Without this rule two such waiters would kill each other's ffmpeg
 // on every poll, forever.
-func (s *Session) ensureGOP(ctx context.Context, g int, req uint64) error {
+func (s *Session) ensureGOP(ctx context.Context, g int, req uint64, w *waiter) error {
 	timeout := time.NewTimer(s.m.o.WaitTimeout)
 	defer timeout.Stop()
 	poll := time.NewTicker(25 * time.Millisecond)
@@ -655,6 +662,7 @@ func (s *Session) ensureGOP(ctx context.Context, g int, req uint64) error {
 		}
 		s.mu.Unlock()
 
+		w.block() // the fragment is not there: the request waits for ffmpeg
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -670,7 +678,9 @@ func (s *Session) ensureGOP(ctx context.Context, g int, req uint64) error {
 // OpenSegment returns segment idx once all its fragments are complete. The
 // caller closes it.
 func (s *Session) OpenSegment(ctx context.Context, idx int) (*Media, error) {
-	if err := s.awaitPlan(ctx); err != nil {
+	w := s.waiter()
+	defer w.done()
+	if err := s.awaitPlan(ctx, &w); err != nil {
 		return nil, err
 	}
 	plan := s.Plan() // under the lock, once: a plan being replaced is not read half way
@@ -684,7 +694,7 @@ func (s *Session) OpenSegment(ctx context.Context, idx int) (*Media, error) {
 
 	for attempt := 0; ; attempt++ {
 		for g := seg.First; g < seg.End; g++ {
-			if err := s.ensureGOP(ctx, g, req); err != nil {
+			if err := s.ensureGOP(ctx, g, req, &w); err != nil {
 				return nil, err
 			}
 		}
@@ -740,7 +750,9 @@ func (s *Session) OpenInit(ctx context.Context) (io.ReadSeekCloser, error) {
 	// one ends.
 	s.busy.Add(1)
 	defer func() { s.busy.Add(-1); s.touch() }()
-	if err := s.awaitPlan(ctx); err != nil {
+	w := s.waiter()
+	defer w.done()
+	if err := s.awaitPlan(ctx, &w); err != nil {
 		return nil, err
 	}
 	timeout := time.NewTimer(s.m.o.WaitTimeout)
@@ -793,6 +805,7 @@ func (s *Session) OpenInit(ctx context.Context) (io.ReadSeekCloser, error) {
 			}
 			return f, nil
 		}
+		w.block() // ffmpeg has not written the init segment yet
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()

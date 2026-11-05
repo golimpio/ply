@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -219,6 +220,11 @@ type Manager struct {
 	closed             bool
 	wg                 sync.WaitGroup // session monitors and the housekeeping
 
+	// What the tier governor reads and is told of (see PlaybackLoad).
+	loadDirty bool                   // under mu: the plays changed since the last unlock
+	waiting   atomic.Int32           // requests blocked on ffmpeg right now (see waiter)
+	onLoad    atomic.Pointer[func()] // OnLoadChange
+
 	reg       *registry     // nil without Options.RegistryDir
 	reaperExe string        // what is run as the reaper (see reaperLink); empty for none
 	stopGate  chan struct{} // a test's: Session.stop waits for it to be closed
@@ -331,6 +337,9 @@ func (m *Manager) housekeeping() {
 			return
 		case <-t.C:
 			m.leakCheck()
+			m.mu.Lock()
+			m.pruneDirectLocked() // a direct play that ran out is an end, whoever asks
+			m.unlock()
 		}
 	}
 }
@@ -477,7 +486,8 @@ func (m *Manager) Delete(id string) bool {
 			}
 		}
 	}
-	m.mu.Unlock()
+	m.loadDirty = m.loadDirty || ok || dropped
+	m.unlock()
 	if ok {
 		s.stop()
 		m.stopped(id)
@@ -503,9 +513,10 @@ func (m *Manager) Close() {
 		delete(m.sessions, id)
 		m.stopping[id] = stopInfo{since: m.clock(), kind: s.kind}
 	}
+	m.loadDirty = m.loadDirty || len(all) > 0 || len(m.direct) > 0
 	m.direct = map[DirectKey]*directPlay{}
 	m.recentDirect = map[DirectKey]time.Time{}
-	m.mu.Unlock()
+	m.unlock()
 
 	var wg sync.WaitGroup
 	for _, s := range all {
@@ -525,18 +536,18 @@ func (m *Manager) Create(ctx context.Context, r Request) (*Session, error) {
 	transcode := r.transcode()
 	m.mu.Lock()
 	if m.closed {
-		m.mu.Unlock()
+		m.unlock()
 		return nil, ErrClosed
 	}
 	if err := m.admitLocked(transcode); err != nil {
-		m.mu.Unlock()
+		m.unlock()
 		return nil, err
 	}
 	m.reserved++
 	if transcode {
 		m.reservedTranscodes++
 	}
-	m.mu.Unlock()
+	m.unlock()
 	// unreserve gives back the place held for this session, with m.mu held.
 	unreserve := func() {
 		m.reserved--
@@ -593,7 +604,8 @@ func (m *Manager) Create(ctx context.Context, r Request) (*Session, error) {
 	}
 	m.sessions[id] = s
 	m.wg.Add(1)
-	m.mu.Unlock()
+	m.loadDirty = true
+	m.unlock()
 	go func() { defer m.wg.Done(); s.monitor() }()
 
 	s.mu.Lock()
