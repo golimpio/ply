@@ -4,6 +4,7 @@
   import { backdropOf, posterImg, prefersPosters } from '../lib/meta';
   import { resource } from '../lib/resource.svelte';
   import { href } from '../lib/router.svelte';
+  import { titleBadge } from '../lib/library.svelte';
   import BackButton from '../components/BackButton.svelte';
   import Hero from '../components/Hero.svelte';
   import MediaCard from '../components/MediaCard.svelte';
@@ -54,6 +55,7 @@
             title={card.title}
             sub={[card.year || undefined]}
             rating={card.rating}
+            watch={titleBadge(card)}
           />
         {/each}
       </div>

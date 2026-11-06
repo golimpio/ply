@@ -224,6 +224,29 @@ describe('response shapes', () => {
   });
 });
 
+describe('watched', () => {
+  it('puts {watched} to the item, the title, the show and the season (the name escaped, 0 kept)', async () => {
+    const item = { id: 3, watched: true, watchedAt: 9, playCount: 1, progress: { positionSec: 0, watched: true } };
+    const fetchFn = stubFetch(json({ watched: true, items: [item] }));
+    expect(await m.api.setItemWatched(3, true)).toEqual({ watched: true, items: [item] });
+    await m.api.setTitleWatched(7, false);
+    await m.api.setShowWatched('Law & Order', true);
+    await m.api.setSeasonWatched('Law & Order', 0, true);
+    const calls = fetchFn.mock.calls as unknown as FetchCall[];
+    expect(calls.map(([path, init]) => `${init.method} ${path} ${init.body}`)).toEqual([
+      'PUT /api/items/3/watched {"watched":true}',
+      'PUT /api/titles/7/watched {"watched":false}',
+      'PUT /api/shows/Law%20%26%20Order/watched {"watched":true}',
+      'PUT /api/shows/Law%20%26%20Order/seasons/0/watched {"watched":true}',
+    ]);
+  });
+
+  it('reads a null list of items as none', async () => {
+    stubFetch(json({ watched: false, items: null }));
+    expect(await m.api.setShowWatched('Lost', false)).toEqual({ watched: false, items: [] });
+  });
+});
+
 describe('putProgress', () => {
   it('sends the position and the duration to the item', async () => {
     const fetchFn = stubFetch(json({ positionSec: 42.5, watched: false }));

@@ -3,7 +3,7 @@
   import { useAmbient } from '../lib/ambient.svelte';
   import { episodeLabel, formatDuration } from '../lib/format';
   import { byName } from '../lib/az';
-  import { byAdded, ensureLibrary, library, showsOf, type ShowEntry } from '../lib/library.svelte';
+  import { byAdded, ensureLibrary, findItem, library, showsOf, titleBadge, type ShowEntry } from '../lib/library.svelte';
   import {
     airLabel,
     groupByTitle,
@@ -19,6 +19,7 @@
   import { rescan, scan } from '../lib/state.svelte';
   import { app } from '../lib/state.svelte';
   import { artOf, progressOf } from '../lib/ui-types';
+  import { countsBadge } from '../lib/watched';
   import Badges from '../components/Badges.svelte';
   import Hero from '../components/Hero.svelte';
   import HeroTitle from '../components/HeroTitle.svelte';
@@ -105,7 +106,12 @@
   // One card per film: its newest version in Recently added, and in Continue
   // the version played last (the server lists the most recent first).
   const recent = $derived(onePerTitle([...items].sort(byAdded)).slice(0, 24));
-  const continuing = $derived(onePerTitle(continueItems));
+  // A file watched since the list came (marked, here or on another page, or played to the end): gone
+  // from it at once, as the server leaves it out from then on. The file's own state, not its film's:
+  // a film seen in one version and being watched again in another stays.
+  const continuing = $derived(
+    onePerTitle(continueItems.filter((i) => !((findItem(i.id) ?? i).progress?.watched ?? false))),
+  );
   const movies = $derived(groupByTitle(items.filter((i) => i.kind === 'movie')).sort((a, b) => byName(a.item, b.item))); // as Movies lists them
   const shows = $derived(showsOf(items, library.shows).sort((a, b) => b.latestAddedAt - a.latestAddedAt));
   const moviePosters = $derived(prefersPosters(movies.map((g) => g.item)));
@@ -215,7 +221,8 @@
           img={showPosters ? posterImg(s.meta) : showWideImg(s.meta, s.cover)}
           href={href.show(s.show)}
           title={s.show}
-          sub={[plural(s.episodeCount, 'episode')]}
+          sub={[plural(s.counts.episodeCount, 'episode')]}
+          watch={countsBadge(s.counts)}
         />
       {/snippet}
     </Rail>
@@ -236,7 +243,7 @@
     {#each genreRails as r (r.genre.id)}
       <Rail title={r.genre.name} items={r.titles.slice(0, 30)} key={(t) => `${t.kind}:${t.id}`} size="poster" more={{ href: href.genre(r.genre.id), label: `All ${r.genre.count}` }}>
         {#snippet card(t: TitleCard)}
-          <MediaCard shape="poster" img={posterImg(t)} href={titleHref(t)} title={t.title} sub={[t.year || '']} />
+          <MediaCard shape="poster" img={posterImg(t)} href={titleHref(t)} title={t.title} sub={[t.year || '']} watch={titleBadge(t)} />
         {/snippet}
       </Rail>
     {/each}

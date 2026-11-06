@@ -509,6 +509,42 @@ Svelte 5 (runes) + Vite + TypeScript, hls.js. No UI framework; small hand-writte
   once, and drops it when the key changes. The TMDB notice (`TmdbNotice`) is in the TMDB card and in Details, whether
   or not the settings load. Settings and Activity are centred in `.page-container` (app.css, `--page-max`). Tested by
   `lib/settings-tabs.test.ts` and `e2e/settings-ui.mjs`.
+- **Season posters** (`components/SeasonRow.svelte`, `lib/seasons.ts`): a show's seasons are a row of 2:3 posters
+  (`--season-w`, `--season-w-narrow` from 600 px down), each with its name ("Specials" for 0, last), its episode count
+  and its watch badge; a season with no poster of its own has the show's, its name on a band over it. The row
+  scrolls sideways with snap points and never wraps. Several seasons are the WAI-ARIA tabs pattern (as Settings: one
+  Tab stop, arrows, Home and End, selection follows focus; the episode list is the tabpanel); the selected one has
+  `--ring-selected`. The season is the hash's `?s=N`, and a switch is a `redirect()`, which leaves the page where it
+  is scrolled to for another state of the same page. The posters in view (the selected card scrolled into view
+  first) load with `fetchpriority=high`, the rest lazily; none is asked for until the show's details are in, so a
+  card never loads the show's poster and then its own. One season is a card beside its name, not a row of one.
+  Tested by `e2e/watched-ui.mjs`.
+- **Watched** (M11, see "Watch state"; `lib/watched.ts`, `lib/library.svelte.ts`, `components/WatchBadge.svelte`):
+  toggles on a film's and an episode's page ("Mark as watched" / "Mark as unwatched", text that says what happens),
+  on each episode of a show's list (an icon button labelled "Mark S01E02 as watched"), on the season ("Mark season
+  as watched", "Mark specials as ...") and on the show's hero. A film with a title goes to `PUT /api/titles/{id}/watched`
+  (all its versions), an episode or a file with no title to the item's, a season and a show to theirs.
+  `markWatched()` changes the cached library at once, as the server will, then writes the answer's `items[]` into it
+  (`applyWatch`; a film's versions share the film's state); on an error it puts every file back and the page says
+  why in its `.error` style. Marks can overlap: each change stamps the files it touches with a generation, and an
+  answer or a rollback only writes files whose last change is its own. The toggles stay enabled while a mark is out
+  (`aria-disabled`, a press meanwhile does nothing), so the focus stays on the button. An episode's toggle marks
+  its own file (the item route): an episode with two files is counted watched when either is, and unmarking one
+  file leaves the other, by design (the state is the file's). A `PUT /progress` answering `watched: true` makes the
+  item watched (`applyProgress`). `findItem` and `episodesOf` read an index (by id, by show) built once per fetched
+  list, so a page of 2,800 title cards does no linear search.
+  So every card, rail and count follows without a refetch: the counts of a show and a season are read off the cached
+  episodes (`countEpisodes`, `showCounts`: an episode is a show, season and number, watched when any of its files is;
+  a show's counts leave the specials out unless it has nothing else), as the server counts them. The Unwatched filter reads `item.watched` (the film's). Badges (in the
+  style of `.badge`, over the picture so a card keeps its height): ✓ on a watched film or episode ("Watched" to a
+  screen reader), "N left" on a show or season with some watched ("3 episodes left"; a dot when one is started),
+  "In progress" when none is watched and one is started, ✓ when all are; a partly watched film keeps its progress
+  bar. A title card (genre, collection, person) of a film reads its cached item; of a series, the card's own counts
+  (over every show linked to it), plus what changed since the list was fetched in its show (`titleBadge`: the
+  show's counts from before its first change are kept). Continue watching drops an item whose own file is watched,
+  not its film (a film seen in one version and being watched again in another stays). Card lines say the same
+  distinct-episode count as the badge.
+  Tested by `lib/watched.test.ts`, `lib/library.test.ts` and `e2e/watched-ui.mjs`.
 - Dev: `vite` proxy `/api` → `http://localhost:8420`. `npm run build` → `web/dist`, embedded by `web/embed.go`.
   Keep `web/dist/.gitkeep` so `go build` works before the first web build (`all:dist`).
 

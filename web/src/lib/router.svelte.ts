@@ -260,14 +260,19 @@ export function navigate(hash: string): void {
   if (!samePage(cur, next)) window.scrollTo(0, 0);
 }
 
-/** Shows another page in place of this one (a redirect): no new history entry. */
+/**
+ * Shows another page in place of this one (a redirect): no new history entry. Another state of the
+ * same page (a show's season) stays where it is scrolled to, as a link to it would.
+ */
 export function redirect(hash: string): void {
   restoring++;
+  const cur = router.route;
   const v = newView(hash, views[at].key);
   views[at] = v;
   history.replaceState({ ply: { key: v.key } }, '', hash);
-  publish(parseRoute(hash));
-  window.scrollTo(0, 0);
+  const next = parseRoute(hash);
+  publish(next);
+  if (!samePage(cur, next)) window.scrollTo(0, 0);
 }
 
 /** Where goBack(fallback) goes, and what its button says. */

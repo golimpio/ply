@@ -270,17 +270,19 @@ describe('filmPasses', () => {
     expect(passes(film({ height: 1080, hdr: 'hdr10' }), '4k', 'hdr')).toBe(false);
   });
 
-  it('the filters are all asked of a film: 4K and HDR from one version, Unwatched from none', () => {
-    const watched = { positionSec: 7000, watched: true };
-    const both = film({ height: 2160, hdr: 'hdr10' }, { height: 1080, progress: watched });
+  it('the filters are all asked of a film: 4K and HDR from one version, Unwatched of the film', () => {
+    // The server gives every version the film's watched (seen in the 1080p file, the 4K one is too).
+    const both = film({ height: 2160, hdr: 'hdr10', watched: true }, { height: 1080, watched: true, progress: { positionSec: 0, watched: true } });
     expect(passes(both, '4k', 'hdr')).toBe(true);
     expect(passes(both, '4k', 'hdr', 'unwatched')).toBe(false);
     expect(passes(film({ height: 2160, hdr: 'hdr10' }), '4k', 'hdr', 'unwatched')).toBe(true);
   });
 
-  it('a film with any version watched to the end is not unwatched', () => {
-    const seen = film({ height: 1080, progress: { positionSec: 6000, watched: true } }, { height: 2160 });
-    expect(passes(seen, 'unwatched')).toBe(false);
+  it("Unwatched reads the film's watched, not a file's progress", () => {
+    // Watched with no position of its own (a version that came after the film was seen).
+    expect(passes(film({ height: 2160, watched: true, progress: null }), 'unwatched')).toBe(false);
+    // A file's progress says watched, the film does not (unmarked since): unwatched.
+    expect(passes(film({ height: 1080, watched: false, progress: { positionSec: 6000, watched: true } }), 'unwatched')).toBe(true);
     expect(passes(film({ height: 2160, progress: { positionSec: 60, watched: false } }), 'unwatched')).toBe(true);
   });
 });

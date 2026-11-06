@@ -235,14 +235,15 @@ export interface FilmFilter {
 
 /**
  * Whether a film passes the filters: 4K or HDR when any version is, both when one version is both
- * (a 4K SDR file beside a 1080p HDR one is neither 4K HDR); Unwatched when no version was watched to
- * the end (a film seen in 1080p that also has a 4K file is a watched film).
+ * (a 4K SDR file beside a 1080p HDR one is neither 4K HDR); Unwatched when the film is not watched:
+ * an item's `watched` is its film's, across all its versions (a film seen in 1080p that also has a
+ * 4K file is a watched film).
  */
 export function filmPasses(g: TitleGroup, f: FilmFilter): boolean {
   const picture = [f.filters.includes('4k') ? f.is4k : null, f.filters.includes('hdr') ? f.isHdr : null].filter((p) => p !== null);
   return (
     (!picture.length || g.versions.some((v) => picture.every((p) => p(v)))) &&
-    (!f.filters.includes('unwatched') || !g.versions.some((v) => v.progress?.watched))
+    (!f.filters.includes('unwatched') || !g.item.watched)
   );
 }
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, type ItemSummary, type Stream } from '../lib/api';
+  import { api, type ItemSummary, type ItemWatch, type Stream } from '../lib/api';
   import { useAmbient } from '../lib/ambient.svelte';
   import {
     channelLabel,
@@ -11,13 +11,14 @@
     formatDuration,
     methodLabel,
   } from '../lib/format';
-  import { ensureLibrary, findItem, library } from '../lib/library.svelte';
+  import { ensureLibrary, findItem, library, markWatched } from '../lib/library.svelte';
   import { CREDIT_LINES, crewWith, logoSrc, ratingLabel, runtimeLabel, versionLabel, yearOf } from '../lib/meta';
   import { titleRatings } from '../lib/ratings';
   import { href } from '../lib/router.svelte';
   import { resource } from '../lib/resource.svelte';
   import { app } from '../lib/state.svelte';
   import { artOf, progressOf } from '../lib/ui-types';
+  import { WATCHED } from '../lib/watched';
   import BackButton from '../components/BackButton.svelte';
   import Badges from '../components/Badges.svelte';
   import EditTitle from '../components/EditTitle.svelte';
@@ -30,6 +31,7 @@
   import Rail from '../components/Rail.svelte';
   import Ratings from '../components/Ratings.svelte';
   import SourceBadge from '../components/SourceBadge.svelte';
+  import WatchBadge from '../components/WatchBadge.svelte';
 
   let { id }: { id: number } = $props();
 
@@ -48,8 +50,18 @@
   const decision = $derived({ data: detail.data?.playback, error: detail.error });
 
   // The cached summary paints the hero at once (and lands the card morph);
-  // the full detail fills in the metadata and the technical section.
-  const item = $derived<ItemSummary | undefined>(detail.data ?? findItem(id));
+  // the full detail fills in the metadata and the technical section. The watch state is the
+  // cached one's when there is one: a mark (here, or on another page) changes it there.
+  // An item the cached list doesn't have (it is still loading, or failed) keeps the state of the
+  // last mark made here.
+  const cached = $derived(findItem(id));
+  let own = $state<ItemWatch>();
+  const watch = $derived(cached ?? (own?.id === id ? own : undefined));
+  const item = $derived<ItemSummary | undefined>(
+    detail.data && watch
+      ? { ...detail.data, watched: watch.watched, watchedAt: watch.watchedAt, playCount: watch.playCount, progress: watch.progress }
+      : (detail.data ?? cached),
+  );
   const isEpisode = $derived(item?.kind === 'episode');
   const resumeAt = $derived(item && progressOf(item) > 0 ? (item.progress?.positionSec ?? 0) : 0);
   // The movie's title, or the episode's show.
@@ -95,6 +107,31 @@
   let fixing = $state(false);
   let editing = $state(false);
   let notice = $state('');
+
+  // Marking the film (all its versions) or the episode: the page changes at once and goes back on
+  // an error, which is said under the hero.
+  let marking = $state(false);
+  let markError = $state('');
+  // The button stays enabled (aria-disabled) while a mark is on its way, so that it keeps the focus.
+  async function toggleWatched() {
+    if (!item || marking) return;
+    const watched = !item.watched;
+    const was = own;
+    if (!cached) {
+      own = { id, watched, watchedAt: null, playCount: watched ? 1 : 0, progress: watched ? { positionSec: 0, watched: true } : null };
+    }
+    marking = true;
+    markError = '';
+    try {
+      const answer = (await markWatched({ item }, watched)).items.find((w) => w.id === id);
+      if (answer) own = answer;
+    } catch (e) {
+      own = was;
+      markError = `Couldn’t mark it as ${watched ? 'watched' : 'unwatched'}: ${e instanceof Error ? e.message : String(e)}`;
+    } finally {
+      marking = false;
+    }
+  }
 
   async function refresh() {
     if (!item) return;
@@ -179,7 +216,7 @@
       {#if meta?.certification}<span class="cert">{meta.certification}</span>{/if}
       {#if runtime}<span>{runtime}</span>{/if}
       {#if epScore}<span class="rating" title="TMDB"><Icon name="star" filled /><span class="sr-only">Rated on TMDB</span>{epScore}</span>{/if}
-      <span class="badges"><Badges {item} /><SourceBadge source={meta?.source} /></span>
+      <span class="badges">{#if item.watched}<WatchBadge badge={WATCHED} />{/if}<Badges {item} /><SourceBadge source={meta?.source} /></span>
     </div>
     <Ratings {ratings} />
     <div class="hero-actions">
@@ -191,7 +228,12 @@
       {:else}
         <a class="btn primary" href={href.play(item.id)}><Icon name="play" />Play</a>
       {/if}
-      <Menu items={menu} />
+      <span class="pair">
+        <button class="btn" aria-disabled={marking} onclick={toggleWatched}>
+          <Icon name="check" />{item.watched ? 'Mark as unwatched' : 'Mark as watched'}
+        </button>
+        <Menu items={menu} />
+      </span>
     </div>
   </Hero>
 
@@ -204,6 +246,7 @@
       </div>
     {/if}
     {#if notice}<p class="muted notice" role="status">{notice}</p>{/if}
+    {#if markError}<p class="error notice" role="alert">{markError}</p>{/if}
 
     {#if overview || meta?.genres.length || credits.length || meta?.collection}
       <section class="about">

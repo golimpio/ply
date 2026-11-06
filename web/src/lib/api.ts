@@ -95,6 +95,28 @@ export interface ItemSummary extends Partial<MetaFields> {
   still?: string;
   /** An episode's own ratings (its IMDb rating, or []); absent on movies. */
   ratings?: RatingEntry[];
+  /**
+   * Watch state (M11): the file's, or for a film with a title the film's, across all its versions.
+   * watchedAt is unix seconds, null when not watched; playCount 0 then.
+   */
+  watched?: boolean;
+  watchedAt?: number | null;
+  playCount?: number;
+}
+
+/** One file a PUT .../watched covered, as it is now; progress is the file's own (null: not started). */
+export interface ItemWatch {
+  id: number;
+  watched: boolean;
+  watchedAt: number | null;
+  playCount: number;
+  progress: Progress | null;
+}
+
+/** The answer to every PUT .../watched: what was asked for, and every file it covered. */
+export interface WatchResult {
+  watched: boolean;
+  items: ItemWatch[];
 }
 
 export interface Stream {
@@ -162,7 +184,10 @@ export interface ItemDetail extends ItemSummary {
 export interface ShowSummary extends Partial<MetaFields> {
   show: string;
   seasons: number[];
+  /** Episodes, the specials apart (unless there is nothing else); of them watched, and started. */
   episodeCount: number;
+  watchedEpisodes?: number;
+  inProgress?: number;
   year?: number;
   overview?: string;
 }
@@ -187,6 +212,12 @@ export interface TitleCard {
   show?: string;
   /** Shows: when the next episode airs (YYYY-MM-DD). May be past until the show is next refreshed. */
   nextAirDate?: string;
+  /** A film: watched in any version; a series: in all its episodes (M11). */
+  watched?: boolean;
+  /** A series: how far through its episodes. */
+  episodeCount?: number;
+  watchedEpisodes?: number;
+  inProgress?: number;
 }
 
 export interface Genre {
@@ -325,13 +356,19 @@ export interface SeasonInfo {
   overview?: string;
   poster?: string;
   airDate?: string;
-  /** Episode files in the library. */
+  /** Episodes in the library (one that has two files is one). */
   episodeCount: number;
+  /** Of them, watched. */
+  watchedEpisodes: number;
+  /** Of them, started and not watched. */
+  inProgress: number;
 }
 
 export interface ShowDetail extends Partial<MetaFields> {
   show: string;
   episodeCount: number;
+  watchedEpisodes?: number;
+  inProgress?: number;
   year?: number;
   overview?: string;
   meta?: TitleDetail;
@@ -987,6 +1024,11 @@ async function send<T>(
   return (await res.json()) as T;
 }
 
+async function watchRequest(path: string, watched: boolean): Promise<WatchResult> {
+  const r = await request<WatchResult>('PUT', path, { watched });
+  return { watched: r.watched, items: r.items ?? [] };
+}
+
 function qs(params: Record<string, string | undefined>): string {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v) p.set(k, v);
@@ -1068,6 +1110,17 @@ export const api = {
    */
   putProgress: (id: number, positionSec: number, durationSec: number, keepalive = false) =>
     request<Progress | null>('PUT', `/api/items/${id}/progress`, { positionSec, durationSec }, keepalive),
+
+  // Watch state (M11): each answers 400 without `watched`, 404 for what is not there.
+
+  /** An episode, or a file no title is known for; a film with a title is marked in all its versions. */
+  setItemWatched: (id: number, watched: boolean) => watchRequest(`/api/items/${id}/watched`, watched),
+  /** Every version of a film, or every episode of a series. */
+  setTitleWatched: (id: number, watched: boolean) => watchRequest(`/api/titles/${id}/watched`, watched),
+  setShowWatched: (show: string, watched: boolean) => watchRequest(`/api/shows/${encodeURIComponent(show)}/watched`, watched),
+  /** Season 0 is the specials. */
+  setSeasonWatched: (show: string, season: number, watched: boolean) =>
+    watchRequest(`/api/shows/${encodeURIComponent(show)}/seasons/${season}/watched`, watched),
 
   async continueWatching(): Promise<ItemSummary[]> {
     return ((await request<ItemSummary[] | null>('GET', '/api/continue')) ?? []).map(normaliseRow);

@@ -341,6 +341,14 @@
   --side-nav-w: 11rem;
   --fade-edge: 2rem;
   --mask-solid: var(--black);
+  /* Season posters on a show's page (seasons task): a card's width in the row, from 600 px and
+     below (SeasonRow's `sizes` repeats both); the ring of the selected one; the band that names the
+     season over a show's poster standing in for its own; the dot of a season started. */
+  --season-w: 8.5rem;
+  --season-w-narrow: 7rem;
+  --ring-selected: 0 0 0 2px var(--surface-room), 0 0 0 4px var(--text);
+  --scrim-season-label: var(--black-a65);
+  --season-dot: 0.55rem;
 
   /* Fonts. */
   --font-text: var(--family-system);

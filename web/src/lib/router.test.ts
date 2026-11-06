@@ -631,4 +631,16 @@ describe('view state', () => {
     expect(router.previous).toBeNull();
     expect(recall('x', 0)).toBe(0);
   });
+
+  it('keeps the scroll on a redirect to another season of the same show, not to another page', () => {
+    open('#/shows/Lost?s=1');
+    y = 700;
+    const entries = history.length;
+    redirect(href.show('Lost', 2));
+    expect(router.route).toEqual({ name: 'show', show: 'Lost', season: 2 });
+    expect(history.length).toBe(entries);
+    expect(y).toBe(700);
+    redirect(href.show('Fringe', 1)); // another show is another page
+    expect(y).toBe(0);
+  });
 });

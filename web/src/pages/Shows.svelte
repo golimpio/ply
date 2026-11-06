@@ -5,6 +5,7 @@
   import { passesMinRating, ratingScore } from '../lib/ratings';
   import { href, type LibraryView } from '../lib/router.svelte';
   import { app } from '../lib/state.svelte';
+  import { countsBadge } from '../lib/watched';
   import JumpRail from '../components/JumpRail.svelte';
   import LibraryControls from '../components/LibraryControls.svelte';
   import MediaCard from '../components/MediaCard.svelte';
@@ -76,8 +77,9 @@
           href={href.show(s.show)}
           title={s.show}
           label={s.show}
-          sub={[s.meta?.year, plural(s.seasons.length, 'season'), plural(s.episodeCount, 'episode')]}
+          sub={[s.meta?.year, plural(s.seasons.length, 'season'), plural(s.counts.episodeCount, 'episode')]}
           rating={s.meta?.rating}
+          watch={countsBadge(s.counts)}
           {priority}
           {sizes}
           {hold}

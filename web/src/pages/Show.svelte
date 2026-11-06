@@ -2,15 +2,16 @@
   import { api, ApiError, type EpisodeOrder, type ItemSummary } from '../lib/api';
   import { useAmbient } from '../lib/ambient.svelte';
   import { episodeLabel, formatDuration, seasonLabel } from '../lib/format';
-  import { ensureLibrary, library, showMeta, showsOf } from '../lib/library.svelte';
-  import { backdropOf, CREDIT_LINES, crewWith, logoSrc, yearSpan } from '../lib/meta';
+  import { ensureLibrary, episodesOf, library, markWatched, showMeta, showsOf, type WatchTarget } from '../lib/library.svelte';
+  import { backdropOf, CREDIT_LINES, crewWith, logoSrc, posterImg, yearSpan } from '../lib/meta';
   import { morph } from '../lib/nav';
   import { ensureRatingPrefs, ratingPrefs } from '../lib/ratingprefs.svelte';
   import { orderShown, titleRatings } from '../lib/ratings';
-  import { href } from '../lib/router.svelte';
+  import { href, redirect } from '../lib/router.svelte';
   import { resource } from '../lib/resource.svelte';
   import { app } from '../lib/state.svelte';
   import { artOf, progressOf } from '../lib/ui-types';
+  import { countEpisodes, countsBadge, showCounts, WATCHED } from '../lib/watched';
   import Art from '../components/Art.svelte';
   import BackButton from '../components/BackButton.svelte';
   import Badges from '../components/Badges.svelte';
@@ -24,7 +25,9 @@
   import Rail from '../components/Rail.svelte';
   import Rating from '../components/Rating.svelte';
   import Ratings from '../components/Ratings.svelte';
+  import SeasonRow, { type SeasonCard } from '../components/SeasonRow.svelte';
   import SourceBadge from '../components/SourceBadge.svelte';
+  import WatchBadge from '../components/WatchBadge.svelte';
 
   let { show, season }: { show: string; season?: number } = $props();
 
@@ -40,19 +43,16 @@
     return api.show(show);
   });
 
-  const entry = $derived(showsOf(library.items.filter((i) => i.show === show))[0]);
+  const entry = $derived(showsOf(episodesOf(show))[0]);
+  // Regular seasons first, specials last: the row's order, and the one "next up" looks in.
+  const seasonOrder = (s: number | undefined) => s || Infinity;
   const episodes = $derived(
-    library.items
-      .filter((i) => i.kind === 'episode' && i.show === show)
-      .sort((a, b) => (a.season ?? 0) - (b.season ?? 0) || (a.episode ?? 0) - (b.episode ?? 0)),
+    [...episodesOf(show)].sort((a, b) => seasonOrder(a.season) - seasonOrder(b.season) || (a.episode ?? 0) - (b.episode ?? 0)),
   );
-  // Regular seasons first, specials last.
-  const seasons = $derived(
-    [...new Set(episodes.map((e) => e.season ?? 0))].sort((a, b) => (a || 1000) - (b || 1000)),
-  );
+  const seasons = $derived([...new Set(episodes.map((e) => e.season ?? 0))]);
   // Next up: the first started-but-unfinished episode, else the first unwatched one.
   const next = $derived(
-    episodes.find((e) => progressOf(e) > 0) ?? episodes.find((e) => !e.progress?.watched) ?? episodes[0],
+    episodes.find((e) => progressOf(e) > 0) ?? episodes.find((e) => !e.watched) ?? episodes[0],
   );
   const current = $derived(season !== undefined && seasons.includes(season) ? season : (next?.season ?? seasons[0]));
   const list = $derived(episodes.filter((e) => (e.season ?? 0) === current));
@@ -61,6 +61,24 @@
   const summary = $derived(detail.data ?? showMeta(show));
   const seasonInfo = $derived(detail.data?.seasons.find((s) => s.season === current));
   const seasonName = (n: number) => detail.data?.seasons.find((s) => s.season === n)?.name || seasonLabel(n);
+
+  // The seasons' posters; one with none of its own has the show's, with its name over it. The
+  // counts are the cached episodes' (lib/watched), so a mark shows on the cards at once.
+  const showPoster = $derived(posterImg(summary) ?? posterImg(meta));
+  const seasonCards = $derived<SeasonCard[]>(
+    seasons.map((n) => {
+      const own = posterImg(detail.data?.seasons.find((s) => s.season === n));
+      const counts = countEpisodes(episodes.filter((e) => (e.season ?? 0) === n));
+      return { season: n, name: seasonName(n), poster: own ?? showPoster, fallback: !own, episodes: counts.episodeCount, badge: countsBadge(counts) };
+    }),
+  );
+  const currentCounts = $derived(countEpisodes(list));
+  const seasonDone = $derived(currentCounts.episodeCount > 0 && currentCounts.watchedEpisodes === currentCounts.episodeCount);
+  const totals = $derived(showCounts(episodes));
+  const showDone = $derived(totals.episodeCount > 0 && totals.watchedEpisodes === totals.episodeCount);
+  const showBadge = $derived(countsBadge(totals));
+  // Another season: in place of this one in the history, the page left where it is scrolled to.
+  const selectSeason = (n: number) => redirect(href.show(show, n));
   const logo = $derived(logoSrc(meta));
   const years = $derived(yearSpan(meta, summary?.year));
   const ratings = $derived(titleRatings(meta, summary));
@@ -76,6 +94,29 @@
   let fixing = $state(false);
   let editing = $state(false);
   let notice = $state('');
+
+  // Marking: one at a time; the cards and counts change at once and go back on an error, which is
+  // said next to what was pressed (the hero's button, or the season's).
+  let marking = $state(false);
+  let markError = $state<{ at: 'show' | 'season'; text: string }>();
+  // The buttons stay enabled (aria-disabled) while a mark is on its way, so that the focus stays on
+  // the one pressed; a press meanwhile does nothing.
+  async function mark(t: WatchTarget, watched: boolean, at: 'show' | 'season') {
+    if (marking) return;
+    // The season shown follows the next episode until one is chosen: keep it where it is.
+    if (season === undefined && current !== undefined) redirect(href.show(show, current));
+    marking = true;
+    markError = undefined;
+    try {
+      await markWatched(t, watched);
+    } catch (e) {
+      const why = e instanceof Error ? e.message : String(e);
+      markError = { at, text: `Couldn’t mark ${watched ? 'it as watched' : 'it as unwatched'}: ${why}` };
+    } finally {
+      marking = false;
+    }
+  }
+  const seasonWord = (n: number) => (n === 0 ? 'specials' : 'season');
 
   async function refresh() {
     notice = '';
@@ -178,7 +219,8 @@
       {#if years}<span>{years}</span>{/if}
       {#if meta?.certification}<span class="cert">{meta.certification}</span>{/if}
       <span>{plural(seasons.filter((s) => s !== 0).length || seasons.length, 'season')}</span>
-      <span>{plural(episodes.length, 'episode')}</span>
+      <span>{plural(totals.episodeCount, 'episode')}</span>
+      {#if showBadge}<WatchBadge badge={showBadge} />{/if}
       {#if meta?.status && status[meta.status]}<span>{status[meta.status]}</span>{/if}
       {#if meta}<SourceBadge source={meta.source} />{/if}
     </div>
@@ -191,7 +233,12 @@
           {episodeLabel(next.season, next.episode)}
         </a>
       {/if}
-      <Menu items={menu} />
+      <span class="pair">
+        <button class="btn" aria-disabled={marking} onclick={() => mark({ show }, !showDone, 'show')}>
+          <Icon name="check" />{showDone ? 'Mark show as unwatched' : 'Mark show as watched'}
+        </button>
+        <Menu items={menu} />
+      </span>
     </div>
   </Hero>
 
@@ -205,6 +252,7 @@
       </div>
     {/if}
     {#if notice}<p class="muted notice" role="status">{notice}</p>{/if}
+    {#if markError?.at === 'show'}<p class="error notice" role="alert">{markError.text}</p>{/if}
 
     {#if meta?.overview || summary?.overview || meta?.genres.length || credits.length}
       <section class="about">
@@ -242,27 +290,46 @@
     {/if}
 
     <section class="season">
-      {#if seasons.length > 1}
-        <div class="chips" role="tablist" aria-label="Seasons">
-          {#each seasons as s (s)}
-            <a class="chip" role="tab" aria-selected={s === current} href={href.show(show, s)}>{seasonName(s)}</a>
-          {/each}
+      <div class="season-top" class:solo={seasons.length === 1}>
+        <SeasonRow
+          seasons={seasonCards}
+          selected={current}
+          onselect={selectSeason}
+          panel="season-panel"
+          label={show}
+          ready={!!detail.data || !!detail.error}
+        />
+        <div class="season-head">
+          <h2>{seasonName(current)}</h2>
+          {#if seasons.length === 1}<span class="muted">{plural(currentCounts.episodeCount, 'episode')}</span>{/if}
+          <button
+            class="btn"
+            aria-disabled={marking || !list.length}
+            onclick={() => list.length && mark({ show, season: current }, !seasonDone, 'season')}
+          >
+            <Icon name="check" />{`Mark ${seasonWord(current)} as ${seasonDone ? 'unwatched' : 'watched'}`}
+          </button>
         </div>
-      {:else}
-        <h2>{seasonName(current)}</h2>
-      {/if}
+      </div>
+      {#if markError?.at === 'season'}<p class="error mark-error" role="alert">{markError.text}</p>{/if}
       {#if seasonInfo?.overview}<p class="muted season-overview">{seasonInfo.overview}</p>{/if}
 
-      <ol class="episodes" role={seasons.length > 1 ? 'tabpanel' : undefined}>
+      <ol
+        class="episodes"
+        id="season-panel"
+        role={seasons.length > 1 ? 'tabpanel' : undefined}
+        aria-labelledby={seasons.length > 1 ? `season-tab-${current}` : undefined}
+      >
         {#each list as ep (ep.id)}
           {@const p = progressOf(ep)}
           {@const r = epRating(ep)}
+          {@const what = `Mark ${ep.episode ? episodeLabel(ep.season, ep.episode) : ep.episodeTitle || ep.title} as ${ep.watched ? 'unwatched' : 'watched'}`}
           <li>
             <a class="ep" href={href.item(ep.id)} onclick={morph}>
               <div class="thumb">
                 <Art item={ep} label={show} sizes="(max-width: 600px) 7.5rem, 13rem" />
                 {#if p > 0}<div class="bar"><span style:width="{p * 100}%"></span></div>{/if}
-                {#if ep.progress?.watched}<span class="watched">Watched</span>{/if}
+                {#if ep.watched}<span class="watched"><WatchBadge badge={WATCHED} /></span>{/if}
               </div>
               <div class="text">
                 <div class="line">
@@ -277,6 +344,9 @@
                 {#if ep.overview}<p class="ep-overview">{ep.overview}</p>{/if}
               </div>
             </a>
+            <button class="btn icon mark" class:on={ep.watched} aria-disabled={marking} aria-label={what} title={what} onclick={() => mark({ item: ep }, !ep.watched, 'season')}>
+              <Icon name="check" />
+            </button>
             <a class="btn icon play" href={href.play(ep.id, resumeAt(ep))} aria-label="Play {episodeLabel(ep.season, ep.episode)}">
               <Icon name="play" />
             </a>
@@ -342,6 +412,36 @@
     gap: 1.25rem;
     max-width: 60rem;
   }
+  .season-top {
+    display: grid;
+    gap: 1.25rem;
+    min-width: 0;
+  }
+  /* One season: its card beside its name and button, not a row with one card in it. */
+  .season-top.solo {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+  }
+  .solo .season-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.4rem;
+  }
+  .solo .season-head button {
+    margin-top: 0.6rem;
+  }
+  .season-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+  }
+  .season-head h2 {
+    margin: 0;
+  }
+  .mark-error {
+    margin: 0.75rem 0 0;
+  }
   .season-overview {
     margin: 0.9rem 0 0;
     max-width: 65ch;
@@ -403,11 +503,13 @@
     position: absolute;
     top: 6px;
     right: 6px;
-    padding: 0.05rem 0.45rem;
-    font-size: var(--fs-2xs);
-    font-weight: var(--fw-semibold-2);
-    background: var(--surface-tag);
-    border-radius: var(--radius-sm);
+  }
+  .mark {
+    flex: none;
+    color: var(--text-muted);
+  }
+  .mark.on {
+    color: var(--ok);
   }
   .text {
     min-width: 0;

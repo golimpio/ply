@@ -5,6 +5,7 @@
   import { resource } from '../lib/resource.svelte';
   import { href, redirect } from '../lib/router.svelte';
   import { openSearch } from '../lib/palette.svelte';
+  import { titleBadge } from '../lib/library.svelte';
   import BackButton from '../components/BackButton.svelte';
   import MediaCard from '../components/MediaCard.svelte';
   import Picture from '../components/Picture.svelte';
@@ -130,6 +131,7 @@
               title={card.title}
               sub={[card.year || undefined, role]}
               rating={card.rating}
+              watch={titleBadge(card)}
             />
           {/each}
         </div>

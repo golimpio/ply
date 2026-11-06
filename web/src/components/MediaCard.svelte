@@ -3,9 +3,11 @@
   import { posterImg, wideImg, type Img } from '../lib/meta';
   import { morph } from '../lib/nav';
   import { progressOf } from '../lib/ui-types';
+  import { itemBadge, type WatchBadge as Watch } from '../lib/watched';
   import Badges from './Badges.svelte';
   import Picture from './Picture.svelte';
   import Rating from './Rating.svelte';
+  import WatchBadge from './WatchBadge.svelte';
 
   // A card: picture, title under it, an optional second line, and a
   // watch-progress bar when the item has been started. `wide` is 16:9 (frame
@@ -13,6 +15,8 @@
   // (a show's poster, a title's). `note` is a short flag over the picture. `rating` is the title's
   // primary rating, shown quietly at the start of the second line. A virtual grid passes the
   // picture's load `priority`, its `sizes` (the width of its columns) and whether to `hold` it.
+  // `watch` is the watch badge in the top corner (a show's "3 left"); by default the item's ✓.
+  // Both badges sit over the picture: the card is as tall with them as without.
   let {
     item = undefined,
     img = undefined,
@@ -26,6 +30,7 @@
     priority = undefined,
     sizes = undefined,
     hold = false,
+    watch = undefined,
   }: {
     item?: ItemSummary;
     img?: Img | null;
@@ -39,7 +44,9 @@
     priority?: 'high' | 'low';
     sizes?: string;
     hold?: boolean;
+    watch?: Watch | null;
   } = $props();
+  const badge = $derived(watch === undefined ? itemBadge(item) : watch);
 
   const progress = $derived(item ? progressOf(item) : 0);
   const parts = $derived((Array.isArray(sub) ? sub : [sub]).filter((p) => p !== '' && p != null));
@@ -57,7 +64,12 @@
       {hold}
     />
     {#if item}<div class="badges"><Badges {item} notable /></div>{/if}
-    {#if note}<span class="note">{note}</span>{/if}
+    {#if note || badge}
+      <div class="corner">
+        {#if badge}<WatchBadge {badge} />{/if}
+        {#if note}<span class="note">{note}</span>{/if}
+      </div>
+    {/if}
     {#if progress > 0}
       <div class="progress" role="progressbar" aria-label="Watched" aria-valuenow={Math.round(progress * 100)}>
         <span style:width="{progress * 100}%"></span>
@@ -113,10 +125,15 @@
     display: flex;
     gap: 4px;
   }
-  .note {
+  .corner {
     position: absolute;
     top: 8px;
     right: 8px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .note {
     padding: 0.15rem 0.5rem;
     border-radius: var(--radius-pill);
     background: var(--accent);

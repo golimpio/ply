@@ -169,10 +169,12 @@ code {
     background var(--motion-hover),
     border-color var(--motion-hover);
 }
-.btn:hover:not(:disabled) {
+.btn:hover:not(:disabled, [aria-disabled='true']) {
   background: var(--fill-hover);
 }
-.btn:disabled {
+/* aria-disabled: not usable for now, but keeps the focus (a toggle while its request is out). */
+.btn:disabled,
+.btn[aria-disabled='true'] {
   opacity: var(--opacity-disabled);
   cursor: default;
 }
@@ -413,6 +415,12 @@ code {
   align-items: center;
   gap: 0.75rem;
   margin-top: 0.4rem;
+}
+/* Two actions that wrap together (a toggle and the ⋯ menu), so the menu is never alone on a line. */
+.hero-actions .pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
 }
 /* "This might not be the right film": a note in the warning colour, with an icon and a button. */
 .review-note {

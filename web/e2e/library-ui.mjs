@@ -60,18 +60,26 @@ function filmTitle(i) {
 const poster = (kind, id) => `/api/images/tmdb/w342/${kind}${id}.svg`;
 /** A Rotten Tomatoes rating: its glyph is taller than the line of text it sits in. */
 const tomato = { source: 'rt_critics', value: 91, scale: 100, score100: 91, state: 'fresh', url: '', fetchedAt: '' };
+// A fifth of the films watched (a check over the poster), a seventh part way (a progress bar).
+const watchOf = (i) => {
+  const watched = i % 5 === 0;
+  return {
+    watched, watchedAt: watched ? 1_700_000_000 : null, playCount: watched ? 1 : 0,
+    progress: watched ? { positionSec: 0, watched: true } : i % 7 === 0 ? { positionSec: 600, watched: false } : null,
+  };
+};
 const film = (i, rated) => {
   const title = filmTitle(i);
   return {
     id: i, kind: 'movie', title, sortTitle: sortTitleOf(title), year: 1950 + ((i * 37) % 70), durationSec: 5400 + i, container: 'mkv',
     videoCodec: 'h264', audioCodec: 'aac', width: 1920, height: 1080, addedAt: i, art: null, titleId: 10_000 + i, poster: poster('p', i),
-    matchState: 'matched', needsReview: false, rating: rated?.test(sortTitleOf(title)) ? tomato : null, progress: null,
+    matchState: 'matched', needsReview: false, rating: rated?.test(sortTitleOf(title)) ? tomato : null, ...watchOf(i),
   };
 };
 const showName = (i) => `${WORDS[(i * 31) % WORDS.length]} Show ${i}`;
 const episode = (i) => ({
   id: 100_000 + i, kind: 'episode', title: showName(i), show: showName(i), season: 1, episode: 1, durationSec: 2800, container: 'mkv',
-  videoCodec: 'h264', audioCodec: 'aac', width: 1920, height: 1080, addedAt: i, art: null, progress: null, matchState: 'matched', needsReview: false,
+  videoCodec: 'h264', audioCodec: 'aac', width: 1920, height: 1080, addedAt: i, art: null, matchState: 'matched', needsReview: false, ...watchOf(i),
 });
 const showRow = (i) => ({
   show: showName(i), sortTitle: showName(i), seasons: [1], episodeCount: 1, year: 2000 + (i % 20), poster: poster('s', i),
@@ -432,6 +440,7 @@ const scenarios = {
     check('the tracked card moves by the scroll and nothing else', worst <= 1, `${worst} px off`);
     check('the pitch is the same with glyphs in the page', Math.abs((await pitchOf(page)) - p0) < 0.5, `${p0} → ${await pitchOf(page)}`);
     const heights = await page.evaluate(() => [...new Set([...document.querySelectorAll('main a.card')].map((a) => Math.round(a.getBoundingClientRect().height * 10) / 10))]);
+    check('watched films have their check in the page (the positive control for the next)', (await page.locator('main a.card [data-watch]').count()) > 0);
     check('every card as tall', heights.length === 1, heights.join(' '));
     check('no page errors', errors.length === 0, errors.join('; '));
     await context.close();
