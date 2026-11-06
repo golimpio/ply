@@ -54,6 +54,8 @@ export type MatchState = 'pending' | 'matched' | 'unmatched' | 'manual' | 'disab
  */
 export interface MetaFields {
   titleId?: number;
+  /** What a movie or a show is listed under ("Matrix, The"); not on an episode. See lib/az. */
+  sortTitle?: string;
   poster?: string;
   backdrop?: string;
   logo?: string;
@@ -434,6 +436,17 @@ export interface Settings {
   mdblistAttributionUrl?: string;
   /** When the IMDb dataset in use was published (RFC 3339); null until the first download. */
   imdbDatasetUpdatedAt?: string | null;
+  /**
+   * The last test of the key in use (a Test, or a save that checked it), in unix seconds: 0 when it
+   * was never tested or the key has changed since. ...KeyTestOk is false when there is no test.
+   * Absent from a server before they were added.
+   */
+  tmdbKeyTestedAt?: number;
+  tmdbKeyTestOk?: boolean;
+  tvdbKeyTestedAt?: number;
+  tvdbKeyTestOk?: boolean;
+  mdblistKeyTestedAt?: number;
+  mdblistKeyTestOk?: boolean;
 }
 
 export type LimitSource = 'flag' | 'settings' | 'default';

@@ -205,6 +205,12 @@ async function open(browser, opts = {}) {
 }
 
 const card = (page) => page.locator('.card.tvdb');
+const tmdbCard = (page) => page.locator('.card.tmdb');
+/** Remove asks first: the button, then the confirm's Remove. */
+async function remove(scope, label) {
+  await scope.locator(`button:has-text("${label}")`).click();
+  await scope.locator('.confirm-remove button:has-text("Remove")').click();
+}
 const lastCall = (calls, method, path) => calls.filter((c) => c.method === method && c.path === path).at(-1);
 const dialog = (page) => page.locator('dialog[open]');
 
@@ -216,7 +222,7 @@ const scenarios = {
       put: (body, n) =>
         n === 1 ? [400, { error: 'TVDB rejected the key or PIN' }] : [200, settings({ tvdbKeySet: true, tvdbKeySource: 'settings', tvdbKeyChecked: true })],
     });
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?tab=keys`);
     await card(page).waitFor();
     check('the key field is a password field', (await page.locator('#tvdb-key').getAttribute('type')) === 'password');
     await page.fill('#tvdb-key', 'fake-refused-key');
@@ -241,7 +247,7 @@ const scenarios = {
   // the key field's empty value sent along with it ("" removes the stored key).
   async 'TVDB card: a PIN alone is sent alone'(browser) {
     const { context, page, calls } = await open(browser, { settings: { tvdbKeySet: true, tvdbKeySource: 'settings' } });
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?tab=keys`);
     await card(page).waitFor();
     check('the PIN field is a password field', (await page.locator('#tvdb-pin').getAttribute('type')) === 'password');
     check('the PIN is explained', /subscription/.test(await text(card(page).locator('#tvdb-pin-hint'))));
@@ -258,25 +264,25 @@ const scenarios = {
   // would change nothing), and Remove sending anything but "".
   async 'TVDB card: Remove, and the wording for a key set elsewhere'(browser) {
     let { context, page, calls } = await open(browser, { settings: { tvdbKeySet: true, tvdbKeySource: 'settings', tvdbPinSet: true } });
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?tab=keys`);
     await card(page).waitFor();
     check('from this page: it says so', /A key is set, from this page\./.test(await text(card(page))));
-    await card(page).locator('button:has-text("Remove key")').click();
+    await remove(card(page), 'Remove key');
     await card(page).locator('p[role="status"].ok').waitFor();
     check('Remove key sends tvdbKey ""', JSON.stringify(lastCall(calls, 'PUT', '/api/settings')?.body) === JSON.stringify({ tvdbKey: '' }));
     // Mutant caught: no focus() after a save (Remove goes away, and the focus falls to the page).
     await card(page).locator('button:has-text("Remove key")').waitFor({ state: 'detached' });
     await sleep(200);
     check('Remove key: the focus is on what happened', await page.evaluate(() => document.activeElement?.matches('.card.tvdb p[role="status"]') ?? false), await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 80)));
-    await card(page).locator('button:has-text("Remove PIN")').click();
+    await remove(card(page), 'Remove PIN');
     await page.waitForFunction(() => document.querySelector('.card.tvdb p[role="status"].ok')?.textContent?.includes('PIN removed'));
     check('Remove PIN sends tvdbPin ""', JSON.stringify(lastCall(calls, 'PUT', '/api/settings')?.body) === JSON.stringify({ tvdbPin: '' }));
     await context.close();
 
     // The TMDB card's Remove keeps the focus too.
     ({ context, page, calls } = await open(browser));
-    await page.goto(`${base}/#/settings`);
-    await page.locator('form.key button:has-text("Remove")').click();
+    await page.goto(`${base}/#/settings?tab=keys`);
+    await remove(tmdbCard(page), 'Remove key');
     await page.locator('.card p[role="status"].ok').first().waitFor();
     await sleep(300);
     check('TMDB Remove: the focus is on what happened', await page.evaluate(() => document.activeElement?.textContent?.trim() === 'Key removed.'));
@@ -286,7 +292,7 @@ const scenarios = {
     // the flag's, and a typed PIN would be "saved" while the flag's still wins).
     for (const source of ['flag', 'env']) {
       ({ context, page, calls } = await open(browser, { settings: { tvdbKeySet: true, tvdbKeySource: 'settings', tvdbPinSet: true, tvdbPinSource: source } }));
-      await page.goto(`${base}/#/settings`);
+      await page.goto(`${base}/#/settings?tab=keys`);
       await card(page).waitFor();
       check(`PIN from ${source}: no Remove PIN, no PIN field`, (await card(page).locator('button:has-text("Remove PIN")').count()) === 0 && (await page.locator('#tvdb-pin').count()) === 0);
       check(`PIN from ${source}: says where to change it`, (await text(card(page))).includes('The PIN comes from -tvdb-pin or PLY_TVDB_PIN; change it there.'));
@@ -294,7 +300,7 @@ const scenarios = {
     }
     // Positive control: a PIN stored here can be removed.
     ({ context, page } = await open(browser, { settings: { tvdbKeySet: true, tvdbKeySource: 'settings', tvdbPinSet: true, tvdbPinSource: 'settings' } }));
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?tab=keys`);
     await card(page).waitFor();
     check('PIN from this page: Remove PIN is there', (await card(page).locator('button:has-text("Remove PIN")').count()) === 1);
     await context.close();
@@ -306,8 +312,8 @@ const scenarios = {
       ['a 409', () => [409, { error: 'tvdbPin is set by -tvdb-pin and cannot be removed here' }]], // the server's words
     ]) {
       ({ context, page } = await open(browser, { settings: { tvdbKeySet: true, tvdbKeySource: 'settings', tvdbPinSet: true }, put }));
-      await page.goto(`${base}/#/settings`);
-      await card(page).locator('button:has-text("Remove PIN")').click();
+      await page.goto(`${base}/#/settings?tab=keys`);
+      await remove(card(page), 'Remove PIN');
       const msg = card(page).locator('p[role="status"]').first();
       await msg.waitFor();
       check(`Remove PIN, ${name}: says the PIN comes from elsewhere`, (await text(msg)) === 'The PIN comes from -tvdb-pin or PLY_TVDB_PIN; change it there.', await text(msg));
@@ -316,7 +322,7 @@ const scenarios = {
 
     // Mutant caught: "PIN saved." with -metadata=false, where nothing was checked.
     ({ context, page } = await open(browser, { settings: { tvdbKeySet: true, tvdbKeySource: 'settings', metadataEnabled: false, metadataForcedOff: true } }));
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?tab=keys`);
     await page.fill('#tvdb-pin', '0000-fake');
     await card(page).locator('button:has-text("Save")').click();
     await card(page).locator('p[role="status"].ok').waitFor();
@@ -328,7 +334,7 @@ const scenarios = {
       ['flag', 'the -tvdb-key flag'],
     ]) {
       ({ context, page, calls } = await open(browser, { settings: { tvdbKeySet: true, tvdbKeySource: source } }));
-      await page.goto(`${base}/#/settings`);
+      await page.goto(`${base}/#/settings?tab=keys`);
       await card(page).waitFor();
       const said = await text(card(page));
       check(`from ${source}: it says where, and to change it there`, said.includes(`A key is set, from ${words}. Change it there.`), said);
@@ -345,7 +351,7 @@ const scenarios = {
       settings: { tvdbKeySet: true, tvdbKeySource: 'settings' },
       test: (provider, n) => (provider === 'tvdb' && n === 2 ? { ok: false, error: 'TVDB rejected the key or PIN' } : { ok: true }),
     });
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?tab=keys`);
     await card(page).waitFor();
     const tvdbTest = card(page).locator('button[aria-label="Test the TVDB key"]');
     await tvdbTest.click();
@@ -360,10 +366,10 @@ const scenarios = {
     await tmdbTest.click();
     await sleep(300);
     check('TMDB Test sends provider tmdb', JSON.stringify(lastCall(calls, 'POST', '/api/settings/test')?.body) === JSON.stringify({ provider: 'tmdb' }));
-    check('the TMDB result is in the TMDB card', (await text(page.locator('.key-test [role="status"]'))) === 'The TMDB key works.');
+    check('the TMDB result is in the TMDB card', (await text(tmdbCard(page).locator('.test [role="status"]'))) === 'The TMDB key works.');
     await context.close();
     const off = await open(browser, { settings: { tvdbKeySet: false } });
-    await off.page.goto(`${base}/#/settings`);
+    await off.page.goto(`${base}/#/settings?tab=keys`);
     await card(off.page).waitFor();
     check('no TVDB key: its Test is disabled', await card(off.page).locator('button[aria-label="Test the TVDB key"]').isDisabled());
     check('no TVDB key: it says why', (await text(card(off.page).locator('.test .why'))) === 'Set a key to test it.');
@@ -378,7 +384,7 @@ const scenarios = {
       test: (provider) => (provider === 'tvdb' ? { ok: false, error: 'TVDB rejected the key or PIN' } : { ok: true }),
       putDelay: 600,
     });
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?tab=keys`);
     await card(page).waitFor();
     const result = card(page).locator('.test [role="status"]');
     const tvdbTest = card(page).locator('button[aria-label="Test the TVDB key"]');
@@ -396,12 +402,12 @@ const scenarios = {
     // TMDB: "works", then Remove: gone.
     const tmdbTest = page.locator('button[aria-label="Test the TMDB key"]');
     await tmdbTest.click();
-    await page.waitForFunction(() => document.querySelector('.key-test [role="status"]')?.textContent?.includes('works'));
-    await page.locator('form.key button:has-text("Remove")').click();
-    await page.locator('form.key button:has-text("Remove")').waitFor({ state: 'detached' });
+    await page.waitForFunction(() => document.querySelector('.card.tmdb .test [role="status"]')?.textContent?.includes('works'));
+    await remove(tmdbCard(page), 'Remove key');
+    await tmdbCard(page).locator('button:has-text("Remove key")').waitFor({ state: 'detached' });
     await sleep(300);
-    check('TMDB key removed: "works" is gone', (await text(page.locator('.key-test [role="status"]'))) === '');
-    check('and its Test is off, saying why', (await tmdbTest.isDisabled()) && (await text(page.locator('.key-test .why'))) === 'Set a key to test it.');
+    check('TMDB key removed: "works" is gone', (await text(tmdbCard(page).locator('.test [role="status"]'))) === '');
+    check('and its Test is off, saying why', (await tmdbTest.isDisabled()) && (await text(tmdbCard(page).locator('.test .why'))) === 'Set a key to test it.');
     await context.close();
 
     // Lookups off: nothing can be asked, so no Test, and the reason. Positive control: the same keys with lookups on.
@@ -411,7 +417,7 @@ const scenarios = {
       ['lookups on', {}, false],
     ]) {
       const o = await open(browser, { settings: { tvdbKeySet: true, tvdbKeySource: 'settings', ...over } });
-      await o.page.goto(`${base}/#/settings`);
+      await o.page.goto(`${base}/#/settings?tab=keys`);
       await card(o.page).waitFor();
       const both = [o.page.locator('button[aria-label="Test the TMDB key"]'), card(o.page).locator('button[aria-label="Test the TVDB key"]')];
       const disabled = await Promise.all(both.map((b) => b.isDisabled()));
@@ -434,8 +440,9 @@ const scenarios = {
         return { ok: true };
       },
     });
-    await page.goto(`${base}/#/settings`);
-    const line = page.locator('.status .shows-line');
+    await page.goto(`${base}/#/settings?tab=keys`);
+    // API keys shows the server's line when it is about a key (not "Shows: ...").
+    const line = page.locator('.key-status .shows-line');
     await line.getByText('TVDB rejected the key or PIN').waitFor();
     const tvdbTest = card(page).locator('button[aria-label="Test the TVDB key"]');
     await tvdbTest.click();
@@ -443,8 +450,8 @@ const scenarios = {
     await sleep(300);
     check('a failed Test: the status is not asked for again', hits['/api/metadata/status'] === 1, `${hits['/api/metadata/status']}x`);
     await tvdbTest.click();
-    await line.getByText('Shows: TVDB').waitFor({ timeout: 3000 }).catch(() => {});
-    check('a Test that works: the status line is fetched again', (await text(line)) === 'Shows: TVDB', `${await text(line)}, asked ${hits['/api/metadata/status']}x`);
+    await line.waitFor({ state: 'detached', timeout: 3000 }).catch(() => {});
+    check('a Test that works: the status line is fetched again, and the warning goes', (await line.count()) === 0 && hits['/api/metadata/status'] === 2, `${await line.count()} lines, asked ${hits['/api/metadata/status']}x`);
     check('and the Test result stays', (await text(card(page).locator('.test [role="status"]'))) === 'The TVDB key works.');
     await context.close();
   },
@@ -456,7 +463,7 @@ const scenarios = {
       settings: { tvdbKeySet: true, tvdbKeySource: 'settings' },
       testDelay: (provider, n) => (n === 1 ? 1500 : 0),
     });
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?tab=keys`);
     await card(page).waitFor();
     const result = card(page).locator('.test [role="status"]');
     await card(page).locator('button[aria-label="Test the TVDB key"]').click(); // answered in 1.5 s
@@ -473,40 +480,56 @@ const scenarios = {
     await context.close();
   },
 
-  // Mutant caught: the result cleared by any new copy of the settings (a scan or a matching pass
-  // ending fetches them again, unchanged), not only by a change the Test depends on.
+  // Mutant caught: the result cleared by any new copy of the settings (a scan, or another key's
+  // save, fetches them again, unchanged for TVDB), not only by a change the Test depends on.
+  // API keys doesn't poll the matching status any more, so the refetch here comes from a save of
+  // the TMDB key, which bumps the library version as a pass ending did.
   async 'Test: the same settings fetched again keep the result'(browser) {
-    // The pass ends when the test says so, not at the nth status request: the page may ask for the
-    // status more than once as it starts, and a pass that ended then would refetch the settings
-    // before the test counts them (the flake this replaced: "2x, then 2x").
-    let ended = false;
-    const { context, page, hits } = await open(browser, {
-      settings: { tvdbKeySet: true, tvdbKeySource: 'settings' },
-      status: () => (ended ? status() : status({ running: true, pending: 2 })),
-    });
-    await page.clock.install();
-    await page.goto(`${base}/#/settings`);
+    const { context, page, hits } = await open(browser, { settings: { tvdbKeySet: true, tvdbKeySource: 'settings' } });
+    await page.goto(`${base}/#/settings?tab=keys`);
     await card(page).waitFor();
     const result = card(page).locator('.test [role="status"]');
-    await sleep(1000); // the page settles (it may fetch the settings again as it starts)
+    await sleep(500); // the page settles
     await card(page).locator('button[aria-label="Test the TVDB key"]').click();
     await page.waitForFunction(() => document.querySelector('.card.tvdb .test [role="status"]')?.textContent?.includes('works'));
     const before = hits['/api/settings'];
-    ended = true; // the pass ends: at its next poll the page fetches the settings again
     const refetched = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/settings' && r.request().method() === 'GET', { timeout: 10000 });
-    await page.clock.runFor(3000);
+    await page.fill('#tmdb-key', 'fake-other-key');
+    await tmdbCard(page).locator('button:has-text("Save key")').click();
     await refetched.catch(() => {});
-    await sleep(100); // the page applies the answer
+    await sleep(200); // the page applies the answer
     check('the settings were fetched again', hits['/api/settings'] > before, `${before}x, then ${hits['/api/settings']}x`);
     check('the result is still there', (await text(result)) === 'The TVDB key works.', await text(result));
     await context.close();
+  },
+
+  // Mutant caught: polling the status on API keys (it shows no progress; Library and Details do).
+  async 'API keys: no polling of the matching status'(browser) {
+    const { context, page, hits } = await open(browser, { status: () => status({ running: true, pending: 3 }) });
+    await page.clock.install();
+    await page.goto(`${base}/#/settings?tab=keys`);
+    await card(page).waitFor();
+    await sleep(300);
+    await page.clock.runFor(10000);
+    await sleep(300);
+    check('API keys: the status is asked for once', hits['/api/metadata/status'] === 1, `${hits['/api/metadata/status']}x`);
+    await context.close();
+    // Positive control: Details polls the same running pass.
+    const d = await open(browser, { status: () => status({ running: true, pending: 3 }) });
+    await d.page.clock.install();
+    await d.page.goto(`${base}/#/settings?tab=details`);
+    await d.page.locator('.status p').first().waitFor();
+    await d.page.clock.runFor(10000);
+    await sleep(300);
+    check('Details: asked for again while it runs', d.hits['/api/metadata/status'] > 1, `${d.hits['/api/metadata/status']}x`);
+    await d.context.close();
   },
 
   // Mutant caught: a key or PIN field a password manager may fill (with ply's own token, which the
   // sign-in prompt saves as current-password; Save would send it to TVDB or TMDB).
   async 'Key and PIN fields: password managers stay out'(browser) {
     const { context, page } = await open(browser);
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?tab=keys`);
     await card(page).waitFor();
     for (const id of ['tmdb-key', 'tvdb-key', 'tvdb-pin']) {
       const attrs = await page.locator(`#${id}`).evaluate((el) => ({
@@ -533,7 +556,7 @@ const scenarios = {
       status: (n) => (n <= 2 ? status({ ...tvdbOnly, running: true }) : status(tvdbOnly)),
     });
     await page.clock.install();
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?tab=details`);
     const line = page.locator('.status p').first();
     await line.getByText('Looking up shows on TVDB…').waitFor();
     await page.clock.runFor(3000);
@@ -552,7 +575,7 @@ const scenarios = {
   // Mutant caught: the attribution missing, reworded, or without its link to thetvdb.com.
   async 'TVDB card: the attribution TVDB asks for, as the server gives it'(browser) {
     const { context, page } = await open(browser);
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?tab=keys`);
     await card(page).waitFor();
     const note = card(page).locator('.attribution');
     check('the attribution is there', (await note.count()) === 1);
@@ -562,7 +585,7 @@ const scenarios = {
     // Positive control for the text coming from the server: another text is shown as it is.
     await context.close();
     const other = await open(browser, { settings: { tvdbAttribution: 'Fake notice from the server.', tvdbAttributionUrl: 'https://thetvdb.com/' } });
-    await other.page.goto(`${base}/#/settings`);
+    await other.page.goto(`${base}/#/settings?tab=keys`);
     await card(other.page).waitFor();
     check('the server’s text, not one of the page’s', (await text(card(other.page).locator('.attribution'))).startsWith('Fake notice from the server.'));
     await other.context.close();
@@ -573,7 +596,7 @@ const scenarios = {
   async 'Status: showsLine as given, and a TVDB key counts as a key'(browser) {
     for (const line of ['Shows: TVDB', 'Shows: TMDB (no TVDB key)', 'TVDB rejected the key or PIN']) {
       const { context, page } = await open(browser, { status: { showsLine: line } });
-      await page.goto(`${base}/#/settings`);
+      await page.goto(`${base}/#/settings?tab=details`);
       const el = page.locator('.status .shows-line');
       await el.waitFor();
       check(`"${line}" is shown as it is`, (await text(el)) === line, await text(el));
@@ -586,7 +609,7 @@ const scenarios = {
     ];
     for (const [name, st, want, refresh] of cases) {
       const { context, page } = await open(browser, { status: st });
-      await page.goto(`${base}/#/settings`);
+      await page.goto(`${base}/#/settings?tab=details`);
       const line = page.locator('.status p').first();
       await line.waitFor();
       check(`${name}: what it says`, want.test(await text(line)), await text(line));
@@ -788,6 +811,7 @@ const scenarios = {
       check(`${answers[i][0]} "${answers[i][1].error}": ${want[i]}`, said.startsWith(want[i]), said);
     }
     check('a refused key: the settings are offered', (await dialog(page).locator('.error a:has-text("Open settings")').count()) === 1);
+    check('at the API keys tab', (await dialog(page).locator('.error a:has-text("Open settings")').getAttribute('href')) === '#/settings?tab=keys');
     // TVDB not set up (the server's 409 for tvdb:… with no TVDB key) is said as the server says it.
     await dialog(page).locator('input[type="search"]').fill('tvdb:81189');
     await dialog(page).locator('button:has-text("Use this show")').click();
@@ -860,7 +884,7 @@ const scenarios = {
         settings: { tvdbKeySet: true, tvdbKeySource: 'settings', tvdbPinSet: true },
         test: () => ({ ok: false, error: 'TVDB rejected the key or PIN' }),
       });
-      await page.goto(`${base}/#/settings`);
+      await page.goto(`${base}/#/settings?tab=keys`);
       await card(page).waitFor();
       await card(page).locator('button[aria-label="Test the TVDB key"]').click();
       await sleep(300);

@@ -450,12 +450,17 @@
   }
 
   onMount(() => {
-    el = video;
+    const v = video!;
+    el = v;
+    // A plain listener: it fires several times a second, and Svelte's handlers each set a timer.
+    const onTimeUpdate = () => progress.update();
+    v.addEventListener('timeupdate', onTimeUpdate);
     subKey = defaultSubtitle(item.subtitles);
     void start(startSec);
     return () => {
       destroyed = true;
       leave();
+      v.removeEventListener('timeupdate', onTimeUpdate);
     };
   });
 
@@ -470,6 +475,28 @@
 <!-- Back in view: beat at once, so that a session lost while hidden (timers are throttled) is replaced now. -->
 <svelte:document onvisibilitychange={() => (document.hidden ? progress.report(true) : heartbeat.beat())} />
 
+<!-- How this is being played, in the top bar: the badge, and why on demand. -->
+{#snippet how()}
+  {#if playback}
+    <details class="why">
+      <summary>
+        <span class="badge">{methodLabel(playback.method)}</span>
+        <span class="muted">how this is being played</span>
+      </summary>
+      <div class="why-body">
+        <p class="muted">
+          video: {playback.videoAction}, audio: {playback.audioAction}
+        </p>
+        {#if playback.reasons.length}
+          <ul>
+            {#each playback.reasons as reason}<li>{reason}</li>{/each}
+          </ul>
+        {/if}
+      </div>
+    </details>
+  {/if}
+{/snippet}
+
 <div class="player">
   <div class="frame" bind:this={frame}>
     <!-- svelte-ignore a11y_media_has_caption -->
@@ -478,7 +505,6 @@
       playsinline
       preload="metadata"
       onloadedmetadata={onLoadedMetadata}
-      ontimeupdate={() => progress.update()}
       onplay={onPlay}
       onpause={onPause}
       onended={onEnded}
@@ -494,6 +520,7 @@
         {video}
         {title}
         {subtitle}
+        year={item.kind === 'episode' ? undefined : item.year || undefined}
         artwork={artSrc(item, 'backdrop')}
         duration={item.durationSec}
         {audioTracks}
@@ -503,6 +530,7 @@
         onSelectAudio={selectAudio}
         onSelectSubtitle={selectSubtitle}
         onClose={() => goBack()}
+        info={how}
       />
     {/if}
     {#if limit && (phase === 'limit' || phase === 'starting')}
@@ -525,38 +553,18 @@
       </div>
     {/if}
   </div>
-
-  {#if playback}
-    <details class="why">
-      <summary>
-        <span class="badge">{methodLabel(playback.method)}</span>
-        <span class="muted">how this is being played</span>
-      </summary>
-      <p class="muted">
-        video: {playback.videoAction}, audio: {playback.audioAction}
-      </p>
-      {#if playback.reasons.length}
-        <ul>
-          {#each playback.reasons as reason}<li>{reason}</li>{/each}
-        </ul>
-      {/if}
-    </details>
-  {/if}
 </div>
 
 <style>
+  /* The whole of the host (Play: the window); the picture letterboxed on black. */
+  .player,
   .frame {
-    position: relative;
-    background: var(--surface-video);
-    border-radius: var(--radius);
-    overflow: hidden;
-    aspect-ratio: 16 / 9;
-    max-height: 80dvh;
+    position: absolute;
+    inset: 0;
   }
-  .frame:fullscreen {
-    aspect-ratio: auto;
-    max-height: none;
-    border-radius: 0;
+  .frame {
+    background: var(--surface-video);
+    overflow: hidden;
   }
   video {
     width: 100%;
@@ -608,7 +616,7 @@
     }
   }
   .why {
-    margin-top: 0.8rem;
+    flex: none;
     font-size: var(--fs-sm-3);
   }
   .why summary {
@@ -617,12 +625,30 @@
     align-items: center;
     gap: 0.6rem;
   }
+  .why-body {
+    position: absolute;
+    top: 100%;
+    right: max(var(--gutter-player), env(safe-area-inset-right));
+    max-width: min(26rem, calc(100vw - 2rem));
+    padding: 0.6rem 0.8rem;
+    background: var(--surface-popover);
+    backdrop-filter: var(--blur-popover);
+    border: 1px solid var(--line-overlay);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-popover);
+  }
   .why p,
   .why ul {
-    margin: 0.4rem 0 0;
+    margin: 0;
   }
   .why ul {
+    margin-top: 0.4rem;
     padding-left: 1.2rem;
     color: var(--text-muted);
+  }
+  @media (max-width: 600px) {
+    .why summary .muted {
+      display: none;
+    }
   }
 </style>

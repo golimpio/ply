@@ -113,9 +113,7 @@
       {:else if route.name === 'item'}
         {#key route.id}<Item id={route.id} />{/key}
       {:else if route.name === 'play'}
-        <div class="play-page">
-          {#key route.id}<Play id={route.id} startSec={route.startSec} />{/key}
-        </div>
+        {#key route.id}<Play id={route.id} startSec={route.startSec} />{/key}
       {:else if route.name === 'person'}
         {#key route.id}<Person id={route.id} />{/key}
       {:else if route.name === 'genre'}
@@ -153,9 +151,5 @@
   }
   :global(html[data-lit]) .light {
     opacity: var(--light-lit);
-  }
-  /* The player page has no header bar above it. */
-  .play-page {
-    padding: max(1rem, env(safe-area-inset-top)) var(--gutter) 2rem;
   }
 </style>

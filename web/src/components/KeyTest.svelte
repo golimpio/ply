@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api, type KeyProvider } from '../lib/api';
+  import { testedLine } from '../lib/settings-tabs';
 
   // "Test": asks the server to use the key in use (from wherever it comes) now. The page never
   // sees the key; only whether it works, and why not.
@@ -10,6 +11,8 @@
     unavailable = '',
     about,
     onworks,
+    testedAt = 0,
+    testOk = false,
   }: {
     provider: KeyProvider;
     name: string;
@@ -25,17 +28,34 @@
     about: string;
     /** The key works: the server has cleared a "rejected" or "unreachable" status, which the page can now ask for. */
     onworks?: () => void;
+    /** The server's last test of this key (unix seconds; 0 for none) and whether it passed. */
+    testedAt?: number;
+    testOk?: boolean;
   } = $props();
 
   let testing = $state(false);
   let result = $state<{ ok: boolean; text: string } | null>(null);
+  /** A test made here, which the server has recorded too, ahead of the settings being fetched again. */
+  let tested = $state<{ at: number; ok: boolean } | null>(null);
   let asked = 0;
 
   $effect(() => {
     void about;
     result = null;
+    tested = null;
     asked++; // an answer still on its way is about the key there was
   });
+
+  const last = $derived(tested ?? (testedAt ? { at: testedAt, ok: testOk } : null));
+  // "5 minutes ago" moves on while the page stays open.
+  let now = $state(Date.now());
+  $effect(() => {
+    if (!last) return;
+    now = Date.now();
+    const t = setInterval(() => (now = Date.now()), 30_000);
+    return () => clearInterval(t);
+  });
+  const lastLine = $derived(last ? testedLine(last.at, last.ok, now) : '');
 
   async function test() {
     const mine = ++asked;
@@ -45,6 +65,7 @@
       const r = await api.testKey(provider);
       if (mine !== asked) return;
       result = r.ok ? { ok: true, text: `The ${name} key works.` } : { ok: false, text: r.error || `${name} did not accept the key.` };
+      tested = { at: Date.now() / 1000, ok: r.ok };
       if (r.ok) onworks?.();
     } catch (e) {
       if (mine !== asked) return;
@@ -68,6 +89,9 @@
   </button>
   {#if unavailable}<span id="{provider}-test-why" class="muted why">{unavailable}</span>{/if}
   <p class="result" class:ok={result?.ok} class:error={result && !result.ok} role="status">{result?.text ?? ''}</p>
+  {#if lastLine}
+    <p class="tested muted" class:failed={!last?.ok} title={last ? new Date(last.at * 1000).toLocaleString() : undefined}>{lastLine}</p>
+  {/if}
 </div>
 
 <style>
@@ -87,5 +111,13 @@
   }
   .ok {
     color: var(--ok);
+  }
+  .tested {
+    flex-basis: 100%;
+    margin: 0;
+    font-size: var(--fs-sm);
+  }
+  .tested.failed {
+    color: var(--warn);
   }
 </style>

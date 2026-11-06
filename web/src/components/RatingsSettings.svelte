@@ -1,72 +1,29 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
-  import { api, ApiError, type RatingSource, type Settings, type SettingsUpdate } from '../lib/api';
+  import { api, type RatingSource, type Settings, type SettingsUpdate } from '../lib/api';
   import { formatDate } from '../lib/credits';
   import { applyRatingPrefs } from '../lib/ratingprefs.svelte';
   import { linkParts, PRIMARY_SOURCES, RATING_SOURCES, SOURCE_NAMES } from '../lib/ratings';
+  import { href } from '../lib/router.svelte';
   import { app } from '../lib/state.svelte';
   import Icon from './Icon.svelte';
-  import KeyTest from './KeyTest.svelte';
 
-  // Settings → Ratings (M10): the MDBList key (Rotten Tomatoes, Metacritic, Letterboxd and Trakt),
-  // the source whose rating cards show, which sources a title's page shows and in what order, and
-  // the notices of IMDb and MDBList. The key is checked before it is stored and never shown back,
-  // as the TMDB and TVDB keys are. Every choice is saved as it is made.
-  let { settings: s }: { settings: Settings } = $props();
+  // Settings → Ratings (M10): the source whose rating cards show, which sources a title's page
+  // shows and in what order, and IMDb's notice. Every choice is saved as it is made. The MDBList key
+  // (Rotten Tomatoes, Metacritic, Letterboxd and Trakt) is in API keys (MdblistKey); `onkeys` opens it.
+  let { settings: s, onkeys }: { settings: Settings; onkeys?: () => void } = $props();
 
-  const KEY_SOURCES: Record<string, string> = {
-    flag: 'the -mdblist-key flag',
-    env: 'the PLY_MDBLIST_KEY environment variable',
-    settings: 'this page',
-  };
   /** How long a save of a choice may take before it counts as refused. */
   const SAVE_TIMEOUT_MS = 15_000;
   const MDBLIST: RatingSource[] = ['rt_critics', 'rt_audience', 'metacritic', 'letterboxd', 'trakt'];
-  const fixed = $derived(s.mdblistKeySource === 'flag' || s.mdblistKeySource === 'env');
   const lookupsOff = $derived(s.metadataForcedOff || !s.metadataEnabled);
-  const testUnavailable = $derived(!s.mdblistKeySet ? 'Set a key to test it.' : lookupsOff ? 'Online lookups are off.' : '');
   const available = $derived(s.ratingsAvailable ?? []);
 
-  // ---- the key ----
-
-  let key = $state('');
-  let saving = $state(false);
-  let keyMessage = $state<{ ok: boolean; text: string } | null>(null);
-  let keyMessageEl = $state<HTMLElement>();
-  let saves = $state(0);
-  const testAbout = $derived([s.mdblistKeySet, s.mdblistKeySource, s.metadataEnabled, s.metadataForcedOff, saves].join('|'));
-
-  async function saveKey(update: SettingsUpdate, done: string) {
-    saving = true;
-    keyMessage = null;
-    try {
-      const r = await api.saveSettings(update);
-      saves++;
-      keyMessage =
-        update.mdblistKey && r.mdblistKeyChecked === false
-          ? { ok: true, text: 'Saved, not checked: online lookups are switched off. The key is checked when they are on.' }
-          : { ok: true, text: done };
-      key = '';
-      applyRatingPrefs(r);
-      app.libraryVersion++; // the sources this install can have change: the page and the lists
-    } catch (e) {
-      const why =
-        e instanceof ApiError && e.status === 502 ? 'MDBList could not be reached to check the key.' : e instanceof Error ? e.message : String(e);
-      keyMessage = { ok: false, text: why };
-    } finally {
-      saving = false;
-    }
-    await tick();
-    keyMessageEl?.focus();
-  }
-
-  function submit(e: Event) {
+  function openKeys(e: MouseEvent) {
+    if (!onkeys || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return; // a new tab or window: the link's own way
     e.preventDefault();
-    const k = key.trim();
-    if (k && !fixed) void saveKey({ mdblistKey: k }, 'Key saved. Ratings are fetched from MDBList in the background.');
+    onkeys();
   }
-
-  // ---- the choices ----
 
   // `primary` and `shown` are what the page shows and what was asked for last; `confirmed` is what
   // the server has (its last answer). The card follows the settings it is given until a choice is
@@ -177,55 +134,19 @@
   }
 
   const imdbNotice = $derived(linkParts(s.imdbAttribution ?? '', s.imdbAttributionUrl ?? ''));
-  const mdblistNotice = $derived(linkParts(s.mdblistAttribution ?? '', s.mdblistAttributionUrl ?? ''));
   const datasetDate = $derived(formatDate(s.imdbDatasetUpdatedAt));
 </script>
 
 <div class="settings-panel ratings-card" role="group" aria-label="Ratings">
-  <div class="key-part" role="group" aria-labelledby="ratings-key-h">
-    <div>
-      <h3 id="ratings-key-h">MDBList key</h3>
-      <p class="muted">
-        IMDb ratings come from IMDb’s own data files and need no key. With an MDBList key, ply adds Rotten Tomatoes,
-        Metacritic, Letterboxd and Trakt.
-        {#if s.mdblistKeySet}
-          A key is set, from {KEY_SOURCES[s.mdblistKeySource ?? ''] ?? 'the server'}.{#if fixed}{' '}Change it there.{/if}
-        {:else}
-          No key yet. Get a free one from
-          <a class="link" href="https://mdblist.com/preferences/" target="_blank" rel="noreferrer">MDBList</a>.
-        {/if}
-      </p>
-    </div>
-
-    <!-- new-password and the managers' opt-outs: a password manager must never fill ply's own token in here. -->
-    {#if !fixed}
-      <form class="key" onsubmit={submit}>
-        <label class="sr-only" for="mdblist-key">{s.mdblistKeySet ? 'Replace the MDBList key' : 'MDBList key'}</label>
-        <input
-          id="mdblist-key"
-          class="settings-input"
-          bind:value={key}
-          type="password"
-          autocomplete="new-password"
-          data-1p-ignore
-          data-lpignore="true"
-          data-bwignore
-          spellcheck="false"
-          placeholder={s.mdblistKeySet ? 'Paste a new key to replace it' : 'Paste your key'}
-        />
-        <button class="btn primary" disabled={saving || !key.trim()}>{saving ? 'Checking…' : 'Save key'}</button>
-        {#if s.mdblistKeySet && s.mdblistKeySource === 'settings'}
-          <button type="button" class="btn" disabled={saving} onclick={() => saveKey({ mdblistKey: '' }, 'Key removed.')}>Remove</button>
-        {/if}
-      </form>
+  <p class="muted keys-note">
+    IMDb ratings come from IMDb’s own data files and need no key.
+    {#if s.mdblistKeySet}
+      Rotten Tomatoes, Metacritic, Letterboxd and Trakt come with your MDBList key, in
+    {:else}
+      Rotten Tomatoes, Metacritic, Letterboxd and Trakt need an MDBList key: add one in
     {/if}
-    {#if keyMessage}
-      <p bind:this={keyMessageEl} class="key-message" class:error={!keyMessage.ok} class:ok={keyMessage.ok} role="status" tabindex="-1">
-        {keyMessage.text}
-      </p>
-    {/if}
-    <KeyTest provider="mdblist" name="MDBList" busy={saving} unavailable={testUnavailable} about={testAbout} />
-  </div>
+    <a class="link" href={href.settingsTab('keys')} onclick={openKeys}>API keys</a>.
+  </p>
 
   <div class="settings-panel-part">
     <div class="primary">
@@ -288,31 +209,10 @@
           >{/if}{imdbNotice.after}
       </p>
     {/if}
-    {#if s.mdblistAttribution}
-      <p class="mdblist-notice">
-        {mdblistNotice.before}{#if mdblistNotice.link}<a class="link" href={s.mdblistAttributionUrl} target="_blank" rel="noreferrer"
-            >{mdblistNotice.link}</a
-          >{/if}{mdblistNotice.after}
-      </p>
-    {/if}
   </div>
 </div>
 
 <style>
-  /* The key's part lays out as the card does. */
-  .key-part {
-    display: grid;
-    gap: inherit;
-  }
-  .key {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.6rem;
-  }
-  .key input {
-    flex: 1 1 16rem;
-    min-width: 0;
-  }
   .primary {
     display: flex;
     flex-wrap: wrap;

@@ -91,8 +91,10 @@ const settings = {
  * A fresh page on the mocked server (about:blank first: a deep link has an entry before it).
  *   slowItems  ms before the library and the items' details are answered
  *   shrink     titles the genre has lost by its second fetch, from the top (the library changed)
+ *   many       a library of this many films instead (no episodes)
  */
 async function open(browser, opts = {}) {
+  const items = opts.many ? Array.from({ length: opts.many }, (_, i) => movie(i + 1)) : ITEMS;
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, serviceWorkers: 'block' });
   const page = await context.newPage();
   const errors = [];
@@ -105,9 +107,9 @@ async function open(browser, opts = {}) {
     const p = u.pathname;
     if (p.startsWith('/api/images/')) return route.fulfill({ status: 404, body: '' });
     if (p === '/api/info') return json(route, { id: 'x', name: 'e2e', version: 'dev', authRequired: false });
-    if (p === '/api/scan') return json(route, { running: false, itemCount: ITEMS.length, watching: [] });
+    if (p === '/api/scan') return json(route, { running: false, itemCount: items.length, watching: [] });
     if (opts.slowItems && p.startsWith('/api/items')) await sleep(opts.slowItems);
-    if (p === '/api/items') return json(route, ITEMS);
+    if (p === '/api/items') return json(route, items);
     if (p === '/api/shows') return json(route, SHOWS);
     if (['/api/continue', '/api/upcoming', '/api/folders', '/api/metadata/review', '/api/sessions'].includes(p)) return json(route, []);
     if (p === '/api/genres') return json(route, [{ id: 18, name: 'Drama', count: GENRE_TITLES.length }]);
@@ -125,7 +127,7 @@ async function open(browser, opts = {}) {
     if (p === '/api/people/31') return json(route, PERSON);
     if (p === '/api/collections/9') return json(route, { id: 9, name: 'The Mann Collection', titles: [] });
     const m = p.match(/^\/api\/items\/(\d+)$/);
-    const it = m && ITEMS.find((i) => i.id === Number(m[1]));
+    const it = m && items.find((i) => i.id === Number(m[1]));
     if (it) return json(route, detail(it));
     return json(route, { error: `unmocked ${p}` }, 404);
   });
@@ -196,7 +198,7 @@ const scenarios = {
     const { context, page, errors } = await open(browser);
     await page.goto(`${base}/#/`);
     await page.locator('header nav a[href="#/movies"]').click();
-    await page.locator('.grid .card').nth(40).waitFor();
+    await page.locator('.grid .card').nth(12).waitFor(); // a virtual grid: a screenful of cards, not all 120
     await page.locator('a.chip', { hasText: 'Newest' }).click();
     await page.locator('a.chip', { hasText: 'Unwatched' }).click();
     const view = await hash(page);
@@ -221,6 +223,29 @@ const scenarios = {
     check('the focus is back on the card that was opened', (await page.evaluate(() => document.activeElement?.getAttribute('href'))) === card.href, await page.evaluate(() => `${document.activeElement?.tagName} ${document.activeElement?.getAttribute('href')}`));
     check('Back went back in the history (no new entry)', (await entries(page)) === before + 1, `${before} → ${await entries(page)}`);
     check('no page errors', errors.length === 0, errors.join('; '));
+    await context.close();
+  },
+
+  // Mutant caught: the grid not claiming the restore (the router's own scroll lands, but the card
+  // isn't mounted yet when it looks for it: the focus goes to the title).
+  async 'Movies with 5,000 films, far down → a film → Back: the same card, in the same place'(browser) {
+    const { context, page, errors } = await open(browser, { many: 5000 });
+    await page.goto(`${base}/#/`);
+    await page.locator('header nav a[href="#/movies"]').click();
+    await page.locator('.grid .card').nth(12).waitFor();
+    check('5,000 films: a screenful of cards in the page', (await page.locator('a.card').count()) < 200, String(await page.locator('a.card').count()));
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight * 0.7));
+    const y0 = await settle(page);
+    const card = await middleCard(page);
+    await follow(page, card.href);
+    await back(page).click();
+    await until(async () => (await hash(page)) === '#/movies');
+    const y1 = await settle(page);
+    const after = await middleCard(page);
+    check('5,000 films: the same card in the middle, in the same place', after?.href === card.href && Math.abs(after.top - card.top) <= 4, `${JSON.stringify(card)} → ${JSON.stringify(after)}`);
+    check('5,000 films: the scroll position is restored', Math.abs(y1 - y0) <= ROWS, `${y0} → ${y1}`);
+    check('5,000 films: the focus is back on the card', (await page.evaluate(() => document.activeElement?.getAttribute('href'))) === card.href);
+    check('5,000 films: no page errors', errors.length === 0, errors.join('; '));
     await context.close();
   },
 
@@ -342,37 +367,40 @@ const scenarios = {
     check('Forward twice reaches the film again', (await hash(page)) === '#/item/1', await hash(page));
     check('whose Back still says Back', (await text(back(page))) === 'Back');
 
-    // The player: its link goes back to where it was opened from, and says so.
+    // The player's close (✕, Player.svelte's onClose): back to where it was opened from, through
+    // the history, not a new entry. Mutant caught: onClose setting location.hash to the film (the
+    // browser's Back then reopens the player).
+    const close = 'button[aria-label="Close player"]';
+    const closePlayer = () => page.evaluate((sel) => document.querySelector(sel).click(), close); // the controls hide
     await page.locator('a.btn.primary[href="#/play/1"]').click();
-    const playBack = page.locator('.play-page > p > a').first();
-    await playBack.waitFor();
-    check("the player's link says Back (there is a previous view)", (await text(playBack)) === '← Back', await text(playBack));
+    await page.locator(close).waitFor({ state: 'attached' });
     const n = await entries(page);
-    await playBack.click();
+    await closePlayer();
     await until(async () => (await hash(page)) === '#/item/1');
-    check("the player's link goes back to the film", (await hash(page)) === '#/item/1', await hash(page));
+    check("the player's close button goes back to the film", (await hash(page)) === '#/item/1', await hash(page));
     await page.goBack();
     await until(async () => (await hash(page)) === '#/movies');
     check("and the browser's Back then goes to Movies, not the player", (await hash(page)) === '#/movies', await hash(page));
     check('no entry was added', (await entries(page)) === n);
 
-    // The player's own close button (Player.svelte's onClose): Back too, not a new entry. Mutant
-    // caught: onClose setting location.hash to the film (the browser's Back then reopens the player).
+    // Escape closes it the same way.
     await page.goForward();
     await until(async () => (await hash(page)) === '#/item/1');
     await page.locator('a.btn.primary[href="#/play/1"]').click();
-    await page.locator('button[aria-label="Close player"]').waitFor({ state: 'attached' });
-    await page.evaluate(() => document.querySelector('button[aria-label="Close player"]').click()); // the controls hide
+    await page.locator(close).waitFor({ state: 'attached' });
+    await page.keyboard.press('Escape');
     await until(async () => (await hash(page)) === '#/item/1');
-    check("the player's close button goes back to the film", (await hash(page)) === '#/item/1', await hash(page));
+    check('Escape goes back to the film', (await hash(page)) === '#/item/1', await hash(page));
     await page.goBack();
     await until(async () => !(await hash(page)).startsWith('#/item/1'));
-    check("after the close, the browser's Back goes to Movies, not the player", (await hash(page)) === '#/movies', await hash(page));
+    check("after Escape, the browser's Back goes to Movies, not the player", (await hash(page)) === '#/movies', await hash(page));
 
-    // A deep link to the player: its link names the film's page.
+    // A deep link to the player: its close goes to the film's page, in place of the player.
     await fresh(page, '#/play/1');
-    await playBack.waitFor();
-    check("a deep link's player link says Details", (await text(playBack)) === '← Details', await text(playBack));
+    await page.locator(close).waitFor({ state: 'attached' });
+    await closePlayer();
+    await until(async () => (await hash(page)) === '#/item/1');
+    check("a deep link's close goes to the film's page", (await hash(page)) === '#/item/1', await hash(page));
 
     // A deep link: its fallback replaces it, so the browser's Back leaves the app.
     await fresh(page, '#/item/7');
@@ -432,12 +460,12 @@ const scenarios = {
     const { context, page } = await open(browser);
     await page.goto(`${base}/#/`);
     await page.locator('header nav a[href="#/movies"]').click();
-    await page.locator('.grid .card').nth(40).waitFor();
+    await page.locator('.grid .card').nth(12).waitFor(); // a virtual grid: a screenful of cards, not all 120
     await page.evaluate(() => window.scrollTo(0, 3000));
     const y0 = await settle(page);
     const card = await middleCard(page);
     await page.reload();
-    await page.locator('.grid .card').nth(40).waitFor();
+    await page.locator('.grid .card').nth(12).waitFor(); // a virtual grid: a screenful of cards, not all 120
     await until(async () => (await scrollY(page)) > 0);
     const y1 = await settle(page);
     const again = await middleCard(page);

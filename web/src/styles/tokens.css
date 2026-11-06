@@ -313,18 +313,34 @@
   --z-under: -1;
   --z-over: 1; /* on a page's hero: its Back button */
   --z-bar: 20; /* the header, the tab bar, menus */
+  --z-player: 30; /* the full-window player, over everything else on the page */
 
   /* Opacity steps that repeat. */
   --opacity-disabled: 0.5;
   --light-dim: 0.12; /* the projection light with no film */
   --light-lit: 0.3;
 
+  /* The A to Z rail of Movies and Shows (grid task). */
+  --opacity-rail-idle: 0.4; /* until a pointer is over it, or it has the focus */
+  --rail-w: 24px; /* a letter's target: 24 px at the least (WCAG 2.5.8) */
+  --rail-letter-h: 24px;
+  --bubble-size: 4.5rem; /* the big letter beside a dragging finger */
+  --tabbar-h: 5.5rem; /* what the phone tab bar covers at the bottom, before the safe area */
+
   /* Layout. */
   --gutter: clamp(1rem, 4vw, 3rem);
+  --gutter-player: clamp(0.75rem, 2.5vw, 1.5rem); /* the player's bars, from the window's edges */
   --bar-h: 3.5rem;
   --chip-h: 2rem; /* a rating chip */
   --chip-pad: 0.2rem 0.7rem;
   --chip-gap: 0.4rem;
+  /* Settings tabs (settings task). --page-max: the width of the centred pages of text and controls
+     (.page-container: Settings and Activity); --side-nav-w: Settings' column of tabs; the fade at the
+     edge of a row that scrolls sideways (a mask: only its alpha counts). */
+  --page-max: 68rem;
+  --side-nav-w: 11rem;
+  --fade-edge: 2rem;
+  --mask-solid: var(--black);
 
   /* Fonts. */
   --font-text: var(--family-system);

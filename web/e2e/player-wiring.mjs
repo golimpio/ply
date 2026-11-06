@@ -32,6 +32,7 @@ const results = [];
 const check = (name, ok, detail = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  (${detail})` : ''}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const near = (x, want, tol) => Math.abs(x - want) <= tol;
+const CLOSE = 'button[aria-label="Close player"]'; // the player's ✕, which goes back
 
 /** Poll (here, in node) until fn returns something truthy; throws, so a scenario fails instead of hanging. */
 async function until(what, fn, ms = 10000) {
@@ -301,7 +302,7 @@ try {
     const reported = s.puts().find((p) => near(p.pos, at, 2));
     check('W2 exactly where the failure was reported', sent === reported.pos, `asked for ${sent}, reported ${reported.pos}`);
     await s.playingAt('Retry to resume', sent - 1, sent + 6);
-    await s.click('.play-page a');
+    await s.click(CLOSE);
     await until('the player to be gone', async () => (await s.page.locator('video').count()) === 0);
     await sleep(300);
     check('W2 leaving after a failure erased nothing', s.puts().every((p) => p.pos >= 20), JSON.stringify(s.puts()));
@@ -372,7 +373,7 @@ try {
   await scenario('W1/W4 leaving the player', { hls: true }, async (s) => {
     await s.go('#/play/1?t=30');
     await s.playingAt('hls.js to resume at 30 s', 31, 40);
-    await s.click('.play-page a');
+    await s.click(CLOSE);
     await until('the session to be deleted', () => s.deletes().some((d) => d.id === 's1'));
     const last = s.puts().at(-1);
     check('leaving reports the position', last && last.pos >= 30, JSON.stringify(s.puts()));
@@ -386,7 +387,7 @@ try {
   await scenario('W4 playback answered after leaving', { hls: true, hold: true }, async (s) => {
     await s.go('#/play/1?t=5');
     await until('the playback request', () => s.posts().length === 1);
-    await s.click('.play-page a');
+    await s.click(CLOSE);
     await until('the player to be gone', async () => (await s.page.locator('video').count()) === 0);
     s.release();
     await until('the late session to be deleted', () => s.deletes().some((d) => d.id === 's1'));

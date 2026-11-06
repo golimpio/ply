@@ -83,6 +83,12 @@ code {
 .page.flush {
   padding-top: 0; /* pages that open with a full-bleed hero */
 }
+/* A page of text and controls (Settings, Activity): a measure of its own, centred on a wide screen. */
+.page-container {
+  width: 100%;
+  max-width: var(--page-max);
+  margin-inline: auto;
+}
 
 .center {
   min-height: 60dvh;
@@ -291,6 +297,37 @@ code {
 }
 .settings-panel .ok {
   color: var(--ok);
+}
+/* A key's card in Settings → API keys (TmdbKey, TvdbKey, MdblistKey): one layout for the three. */
+.key-card .key-fields {
+  display: grid;
+  gap: 0.9rem;
+}
+.key-card .key-field {
+  display: grid;
+  gap: 0.35rem;
+}
+.key-card .key-field > label,
+.key-card .key-field > .label {
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-md);
+}
+.key-card .key-field > label .muted {
+  font-weight: var(--fw-regular);
+}
+.key-card .key-field .hint {
+  font-size: var(--fs-xs-3);
+}
+.key-card .key-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+.key-card .key-notice {
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-xs-3);
 }
 /* Text fields and selects. A .text-field's border lights up on focus; a .settings-input also gets
    the focus ring. Components override the size where theirs differs. */

@@ -267,15 +267,17 @@ machine is let off), and a redirect is an error.
 - **Movies and Shows**: "Rating" in the sort, and a minimum (Any rating, 60+, 70+, 80+) on score100, in the URL hash
   (`#/movies?sort=rating&min=70`). Both pages sort and filter the library they already hold, so they don't use the
   server's `sort=rating`/`minRating` (and can't get its 400).
-- **Settings → Ratings** (`components/RatingsSettings.svelte`): the MDBList key as the TMDB and TVDB keys (password field
-  kept from password managers, Remove only for a key stored here, Test with `provider: "mdblist"`); the primary rating
+- **Settings → API keys → MDBList** (`components/MdblistKey.svelte`, since Settings has tabs: see DESIGN.md › Web
+  UI › Settings): the MDBList key as the TMDB and TVDB keys (password field kept from password managers, a mask when
+  set, Remove only for a key stored here, Test with `provider: "mdblist"` and its last test), and MDBList's notice.
+- **Settings → Ratings** (`components/RatingsSettings.svelte`): a line on what the MDBList key adds, linking to the API
+  keys tab; the primary rating
   (a select of the primary sources this install has); the shown sources as a checklist with move up and down (an
   unticked source goes to the end); every change saved at once (the client's `PUT /api/settings`), one save at a time
   with the latest choice sent last (answers can't cross), said in a `role=status` line, and put back with the server's
   words when refused; a confirmed primary refreshes the cards; once a choice is made the card keeps its own state, so a
   GET of the settings that started before a save can't undo it; the focus stays on the moved row's button (or its
-  twin, at the top or bottom) at once; IMDb's and MDBList's notices as the server
-  words them, with their links; and "IMDb ratings updated <date>" or "IMDb ratings not downloaded yet".
+  twin, at the top or bottom) at once; IMDb's notice as the server words it, with its link; and "IMDb ratings updated <date>" or "IMDb ratings not downloaded yet".
 - **Activity**: `ratings.imdb` is "IMDb ratings" and `ratings.mdblist` "Ratings from MDBList".
 - **Tests**: `lib/ratings.test.ts`, the ratings part of `lib/meta-api.test.ts`, `sortCards` in `lib/credits.test.ts`, and
   `web/e2e/ratings-ui.mjs` (mocked; each scenario names the mutant it kills).

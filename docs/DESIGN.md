@@ -419,9 +419,31 @@ Svelte 5 (runes) + Vite + TypeScript, hls.js. No UI framework; small hand-writte
   `video/mp4; codecs="hvc1"`, `audio/mp4; codecs="ac-3"`/`"ec-3"`), POSTs `/playback`, then: direct → `<video src>`;
   HLS → native if `canPlayType('application/vnd.apple.mpegurl')` (Safari) else hls.js. Seek past encoded range →
   new playback with `startSec` (display time = startSec + currentTime). DELETE session on leave.
+- **Player chrome** (`pages/Play.svelte`, `components/Player.svelte`, `components/PlayerControls.svelte`): Play fills
+  the browser window (a fixed layer, not the Fullscreen API; App leaves the header and tab bar out), the picture
+  letterboxed on black; the full screen button still uses the Fullscreen API on the frame. An overlay over it: the
+  title at the top, the page's `h1` (a film: its title and year; an episode: show · SxxEyy above its title), how it
+  is played (a badge; its reasons in a popover) and close (✕), the controls at the bottom; both bars pad into the
+  safe areas (an iPhone held sideways). It shows on a mousemove, a touch or a key and hides 3 s (`IDLE_MS`) after
+  the last while playing, the cursor with it; it stays while paused, with a menu or the popover open, while
+  scrubbing, with the mouse on a control (not on a bar's empty space: a mouse parked at the edge lets it go), or
+  with keyboard focus that came in by keyboard. Touch: a tap on the picture shows or hides it (never plays or
+  pauses), a double tap on a side skips 10 s. Close and Escape call `goBack()` (to the item page from a deep link);
+  the unmount ends the session as any leaving does (report with keepalive, heartbeat stopped, DELETE). Escape takes
+  one layer at a time: a menu or the popover, then full screen, then the player (an Escape within 500 ms of leaving
+  full screen is taken as the one that left it). While the item loads or fails, Play shows the same ✕ and takes
+  Escape. The scrubber seeks to the fraction of the bar under the pointer (pointerdown captures, a drag previews,
+  pointerup seeks, and the fill stays there while the element seeks); its `<input type=range step=any>` takes no
+  pointer (a native range maps a click with the thumb's width taken off both ends) and is there for the keyboard
+  (arrows ±5 s, Home, End; Space and K play and pause) and assistive technology. Cost while playing: the bars fade
+  by opacity, the fill and tooltip move by transform; a mousemove only notes the time (one idle timer at a time,
+  plain listeners that stop at the player, as Svelte's own handlers each set a timer) and reads no layout (the bar's
+  rect is read on pointerdown and on resize); while hidden the clock and buffer bars don't update, so nothing runs,
+  and they catch up as it shows; the lock screen's position is set on play, pause, seeked, ratechange and
+  loadedmetadata only. Tested by `e2e/player-ui.mjs`.
 - **Back** (`lib/router.svelte.ts`, `components/BackButton.svelte`): the top-level sections, Home, Movies and Shows,
   have no Back button; every other page has one under the header (floating over a hero): a film, an episode, a
-  show, a person, a collection, a genre, Settings and Activity (the player's own link and close do the same). The router
+  show, a person, a collection, a genre, Settings and Activity (the player's close and Escape do the same). The router
   keeps the views of the tab (at most 50), one per history entry, keyed in `history.state`; each holds its scroll
   position, the link that was followed (or the one in the middle of the screen), and state a page `remember()`s
   (the genre page's sort). `goBack()` goes to the previous view with `history.back()`, so the browser's Back and
@@ -432,9 +454,61 @@ Svelte 5 (runes) + Vite + TypeScript, hls.js. No UI framework; small hand-writte
   (skeletons, or Item's and Show's details on their way), and the followed link drawn, or room enough, or a page
   that stopped growing; it jumps, puts that link back where it was over up to 10 frames, and gives it the focus
   (else the page's `h1`). A page that restores itself (a virtualized grid) calls `claimRestore()` as it mounts and
-  the router leaves the scroll alone. A reload keeps the views: pagehide writes them to sessionStorage, and the
-  entry left by `navigate()` carries its scroll position. Sort and filters are in the hash, so Back returns to them
+  the router leaves the scroll and the focus alone (`refocus` says whether to put it back: not on a reload). A
+  reload keeps the views: pagehide writes them to sessionStorage, and the entry left by `navigate()` carries its
+  scroll position. Sort and filters are in the hash, so Back returns to them
   exactly. Tested by `router.test.ts` and `e2e/navigation.mjs`.
+- **Movies and Shows at scale** (`components/VirtualGrid.svelte`, `components/JumpRail.svelte`, `lib/vgrid.ts`,
+  `lib/az.ts`): the grid keeps in the page only the rows on screen, about a screen more above and below
+  (`nearRows`) and the focused card's row with its neighbours, each row absolutely placed at row x pitch; 5,000
+  films are 70 to 100 cards in the DOM. The columns are the CSS grid's own (`.grid`, `.grid.posters`, read from its
+  computed style on resize); every card is as tall as the next (MediaCard's line under the title is always there and
+  one line tall, a rating glyph or not), so the pitch is one measured card (ResizeObserver) plus the gap. A scroll
+  costs one read of the grid's place per frame (rAF). When the pitch or the columns change (a resize, a zoom, the
+  fonts) the page scrolls so that the first card on screen stays in the first row. Posters on screen load eager with
+  `fetchpriority=high`, the others lazy and low; `sizes` is the column width, so the srcset picks the smallest
+  that fills it (w185 for a 177 px column at 1x, w500 at 2x). A new row's posters aren't asked for until it has
+  been in the page 100 ms (one timer for the row due first; a first mount, a Back and a rail jump load at once): a
+  fling through 5,000 films starts about 36 requests instead of about 1,000, and a scroll at reading speed still
+  finds every poster asked for, its row mounted a screen ahead. A poster unmounted before it loaded drops its
+  `src`, which cancels its request (without that, the last screen's posters after a fling waited 25 s at 150 ms
+  an image; now under 1 s). It remembers the first card of the first row wholly under the header and, on Back, Forward
+  or a reload, claims the restore and scrolls that card back into the first row (the same place at the same width;
+  the same row at another), then focuses the followed card unless reloading. Arrow keys move between cards (up and
+  down by a row). The grid is a list (`role=list`, each card a listitem with `aria-setsize` and `aria-posinset`).
+  Movies, Shows and Home's Movies rail sort by name as the server does (`byName`: the ASCII lower-case sort title,
+  "Matrix, The", then year, then id) since `/api/items` and `/api/shows` keep file order. Sorted by name, a list of
+  40 or more with two letters or more has the **A to Z rail** on the right edge: the letters present (# for digits
+  and symbols, accents dropped: É is E), each a 24 px target (`--rail-w`, `--rail-letter-h`; a screen too short
+  for all shows fewer, evenly, and a drag still reaches every one), faint (`--opacity-rail-idle`) until hovered,
+  focused or touched; where the gutter is narrower than the rail the grid makes room. A click jumps that letter's
+  first card to the top, a drag jumps as it goes (a touch drag shows the letter big), and from the keyboard it is
+  one Tab stop (roving tabindex: ↑ ↓ Home End, Enter jumps and focuses the card). Tested by `vgrid.test.ts`,
+  `az.test.ts` and `e2e/library-ui.mjs` (5,000 films: the DOM bound, priorities mid-list and at 2x, cards with a
+  rating glyph, the measured pitch and a live resize, the rail's targets at five sizes, by mouse, touch and
+  keyboard, Back at another width, a 304 revisit).
+- **Settings** (`pages/Settings.svelte`, a tab each in `pages/settings/`): five tabs, **Library** (folders, a scan,
+  Needs attention), **Details** (online lookups, language, the matching status, Refresh all details), **Ratings**
+  (primary, shown order, a link to the MDBList key), **Playback** (the limits) and **API keys** (TMDB, TVDB key and
+  PIN, MDBList, each with its notice). The tab is in the hash, `#/settings?tab=details|ratings|playback|keys`
+  (Library, the default, is the bare `#/settings`; the player's older `?s=playback` opens Playback:
+  `lib/settings-tabs.ts`), and a switch is a `redirect()`, so tabs add no history entries and Back leaves Settings.
+  `components/Tabs.svelte` is the WAI-ARIA tabs pattern (tablist/tab/tabpanel, `aria-selected`, `aria-controls` on
+  the selected tab, roving tabindex, arrows, Home and End, selection follows focus; the panel is not a Tab stop of its
+  own, every panel having controls); only the selected panel is mounted, so a tab fetches only what it shows
+  (Library: folders, review, status; Details: settings and status; API keys: settings and the status once, for the
+  server's word on a key; Ratings and Playback: settings). Library and Details poll the status while matching runs
+  (`lib/matching.svelte.ts`, `poll: true`); API keys doesn't. From 900 px the tabs are a column beside the panel (the
+  selected one a quiet fill and the accent's bar), below a row that scrolls sideways, the selected tab in its middle
+  and a fade (`--fade-edge`, a mask) at an edge with more past it. The three key cards share one layout (`.key-card`
+  in app.css) and one field, `components/KeyField.svelte`: a key that is set shows as a mask, eight dots in the
+  placeholder only (the server never sends a key). An empty save sends nothing; Remove asks first, in place
+  (`ConfirmRemove`: "Remove the TMDB key?", the focus on Keep). Test is off while a key is typed and not saved (it
+  would test the saved one; Save checks the typed one). Each Test (`KeyTest`) shows "Worked when tested 5 minutes
+  ago" or "Failed when tested ..." from `<p>KeyTestedAt`/`<p>KeyTestOk` (M8-TVDB.md › Last tested), its own result at
+  once, and drops it when the key changes. The TMDB notice (`TmdbNotice`) is in the TMDB card and in Details, whether
+  or not the settings load. Settings and Activity are centred in `.page-container` (app.css, `--page-max`). Tested by
+  `lib/settings-tabs.test.ts` and `e2e/settings-ui.mjs`.
 - Dev: `vite` proxy `/api` → `http://localhost:8420`. `npm run build` → `web/dist`, embedded by `web/embed.go`.
   Keep `web/dist/.gitkeep` so `go build` works before the first web build (`all:dist`).
 

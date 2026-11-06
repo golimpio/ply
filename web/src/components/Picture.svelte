@@ -5,12 +5,17 @@
 
   // An image in a fixed-ratio frame that fades in once loaded, with the
   // generated title tile standing in when there is none or it fails.
+  // `priority` (a virtual grid's): high loads at once, before the rest; low
+  // lazily, after it. `eager` is high. `hold` (a virtual grid's new row): not
+  // asked for yet; once released it loads, and a later hold changes nothing.
   let {
     img,
     ratio,
     label = '',
     sizes = undefined,
     eager = false,
+    priority = undefined,
+    hold = false,
     fit = 'cover',
   }: {
     img: Img | null;
@@ -18,8 +23,16 @@
     label?: string;
     sizes?: string;
     eager?: boolean;
+    priority?: 'high' | 'low';
+    hold?: boolean;
     fit?: 'cover' | 'contain';
   } = $props();
+  const urgent = $derived(eager || priority === 'high');
+  let released = $state(false);
+  $effect.pre(() => {
+    if (!hold) released = true;
+  });
+  const asked = $derived(released || !hold);
 
   let el = $state<HTMLImageElement>();
   let loaded = $state(false);
@@ -39,6 +52,15 @@
   $effect(() => {
     if (el?.complete && el.naturalWidth > 0) loaded = true;
   });
+  // Dropped before it has loaded (a virtual grid's row scrolled away): let go of the request.
+  $effect(() => {
+    const node = el;
+    return () => {
+      if (!node || node.complete) return;
+      node.removeAttribute('srcset');
+      node.removeAttribute('src');
+    };
+  });
 </script>
 
 <div class="picture" style:aspect-ratio={ratio} data-art>
@@ -47,12 +69,12 @@
   {:else}
     <img
       bind:this={el}
-      src={img.src}
-      srcset={img.srcset}
+      src={asked ? img.src : undefined}
+      srcset={asked ? img.srcset : undefined}
       {sizes}
       alt=""
-      loading={eager ? 'eager' : 'lazy'}
-      fetchpriority={eager ? 'high' : 'auto'}
+      loading={urgent ? 'eager' : 'lazy'}
+      fetchpriority={urgent ? 'high' : (priority ?? 'auto')}
       decoding="async"
       style:object-fit={fit}
       class:loaded

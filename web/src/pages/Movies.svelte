@@ -1,15 +1,19 @@
 <script lang="ts">
   import type { ItemSummary } from '../lib/api';
+  import { byName, railLetters } from '../lib/az';
   import { formatDuration, hdrLabel, resolutionLabel } from '../lib/format';
-  import { byAdded, byTitle, ensureLibrary, library } from '../lib/library.svelte';
+  import { byAdded, ensureLibrary, library } from '../lib/library.svelte';
   import { filmPasses, groupByTitle, prefersPosters, type TitleGroup } from '../lib/meta';
   import { passesMinRating, ratingScore } from '../lib/ratings';
   import { href, type LibraryView } from '../lib/router.svelte';
   import { app } from '../lib/state.svelte';
+  import JumpRail from '../components/JumpRail.svelte';
   import LibraryControls from '../components/LibraryControls.svelte';
   import MediaCard from '../components/MediaCard.svelte';
+  import VirtualGrid from '../components/VirtualGrid.svelte';
 
   let { view }: { view: LibraryView } = $props();
+  let grid = $state<VirtualGrid<TitleGroup>>();
 
   $effect(() => {
     void app.libraryVersion;
@@ -17,12 +21,12 @@
   });
 
   const order: Record<LibraryView['sort'], (a: ItemSummary, b: ItemSummary) => number> = {
-    title: byTitle,
+    title: byName, // the server's order of names (lib/az)
     added: byAdded,
-    year: (a, b) => (b.year ?? 0) - (a.year ?? 0) || byTitle(a, b),
+    year: (a, b) => (b.year ?? 0) - (a.year ?? 0) || byName(a, b),
     duration: (a, b) => b.durationSec - a.durationSec,
     // score100, so that sources on other scales compare; no rating last.
-    rating: (a, b) => ratingScore(b) - ratingScore(a) || byTitle(a, b),
+    rating: (a, b) => ratingScore(b) - ratingScore(a) || byName(a, b),
   };
 
   // One card per film: its files (4K and 1080p, say) are versions of it.
@@ -36,6 +40,7 @@
       .sort((a, b) => order[view.sort](a.item, b.item)),
   );
   const posters = $derived(prefersPosters(all.map((g) => g.item)));
+  const letters = $derived(view.sort === 'title' ? railLetters(shown.map((g) => g.item.sortTitle || g.item.title)) : []);
 
   const sub = (g: TitleGroup) => [
     g.item.year,
@@ -76,8 +81,9 @@
   {:else if shown.length === 0}
     <p class="muted">No movies match these filters. <a href={href.moviesWith({ sort: view.sort })}>Clear filters</a></p>
   {:else}
-    <div class="grid" class:posters>
-      {#each shown as g (g.key)}
+    <JumpRail entries={letters} onjump={(i, focus, moving) => grid?.scrollToIndex(i, focus, moving)} />
+    <VirtualGrid bind:this={grid} items={shown} key={(g) => g.key} {posters} railed={letters.length > 0} ratio={posters ? 3 / 2 : 9 / 16}>
+      {#snippet card(g, _i, priority, sizes, hold)}
         <MediaCard
           item={g.item}
           shape={posters ? 'poster' : 'wide'}
@@ -85,18 +91,17 @@
           title={g.item.title}
           sub={sub(g)}
           rating={g.item.rating}
+          {priority}
+          {sizes}
+          {hold}
         />
-      {/each}
-    </div>
+      {/snippet}
+    </VirtualGrid>
   {/if}
 </div>
 
 <style>
   .sk {
     aspect-ratio: 16 / 9;
-  }
-  .grid.posters {
-    grid-template-columns: repeat(auto-fill, minmax(min(160px, 42vw), 1fr));
-    gap: 1.75rem 1.1rem;
   }
 </style>

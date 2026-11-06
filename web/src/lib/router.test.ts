@@ -49,7 +49,9 @@ describe('parseRoute', () => {
     ['#/person/0', notfound],
     ['#/genre/-3', notfound],
     ['#/collection/x', notfound],
-    ['#/settings', { name: 'settings' }],
+    ['#/settings', { name: 'settings', tab: 'library' }],
+    ['#/settings?tab=keys', { name: 'settings', tab: 'keys' }],
+    ['#/settings?s=playback', { name: 'settings', tab: 'playback' }],
     ['#/settings/extra', notfound],
     ['#/activity', { name: 'activity' }],
     ['#/activity/7', notfound],
@@ -103,7 +105,8 @@ describe('href', () => {
     expect(parseRoute(href.person(7))).toEqual({ name: 'person', id: 7 });
     expect(parseRoute(href.genre(18))).toEqual({ name: 'genre', id: 18 });
     expect(parseRoute(href.collection(9))).toEqual({ name: 'collection', id: 9 });
-    expect(parseRoute(href.settings)).toEqual({ name: 'settings' });
+    expect(parseRoute(href.settings)).toEqual({ name: 'settings', tab: 'library' });
+    expect(parseRoute(href.settingsTab('ratings'))).toEqual({ name: 'settings', tab: 'ratings' });
     expect(parseRoute(href.activity)).toEqual({ name: 'activity' });
   });
 });
@@ -221,7 +224,7 @@ describe('the fallback parents', () => {
     [{ name: 'person', id: 3 }, '#/'],
     [{ name: 'collection', id: 3 }, '#/'],
     [{ name: 'genre', id: 3 }, '#/'],
-    [{ name: 'settings' }, '#/'],
+    [{ name: 'settings', tab: 'library' }, '#/'],
     [{ name: 'activity' }, '#/'],
   ])('%o', (route, parent) => {
     expect(parentOf(route)?.hash).toBe(parent);
@@ -529,9 +532,24 @@ describe('a page that restores itself', () => {
     await landed();
     const saved = claimRestore(); // as the page mounts
     expect(saved?.scroll).toBe(2000);
+    expect(saved?.refocus).toBe(true); // Back puts the focus back: the page's to do now
     expect(recall('first', 0)).toBe(120);
     await frames(4);
     expect(y).toBe(0); // not the router's to move
+  });
+
+  it('is told not to move the focus on a reload', async () => {
+    open('#/');
+    navigate('#/movies');
+    remember('first', 120);
+    y = 3000;
+    window.dispatchEvent(new Event('pagehide'));
+    y = 0;
+    resetNavigation(); // the reload
+    const saved = claimRestore();
+    expect(saved?.scroll).toBe(3000);
+    expect(saved?.refocus).toBe(false);
+    expect(recall('first', 0)).toBe(120);
   });
 
   it('is too late once another navigation came', async () => {

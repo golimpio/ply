@@ -11,7 +11,8 @@
   // watch-progress bar when the item has been started. `wide` is 16:9 (frame
   // grab, still or backdrop), `poster` is 2:3; `img` overrides the picture
   // (a show's poster, a title's). `note` is a short flag over the picture. `rating` is the title's
-  // primary rating, shown quietly at the start of the second line.
+  // primary rating, shown quietly at the start of the second line. A virtual grid passes the
+  // picture's load `priority`, its `sizes` (the width of its columns) and whether to `hold` it.
   let {
     item = undefined,
     img = undefined,
@@ -22,6 +23,9 @@
     label = '',
     note = '',
     rating = null,
+    priority = undefined,
+    sizes = undefined,
+    hold = false,
   }: {
     item?: ItemSummary;
     img?: Img | null;
@@ -32,6 +36,9 @@
     label?: string;
     note?: string;
     rating?: RatingEntry | null;
+    priority?: 'high' | 'low';
+    sizes?: string;
+    hold?: boolean;
   } = $props();
 
   const progress = $derived(item ? progressOf(item) : 0);
@@ -44,8 +51,10 @@
     <Picture
       img={picture}
       ratio={shape === 'poster' ? '2 / 3' : '16 / 9'}
-      sizes={shape === 'poster' ? '(max-width: 600px) 40vw, 200px' : '(max-width: 600px) 70vw, 320px'}
+      sizes={sizes ?? (shape === 'poster' ? '(max-width: 600px) 40vw, 200px' : '(max-width: 600px) 70vw, 320px')}
       label={label || title}
+      {priority}
+      {hold}
     />
     {#if item}<div class="badges"><Badges {item} notable /></div>{/if}
     {#if note}<span class="note">{note}</span>{/if}
@@ -56,12 +65,12 @@
     {/if}
   </div>
   <div class="title">{title}</div>
-  {#if parts.length || rating}
-    <div class="sub">
-      {#if rating}<span class="rating"><Rating entry={rating} compact /></span>{/if}
-      {#each parts as p, i (i)}<span>{p}</span>{/each}
-    </div>
-  {/if}
+  <!-- Always there, one line tall, a rating glyph or not: every card is as tall as the next (a
+       virtual grid places its rows by one measured height). -->
+  <div class="sub">
+    {#if rating}<span class="rating"><Rating entry={rating} compact /></span>{/if}
+    {#each parts as p, i (i)}<span>{p}</span>{/each}
+  </div>
 </a>
 
 <style>
@@ -136,8 +145,10 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  /* One line tall: a rating glyph (1.3em) no longer makes it taller, its text where it was. */
   .sub {
     display: flex;
+    height: 1lh;
     gap: 0.75rem;
     margin-top: 0.1rem;
     color: var(--text-muted);

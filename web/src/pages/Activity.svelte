@@ -184,7 +184,7 @@
   </li>
 {/snippet}
 
-<div class="page activity">
+<div class="page page-container activity">
   <header class="top">
     <div class="intro">
       <BackButton />
@@ -391,7 +391,6 @@
 
 <style>
   .activity {
-    max-width: 60rem;
     display: grid;
     gap: 2.25rem;
   }

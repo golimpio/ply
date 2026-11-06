@@ -45,7 +45,7 @@ const fKeydown = (page) =>
         window.addEventListener('keydown', on);
       }),
   );
-const opacity = (page) => page.evaluate(() => getComputedStyle(document.querySelector('.controls')).opacity);
+const opacity = (page) => page.evaluate(() => getComputedStyle(document.querySelector('.controls .bottom')).opacity);
 
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 try {

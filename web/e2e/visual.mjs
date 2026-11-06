@@ -488,11 +488,17 @@ const SHOTS = [
   { name: 'genre', hash: '#/genre/18', ready: 'h1 .count', full: true },
   { name: 'collection', hash: '#/collection/9', ready: 'a.card', full: true },
   { name: 'person', hash: '#/person/31', ready: 'h2.library', full: true },
-  { name: 'settings', hash: '#/settings', ready: 'ul[aria-label="Library folders"] li', full: true,
-    act: async (page) => {
-      await visible(page, '.ratings-card');
-      await until('no skeletons', () => page.evaluate(() => !document.querySelector('.skeleton')));
-    } },
+  // Settings, a shot per tab (#/settings?tab=...; Library is the bare #/settings).
+  ...[
+    ['library', 'ul[aria-label="Library folders"] li'],
+    ['details', '.status p'],
+    ['ratings', '.ratings-card'],
+    ['playback', '#max-streams'],
+    ['keys', '#tmdb-key'],
+  ].map(([tab, ready]) => ({
+    name: `settings-${tab}`, hash: tab === 'library' ? '#/settings' : `#/settings?tab=${tab}`, ready, full: true,
+    act: (page) => until('no skeletons', () => page.evaluate(() => !document.querySelector('.skeleton'))),
+  })),
   { name: 'activity', hash: '#/activity', ready: '[data-job="3"]', full: true },
   {
     name: 'folders-picker', hash: '#/settings', ready: 'ul[aria-label="Library folders"] li',
@@ -536,7 +542,7 @@ const SHOTS = [
   { name: 'focus-header', hash: '#/', ready: 'text=Recently added', act: (page) => page.keyboard.press('Tab') },
   { name: 'focus-card', hash: '#/movies', ready: 'a.card', act: (page) => keyboardFocus(page, 'a.card') },
   { name: 'focus-chip', hash: '#/item/1', ready: 'ul.ratings .score-chip', act: (page) => keyboardFocus(page, 'ul.ratings a.score-chip') },
-  { name: 'focus-input', hash: '#/settings', ready: '#tmdb-key', act: async (page) => {
+  { name: 'focus-input', hash: '#/settings?tab=keys', ready: '#tmdb-key', act: async (page) => {
     await page.locator('#tmdb-key').scrollIntoViewIfNeeded();
     await keyboardFocus(page, '#tmdb-key');
   } },
@@ -577,12 +583,12 @@ const SHOTS = [
   // A rotten Tomatometer and a spilled audience.
   { name: 'item-rotten', hash: '#/item/8', ready: 'ul.ratings [data-source="rt_audience"]', full: true },
   // Errors.
-  { name: 'keytest-error', hash: '#/settings', ready: '#tmdb-key', opts: { testError: 'TMDB said the key is not valid (401).' }, act: async (page) => {
+  { name: 'keytest-error', hash: '#/settings?tab=keys', ready: '#tmdb-key', opts: { testError: 'TMDB said the key is not valid (401).' }, act: async (page) => {
     await page.click('button[aria-label="Test the TMDB key"]');
     await visible(page, '.test .result.error');
     await page.locator('.test .result.error').first().scrollIntoViewIfNeeded();
   } },
-  { name: 'tvdb-error', hash: '#/settings', ready: '#tvdb-key', opts: { putError: 'TVDB rejected the key or PIN', settings: { tvdbKeySet: false, tvdbKeySource: '' } }, act: async (page) => {
+  { name: 'tvdb-error', hash: '#/settings?tab=keys', ready: '#tvdb-key', opts: { putError: 'TVDB rejected the key or PIN', settings: { tvdbKeySet: false, tvdbKeySource: '' } }, act: async (page) => {
     await page.fill('#tvdb-key', 'fake-refused-key');
     await page.locator('.card.tvdb button:has-text("Save")').click();
     await visible(page, '.card.tvdb p[role="status"].error');
@@ -595,6 +601,11 @@ const SHOTS = [
   } },
   { name: 'player-error', hash: '#/play/1', ready: '.overlay[role="alert"]', opts: { player: true, file: 404 } },
   { name: 'player-stopped', hash: '#/play/1', ready: '.overlay.stopped', opts: { player: true, file: 410 } },
+  // A key's Remove asks first.
+  { name: 'remove-confirm', hash: '#/settings?tab=keys', ready: '#tmdb-key', act: async (page) => {
+    await page.click('.card.tmdb button:has-text("Remove key")');
+    await visible(page, '.card.tmdb .confirm-remove');
+  } },
   { name: 'folders-forget', hash: '#/settings', ready: 'ul[aria-label="Library folders"] li', act: async (page) => {
     await page.click('button[aria-label="Remove /Volumes/NAS/Movies"]');
     await page.locator('dialog[open] input[type="checkbox"]').check();

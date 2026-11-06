@@ -2,7 +2,8 @@
   import { api, type GenreCount, type ItemSummary, type Settings, type TitleCard, type UpcomingShow } from '../lib/api';
   import { useAmbient } from '../lib/ambient.svelte';
   import { episodeLabel, formatDuration } from '../lib/format';
-  import { byAdded, byTitle, ensureLibrary, library, showsOf, type ShowEntry } from '../lib/library.svelte';
+  import { byName } from '../lib/az';
+  import { byAdded, ensureLibrary, library, showsOf, type ShowEntry } from '../lib/library.svelte';
   import {
     airLabel,
     groupByTitle,
@@ -105,7 +106,7 @@
   // the version played last (the server lists the most recent first).
   const recent = $derived(onePerTitle([...items].sort(byAdded)).slice(0, 24));
   const continuing = $derived(onePerTitle(continueItems));
-  const movies = $derived(groupByTitle(items.filter((i) => i.kind === 'movie')).sort((a, b) => byTitle(a.item, b.item)));
+  const movies = $derived(groupByTitle(items.filter((i) => i.kind === 'movie')).sort((a, b) => byName(a.item, b.item))); // as Movies lists them
   const shows = $derived(showsOf(items, library.shows).sort((a, b) => b.latestAddedAt - a.latestAddedAt));
   const moviePosters = $derived(prefersPosters(movies.map((g) => g.item)));
   const showPosters = $derived(prefersPosters(shows.map((s) => s.meta ?? {})));
@@ -180,7 +181,7 @@
           <p class="muted">Add a free TMDB key and ply fills in the details by itself, and keeps them up to date.</p>
         </div>
         <div class="setup-actions">
-          <a class="btn primary" href={href.settings}>Set it up</a>
+          <a class="btn primary" href={href.settingsTab('keys')}>Set it up</a>
           <button class="btn" onclick={dismiss}>Not now</button>
         </div>
       </aside>

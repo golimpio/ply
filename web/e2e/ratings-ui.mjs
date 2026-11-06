@@ -225,6 +225,8 @@ const face = (loc) =>
   );
 const settingsCall = (calls) => calls.filter((c) => (c.method === 'PUT' || c.method === 'PATCH') && c.path === '/api/settings');
 const card = (page) => page.locator('.ratings-card');
+/** The MDBList key's card, in Settings → API keys. */
+const keyCard = (page) => page.locator('.card.mdblist');
 const cardTitles = (page) => page.locator('.grid .card .title').allTextContents();
 
 const scenarios = {
@@ -368,42 +370,44 @@ const scenarios = {
   // Mutants caught: the key sent under another name, the server's refusal replaced by a generic
   // message, Remove offered for a key from the environment, and Test asking about another provider
   // (the mock gives MDBList's answer only to provider "mdblist").
+  // Settings in tabs: the MDBList key has its own card in API keys.
   async 'Settings: the MDBList key, a refusal inline, Remove and Test'(browser) {
     let { context, page, calls } = await open(browser, {
       put: (body, n) => (n === 1 ? [400, { error: 'MDBList rejected the key' }] : [200, settings({ mdblistKeySet: true, mdblistKeySource: 'settings', mdblistKeyChecked: true, ratingsAvailable: SOURCES })]),
     });
-    await page.goto(`${base}/#/settings`);
-    await card(page).waitFor();
+    await page.goto(`${base}/#/settings?tab=keys`);
+    await keyCard(page).waitFor();
     const input = page.locator('#mdblist-key');
     check('the key field is a password field', (await input.getAttribute('type')) === 'password');
     check('password managers are told to keep out', (await input.getAttribute('autocomplete')) === 'new-password' && (await input.getAttribute('data-1p-ignore')) !== null && (await input.getAttribute('data-lpignore')) === 'true' && (await input.getAttribute('data-bwignore')) !== null);
     await input.fill('fake-refused-key');
-    await card(page).locator('button:has-text("Save key")').click();
-    const msg = card(page).locator('p.key-message');
+    await keyCard(page).locator('button:has-text("Save key")').click();
+    const msg = keyCard(page).locator('p.key-message');
     await msg.waitFor();
     check('the refusal is said as the server said it', (await text(msg)) === 'MDBList rejected the key', await text(msg));
     check('it is an error, inline', await msg.evaluate((e) => e.classList.contains('error') && e.getAttribute('role') === 'status'));
     check('the key went as mdblistKey, and nothing else', JSON.stringify(settingsCall(calls)[0]?.body) === JSON.stringify({ mdblistKey: 'fake-refused-key' }), JSON.stringify(settingsCall(calls)[0]?.body));
     check('the refused key stays to be fixed', (await input.inputValue()) === 'fake-refused-key');
     await input.fill('fake-good-key');
-    await card(page).locator('button:has-text("Save key")').click();
-    await card(page).locator('p.key-message.ok').waitFor();
-    check('a good key: saved, and said so', /^Key saved/.test(await text(card(page).locator('p.key-message.ok'))));
+    await keyCard(page).locator('button:has-text("Save key")').click();
+    await keyCard(page).locator('p.key-message.ok').waitFor();
+    check('a good key: saved, and said so', /^Key saved/.test(await text(keyCard(page).locator('p.key-message.ok'))));
     check('the field is emptied', (await input.inputValue()) === '');
     await context.close();
 
     ({ context, page, calls } = await open(browser, { settings: { mdblistKeySet: true, mdblistKeySource: 'settings' } }));
-    await page.goto(`${base}/#/settings`);
-    await card(page).locator('button:has-text("Remove")').click();
-    await card(page).locator('p.key-message.ok').waitFor();
+    await page.goto(`${base}/#/settings?tab=keys`);
+    await keyCard(page).locator('button:has-text("Remove key")').click();
+    await keyCard(page).locator('.confirm-remove button:has-text("Remove")').click(); // Remove asks first
+    await keyCard(page).locator('p.key-message.ok').waitFor();
     check('Remove sends mdblistKey ""', JSON.stringify(settingsCall(calls).at(-1)?.body) === JSON.stringify({ mdblistKey: '' }));
     await context.close();
 
     ({ context, page } = await open(browser, { settings: { mdblistKeySet: true, mdblistKeySource: 'env' } }));
-    await page.goto(`${base}/#/settings`);
-    await card(page).waitFor();
-    check('a key from the environment: no Remove, no field', (await card(page).locator('button:has-text("Remove")').count()) === 0 && (await page.locator('#mdblist-key').count()) === 0);
-    check('and it says where it comes from', (await text(card(page))).includes('A key is set, from the PLY_MDBLIST_KEY environment variable. Change it there.'));
+    await page.goto(`${base}/#/settings?tab=keys`);
+    await keyCard(page).waitFor();
+    check('a key from the environment: no Remove, no field', (await keyCard(page).locator('button:has-text("Remove")').count()) === 0 && (await page.locator('#mdblist-key').count()) === 0);
+    check('and it says where it comes from', (await text(keyCard(page))).includes('A key is set, from the PLY_MDBLIST_KEY environment variable. Change it there.'));
     await context.close();
 
     for (const [name, answer, want] of [
@@ -411,10 +415,10 @@ const scenarios = {
       ['fail', { ok: false, error: 'MDBList rejected the key' }, 'MDBList rejected the key'],
     ]) {
       ({ context, page, calls } = await open(browser, { settings: { mdblistKeySet: true, mdblistKeySource: 'settings' }, test: () => answer }));
-      await page.goto(`${base}/#/settings`);
-      await card(page).locator('button[aria-label="Test the MDBList key"]').click();
-      const result = card(page).locator('.test p.result');
-      await page.waitForFunction(() => document.querySelector('.ratings-card .test p.result')?.textContent?.trim());
+      await page.goto(`${base}/#/settings?tab=keys`);
+      await keyCard(page).locator('button[aria-label="Test the MDBList key"]').click();
+      const result = keyCard(page).locator('.test p.result');
+      await page.waitForFunction(() => document.querySelector('.card.mdblist .test p.result')?.textContent?.trim());
       check(`Test ${name}: "${want}"`, (await text(result)) === want, await text(result));
       check(`Test ${name}: asked about MDBList`, JSON.stringify(calls.find((c) => c.path === '/api/settings/test')?.body) === JSON.stringify({ provider: 'mdblist' }));
       await context.close();
@@ -426,7 +430,7 @@ const scenarios = {
   // the server did not take, and the focus lost after a move.
   async 'Settings: the primary rating and the shown sources, saved as they change'(browser) {
     let { context, page, calls } = await open(browser, { settings: { mdblistKeySet: true, mdblistKeySource: 'settings', ratingsAvailable: SOURCES } });
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?tab=ratings`);
     await card(page).waitFor();
     const opts = await page.locator('#ratings-primary option').evaluateAll((os) => os.map((o) => o.value));
     // Mutant caught: the hint described by the list, not the group of checkboxes it is about.
@@ -460,7 +464,7 @@ const scenarios = {
 
     // A refusal (400) is said inline, and the page goes back to what the server has.
     ({ context, page, calls } = await open(browser, { put: () => [400, { error: 'ratingsPrimary: "letterboxd" is not available' }], settings: { ratingsAvailable: ['imdb', 'letterboxd', 'tmdb'] } }));
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?tab=ratings`);
     await card(page).waitFor();
     await page.selectOption('#ratings-primary', 'letterboxd');
     await page.waitForFunction(() => document.querySelector('.ratings-card p.choice-message.error'));
@@ -473,18 +477,21 @@ const scenarios = {
   // (or "not downloaded yet" when there is one).
   async 'Settings: the notices of IMDb and MDBList, and the dataset date'(browser) {
     let { context, page } = await open(browser);
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?tab=ratings`);
     await card(page).waitFor();
     check('the IMDb notice, word for word', (await text(card(page).locator('.imdb-notice'))) === IMDB_NOTICE, await text(card(page).locator('.imdb-notice')));
     check('with its link', (await card(page).locator('.imdb-notice a').getAttribute('href')) === 'https://www.imdb.com');
-    const mdb = await text(card(page).locator('.mdblist-notice'));
-    check('the MDBList notice, word for word, then its link', mdb === `${MDBLIST_NOTICE} mdblist.com`, mdb);
-    check('linked to MDBList', (await card(page).locator('.mdblist-notice a').getAttribute('href')) === 'https://mdblist.com');
     check('the dataset date', (await text(card(page).locator('.dataset'))) === 'IMDb ratings updated 3 November 2026.', await text(card(page).locator('.dataset')));
     check('without an MDBList key, its sources say why they are not there', (await text(card(page).locator('li', { hasText: 'Metacritic' }))).includes('(needs an MDBList key)'));
+    // MDBList's notice is with its key, in API keys.
+    await page.goto(`${base}/#/settings?tab=keys`);
+    await keyCard(page).waitFor();
+    const mdb = await text(keyCard(page).locator('.mdblist-notice'));
+    check('the MDBList notice, word for word, then its link', mdb === `${MDBLIST_NOTICE} mdblist.com`, mdb);
+    check('linked to MDBList', (await keyCard(page).locator('.mdblist-notice a').getAttribute('href')) === 'https://mdblist.com');
     await context.close();
     ({ context, page } = await open(browser, { settings: { imdbDatasetUpdatedAt: null } }));
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?tab=ratings`);
     await card(page).waitFor();
     check('no dataset yet: said', (await text(card(page).locator('.dataset'))) === 'IMDb ratings not downloaded yet.');
     await context.close();
@@ -527,7 +534,7 @@ const scenarios = {
     });
     check("Activity's list: a list, not a grid with a gap", act.display === 'block' && act.gap === 'normal' && act.padding === '0px', JSON.stringify(act));
     // Positive control: the settings card has the look the shared class gives.
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?tab=ratings`);
     const cardPad = await card(page).evaluate((e) => getComputedStyle(e).display);
     check('the Ratings card is still a raised grid', cardPad === 'grid');
     await context.close();
@@ -539,7 +546,7 @@ const scenarios = {
   async 'Settings: choices made quickly are saved in order, and stay'(browser) {
     // 1. The first save is answered late; the second choice is made meanwhile.
     let { context, page, calls, server } = await open(browser, { putDelay: (_b, n) => (n === 1 ? 700 : 0) });
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?tab=ratings`);
     await card(page).waitFor();
     await page.locator('#rs-trakt').uncheck();
     await page.locator('#rs-tmdb').uncheck();
@@ -555,7 +562,7 @@ const scenarios = {
     // 2. The primary is changed, and a box ticked before its answer: the cards still refresh.
     let hits;
     ({ context, page, calls, hits, server } = await open(browser, { putDelay: (_b, n) => (n === 1 ? 700 : 0) }));
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?tab=ratings`);
     await card(page).waitFor();
     await sleep(300);
     // A confirmed primary bumps the library version: every page asks again (here, the settings).
@@ -571,7 +578,7 @@ const scenarios = {
 
     // 3. A GET of the settings asked before a save, answered after it, does not undo the save.
     ({ context, page, server } = await open(browser, { getDelay: (n) => (n >= 2 ? 900 : 0) }));
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?tab=ratings`);
     await card(page).waitFor();
     const asked = page.waitForRequest((r) => r.url().endsWith('/api/settings') && r.method() === 'GET');
     await page.selectOption('#ratings-primary', 'tmdb'); // confirmed: the library and the settings are asked for again
@@ -589,7 +596,7 @@ const scenarios = {
   // (atEnd always false), and the focus moved only after the answer.
   async 'Settings: the focus after a move'(browser) {
     const { context, page } = await open(browser, { settings: { ratingsAvailable: SOURCES }, putDelay: () => 600 });
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?tab=ratings`);
     await card(page).waitFor();
     const focused = () => page.evaluate(() => document.activeElement?.id || document.activeElement?.tagName);
     const settled = (words) => page.waitForFunction((w) => document.querySelector('.ratings-card p.choice-message')?.textContent?.includes(w), words);
@@ -614,7 +621,7 @@ const scenarios = {
   // unable to save again).
   async 'Settings: after a refusal, the next choice is saved'(browser) {
     const { context, page, calls } = await open(browser, { put: (b, n) => (n === 1 ? [400, { error: 'nope' }] : [200, settings({ ratingsShown: b.ratingsShown ?? SOURCES })]) });
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?tab=ratings`);
     await card(page).waitFor();
     await page.locator('#rs-trakt').uncheck();
     await page.waitForFunction(() => document.querySelector('.ratings-card p.choice-message.error'));
@@ -633,7 +640,7 @@ const scenarios = {
       putDelay: (_b, n) => (n === 1 ? 600 : 0),
       put: (b, n) => (n === 1 ? [400, { error: 'refused one' }] : [200, settings({ ratingsShown: b.ratingsShown })]),
     });
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?tab=ratings`);
     await card(page).waitFor();
     await page.locator('#rs-trakt').uncheck();
     await page.locator('#rs-tmdb').uncheck(); // while the first is on its way
@@ -650,7 +657,7 @@ const scenarios = {
   // Takes the 15 s of the timeout.
   async 'Settings: a save the server never answers is given up on'(browser) {
     const { context, page, calls, server } = await open(browser, { hang: (_b, n) => n === 1 });
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?tab=ratings`);
     await card(page).waitFor();
     await page.locator('#rs-trakt').uncheck();
     await sleep(1000);
@@ -665,14 +672,17 @@ const scenarios = {
   },
 
   // Mutants caught: the whole card named "MDBList key" (it is the Ratings card), and the key's
-  // part without a group of its own.
+  // card without a group of its own. Settings in tabs: the key's card is in API keys.
   async 'Settings: the card and its key part are named'(browser) {
     const { context, page } = await open(browser);
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?tab=ratings`);
     await card(page).waitFor();
     check('the card is the group "Ratings"', (await page.getByRole('group', { name: 'Ratings', exact: true }).count()) === 1 && (await card(page).getAttribute('aria-label')) === 'Ratings');
+    check('the key is not in it', (await card(page).locator('#mdblist-key').count()) === 0);
+    await page.goto(`${base}/#/settings?tab=keys`);
     const key = page.getByRole('group', { name: 'MDBList key', exact: true });
-    check('the key part is the group "MDBList key"', (await key.count()) === 1 && (await key.locator('#mdblist-key').count()) === 1);
+    await key.waitFor();
+    check('the key\'s card is the group "MDBList key"', (await key.count()) === 1 && (await key.locator('#mdblist-key').count()) === 1);
     check('and the choices are not in it', (await key.locator('#ratings-primary').count()) === 0);
     await context.close();
   },
@@ -680,7 +690,7 @@ const scenarios = {
   // Mutant caught: the page keeping what it asked for when the server kept something else.
   async "Settings: the page shows what the server kept"(browser) {
     const { context, page } = await open(browser, { put: (b) => [200, settings({ ratingsShown: ['imdb', 'metacritic'] })] });
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?tab=ratings`);
     await card(page).waitFor();
     await page.locator('#rs-trakt').uncheck();
     await page.waitForFunction(() => document.querySelector('.ratings-card p.choice-message.ok'));
@@ -693,7 +703,7 @@ const scenarios = {
   // as the server has it.
   async 'Settings: a refused box is put back'(browser) {
     const { context, page } = await open(browser, { put: () => [500, { error: 'boom' }] });
-    await page.goto(`${base}/#/settings`);
+    await page.goto(`${base}/#/settings?tab=ratings`);
     await card(page).waitFor();
     await page.locator('#rs-trakt').uncheck();
     await page.waitForFunction(() => document.querySelector('.ratings-card p.choice-message.error'));
@@ -722,7 +732,7 @@ const scenarios = {
       await page.locator('ol.episodes li').nth(1).waitFor();
       await sleep(300);
       await page.locator('section.season').screenshot({ path: join(shots, `ratings-episodes-${width}.png`) });
-      await page.goto(`${base}/#/settings`);
+      await page.goto(`${base}/#/settings?tab=ratings`);
       await card(page).waitFor();
       // The fixed bars would sit over the card in an element's screenshot.
       await page.addStyleTag({ content: 'header.bar, nav.tabs { visibility: hidden }' });

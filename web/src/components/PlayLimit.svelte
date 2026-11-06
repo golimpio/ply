@@ -108,7 +108,7 @@
     </span>
   </div>
   <p class="muted small">
-    <a class="link" href={`${href.settings}?s=playback`}>Raise the limit in Settings</a>
+    <a class="link" href={href.settingsTab('playback')}>Raise the limit in Settings</a>
   </p>
 </div>
 

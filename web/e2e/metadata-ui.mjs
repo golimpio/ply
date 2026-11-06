@@ -305,7 +305,7 @@ const scenarios = {
   async 'Settings: a key saved while lookups are off says it was not checked'(browser) {
     for (const checked of [false, true]) {
       const { context, page } = await open(browser, { keyChecked: checked });
-      await page.goto(`${base}/#/settings`);
+      await page.goto(`${base}/#/settings?tab=keys`);
       await page.fill('#tmdb-key', 'abc123');
       await page.click('button:has-text("Save key")');
       await page.waitForSelector('[role="status"]');
@@ -317,36 +317,57 @@ const scenarios = {
 
   // Mutant caught: `matching` ignoring running and pending (polls for ever); no app.libraryVersion
   // bump when matching ends (the review list and the rest of the page keep what they had).
+  // Settings in tabs: the status line is in Details (with the settings), the review list in
+  // Library, which polls too while matching runs.
   async 'Settings: polling stops when matching ends, and the page refetches what changed'(browser) {
-    const { context, page, hits } = await open(browser, {
-      // A pass under way, then one waiting for its retry, then done.
-      status: (n) => (n === 1 ? status({ running: true, pending: 2 }) : n === 2 ? status({ pending: 1 }) : status()),
-      review: (n) => (n === 1 ? REVIEW : REVIEW.slice(1)), // the matcher settled the first row
-    });
-    await page.clock.install(); // the poll is every 3 s: wind it on by hand
-    await page.goto(`${base}/#/settings`);
-    const line = page.locator('.status p').first();
-    await line.getByText('Matching 2 titles…').waitFor();
-    check('the review list starts with both rows', (await page.locator('.review li').count()) === 2);
-    await page.clock.runFor(3000);
-    await line.getByText('Matching 1 title…').waitFor();
-    await page.clock.runFor(3000);
-    await line.getByText('Everything has been looked up.').waitFor();
-    check('the status was asked for again while it ran', hits['/api/metadata/status'] >= 3, `asked ${hits['/api/metadata/status']}x`);
-    // Matching ended: app.libraryVersion went up, so the page asks again for what may have changed.
-    const one = await page.waitForFunction(() => document.querySelectorAll('.review li').length === 1, null, { polling: 100, timeout: 3000 }).then(
-      () => true,
-      () => false,
-    );
-    check('the review list was fetched again', one && hits['/api/metadata/review'] === 2, `${hits['/api/metadata/review']} fetches`);
-    check('the settings were fetched again', hits['/api/settings'] === 2, `${hits['/api/settings']} fetches`);
-    await sleep(300);
-    const asked = hits['/api/metadata/status'];
-    await page.clock.runFor(20000);
-    await sleep(300);
-    check('the polling has stopped', hits['/api/metadata/status'] === asked, `asked ${asked}x, then ${hits['/api/metadata/status']}x`);
-    check('the review list was not fetched again for it', hits['/api/metadata/review'] === 2, `${hits['/api/metadata/review']} fetches`);
-    await context.close();
+    // A pass under way, then one waiting for its retry, then done.
+    const pass = (n) => (n === 1 ? status({ running: true, pending: 2 }) : n === 2 ? status({ pending: 1 }) : status());
+    {
+      const { context, page, hits } = await open(browser, { status: pass });
+      await page.clock.install(); // the poll is every 3 s: wind it on by hand
+      await page.goto(`${base}/#/settings?tab=details`);
+      const line = page.locator('.status p').first();
+      await line.getByText('Matching 2 titles…').waitFor();
+      await page.clock.runFor(3000);
+      await line.getByText('Matching 1 title…').waitFor();
+      await page.clock.runFor(3000);
+      await line.getByText('Everything has been looked up.').waitFor();
+      check('Details: the status was asked for again while it ran', hits['/api/metadata/status'] >= 3, `asked ${hits['/api/metadata/status']}x`);
+      // Matching ended: app.libraryVersion went up, so the page asks again for what may have changed.
+      await sleep(300);
+      check('Details: the settings were fetched again', hits['/api/settings'] === 2, `${hits['/api/settings']} fetches`);
+      const asked = hits['/api/metadata/status'];
+      await page.clock.runFor(20000);
+      await sleep(300);
+      check('Details: the polling has stopped', hits['/api/metadata/status'] === asked, `asked ${asked}x, then ${hits['/api/metadata/status']}x`);
+      await context.close();
+    }
+    {
+      const { context, page, hits } = await open(browser, {
+        status: pass,
+        review: (n) => (n === 1 ? REVIEW : REVIEW.slice(1)), // the matcher settled the first row
+      });
+      await page.clock.install();
+      await page.goto(`${base}/#/settings`);
+      await page.locator('.matching').waitFor();
+      check('Library: the review list starts with both rows', (await page.locator('.review li').count()) === 2);
+      await page.clock.runFor(3000);
+      await sleep(200);
+      await page.clock.runFor(3000);
+      const one = await page.waitForFunction(() => document.querySelectorAll('.review li').length === 1, null, { polling: 100, timeout: 3000 }).then(
+        () => true,
+        () => false,
+      );
+      check('Library: the review list was fetched again', one && hits['/api/metadata/review'] === 2, `${hits['/api/metadata/review']} fetches`);
+      check('Library: the matching note is gone', (await page.locator('.matching').count()) === 0);
+      await sleep(300);
+      const asked = hits['/api/metadata/status'];
+      await page.clock.runFor(20000);
+      await sleep(300);
+      check('Library: the polling has stopped', hits['/api/metadata/status'] === asked, `asked ${asked}x, then ${hits['/api/metadata/status']}x`);
+      check('Library: the review list was not fetched again for it', hits['/api/metadata/review'] === 2, `${hits['/api/metadata/review']} fetches`);
+      await context.close();
+    }
   },
 
   // Mutant caught: `matching` without keySet (a server with no key reports its queue for ever).
@@ -360,7 +381,7 @@ const scenarios = {
     for (const [name, st, text, polls] of cases) {
       const { context, page, hits } = await open(browser, { status: st });
       await page.clock.install();
-      await page.goto(`${base}/#/settings`);
+      await page.goto(`${base}/#/settings?tab=details`);
       const line = page.locator('.status p').first();
       await line.waitFor();
       const said = ((await line.textContent()) ?? '').trim();
@@ -383,7 +404,7 @@ const scenarios = {
     ];
     for (const [name, st, enabled] of cases) {
       const { context, page } = await open(browser, { status: st });
-      await page.goto(`${base}/#/settings`);
+      await page.goto(`${base}/#/settings?tab=details`);
       const button = page.locator('button:has-text("Refresh all details")');
       await button.waitFor();
       check(`${name}: Refresh all details is ${enabled ? 'enabled' : 'disabled'}`, (await button.isEnabled()) === enabled);
@@ -392,15 +413,21 @@ const scenarios = {
   },
 
   // Mutant caught: the notice reworded (the TMDB API terms, paragraph 3, give it word for word).
+  // Settings in tabs: with the TMDB key, and in Details, where the lookups are switched.
   async 'Settings: the TMDB notice is the one the terms require'(browser) {
     const { context, page } = await open(browser);
-    await page.goto(`${base}/#/settings`);
-    const notice = page.locator('footer.attribution');
-    await notice.waitFor();
-    const said = ((await notice.textContent()) ?? '').replace(/\s+/g, ' ').trim();
-    const required = 'This product uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.';
-    check('the notice is word for word', said.includes(required), said);
-    check('TMDB links to themoviedb.org', (await notice.locator('a[href="https://www.themoviedb.org/"]').count()) === 1);
+    for (const [tab, where] of [
+      ['keys', '.card.tmdb .tmdb-notice'],
+      ['details', '[role="tabpanel"] .tmdb-notice'],
+    ]) {
+      await page.goto(`${base}/#/settings?tab=${tab}`);
+      const notice = page.locator(where);
+      await notice.waitFor();
+      const said = ((await notice.textContent()) ?? '').replace(/\s+/g, ' ').trim();
+      const required = 'This product uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.';
+      check(`${tab}: the notice is word for word`, said.includes(required), said);
+      check(`${tab}: TMDB links to themoviedb.org`, (await notice.locator('a[href="https://www.themoviedb.org/"]').count()) === 1);
+    }
     await context.close();
   },
 

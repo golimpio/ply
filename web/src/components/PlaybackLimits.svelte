@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { api, ApiError, type Settings } from '../lib/api';
 
   // The Playback card of Settings: how many videos may play at once, and how many of them ply may
@@ -95,15 +94,10 @@
       sending[r.field] = false;
     }
   }
-
-  // Settings links here from the player's "too many videos" panel (#/settings?s=playback).
-  let card = $state<HTMLElement>();
-  onMount(() => {
-    if (/[?&]s=playback\b/.test(location.hash)) card?.scrollIntoView({ block: 'center' });
-  });
 </script>
 
-<div class="settings-panel card" bind:this={card}>
+<!-- The player's "too many videos" panel links to its tab (#/settings?s=playback, see lib/settings-tabs). -->
+<div class="settings-panel card">
   {#each ROWS as r (r.field)}
     {@const lock = isLocked(r)}
     {@const note = notes[r.field]}

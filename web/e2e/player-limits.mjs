@@ -349,7 +349,7 @@ try {
     await s.go('#/play/1?t=10');
     await s.playingAt('hls.js to play from 10 s', 11, 20);
     await until('a beat', () => s.beats.length >= 2);
-    await s.page.evaluate(() => document.querySelector('.play-page a').click());
+    await s.page.evaluate(() => document.querySelector('button[aria-label="Close player"]').click());
     await until('the session to be deleted', () => s.deletes().includes('s1'));
     const n = s.beats.length;
     await sleep(1500);
@@ -380,7 +380,7 @@ try {
     check('CAP1 Try again', await s.page.getByRole('button', { name: 'Try again' }).isVisible());
     check('CAP1 the countdown', /Trying again in [45] s/.test(text), text);
     const link = s.page.getByRole('link', { name: 'Raise the limit in Settings' });
-    check('CAP1 a link to Settings', (await link.getAttribute('href')) === '#/settings?s=playback');
+    check('CAP1 a link to Settings', (await link.getAttribute('href')) === '#/settings?tab=playback');
     check('CAP1 no error overlay', !(await s.text('[role=alert]')).includes('Cannot play'));
     check('CAP1 the resume position was asked for', s.posts()[0].body.startSec === 30);
     if (shots) await s.page.screenshot({ path: join(shots, 'cap-panel.png') });
@@ -720,7 +720,7 @@ try {
   // SET1: each limit saves on change, with its own field, and says so.
   // Mutant: the conversions row sending maxStreams (the "wrong field" mutant).
   await scenario('SET1 Settings saves each limit', {}, async (s) => {
-    await s.go('#/settings');
+    await s.go('#/settings?tab=playback');
     const streams = s.page.getByLabel('Videos playing at once');
     const transcodes = s.page.getByLabel('Conversions at once');
     await streams.waitFor();
@@ -744,7 +744,7 @@ try {
     settings: { ...SETTINGS, maxTranscodes: 3, maxTranscodesSource: 'flag' },
     put: (body) => (body.maxStreams !== undefined ? { status: 409, body: { error: 'maxStreams is set by -max-streams or PLY_MAX_STREAMS and cannot be changed here' } } : undefined),
   }, async (s) => {
-    await s.go('#/settings');
+    await s.go('#/settings?tab=playback');
     const streams = s.page.getByLabel('Videos playing at once');
     const transcodes = s.page.getByLabel('Conversions at once');
     await streams.waitFor();
@@ -765,7 +765,7 @@ try {
   await scenario('SET3 an inline 400', {
     put: (body) => (body.maxStreams > 32 ? { status: 400, body: { error: 'maxStreams must be a whole number from 1 to 32' } } : undefined),
   }, async (s) => {
-    await s.go('#/settings');
+    await s.go('#/settings?tab=playback');
     const streams = s.page.getByLabel('Videos playing at once');
     await streams.waitFor();
     await streams.fill('40');
@@ -785,7 +785,7 @@ try {
   // (and is applied when it arrives, as if the requests crossed).
   // Mutant: saves sent as they come (concurrent): the server ends up with an older number.
   await scenario('SET4 quick changes in order', { putDelay: (b) => (b.maxStreams === 6 ? 1200 : 50) }, async (s) => {
-    await s.go('#/settings');
+    await s.go('#/settings?tab=playback');
     const streams = s.page.getByLabel('Videos playing at once');
     await streams.waitFor();
     for (const n of ['6', '7', '8']) {
@@ -808,7 +808,7 @@ try {
     // The server's answer to the streams save carries a transcodes value from before the pending change.
     put: (b, st) => (b.maxStreams !== undefined ? { status: 200, body: (st.settings = { ...st.settings, ...b, maxTranscodes: 5 }) } : undefined),
   }, async (s) => {
-    await s.go('#/settings');
+    await s.go('#/settings?tab=playback');
     const streams = s.page.getByLabel('Videos playing at once');
     const transcodes = s.page.getByLabel('Conversions at once');
     await streams.waitFor();
@@ -826,7 +826,7 @@ try {
   // save is answered.
   // Mutant: the answer's "Saved" written over the newer error.
   await scenario('SET7 an invalid entry during a save', { putDelay: () => 1200 }, async (s) => {
-    await s.go('#/settings');
+    await s.go('#/settings?tab=playback');
     const streams = s.page.getByLabel('Videos playing at once');
     await streams.waitFor();
     await streams.fill('6');
@@ -846,14 +846,14 @@ try {
   // Mutant: the section shown whatever the settings say.
   const { maxStreams: _a, maxTranscodes: _b, maxStreamsSource: _c, maxTranscodesSource: _d, ...OLD } = SETTINGS;
   await scenario('SET6 no Playback section without limits', { settings: OLD }, async (s) => {
-    await s.go('#/settings');
-    await s.page.locator('#folders-h').waitFor();
+    await s.go('#/settings?tab=playback');
+    await s.page.locator('#settings-panel-playback').waitFor();
     await sleep(500);
     check('SET6 older server: no Playback heading', (await s.page.locator('#playback-h').count()) === 0);
   });
   await scenario('SET6 no Playback section when the settings fail', { settings: { error: 'boom' }, settingsStatus: 500 }, async (s) => {
-    await s.go('#/settings');
-    await s.page.locator('#folders-h').waitFor();
+    await s.go('#/settings?tab=playback');
+    await s.page.locator('#settings-panel-playback').waitFor();
     await until('the error', async () => (await s.text('.settings .error')).includes('boom'), 3000);
     check('SET6 failed settings: no Playback heading', (await s.page.locator('#playback-h').count()) === 0);
   });

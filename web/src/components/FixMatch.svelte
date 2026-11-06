@@ -35,6 +35,8 @@
   let busy = $state(false);
   let error = $state('');
   let offline = $state(false);
+  /** Where in Settings that is fixed: the lookups switch, or the key. */
+  let fixIn = $state<'details' | 'keys'>('details');
   let input = $state<HTMLInputElement>();
   // Each search takes a number; an answer is shown only while its number is
   // the latest, so a slow answer for an earlier query (or an earlier opening
@@ -84,12 +86,15 @@
     offline = false;
     if (e instanceof ApiError && e.status === 409) {
       offline = true;
-      return /\bis not set up\b/.test(e.message) ? e.message : 'Online lookups are off, so there is nothing to search.';
+      const noKey = /\bis not set up\b/.test(e.message);
+      fixIn = noKey ? 'keys' : 'details';
+      return noKey ? e.message : 'Online lookups are off, so there is nothing to search.';
     }
     if (e instanceof ApiError && e.status === 502) {
       const refused = /^(TVDB|TMDB) refused the key/.exec(e.message);
       if (refused) {
         offline = true; // the settings are where the key is fixed
+        fixIn = 'keys';
         return `${refused[1]} refused the key. Check it in the settings.`;
       }
       return `${/could not reach TVDB/.test(e.message) ? 'TVDB' : 'TMDB'} could not be reached. Try again in a moment.`;
@@ -199,7 +204,7 @@
   {#if error}
     <p class="error" role="alert">
       {error}
-      {#if offline}<a class="link" href={href.settings} onclick={() => (open = false)}>Open settings</a>{/if}
+      {#if offline}<a class="link" href={href.settingsTab(fixIn)} onclick={() => (open = false)}>Open settings</a>{/if}
     </p>
   {/if}
 

@@ -1,4 +1,5 @@
 import { tick } from 'svelte';
+import { settingsHash, settingsTab, type SettingsTab } from './settings-tabs';
 
 export type Sort = 'title' | 'added' | 'year' | 'duration' | 'rating';
 export type Filter = '4k' | 'hdr' | 'unwatched';
@@ -20,7 +21,7 @@ export type Route =
   | { name: 'person'; id: number }
   | { name: 'genre'; id: number }
   | { name: 'collection'; id: number }
-  | { name: 'settings' }
+  | { name: 'settings'; tab: SettingsTab }
   | { name: 'activity' }
   | { name: 'notfound' };
 
@@ -38,7 +39,7 @@ function libraryView(q: URLSearchParams, fallback: Sort): LibraryView {
 /**
  * Hash forms: #/ (home), #/movies[?sort=&f=&min=], #/shows[?sort=&f=&min=], #/shows/<name>[?s=<season>],
  * #/item/<id>, #/play/<id>[?t=<resume seconds>], #/person/<id>, #/genre/<id>,
- * #/collection/<id>, #/settings, #/activity.
+ * #/collection/<id>, #/settings[?tab=<tab>], #/activity.
  */
 export function parseRoute(hash: string): Route {
   const [path, query = ''] = hash.replace(/^#\/?/, '').split('?');
@@ -57,6 +58,8 @@ export function parseRoute(hash: string): Route {
         return { name: 'show', show: decodeURIComponent(arg), season: Number.isInteger(season) ? season : undefined };
       }
       case 'settings':
+        if (!arg) return { name: 'settings', tab: settingsTab(q) };
+        break;
       case 'activity':
         if (!arg) return { name: head };
         break;
@@ -108,6 +111,7 @@ export const href = {
   genre: (id: number) => `#/genre/${id}`,
   collection: (id: number) => `#/collection/${id}`,
   settings: '#/settings',
+  settingsTab: (tab: SettingsTab) => settingsHash(tab),
   activity: '#/activity',
 };
 
@@ -307,7 +311,7 @@ export const page = {
 };
 
 let restoring = 0;
-let pending: { run: number; scroll: number; anchor?: Anchor; claimed: boolean } | undefined;
+let pending: { run: number; scroll: number; anchor?: Anchor; refocus: boolean; claimed: boolean } | undefined;
 const INPUTS = ['wheel', 'touchstart', 'keydown', 'pointerdown'] as const;
 
 /**
@@ -315,12 +319,13 @@ const INPUTS = ['wheel', 'touchstart', 'keydown', 'pointerdown'] as const;
  * called as it mounts, it answers where its view was left when this is a return to it (Back,
  * Forward, a reload), and takes that restore over: the router then leaves the scroll and the focus
  * alone for this view. Undefined for a view opened afresh. What the page remember()ed is recall()ed
- * as usual.
+ * as usual. `refocus`: whether the router would have put the focus back on the anchor's link (Back
+ * and Forward do; a reload doesn't).
  */
-export function claimRestore(): { scroll: number; anchor?: Anchor } | undefined {
+export function claimRestore(): { scroll: number; anchor?: Anchor; refocus: boolean } | undefined {
   if (!pending || pending.run !== restoring) return undefined;
   pending.claimed = true;
-  return { scroll: pending.scroll, anchor: pending.anchor };
+  return { scroll: pending.scroll, anchor: pending.anchor, refocus: pending.refocus };
 }
 
 /**
@@ -335,7 +340,7 @@ export function claimRestore(): { scroll: number; anchor?: Anchor } | undefined 
  */
 function restoreScroll(y: number, anchor?: Anchor, refocus = true) {
   const run = ++restoring;
-  const job = { run, scroll: y, anchor, claimed: false };
+  const job = { run, scroll: y, anchor, refocus, claimed: false };
   pending = job;
   if (y <= 0) window.scrollTo(0, 0);
   const cancel = () => {

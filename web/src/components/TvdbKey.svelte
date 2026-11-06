@@ -2,6 +2,8 @@
   import { tick } from 'svelte';
   import { api, ApiError, type Settings, type SettingsUpdate } from '../lib/api';
   import { app } from '../lib/state.svelte';
+  import ConfirmRemove from './ConfirmRemove.svelte';
+  import KeyField from './KeyField.svelte';
   import KeyTest from './KeyTest.svelte';
 
   // The TVDB card of the settings: shows come from TheTVDB when there is a key. Like the TMDB key,
@@ -21,9 +23,6 @@
   const pinFixed = $derived(s.tvdbPinSource === 'flag' || s.tvdbPinSource === 'env');
   // A server without tvdbPinSource can't say: offer Remove, and read the answer (see save).
   const pinRemovable = $derived(!!s.tvdbPinSet && (s.tvdbPinSource === 'settings' || s.tvdbPinSource === undefined));
-  const testUnavailable = $derived(
-    !s.tvdbKeySet ? 'Set a key to test it.' : s.metadataForcedOff || !s.metadataEnabled ? 'Online lookups are off.' : '',
-  );
   const attributionHost = $derived.by(() => {
     try {
       return new URL(s.tvdbAttributionUrl ?? '').hostname.replace(/^www\./, '');
@@ -34,6 +33,16 @@
 
   let key = $state('');
   let pin = $state('');
+  // A key or PIN typed and not saved: Test would try the saved one, so it waits for the save (which checks it).
+  const testUnavailable = $derived(
+    !s.tvdbKeySet
+      ? 'Set a key to test it.'
+      : s.metadataForcedOff || !s.metadataEnabled
+        ? 'Online lookups are off.'
+        : key.trim() || pin.trim()
+          ? 'Save the key to test it.'
+          : '',
+  );
   let saving = $state(false);
   let message = $state<{ ok: boolean; text: string } | null>(null);
   let messageEl = $state<HTMLElement>();
@@ -96,7 +105,7 @@
   }
 </script>
 
-<div class="settings-panel card tvdb" role="group" aria-labelledby="tvdb-h">
+<div class="settings-panel card key-card tvdb" role="group" aria-labelledby="tvdb-h">
   <div>
     <h3 id="tvdb-h">TVDB key</h3>
     <p class="muted">
@@ -110,110 +119,58 @@
     </p>
   </div>
 
-  <!-- new-password and the managers' opt-outs: a password manager must never fill ply's own
-       token (saved by the sign-in prompt) in here, where Save would send it to TVDB. -->
-  <form class="fields" onsubmit={submit}>
+  <form class="key-fields" onsubmit={submit}>
     {#if !fixed}
-      <div class="field">
+      <div class="key-field">
         <label for="tvdb-key">{s.tvdbKeySet ? 'Replace the key' : 'Key'}</label>
-        <input
-          id="tvdb-key"
-          class="text-field"
-          bind:value={key}
-          type="password"
-          autocomplete="new-password"
-          data-1p-ignore
-          data-lpignore="true"
-          data-bwignore
-          spellcheck="false"
-          placeholder={s.tvdbKeySet ? 'Paste a new key to replace it' : 'Paste your key'}
-        />
+        <KeyField id="tvdb-key" set={!!s.tvdbKeySet} bind:value={key} />
       </div>
     {/if}
-    <div class="field">
+    <div class="key-field">
       {#if pinFixed}
         <span class="label">Subscriber PIN</span>
         <p class="muted hint pin-elsewhere">{PIN_ELSEWHERE}</p>
       {:else}
         <label for="tvdb-pin">Subscriber PIN <span class="muted">(optional)</span></label>
-        <input
-          id="tvdb-pin"
-          class="text-field"
-          bind:value={pin}
-          type="password"
-          autocomplete="new-password"
-          data-1p-ignore
-          data-lpignore="true"
-          data-bwignore
-          spellcheck="false"
-          aria-describedby="tvdb-pin-hint"
-          placeholder={s.tvdbPinSet ? 'Type a new PIN to replace it' : 'Only if your key needs one'}
-        />
+        <KeyField id="tvdb-pin" set={!!s.tvdbPinSet} bind:value={pin} describedby="tvdb-pin-hint" unsetPlaceholder="Only if your key needs one" />
         <p id="tvdb-pin-hint" class="muted hint">
           A user-supported key works with the PIN of a TVDB subscription.{#if s.tvdbPinSet}{' '}A PIN is set.{/if}
         </p>
       {/if}
     </div>
-    <div class="buttons">
+    <div class="key-buttons">
       <button class="btn primary" disabled={saving || (!key.trim() && !pin.trim())}>{saving ? 'Checking…' : 'Save'}</button>
       {#if s.tvdbKeySet && s.tvdbKeySource === 'settings'}
-        <button type="button" class="btn" disabled={saving} onclick={() => save({ tvdbKey: '' }, 'Key removed.')}>Remove key</button>
+        <ConfirmRemove label="Remove key" question="Remove the TVDB key?" disabled={saving} onconfirm={() => save({ tvdbKey: '' }, 'Key removed.')} />
       {/if}
       {#if pinRemovable}
-        <button type="button" class="btn" disabled={saving} onclick={() => save({ tvdbPin: '' }, 'PIN removed.')}>Remove PIN</button>
+        <ConfirmRemove label="Remove PIN" question="Remove the TVDB PIN?" disabled={saving} onconfirm={() => save({ tvdbPin: '' }, 'PIN removed.')} />
       {/if}
     </div>
   </form>
   {#if message}
-    <p bind:this={messageEl} class="message" class:error={!message.ok} class:ok={message.ok} role="status" tabindex="-1">
+    <p bind:this={messageEl} class="key-message" class:error={!message.ok} class:ok={message.ok} role="status" tabindex="-1">
       {message.text}
     </p>
   {/if}
 
-  <KeyTest provider="tvdb" name="TVDB" busy={saving} unavailable={testUnavailable} about={testAbout} {onworks} />
+  <KeyTest
+    provider="tvdb"
+    name="TVDB"
+    busy={saving}
+    unavailable={testUnavailable}
+    about={testAbout}
+    {onworks}
+    testedAt={s.tvdbKeyTestedAt}
+    testOk={s.tvdbKeyTestOk}
+  />
 
   {#if s.tvdbAttribution}
     <!-- TVDB's terms ask for this notice, with a direct link to TheTVDB.com: shown as the server gives it. -->
-    <p class="attribution muted">
+    <p class="attribution key-notice muted">
       {s.tvdbAttribution}
       {#if s.tvdbAttributionUrl}<a class="link" href={s.tvdbAttributionUrl} target="_blank" rel="noreferrer">{attributionHost || s.tvdbAttributionUrl}</a>{/if}
     </p>
   {/if}
 </div>
 
-<style>
-  .fields {
-    display: grid;
-    gap: 0.9rem;
-  }
-  .field {
-    display: grid;
-    gap: 0.35rem;
-  }
-  label,
-  .label {
-    font-weight: var(--fw-semibold);
-    font-size: var(--fs-md);
-  }
-  label .muted {
-    font-weight: var(--fw-regular);
-  }
-  /* A notch smaller than the shared .settings-panel .hint: .tvdb makes this rule the more specific
-     one, rather than leaving it to the order of the stylesheets. */
-  .tvdb .hint {
-    font-size: var(--fs-xs-3);
-  }
-  .buttons {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.6rem;
-  }
-  .ok {
-    color: var(--ok);
-  }
-  .attribution {
-    padding-top: 1.1rem;
-    border-top: 1px solid var(--line);
-    font-size: var(--fs-xs-3);
-  }
-</style>
