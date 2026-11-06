@@ -311,6 +311,7 @@
   /* Layers. */
   --z-backdrop: -2;
   --z-under: -1;
+  --z-over: 1; /* on a page's hero: its Back button */
   --z-bar: 20; /* the header, the tab bar, menus */
 
   /* Opacity steps that repeat. */

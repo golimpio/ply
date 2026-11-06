@@ -3,7 +3,8 @@
   import { cardHref, sortCards, type TitleSort } from '../lib/credits';
   import { backdropOf, posterImg, prefersPosters } from '../lib/meta';
   import { resource } from '../lib/resource.svelte';
-  import { href } from '../lib/router.svelte';
+  import { href, recall, remember } from '../lib/router.svelte';
+  import BackButton from '../components/BackButton.svelte';
   import MediaCard from '../components/MediaCard.svelte';
 
   let { id }: { id: number } = $props();
@@ -18,7 +19,9 @@
     { value: 'year', label: 'Year' },
     { value: 'rating', label: 'Rating' },
   ];
-  let sort = $state<TitleSort>('title');
+  // Not in the URL, so kept with the view: Back to this page finds the same order (and scroll).
+  let sort = $state<TitleSort>(recall('sort', 'title'));
+  $effect(() => remember('sort', sort));
 
   // Only titles that can be opened: a film with a file, a series with a show.
   const all = $derived((titles.data ?? []).filter(cardHref));
@@ -28,12 +31,14 @@
 </script>
 
 {#if !titles.data && titles.error}
+  <BackButton over />
   <div class="page center">
     <p class="error">{titles.error}</p>
     <p><a href={href.home}>Back to the library</a></p>
   </div>
 {:else if !titles.data || genres.loading}
   <div class="page" aria-busy="true">
+    <BackButton />
     <div class="skeleton sk-name"></div>
     <div class="poster-grid">
       {#each Array(8) as _, i (i)}<div class="skeleton sk-card"></div>{/each}
@@ -41,6 +46,7 @@
   </div>
 {:else}
   <div class="page">
+    <BackButton />
     <h1>{name}{#if all.length}<span class="count">{all.length}</span>{/if}</h1>
 
     {#if all.length === 0}

@@ -8,7 +8,7 @@
   import { AUTO_RETRIES, limitOf, probeMedia, type PlayLimit as Limit } from '../lib/playlimit';
   import { browserProfile } from '../lib/profile';
   import { Progress } from '../lib/progress';
-  import { href } from '../lib/router.svelte';
+  import { goBack, href } from '../lib/router.svelte';
   import { MAX_SESSION_RESTARTS, sessionGone, sessionStopped } from '../lib/session';
   import { artSrc } from '../lib/ui-types';
   import PlayerControls, { type Track } from './PlayerControls.svelte';
@@ -502,7 +502,7 @@
         selectedSubtitle={subKey}
         onSelectAudio={selectAudio}
         onSelectSubtitle={selectSubtitle}
-        onClose={() => (location.hash = href.item(item.id))}
+        onClose={() => goBack()}
       />
     {/if}
     {#if limit && (phase === 'limit' || phase === 'starting')}

@@ -4,6 +4,7 @@
   import { backdropOf, posterImg, prefersPosters } from '../lib/meta';
   import { resource } from '../lib/resource.svelte';
   import { href } from '../lib/router.svelte';
+  import BackButton from '../components/BackButton.svelte';
   import Hero from '../components/Hero.svelte';
   import MediaCard from '../components/MediaCard.svelte';
 
@@ -21,6 +22,7 @@
   const backdrop = $derived(backdropOf(collection) ?? backdropOf(titles.find((t) => t.backdrop)));
 </script>
 
+<BackButton over />
 {#if !collection && detail.error}
   <div class="page center">
     <p class="error">{detail.error}</p>
@@ -29,7 +31,7 @@
 {:else if !collection}
   <div class="skeleton hero-sk" aria-busy="true"></div>
 {:else}
-  <Hero item={undefined} img={backdrop} label={collection.name}>
+  <Hero item={undefined} img={backdrop} label={collection.name} back>
     <h1>{collection.name}</h1>
     {#if collection.overview}<p class="overview">{collection.overview}</p>{/if}
     <div class="meta">

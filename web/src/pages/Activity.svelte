@@ -3,6 +3,7 @@
   import { activity, actionError, describeTiers, groupQueued, isSynthetic } from '../lib/activity.svelte';
   import { api, ApiError, type Job, type PlayingSession } from '../lib/api';
   import { formatClock } from '../lib/format';
+  import BackButton from '../components/BackButton.svelte';
   import Icon from '../components/Icon.svelte';
 
   // What ply does in the background and what waits, below playback and browsing. The store
@@ -186,6 +187,7 @@
 <div class="page activity">
   <header class="top">
     <div class="intro">
+      <BackButton />
       <h1>Activity</h1>
       <p class="muted">What ply does in the background. Playing and browsing always come first.</p>
     </div>

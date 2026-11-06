@@ -18,6 +18,7 @@
   import { resource } from '../lib/resource.svelte';
   import { app } from '../lib/state.svelte';
   import { artOf, progressOf } from '../lib/ui-types';
+  import BackButton from '../components/BackButton.svelte';
   import Badges from '../components/Badges.svelte';
   import EditTitle from '../components/EditTitle.svelte';
   import FixMatch from '../components/FixMatch.svelte';
@@ -86,6 +87,10 @@
   );
   const needsReview = $derived(!!(meta?.needsReview ?? item?.needsReview));
   const matchKind = $derived<'movie' | 'series'>(isEpisode ? 'series' : 'movie');
+  // An episode's parent is its show (at its season); a film's is Movies.
+  const parent = $derived(
+    isEpisode && item?.show ? { hash: href.show(item.show, item.season), label: meta?.title || item.show } : undefined,
+  );
 
   let fixing = $state(false);
   let editing = $state(false);
@@ -152,6 +157,8 @@
   };
 </script>
 
+<!-- Until the item is known, an episode's parent (its show) isn't: the button keeps its place unseen. -->
+<BackButton fallback={parent} pending={!item && !detail.error} over />
 {#if !item && detail.error}
   <div class="page center">
     <p class="error">{detail.error}</p>
@@ -160,7 +167,7 @@
 {:else if !item}
   <div class="skeleton hero-sk" aria-busy="true"></div>
 {:else}
-  <Hero {item} label={item.show || item.title} landing>
+  <Hero {item} label={item.show || item.title} landing back>
     {#if isEpisode && item.show}
       <a class="show link" href={href.show(item.show, item.season)}>{meta?.title || item.show}</a>
     {/if}
@@ -246,7 +253,8 @@
     </Rail>
   {/if}
 
-  <div class="body">
+  <!-- Busy until the details are in: a scroll restored on Back waits for them (lib/router). -->
+  <div class="body" aria-busy={!detail.data && !detail.error}>
     {#if siblings.prev || siblings.next}
       <nav class="siblings" aria-label="Other episodes">
         {#if siblings.prev}

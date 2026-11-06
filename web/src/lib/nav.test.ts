@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { go, morph } from './nav';
-import { router } from './router.svelte';
+import { resetNavigation, router, viewStack } from './router.svelte';
 
 // A loose view of document, so tests can install and remove the API freely.
 const doc = document as unknown as { startViewTransition?: (cb: () => Promise<void>) => unknown };
@@ -10,7 +10,7 @@ beforeEach(() => {
   reduced = false;
   window.matchMedia = ((q: string) => ({ matches: q.includes('reduce') && reduced })) as typeof window.matchMedia;
   history.replaceState(null, '', '/#/');
-  router.route = { name: 'home' };
+  resetNavigation();
 });
 afterEach(() => {
   delete doc.startViewTransition;
@@ -30,6 +30,8 @@ describe('go', () => {
   it('falls back to a plain hash change without View Transitions', () => {
     go('#/item/3');
     expect(location.hash).toBe('#/item/3');
+    expect(router.route).toEqual({ name: 'item', id: 3 });
+    expect(viewStack().hashes).toEqual(['#/', '#/item/3']); // a view Back can return from
   });
 
   it('names only the clicked art for the morph, then routes inside the transition', async () => {
@@ -48,6 +50,7 @@ describe('go', () => {
     expect(art.style.getPropertyValue('view-transition-name')).toBe(''); // unique name released
     expect(location.hash).toBe('#/item/4');
     expect(router.route).toEqual({ name: 'item', id: 4 });
+    expect(router.previous).toBe('#/');
   });
 
   it('skips the animation when the user prefers reduced motion', () => {

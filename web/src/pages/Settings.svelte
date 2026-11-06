@@ -5,6 +5,7 @@
   import { href } from '../lib/router.svelte';
   import { resource } from '../lib/resource.svelte';
   import { app, rescan, scan } from '../lib/state.svelte';
+  import BackButton from '../components/BackButton.svelte';
   import FixMatch from '../components/FixMatch.svelte';
   import KeyTest from '../components/KeyTest.svelte';
   import LibraryFolders from '../components/LibraryFolders.svelte';
@@ -144,7 +145,10 @@
 </script>
 
 <div class="page settings">
-  <h1>Settings</h1>
+  <header>
+    <BackButton />
+    <h1>Settings</h1>
+  </header>
 
   <section aria-labelledby="meta-h">
     <h2 id="meta-h">Movie and show details</h2>

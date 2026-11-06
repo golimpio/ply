@@ -3,8 +3,9 @@
   import { cardHref, groupCredits, lifeSpan } from '../lib/credits';
   import { backdropOf, posterImg, prefersPosters, profileImg } from '../lib/meta';
   import { resource } from '../lib/resource.svelte';
-  import { href } from '../lib/router.svelte';
+  import { href, redirect } from '../lib/router.svelte';
   import { openSearch } from '../lib/palette.svelte';
+  import BackButton from '../components/BackButton.svelte';
   import MediaCard from '../components/MediaCard.svelte';
   import Picture from '../components/Picture.svelte';
 
@@ -25,7 +26,7 @@
   $effect(() => {
     // The page's address follows the merge, so that it can be kept and shared.
     const to = missing?.into || (person && person.id !== id ? person.id : 0);
-    if (to && to !== id) location.replace(href.person(to));
+    if (to && to !== id) redirect(href.person(to));
   });
 
   // Only credits that can be opened: a film with a file, a series with a show.
@@ -55,22 +56,26 @@
 </script>
 
 {#if missing?.into}
+  <BackButton over />
   <div class="page center">
     <p>This person was merged into another.</p>
     <p><a class="btn" href={href.person(missing.into)}>Open their page</a></p>
   </div>
 {:else if missing}
+  <BackButton over />
   <div class="page center">
     <p>This person isn’t in the library.</p>
     <p><button class="btn" onclick={openSearch}>Search for them</button></p>
   </div>
 {:else if !person && detail.error}
+  <BackButton over />
   <div class="page center">
     <p class="error">{detail.error}</p>
     <p><a href={href.home}>Back to the library</a></p>
   </div>
 {:else if !person}
   <div class="page" aria-busy="true">
+    <BackButton />
     <div class="head">
       <div class="skeleton portrait sk-portrait"></div>
       <div class="who">
@@ -85,6 +90,7 @@
   </div>
 {:else}
   <div class="page">
+    <BackButton />
     <header class="head">
       <div class="portrait">
         <Picture img={profileImg(person)} ratio="2 / 3" label={person.name} sizes="192px" eager />

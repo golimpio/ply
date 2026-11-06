@@ -7,13 +7,15 @@
   // Full-bleed backdrop with the page's headline set over its lower-left
   // corner. `tall` is for the home page; detail pages use the shorter default
   // and are the landing point of the card morph (`landing`, see lib/nav).
-  // `img` replaces the item's own backdrop (a show's, a collection's).
+  // `img` replaces the item's own backdrop (a show's, a collection's). `back` keeps the top clear
+  // for the page's floating Back button when the headline is taller than the hero.
   let {
     item,
     img = undefined,
     label = '',
     tall = false,
     landing = false,
+    back = false,
     children,
   }: {
     item: ItemSummary | undefined;
@@ -21,11 +23,12 @@
     label?: string;
     tall?: boolean;
     landing?: boolean;
+    back?: boolean;
     children: Snippet;
   } = $props();
 </script>
 
-<section class="hero" class:tall>
+<section class="hero" class:tall class:back>
   <div class="backdrop" style:view-transition-name={landing ? 'hero-art' : undefined}>
     <Art {item} {img} kind="backdrop" ratio="auto" {label} eager />
   </div>
@@ -82,6 +85,9 @@
     max-width: min(46rem, 100%);
     display: grid;
     gap: 0.85rem;
+  }
+  .back .content {
+    padding-top: calc(var(--bar-h) + 3.75rem);
   }
   .content :global(h1) {
     font-size: var(--fs-display);

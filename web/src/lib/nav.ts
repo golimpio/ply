@@ -3,23 +3,21 @@
 // duration of the transition, so the name stays unique on a page where the same
 // item can appear in several rails.
 import { tick } from 'svelte';
-import { parseRoute, router } from './router.svelte';
+import { navigate } from './router.svelte';
 
 const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export function go(hash: string, from?: Element | null): void {
   const doc = document as Document & { startViewTransition?: (cb: () => Promise<void>) => unknown };
   if (!doc.startViewTransition || reduced()) {
-    location.hash = hash;
+    navigate(hash);
     return;
   }
   const art = from as HTMLElement | null | undefined;
   art?.style.setProperty('view-transition-name', 'hero-art');
   doc.startViewTransition(async () => {
     art?.style.removeProperty('view-transition-name');
-    history.pushState(null, '', hash);
-    router.route = parseRoute(hash);
-    window.scrollTo(0, 0);
+    navigate(hash);
     await tick();
   });
 }

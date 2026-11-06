@@ -9,7 +9,7 @@
     "check": "svelte-check --tsconfig ./tsconfig.json && node scripts/check-tokens.mjs",
     "check:tokens": "node scripts/check-tokens.mjs",
     "test": "vitest run",
-    "e2e": "node e2e/player-wiring.mjs && node e2e/player-limits.mjs && node e2e/metadata-ui.mjs && node e2e/activity-ui.mjs && node e2e/folders-ui.mjs && node e2e/player-controls.mjs && node e2e/tvdb-ui.mjs && node e2e/ratings-ui.mjs",
+    "e2e": "node e2e/player-wiring.mjs && node e2e/player-limits.mjs && node e2e/metadata-ui.mjs && node e2e/activity-ui.mjs && node e2e/folders-ui.mjs && node e2e/player-controls.mjs && node e2e/tvdb-ui.mjs && node e2e/ratings-ui.mjs && node e2e/navigation.mjs",
     "e2e:meta": "node e2e/metadata-ui.mjs",
     "e2e:tvdb": "node e2e/tvdb-ui.mjs",
     "e2e:ratings": "node e2e/ratings-ui.mjs",

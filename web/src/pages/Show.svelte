@@ -12,6 +12,7 @@
   import { app } from '../lib/state.svelte';
   import { artOf, progressOf } from '../lib/ui-types';
   import Art from '../components/Art.svelte';
+  import BackButton from '../components/BackButton.svelte';
   import Badges from '../components/Badges.svelte';
   import EditTitle from '../components/EditTitle.svelte';
   import FixMatch from '../components/FixMatch.svelte';
@@ -160,6 +161,7 @@
   };
 </script>
 
+<BackButton over />
 {#if library.error && !library.loaded}
   <div class="page"><p class="error">{library.error}</p></div>
 {:else if !library.loaded}
@@ -170,7 +172,7 @@
     <p><a href={href.shows}>Back to all shows</a></p>
   </div>
 {:else}
-  <Hero item={entry.cover} img={backdropOf(summary) ?? undefined} label={show} landing>
+  <Hero item={entry.cover} img={backdropOf(summary) ?? undefined} label={show} landing back>
     <HeroTitle title={meta?.title || show} {logo} />
     <div class="meta">
       {#if years}<span>{years}</span>{/if}
@@ -193,7 +195,8 @@
     </div>
   </Hero>
 
-  <div class="body">
+  <!-- Busy until the details are in: a scroll restored on Back waits for them (lib/router). -->
+  <div class="body" aria-busy={!detail.data && !detail.error}>
     {#if needsReview}
       <div class="review-note" role="note">
         <Icon name="alert" />
