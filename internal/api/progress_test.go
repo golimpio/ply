@@ -86,14 +86,47 @@ func TestProgressWatchedAndNotStarted(t *testing.T) {
 		t.Errorf("continue lists a watched item: %+v", cont)
 	}
 
-	// Below 30 s a position is not "started" and clears the row.
-	rec = e.putProgress(id, `{"positionSec": 12, "durationSec": 7200}`, nil)
+	// Below 30 s a position is not "started" and clears the row (positive control: an item that was
+	// started has it; the one that was watched is the next test).
+	other := e.multi
+	e.putProgress(other, `{"positionSec": 100, "durationSec": 600}`, nil)
+	if e.summary(other).Progress == nil {
+		t.Fatal("control: the started item has no progress")
+	}
+	rec = e.putProgress(other, `{"positionSec": 12, "durationSec": 600}`, nil)
 	wantStatus(t, rec, 200)
 	if body := rec.Body.String(); body != "null\n" {
 		t.Errorf("not-started body = %q, want null", body)
 	}
-	if p := e.summary(id).Progress; p != nil {
+	if p := e.summary(other).Progress; p != nil {
 		t.Errorf("progress after restart = %+v, want none", p)
+	}
+}
+
+// A file that was watched stays watched when it is played again and left at once: that is not
+// "unwatching" it. It does not come back to Continue Watching either.
+func TestPlayingAWatchedItemAgainDoesNotUnwatchIt(t *testing.T) {
+	e := newEnv(t, "")
+	id := e.mkv
+	e.putProgress(id, `{"positionSec": 2300, "durationSec": 2400}`, nil)
+	if s := e.summary(id); !s.Watched || s.PlayCount != 1 || s.WatchedAt == nil {
+		t.Fatalf("control: after the end the item is %+v", s.WatchState)
+	}
+	rec := e.putProgress(id, `{"positionSec": 12, "durationSec": 2400}`, nil)
+	wantStatus(t, rec, 200)
+	if p := decode[*Progress](t, rec); p == nil || !p.Watched || p.PositionSec != 12 {
+		t.Errorf("progress after leaving a second viewing at once: %+v", p)
+	}
+	if s := e.summary(id); !s.Watched || s.PlayCount != 1 {
+		t.Errorf("after leaving a second viewing at once the item is %+v", s.WatchState)
+	}
+	e.putProgress(id, `{"positionSec": 1200, "durationSec": 2400}`, nil)
+	if cont := decode[[]ItemSummary](t, e.get("/api/continue")); len(cont) != 0 {
+		t.Errorf("continue lists a watched item that is played again: %+v", cont)
+	}
+	e.putProgress(id, `{"positionSec": 2350, "durationSec": 2400}`, nil)
+	if s := e.summary(id); s.PlayCount != 2 {
+		t.Errorf("a second viewing to the end: playCount %d, want 2", s.PlayCount)
 	}
 }
 

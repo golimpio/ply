@@ -140,7 +140,8 @@ stop being true.
   `progress`. Watched = position >= 90 % of the duration, or within 120 s of the end *and* at least half played (the
   half guard keeps a 90 s clip from counting as watched at second 5; for anything over 20 minutes the 90 % rule is the
   stricter one anyway). A position under 30 s that is not watched deletes the row, so "Play from start" and leaving at
-  once clears a resume point; a watched item keeps its row. The server uses the client's duration, else the item's, and
+  once clears a resume point; a watched item keeps its row, and (M11) stays watched: see "Watch state" in DESIGN.md,
+  which replaced the `watched` flag with `watched_at` and `play_count`. The server uses the client's duration, else the item's, and
   clamps a position past the end. The response is the resulting `{positionSec, watched}` or `null`.
   `updated_at` is unix nanoseconds so back-to-back reports order correctly. `GET /api/continue` = unwatched rows,
   newest first, limit 20, full ItemSummary (art included). `progress` is always present in summaries and details

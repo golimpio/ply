@@ -114,9 +114,10 @@ func (s *Store) WithoutFingerprint(ctx context.Context, afterID int64, limit int
 }
 
 // SetFingerprint records the item's fingerprint, but only while the item is
-// still the file it was computed from (same size and mtime).
+// still the file it was computed from (same size and mtime). No list shows it:
+// it leaves Generation alone.
 func (s *Store) SetFingerprint(ctx context.Context, id, size, mtime int64, fingerprint string) error {
-	_, err := s.exec(ctx, prioLow, `UPDATE items SET fingerprint = ? WHERE id = ? AND size = ? AND mtime = ?`,
+	_, err := s.execQuiet(ctx, prioLow, `UPDATE items SET fingerprint = ? WHERE id = ? AND size = ? AND mtime = ?`,
 		fingerprint, id, size, mtime)
 	return err
 }

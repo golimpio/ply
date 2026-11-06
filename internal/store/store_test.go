@@ -356,8 +356,10 @@ func TestShows(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []Show{
-		{Name: "alpha", Seasons: []int{0}, EpisodeCount: 1},
-		{Name: "Beta", Seasons: []int{1, 3}, EpisodeCount: 3},
+		{Name: "alpha", Seasons: []int{0}, EpisodeCounts: EpisodeCounts{EpisodeCount: 1},
+			BySeason: map[int]EpisodeCounts{0: {EpisodeCount: 1}}},
+		{Name: "Beta", Seasons: []int{1, 3}, EpisodeCounts: EpisodeCounts{EpisodeCount: 3},
+			BySeason: map[int]EpisodeCounts{1: {EpisodeCount: 2}, 3: {EpisodeCount: 1}}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("shows = %+v, want %+v", got, want)

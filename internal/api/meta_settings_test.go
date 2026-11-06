@@ -84,6 +84,9 @@ func TestSettingsDefaultsAndShape(t *testing.T) {
 		"imdbAttribution": imdbAttribution, "imdbAttributionUrl": imdbAttributionURL,
 		"mdblistAttribution": mdblistAttribution, "mdblistAttributionUrl": mdblistAttributionURL,
 		"imdbDatasetUpdatedAt": nil, // null until the first download
+		// The last test of each key: 0 (never tested, or the key changed since) and false, exactly these names.
+		"tmdbKeyTestedAt": 0.0, "tmdbKeyTestOk": false, "tvdbKeyTestedAt": 0.0, "tvdbKeyTestOk": false,
+		"mdblistKeyTestedAt": 0.0, "mdblistKeyTestOk": false,
 	}
 	for k, v := range want {
 		if raw[k] != v {
@@ -109,6 +112,9 @@ func TestSettingsDefaultsAndShape(t *testing.T) {
 	bare := newMetaEnv(t, "", func(o *Options) { o.Settings = nil })
 	if v := decode[SettingsView](t, bare.get("/api/settings")); v.TMDBKeySet || v.Language != "en-US" || v.MetadataEnabled {
 		t.Errorf("no settings: %+v", v)
+	}
+	if raw := decode[map[string]any](t, bare.get("/api/settings")); raw["tvdbKeyTestedAt"] != 0.0 || raw["tvdbKeyTestOk"] != false {
+		t.Errorf("no settings: the tests of the keys are %v, %v; want 0 and false, still there", raw["tvdbKeyTestedAt"], raw["tvdbKeyTestOk"])
 	}
 }
 

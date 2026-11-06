@@ -141,15 +141,30 @@ func (s *Store) write(ctx context.Context, p prio, fn func(tx *sql.Tx) error) er
 	if err := fn(tx); err != nil {
 		return err
 	}
+	if err := s.applyWatchMarks(ctx, tx); err != nil { // a file that arrived for a mark (see markWatchedFiles)
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	s.gen.Add(1)
 	s.ck.wrote(p)
 	return nil
 }
 
-// exec is write for a single statement.
-func (s *Store) exec(ctx context.Context, p prio, query string, args ...any) (sql.Result, error) {
+// exec is write for a single statement (so that what a write does at its end, such as giving a
+// file the watch state a mark waits with, is done for it too).
+func (s *Store) exec(ctx context.Context, p prio, query string, args ...any) (res sql.Result, err error) {
+	err = s.write(ctx, p, func(tx *sql.Tx) (err error) {
+		res, err = tx.ExecContext(ctx, query, args...)
+		return err
+	})
+	return res, err
+}
+
+// execQuiet is exec for a statement no list shows the result of (the background queue's own
+// table): it does not change Generation.
+func (s *Store) execQuiet(ctx context.Context, p prio, query string, args ...any) (sql.Result, error) {
 	release, err := s.acquire(ctx, p)
 	if err != nil {
 		return nil, err
@@ -161,6 +176,18 @@ func (s *Store) exec(ctx context.Context, p prio, query string, args ...any) (sq
 	}
 	return res, err
 }
+
+// Generation is a number that changes after every write that a list of the library can show: items
+// and their streams, matches, titles, progress and watch state, ratings, settings. It is how the API
+// knows that a list it answered is still the list (an ETag), without reading the library again.
+//
+// It is kept in memory. It starts at the time the store was opened, so that a number a client
+// kept from an earlier run never equals one of this run, and counts up from there. A read that
+// takes the number before it reads the library can only err towards a list that is called older
+// than it is: a write counts after it has committed, and the number is read before the data.
+//
+// Only writes through this Store count; the background queue's table (jobs) does not.
+func (s *Store) Generation() uint64 { return s.gen.Load() }
 
 // bulkUpdate is UPDATE table SET set WHERE where, for updateAll. A row that has
 // been updated must no longer satisfy where.

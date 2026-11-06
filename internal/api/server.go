@@ -143,6 +143,8 @@ func New(o Options) *Server {
 	mux.HandleFunc("GET /api/shows/{name}", s.handleShow)
 	mux.HandleFunc("PUT /api/shows/{name}/match", s.handleMatchShow)
 	mux.HandleFunc("DELETE /api/shows/{name}/match", s.handleUnmatchShow)
+	mux.HandleFunc("PUT /api/shows/{name}/watched", s.handleShowWatched)
+	mux.HandleFunc("PUT /api/shows/{name}/seasons/{n}/watched", s.handleSeasonWatched)
 	mux.HandleFunc("POST /api/shows/{name}/metadata/refresh", s.handleRefreshShow)
 	mux.HandleFunc("GET /api/items/{id}", s.handleItem)
 	mux.HandleFunc("POST /api/items/{id}/playback", s.handlePlayback)
@@ -153,6 +155,7 @@ func New(o Options) *Server {
 	mux.HandleFunc("POST /api/items/{id}/metadata/refresh", s.handleRefreshItem)
 	mux.HandleFunc("GET /api/items/{id}/subtitles/{file}", s.handleSubtitle)
 	mux.HandleFunc("PUT /api/items/{id}/progress", s.handleProgress)
+	mux.HandleFunc("PUT /api/items/{id}/watched", s.handleItemWatched)
 	mux.HandleFunc("GET /api/continue", s.handleContinue)
 	mux.HandleFunc("GET /api/sessions/{sid}/index.m3u8", s.handleSessionPlaylist)
 	mux.HandleFunc("GET /api/sessions/{sid}/{file}", s.handleSessionFile)
@@ -164,6 +167,7 @@ func New(o Options) *Server {
 	mux.HandleFunc("GET /api/genres", s.handleGenres)
 	mux.HandleFunc("GET /api/titles", s.handleTitles)
 	mux.HandleFunc("PATCH /api/titles/{id}", s.handlePatchTitle)
+	mux.HandleFunc("PUT /api/titles/{id}/watched", s.handleTitleWatched)
 	mux.HandleFunc("GET /api/collections/{id}", s.handleCollection)
 	mux.HandleFunc("GET /api/upcoming", s.handleUpcoming)
 	mux.HandleFunc("GET /api/images/tmdb/{size}/{file}", s.handleTMDBImage)
@@ -194,9 +198,9 @@ func New(o Options) *Server {
 	})
 	mux.Handle("/", spaHandler(o.UI))
 
-	var inner http.Handler = mux
+	var inner http.Handler = compress(mux)
 	if o.Governor != nil {
-		inner = o.Governor.Track(isBrowse)(mux) // browsing holds the background queue
+		inner = o.Governor.Track(isBrowse)(inner) // browsing holds the background queue
 	}
 	s.handler = middleware(inner, o.Token, o.AllowedHosts)
 	return s
@@ -210,8 +214,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.handler.S
 // keeps them from touching the private endpoints at all and, when token is set,
 // requires it for /api/* except /api/info.
 //
-// No layer wraps the ResponseWriter, so http.ServeContent still sees the
-// server's own writer (io.ReaderFrom for sendfile, http.Flusher).
+// No layer of it wraps the ResponseWriter, so http.ServeContent still sees the
+// server's own writer (io.ReaderFrom for sendfile, http.Flusher). The one layer
+// that does, compress, is inside it and never wraps the media (see compress).
 func middleware(next http.Handler, token string, hosts []string) http.Handler {
 	return cors(knownHosts(sameOriginWrites(sameSiteOnly(requireToken(next, token)), token), hosts))
 }

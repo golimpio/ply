@@ -123,7 +123,16 @@ func (p Plan) SegmentOfGOP(g int) int {
 // Playlist renders the complete VOD playlist. suffix (for example
 // "?token=abc") is appended to every URI so players that cannot send headers
 // stay authenticated.
-func (p Plan) Playlist(suffix string) string {
+func (p Plan) Playlist(suffix string) string { return p.PlaylistFrom(suffix, 0) }
+
+// PlaylistFrom is Playlist for a session that was asked to start at startSec: it adds
+// #EXT-X-START with that time and PRECISE=YES, so that a player that honours it (Safari,
+// iOS, AirPlay) begins there at once, at the second asked for and not at the keyframe
+// before it, and asks for the segment ffmpeg was started at, instead of the first one
+// (which would make ffmpeg start again from the top, and again at the resume position).
+// The playlist is the whole file's, so the time is the file's. Nothing is added for a
+// start at the beginning, or one outside the file.
+func (p Plan) PlaylistFrom(suffix string, startSec float64) string {
 	target := 1.0
 	for _, s := range p.Segments {
 		target = math.Max(target, math.Ceil(s.Duration))
@@ -132,6 +141,9 @@ func (p Plan) Playlist(suffix string) string {
 	b.WriteString("#EXTM3U\n#EXT-X-VERSION:7\n")
 	fmt.Fprintf(&b, "#EXT-X-TARGETDURATION:%d\n", int(target))
 	b.WriteString("#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-INDEPENDENT-SEGMENTS\n")
+	if startSec > 0 && startSec < p.Duration && !math.IsInf(startSec, 0) { // NaN fails both comparisons
+		fmt.Fprintf(&b, "#EXT-X-START:TIME-OFFSET=%.3f,PRECISE=YES\n", startSec)
+	}
 	fmt.Fprintf(&b, "#EXT-X-MAP:URI=\"%s%s\"\n", InitName, suffix)
 	for i, s := range p.Segments {
 		fmt.Fprintf(&b, "#EXTINF:%.3f,\n%s%s\n", s.Duration, SegmentName(i), suffix)

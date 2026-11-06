@@ -67,7 +67,11 @@ mounts) ply starts anyway and logs a warning (`store.Warnings()`).
 ## Store
 modernc.org/sqlite, DSN `file:<path>?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)`
 (URL-escape the path — the macOS default contains a space; tests use a dir with a space). `SetMaxOpenConns(1)`.
-Schema via embedded migrations (`schema_version` table).
+Schema via embedded migrations (`schema_version` table). When an existing database has migrations waiting, `Open` first
+writes a copy of it to `<db>.bak-v<version it is at>` (`VACUUM INTO`: a consistent copy, owner-only from the moment it is
+created and chmod-ed and checked like the database itself, written under `.tmp` and renamed), keeps the 3 newest copies,
+and reports one line with its path (`Store.Notices`, logged at start). A new database makes none; a copy that cannot be
+made stops the start with the database as it was.
 
 ```
 items(id INTEGER PK, kind TEXT CHECK(kind IN('movie','episode')), title, year INT, show, season INT, episode INT,
@@ -77,7 +81,7 @@ streams(item_id FK ON DELETE CASCADE, idx INT /*ffprobe index*/, type TEXT /*vid
         codec_tag, profile, width INT, height INT, pix_fmt, color_transfer, channels INT, language, title,
         is_default INT, forced INT, PRIMARY KEY(item_id, idx))
 subtitles_external(item_id FK CASCADE, path, language, format /*srt|vtt|ass*/)        -- M5
-progress(item_id PK FK CASCADE, position_sec REAL, duration_sec REAL, watched INT, updated_at INT)  -- M5
+progress(item_id PK FK CASCADE, position_sec REAL, duration_sec REAL, watched_at INT, play_count INT, updated_at INT)  -- M5, M11 (see "Watch state")
 ```
 
 ## Probe
@@ -148,8 +152,8 @@ no `Origin`. Reads keep CORS `*` (media, Cast); a preflight is answered as above
 | Method | Path | Body / result |
 |---|---|---|
 | GET | `/api/info` | `{id, name, version, authRequired}` (no auth) |
-| GET | `/api/items?kind=movie\|episode&show=<name>` | `[ItemSummary]` (movies by title; episodes by season, episode) |
-| GET | `/api/shows` | `[ShowSummary]`: `{show, seasons:[int], episodeCount}` + (M6) `year?, overview?, titleId?, poster?, backdrop?, logo?, rating?, certification?, genres?, matchState, needsReview` |
+| GET | `/api/items?kind=movie\|episode&show=<name>` | `[ItemSummary]` (movies by title; episodes by season, episode); a movie row has `sortTitle`, the key to sort movies by (below); `ETag`/`304` and gzip: see "Compression and list caching" |
+| GET | `/api/shows` | `[ShowSummary]`: `{show, seasons:[int], episodeCount, watchedEpisodes, inProgress}` + (M6) `year?, overview?, titleId?, poster?, backdrop?, logo?, rating?, certification?, genres?, matchState, needsReview` + `sortTitle` (the key to sort shows by); `ETag`/`304` |
 | GET | `/api/items/{id}?target=<profile>` | `ItemDetail` incl. `playback` (Decision + `url`) for built-in profile (default avplayer) |
 | POST | `/api/items/{id}/playback` | body `{profile?: name, custom?: Profile, startSec?, audioIndex?, subtitleIndex?}` → `Playback` |
 | GET | `/api/items/{id}/file` | direct play, `http.ServeContent` (Range/ETag), explicit Content-Type: mp4 `video/mp4`, mov `video/quicktime`, m4v `video/x-m4v`, mkv `video/x-matroska`, webm `video/webm`, ts `video/mp2t`, avi `video/x-msvideo` |
@@ -160,7 +164,10 @@ no `Origin`. Reads keep CORS `*` (media, Cast); a preflight is answered as above
 | GET | `/api/sessions` | (M9) **private** (like `/api/folders`, `/api/fs`; so are DELETE and the heartbeat below: no CORS headers, a cross-site `Origin` or `Sec-Fetch-Site` is refused with 403; the playlist and segments stay open for Cast) everything playing, oldest first: `[{id, sessionId, itemId, title, kind: transcode\|remux\|direct, client, startedAt, lastSeenAt, positionSec, paused}]` (`id` = `sessionId`; a direct play's is `d-…`; `client` = `"<ip> · <browser>"`; `positionSec` is the player's last heartbeat, else the start of the last segment it asked for) |
 | POST | `/api/sessions/{sid}/heartbeat` | (M9) `{positionSec?, paused?}` (empty body ok) → 204; 404 if the session is unknown or ply ended it; 410 (above) if it was stopped on purpose. From its first heartbeat a session is stopped 30 s after its last beat or segment request (never later than `-stream-idle`); if the last beat said `paused: true` it has 3 min instead (a hidden tab's timers run about once a minute), until a segment request or a beat that does not say `paused: true` brings the 30 s back. The player beats every 10 s. A session that never beat keeps the old rule: `-stream-idle` (60 s) without a request. A direct play id can be beaten too |
 | GET | `/api/items/{id}/subtitles/{key}.vtt` | (M5) key = stream idx or `ext<N>` for sidecar; WebVTT. (M9) A cached track is a plain file (`Content-Length`, ranges). An embedded track that is not cached yet is extracted from the container (reading all of it), and the answer does not wait for that: `422` if it fails within a second of the request, `503` + `Retry-After` if the file cannot be read (a share not mounted yet) or the extraction is stopped by someone else (a job cancelled, ply stopping), the finished file if it ends within that second, otherwise `200` chunked (`Cache-Control: no-store`, no ranges) with each cue as ffmpeg writes it, ending at the last cue; the same read extracts the item's other text tracks. A `HEAD` of a track that is not cached answers `200` with no body and starts nothing. The queue extracts them ahead of time for what is being watched and for new files (`subs.preextract`, `docs/M9-ARCHITECTURE.md`) |
-| PUT | `/api/items/{id}/progress` | (M5) `{positionSec, durationSec}`; watched when ≥ 90% |
+| PUT | `/api/items/{id}/progress` | (M5) `{positionSec, durationSec}`; watched when ≥ 90%; answers `{positionSec, watched}` or `null` |
+| PUT | `/api/items/{id}/watched` | (M11) `{watched: true\|false}` (required, else 400) → `WatchResult`; a film that has a title is marked in all its versions (as `/api/titles/{id}/watched`); same token and cross-site rules as `progress` |
+| PUT | `/api/titles/{id}/watched` | (M11) same body, every version of a film or every episode of a series; 404 when the title has no files |
+| PUT | `/api/shows/{name}/watched`, `/api/shows/{name}/seasons/{n}/watched` | (M11) same body, every episode of the show (matched or not; name as for `GET /api/shows/{name}`) or of one season (0 = specials); 404 for an unknown show or a season with no episodes |
 | GET | `/api/continue` | (M5) in-progress items, most recent first |
 
 M6 (metadata; full details and the data model in `docs/M6-METADATA.md`). All need the token; `{id}` etc. unknown → 404,
@@ -168,7 +175,7 @@ bad input → 400, TMDB unreachable → 502, lookups off (no key / `-metadata=fa
 
 | Method | Path | Body / result |
 |---|---|---|
-| GET | `/api/shows/{name}` | `ShowDetail`: ShowSummary fields minus `seasons` + `meta?: TitleDetail`, `seasons:[{season, name, overview?, poster?, airDate?, episodeCount}]` (`episodeCount` = files); name matched without regard to case |
+| GET | `/api/shows/{name}` | `ShowDetail`: ShowSummary fields minus `seasons` + `meta?: TitleDetail`, `seasons:[{season, name, overview?, poster?, airDate?, episodeCount, watchedEpisodes, inProgress}]` (M11: `episodeCount` counts episodes, an episode with two files being one; the show has the three counts too, without the specials); name matched without regard to case |
 | PUT | `/api/shows/{name}/match` | `{tmdbId}` or `{imdbId}` → whole show linked by hand (`manual`); returns ShowDetail |
 | DELETE | `/api/shows/{name}/match` | unmatch (`manual`, no auto re-match); returns ShowDetail |
 | POST | `/api/shows/{name}/metadata/refresh`, `/api/items/{id}/metadata/refresh`, `/api/metadata/refresh` | 202 `{started:true}`; the worker refreshes in the background |
@@ -178,7 +185,7 @@ bad input → 400, TMDB unreachable → 502, lookups off (no key / `-metadata=fa
 | GET | `/api/people?q=` | `[PersonCard]` (≥1 title in the library, max 20; blank q → `[]`) |
 | GET | `/api/people/{id}` | `Person` (details fetched from TMDB on first visit) with `credits` for library titles, newest first |
 | GET | `/api/genres` | `[{id, name, count}]` |
-| GET | `/api/titles?genre=&collection=&person=` | `[TitleCard]` (ids; non-numeric → 400) |
+| GET | `/api/titles?genre=&collection=&person=` | `[TitleCard]` (ids; non-numeric → 400), ordered by `sortTitle` (without regard to case), year, id; `ETag`/`304` |
 | GET | `/api/collections/{id}` | `{id, name, overview?, poster?, backdrop?, titles:[TitleCard]}` in release order |
 | GET | `/api/upcoming` | `[{titleId, show, poster?, backdrop?, nextAirDate, nextEpisode?: {season, episode, name}}]` library series airing today or later, soonest first, max 50 |
 | GET | `/api/metadata/search?kind=movie\|series&q=&year=` | `[{tmdbId, title, originalTitle?, year, overview?, poster?, score}]` best first |
@@ -190,13 +197,16 @@ bad input → 400, TMDB unreachable → 502, lookups off (no key / `-metadata=fa
 
 ```
 ItemSummary {id, kind, title, year, show, season, episode, episodeTitle, durationSec, container, videoCodec,
-             audioCodec, width, height, hdr, addedAt, progress?: {positionSec, watched}, art?}
+             audioCodec, width, height, hdr, addedAt, progress: {positionSec, watched}|null, art?,
+             watched, watchedAt|null, playCount}                                  -- (M11) see "Watch state"
              + (M6) titleId?, poster?, backdrop?, logo?, rating?, certification?, genres?: [string], matchState,
-             needsReview, and for episodes overview?, still? (image fields are relative URLs, with ?token=)
+             needsReview, sortTitle (movies only: episodes sort by show, season, episode), and for episodes overview?,
+             still? (image fields are relative URLs, with ?token=)
 ItemDetail  ItemSummary + {path(basename only), size, bitrate, streams:[Stream], subtitles:[{key, language,
              title, format, image:bool, url?}], playback: Playback, meta?: TitleDetail,
              episodeInfo?: {name, overview, airDate, still, rating}}   -- "episode" stays the episode number
-TitleCard   {id, kind: movie|series, title, year, poster?, backdrop?, rating?, itemId?, show?, nextAirDate?}
+TitleCard   {id, kind: movie|series, title, sortTitle, year, poster?, backdrop?, rating?, itemId?, show?, nextAirDate?,
+             watched, and for a series episodeCount, watchedEpisodes, inProgress}   -- (M11)
 TitleDetail TitleCard + {tmdbId?, imdbId?, originalTitle?, sortTitle, overview?, tagline?, releaseDate?, endDate?,
              status?, runtimeMin?, voteCount?, certification?, logo?, genres:[{id,name}],
              collection?: {id,name}, cast:[{personId,name,character,profile?}], crew:[{personId,name,job,profile?}],
@@ -209,6 +219,54 @@ Playback    {method, videoAction, audioAction, audioIndex, reasons, url, session
 File paths come only from the DB, never from the request. Unknown id → 404.
 SPA: non-`/api` paths serve embedded `web/dist` files; unknown paths fall back to `index.html`.
 
+## Watch state (M11)
+The one place it is kept is the `progress` row of a file: `position_sec` (where to resume), `watched_at` (unix seconds
+when the file was last watched to the end or marked; 0 = not watched), `play_count` (how many times), `updated_at`.
+There is no `watched` flag: watched is `watched_at <> 0`, and a table CHECK keeps `watched_at` and `play_count` in
+agreement (both 0 or both set). A file with no row is not started and not watched; a row exists while the file is
+started (position ≥ 30 s) or watched. Code: `internal/store/progress.go` and `watch.go`.
+
+- **Playing.** A watch is counted when the position gets to the end (≥ 90 %, or within 120 s of it with half played)
+  from a stored position that was not there: reports from the credits on do not count again, and a second viewing
+  counts when it gets to the end. A watched file stays watched when it is played again, whatever position it stops
+  at (it used to turn unwatched at the first position under 30 s). It is not in Continue Watching while watched.
+- **Marking.** `PUT .../watched {watched: true}` gives each file a row at position 0, watched now, once; a file that
+  was watched keeps its time and its count (marking twice, or a season of which some episodes were seen, rewrites no
+  history). `{watched: false}` deletes the rows, positions with them.
+- **Decision: a title, a season and a show have no state of their own; it is read off the files.** One table for
+  files, no second flag that could disagree, and everything that moves a file (a rename, a move, `item_archive` when a
+  folder is removed and added back, which carries `watched_at` and `play_count` with the position) keeps the state
+  with it. A film with a title is watched when *any* of its files is; a season when *all* its episodes are, and a show
+  when all its episodes are *but the specials* (season 0), which have counts of their own (a show of nothing but
+  specials is counted by them). `episodeCount`, `watchedEpisodes` and `inProgress` (started, not watched) say how far.
+  They count **episodes, not files**: an episode is a (show, season, number), watched when any of its files is, started
+  when none is watched and one is started; a file with no number in its name is an episode of its own. A series
+  title's counts are over all the shows linked to it, an episode two of them have being one.
+- **A film is one thing to watch.** Marking a film (by its title, or by any of its files) marks all the files that
+  are linked to the title now, and unmarking clears them all: unmarking only the file shown would leave the film
+  watched through another. A version that arrives later has no row and is watched all the same, as the film was seen;
+  the first mark or unmark after that covers it. `watchedAt` and `playCount` of a film are the latest time and the
+  highest count among its files. A file no title is known for is its own film.
+- **A replaced file keeps the state (marks).** An upgrade puts a new file at another path and deletes the old one, and
+  the old one's progress row goes with it. So when the scanner deletes a watched file (`DeleteItems`) that is linked to
+  a title (an episode: its show's series title, with its season and number), it leaves a **mark** in `title_watch`
+  (`title_id, season, episode`, `watched_at`, `play_count`, `removed_at`; a film's is season 0, episode 0). At the end of
+  every write (`applyWatchMarks`, so every way a file gets a title, or a show gets one, is covered) a mark with a file to
+  carry it gives that file its state, a row like any other, and goes: a film's mark to any file linked to the title (the
+  next version, or a copy that is still there, at once), an episode's to a file of that number in a show linked to
+  the series. The state stays in the files; a mark is only the bridge. A mark belongs to its title (another title is
+  never given it), is deleted by unmarking the title, the season, the show or the episode, keeps its title from
+  `PruneMetadata` while it waits, and is dropped after 90 days. Removing a library folder leaves none (the archive keeps
+  the files' state by path, and "forget" forgets); a file no title is known for leaves none.
+- **What is left.** A watched file that goes with no replacement that is linked to the same title within 90 days is
+  unwatched again, and a file that was never linked to a title has no state beyond itself.
+  Keying all the state by title would survive more, but would make every list answer join two sources of truth.
+- **Answers.** `ItemSummary.watched`, `watchedAt` (null when not) and `playCount` are the file's, except for a film
+  with a title, where they are the film's; `progress` stays the file's own `{positionSec, watched}` (null with no
+  row). `ShowSummary`, `ShowDetail` and each `ShowDetail.seasons[]` entry have the three counts; a series `TitleCard`
+  has them and `watched` (all episodes); a film's has `watched`. `WatchResult` (the answer to every `PUT .../watched`)
+  is `{watched, items: [{id, watched, watchedAt, playCount, progress}]}`: the files the call covered, as they are now.
+
 ## Discovery
 Listen first (supports `:0`), then advertise `_ply._tcp` with the real port, TXT `id=<serverid>`, `v=1`,
 `name=<name>`. Log LAN IPv4 URLs at startup (never only localhost). Shutdown un-registers.
@@ -216,6 +274,16 @@ Listen first (supports `:0`), then advertise `_ply._tcp` with the real port, TXT
 ## Streaming (M3/M4)
 - `POST /playback` with method remux or transcode creates a session: temp dir under `<data>/tmp/sessions/<pid>/<sid>`
   (it was `os.TempDir()/ply-sessions`; that is still swept at start for one release).
+- **Seeking (M11 notes).** The playlist is always the whole file's, with the file's own times (segment `i` starts at
+  the keyframe `plan.Segments[i].Start`; the fragments carry those times plus `TimelineOffset`, 2 s, which a player
+  strips by itself), so a seek anywhere is a plain request for the segment that covers the time, and ffmpeg is cut in
+  at that segment's first keyframe: up to one segment (6 s or the GOP length) before the target, never after it. The
+  player has the data from there to the target and seeks to the exact time by itself (`video.currentTime = t`); the
+  server never moves a seek. `POST /playback {startSec}` echoes `startSec` as asked, starts ffmpeg at the segment
+  that covers it, and from then on the session's playlist carries `#EXT-X-START:TIME-OFFSET=<startSec>,PRECISE=YES`
+  (only for a start inside the file) so that a player that honours it (Apple's) begins at that second and asks for
+  the segment ffmpeg is already writing, not for the first one (which would stop that ffmpeg and start another from
+  the top, and again at the resume position). hls.js is given its `startPosition`, which wins over the tag. (Not tried in Safari: the tag is Apple's own, but no test here plays it.)
 - **Limits on plays (M9)**: `-max-streams` (default 4, `PLY_MAX_STREAMS`) caps all plays, direct ones included;
   `-max-transcodes` (default 1 with a software encoder, 3 with a hardware one, `PLY_MAX_TRANSCODES`) caps the
   transcodes among them. Precedence flag > settings table (`playback.max_streams`, `playback.max_transcodes`) >
@@ -272,11 +340,57 @@ Listen first (supports `:0`), then advertise `_ply._tcp` with the real port, TXT
   An image subtitle (`Decision.BurnSubtitle`) forces a transcode with `-filter_complex` overlay. If a GPU ffmpeg
   fails before its first segment, the session retries once with libx264.
 
+## Compression and list caching
+The lists of a big library are what the browse path asks for most and what costs most (5,000 films: 4.4 MB of JSON,
+~150 ms to build once the titles are read in few queries, 250 ms before). Two things keep that off the wire and off
+the disk.
+
+- **gzip** (`internal/api/compress.go`; the standard library, pooled writers at `BestSpeed`: a person is waiting and
+  the machine may be playing a film; 10× smaller, within 8% of the default level). GET answers that are JSON, HTML,
+  JavaScript, CSS, SVG or WebVTT and at least 1 KB, for a client that sends `Accept-Encoding: gzip` (not `q=0`); the web
+  UI's files too. `Vary: Accept-Encoding` is on every GET and HEAD that could have been compressed. Never: the media
+  (`/api/items/{id}/file`, `/api/items/{id}/art/*`, `/api/images/*`, `/api/sessions/{sid}/*`) and the event stream
+  (`/api/events`), whose requests are not wrapped at all (sendfile and flush are as they were); a request with `Range`;
+  HEAD and the writes; any status but 200; an answer with a `Content-Encoding` or a type that is not text; one that
+  flushes before it has 1 KB, which is a stream (the subtitles while they are extracted). A compressed answer has no
+  `Content-Length` or `Accept-Ranges`, and its `ETag`, if any, is weak. No brotli: it is no part of the standard
+  library, and a dependency for a few percent more on a LAN is not worth it.
+- **ETag / 304** on `GET /api/items`, `/api/shows` and `/api/titles` (`internal/api/listcache.go`): a strong
+  `ETag: "<generation>.<colours>"` and `Cache-Control: private, no-cache`; a request with a matching `If-None-Match`
+  (weak comparison, `*` too) is answered `304` before the library is read (3 µs). The generation is
+  `Store.Generation()`: in memory, it starts at the time the store was opened (so a number kept from an earlier run never
+  matches) and goes up after every committed write through `Store.write` or `Store.exec` (items, matches, titles,
+  progress and watch state, ratings, settings), except the writes no list shows: the background queue's table, the
+  keyframe cache, an item's fingerprint and when MDBList was last asked about a title (`Store.execQuiet`). The colours are the artwork
+  generator's `ColourVersion()`, because the list carries the colour of each picture and that is not in the database.
+  The ETag is taken before the library is read, so a write that lands in between can only make the list newer than its
+  ETag says (the next request then gets it again), never older: a client is never told that an old list is the current
+  one. A 400 or a 500 has no ETag. A list that is missing something it should have (the titles, the watch state or the
+  episodes of its rows could not be read; the rows are sent without them, and the failure is logged) has no ETag either
+  and says `Cache-Control: no-store`, so that it is not kept as the current one. A browser does the rest by itself (`fetch` revalidates a `no-cache` answer with
+  `If-None-Match` and uses its copy on a 304). Not covered yet: `/api/continue`, `/api/upcoming`, `/api/genres`,
+  `/api/collections/{id}`, `/api/shows/{name}`, `/api/items/{id}`.
+- **`?fields=card`** on `GET /api/items?kind=movie` (movies only: any other `kind`, or none, is 400, as is any other value
+  of `fields`) answers `[ItemCard]` with exactly `{id, kind, title, sortTitle, year?, titleId?, addedAt, poster?,
+  art?: {color}, rating: {source, value, scale, score100}|null, watched, progress: {positionSec, watched}|null,
+  durationSec, width, height, hdr?, genres?: [name], matchState, needsReview}`: the same rows in the same order, the
+  `sort` and `minRating` filters apply, a third of the bytes (308 B a row for 5,000 films against 884). Its ETag is a
+  variant of the full list's (`"<generation>.<colours>.card"`). Everything else about a film is in `GET /api/items/{id}`.
+- **`sortTitle`.** The name a title is listed under: `titles.sort_title` ("Matrix, The": `metadata.SortTitle` moves a
+  leading The, A or An to the end when it is made, and a person can write their own with `PATCH /api/titles/{id}`),
+  or its title when it has none (`store.sortTitleCol`, which `GET /api/titles` is ordered by, lower-cased by SQLite:
+  ASCII letters only, then year, then id). `TitleCard.sortTitle` is that. A movie row of `/api/items` and a row of
+  `/api/shows` carry the sort title of the title they are matched to; one that is matched to none carries
+  `metadata.SortTitle` of its name. Compare it without regard to case. `/api/items` and `/api/shows` themselves stay in
+  the order of the file and folder names ("The Matrix" under T): a client sorts them by `sortTitle`. Only English articles
+  are moved; the ones of other languages ("Le", "Der", "El") are not.
+
 ## Efficiency rules (hard requirement — build in and test)
 1. Decision order: direct > remux (copy all) > audio-only transcode (copy video) > full transcode; reasons say why.
 2. Zero-copy direct play: `http.ServeContent` with `*os.File` → sendfile. Every middleware ResponseWriter wrapper
    must delegate `io.ReaderFrom` (and `http.Flusher`, `Unwrap()`); test asserts the wrapped writer still exposes
-   ReaderFrom. Never gzip video/segments.
+   ReaderFrom. Never gzip video/segments. The one wrapper there is, `compress` (below), does not wrap the media at
+   all, and delegates ReaderFrom, Flusher and Unwrap for the text it does.
 3. GPU transcode end-to-end, no hwdownload: VideoToolbox `-hwaccel videotoolbox -hwaccel_output_format
    videotoolbox_vld` + `scale_vt` + `h264_videotoolbox`; VAAPI `-hwaccel vaapi -hwaccel_output_format vaapi
    -vf scale_vaapi=...` + `h264_vaapi`; fall back to software decode/scale only when the filter chain needs it
@@ -305,8 +419,80 @@ Svelte 5 (runes) + Vite + TypeScript, hls.js. No UI framework; small hand-writte
   `video/mp4; codecs="hvc1"`, `audio/mp4; codecs="ac-3"`/`"ec-3"`), POSTs `/playback`, then: direct → `<video src>`;
   HLS → native if `canPlayType('application/vnd.apple.mpegurl')` (Safari) else hls.js. Seek past encoded range →
   new playback with `startSec` (display time = startSec + currentTime). DELETE session on leave.
+- **Back** (`lib/router.svelte.ts`, `components/BackButton.svelte`): the top-level sections, Home, Movies and Shows,
+  have no Back button; every other page has one under the header (floating over a hero): a film, an episode, a
+  show, a person, a collection, a genre, Settings and Activity (the player's own link and close do the same). The router
+  keeps the views of the tab (at most 50), one per history entry, keyed in `history.state`; each holds its scroll
+  position, the link that was followed (or the one in the middle of the screen), and state a page `remember()`s
+  (the genre page's sort). `goBack()` goes to the previous view with `history.back()`, so the browser's Back and
+  Forward stay in step; with none (a deep link) it replaces the entry with the parent (`parentOf`: a film → Movies,
+  an episode → its show, a show → Shows, the player → its item, everything else → Home), and the button names it.
+  Programmatic navigation goes through `navigate()` (a new entry) or `redirect()` (replaceState). On Back the scroll
+  waits a frame (content-visibility lays a new grid out once, at its real sizes), then for the page: no `aria-busy`
+  (skeletons, or Item's and Show's details on their way), and the followed link drawn, or room enough, or a page
+  that stopped growing; it jumps, puts that link back where it was over up to 10 frames, and gives it the focus
+  (else the page's `h1`). A page that restores itself (a virtualized grid) calls `claimRestore()` as it mounts and
+  the router leaves the scroll alone. A reload keeps the views: pagehide writes them to sessionStorage, and the
+  entry left by `navigate()` carries its scroll position. Sort and filters are in the hash, so Back returns to them
+  exactly. Tested by `router.test.ts` and `e2e/navigation.mjs`.
 - Dev: `vite` proxy `/api` → `http://localhost:8420`. `npm run build` → `web/dist`, embedded by `web/embed.go`.
   Keep `web/dist/.gitkeep` so `go build` works before the first web build (`all:dist`).
+
+### Styles
+- **Tokens**: every colour, font, size, radius, shadow, duration and layer of the UI is a CSS custom property in
+  `web/src/styles/tokens.css`, imported first by `app.css`. Two layers:
+  - *primitives*, named for what they are: the palette (`--velvet-900`, `--paper-100`, `--tungsten-400`...), its
+    translucent steps (`--white-a08`, `--black-a50`, `--velvet-950-a78`...), `--space-*`, `--radius-2`...`--radius-16`,
+    `--dur-*` and `--curve-*`, `--family-*`, `--size-*`. Nothing outside tokens.css uses them (the checker reads
+    their names between tokens.css's "Primitives" and "Semantic tokens" markers, and fails on any other use).
+  - *semantic tokens*, named for what they do, pointing at primitives: `--surface-*` (room, raised, control, dialog,
+    menu, bar...), `--fill-*`, `--line-*`, `--text-*`, `--accent`, `--danger`/`--ok`/`--warn` and their `--on-*`,
+    `--rating-*`, `--scrim-*`, `--shadow-*`/`--ring-*`, `--radius-*`, `--motion-*`/`--ease*`, `--z-*`. Components use
+    these. The names from before (`--bg`, `--bg-2`, `--bg-3`, `--muted`, `--font-sans`) are kept as aliases.
+- **Fonts**: `--font-text` (body), `--font-display` (headings, the brand) and `--font-mono` (`code`); all three are
+  the system stack today. **Type scale**: `--fs-3xs` ... `--fs-4xl` (a `-2`/`-3` step sits just above its name, e.g.
+  `--fs-xs-3` = 0.85rem), fluid `--fs-lede`, `--fs-h1`, `--fs-display`, `--fs-tile`, relative `--fs-rel-*`, and the
+  root size `--fs-root`; line heights `--lh-*`, weights `--fw-*`, tracking `--tracking-*`. The positional names
+  (`--fs-xs-3`, `--fs-sm-4`...) are interim: they go once the merge candidates below are decided, and the scale is
+  named again from what is left. `--space-*` and the old names stay.
+- **Swapping the theme or the fonts** is an edit of tokens.css alone: change the primitives, or point the semantic
+  tokens at others; change `--font-*`. `index.html` and `public/manifest.json` repeat the room colour (`#100e0c`) as
+  `theme-color`: they can't read CSS, so change them with it.
+- **Shared classes** in `app.css`, for what repeats: `.btn`, `.chip`/`.chips`, `.badge`, `.score-chip`,
+  `.settings-panel` (every card of Settings), `.text-field` and `.settings-input` (text fields and selects), `.switch`
+  (recoloured with `--switch-on`), `.grid`/`.poster-grid`, and for a title's page `.cert`, `.badges`, `.hero-actions`,
+  `.review-note`, `.title-overview`, `.genres`, `.credits`, `.hero-sk`.
+- **The checker**, `npm run check:tokens` (also run by `npm run check`): `web/scripts/check-tokens.mjs` reads the
+  `<style>` blocks and `.css` files under `web/src` (not tokens.css) and fails, with file:line, on a raw colour (hex,
+  `rgb()`/`hsl()`/..., a named or system colour), a raw `font-family`/`font` or `font-size`, a raw `border-radius`
+  (corners and logical corners too), a raw duration or easing in `transition`/`animation` (and their `-delay`), a raw
+  length, duration or easing in a component's own custom property, and any use of a primitive. `0`, `inherit`,
+  `transparent`, `currentColor`, strings and `url()`s are fine; its `ALLOW` list holds the one exception (the
+  generated tile's per-title hue). `src/styles/tokens.test.ts` tests it.
+- **Frosted glass**: write `backdrop-filter` alone. The build adds `-webkit-backdrop-filter`; given both, it kept only
+  the prefixed one, so Chrome and Firefox drew dialogs, the menu and the bars without their blur until
+  2026-11-06. `src/styles/backdrop.test.ts` builds the CSS and checks every blur reaches the unprefixed property.
+- **No visible change, proven**: `e2e/visual.mjs` screenshots about 45 pages and states (hover, focus, errors, the
+  scrolled header, the player's menus...) at 360, 700, 1280 and 1920 px against a mocked API with a fake clock
+  (`PLY_VISUAL_OUT=<dir>`, `PLY_E2E_DIST=<build>`). Two runs on one build give the same bytes; compare two builds
+  with `cmp`. Beside each PNG: `.motion.txt`, every element's computed transition and animation with motion not
+  reduced (pixels can't show motion), and `.glass.txt`, its computed `backdrop-filter` (Chrome's blur is not
+  repeatable, so the pictures are taken without it; `PLY_VISUAL_BLUR=1` keeps it, to look at).
+- **Merge candidates** (kept apart so the token layer changed nothing; merging is a design decision, to be shown
+  with before/after shots): font sizes 0.7/0.72rem (`--fs-3xs` TabBar, Settings tiles / `--fs-2xs` badges),
+  0.75/0.78/0.8rem (`--fs-2xs-2` kbd, card notes / `--fs-2xs-3` folder tag / `--fs-xs`), 0.82/0.85/0.875/0.88/0.9rem
+  (`--fs-xs-2` PersonCard role, Activity times / `--fs-xs-3`, the most used small size / `--fs-sm` / `--fs-sm-2`
+  folder type buttons / `--fs-sm-3`), 0.92/0.925/0.95rem (`--fs-sm-4` path field, PersonCard name / `--fs-md` TVDB
+  labels / `--fs-md-2` folder rows, Activity lanes), 1.05/1.08rem (`--fs-lg` / `--fs-lg-2` overviews), 1.15/1.2rem
+  and the two `--fs-lede` clamps (Item tagline / Collection overview); radii 4/5px (`--radius-sm` / `--radius-kbd`,
+  the header's kbd) and 6/8px (`--radius-item` menus, palette thumbs / `--radius-row` folder rows, token field);
+  weights 500/550 and 600/650; line heights 1.25/1.3 and 1.45/1.5/1.55; the floating surfaces 0.92/0.94/0.95/0.96
+  (`--surface-palette`/`-dialog`/`-popover`/`-menu`) with blurs 24/20/16px and shadows `--shadow-menu`/`-popover`;
+  the room at 0.70/0.72/0.75/0.78 and 0.85/0.86/0.90 (`--surface-bar-fade`/`-badge`/`-tag`/`-bar`,
+  `--scrim-hero-side`/`--surface-tabbar`/`--surface-tooltip`); white lines 0.10/0.12/0.14 and 0.16/0.18/0.20
+  (`--line-overlay`/`-control`/`-quiet`, `--glass-line`/`--line-badge`/`--line-spinner`); fills 0.07/0.08
+  (`--fill-subtle`/`--fill`); text 0.82/0.86 (`--text-hero-meta`/`--text-lede`); black 0.72/0.75; durations
+  0.2/0.22/0.25s, 0.35/0.38/0.4s and 1/1.1s.
 
 ## Milestones & acceptance
 - **M1 server core**: config, probe, scanner, nameparse, store, playback (avplayer), API (info, items, shows, item

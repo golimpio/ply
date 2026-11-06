@@ -73,9 +73,11 @@ CREATE TABLE item_archive (
     tmdb_kind    TEXT    NOT NULL DEFAULT '',
     position_sec REAL    NOT NULL DEFAULT 0,
     duration_sec REAL    NOT NULL DEFAULT 0,
-    watched      INTEGER NOT NULL DEFAULT 0,
     progress_at  INTEGER NOT NULL DEFAULT 0,
     archived_at  INTEGER NOT NULL,
+    -- 011 (M11, DESIGN.md "Watch state"): the file's watched_at and play_count, as progress has them; they replaced `watched`
+    watched_at   INTEGER NOT NULL DEFAULT 0,
+    play_count   INTEGER NOT NULL DEFAULT 0,
     -- 006: the match of the show an episode was in, apart from the movie's
     series_id    INTEGER NOT NULL DEFAULT 0,
     series_show  TEXT    NOT NULL DEFAULT '',  -- the show it was for ('' = any: the row predates the column)

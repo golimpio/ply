@@ -33,7 +33,7 @@ func TestTitleBriefs(t *testing.T) {
 
 	// More ids than one chunk.
 	ids := make([]int64, 0, 3*briefChunk)
-	for i := int64(1); i <= 3*briefChunk; i++ {
+	for i := int64(1); i <= int64(3*briefChunk); i++ {
 		ids = append(ids, i+100000)
 	}
 	ids = append(ids, matrixID)

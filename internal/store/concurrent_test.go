@@ -132,7 +132,7 @@ func TestConcurrentUseKeepsEveryWriteAtomic(t *testing.T) {
 					t.Errorf("Continue: %v", err)
 				}
 				for _, c := range cont {
-					if c.Progress == nil || c.Progress.Watched || len(c.Streams) != len(videoAudio) {
+					if c.Progress == nil || c.Progress.Watched() || len(c.Streams) != len(videoAudio) {
 						t.Errorf("Continue returned %+v", c)
 					}
 				}

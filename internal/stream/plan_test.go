@@ -166,6 +166,89 @@ seg00003.m4s
 	}
 }
 
+// A session asked to start at a time says so in its playlist, for the players that start where it says.
+func TestPlaylistFromSaysWhereToStart(t *testing.T) {
+	p, _ := NewPlan(evenKeyframes(15, 2), 30, 6)
+	startTag := func(pl string) []string {
+		var tags []string
+		for _, line := range strings.Split(pl, "\n") {
+			if strings.HasPrefix(line, "#EXT-X-START") {
+				tags = append(tags, line)
+			}
+		}
+		return tags
+	}
+
+	pl := p.PlaylistFrom("?token=a", 13.25)
+	if got := startTag(pl); len(got) != 1 || got[0] != "#EXT-X-START:TIME-OFFSET=13.250,PRECISE=YES" {
+		t.Fatalf("start tags = %q", got)
+	}
+	// The rest is the playlist there is without it, in the same order, with the tag after the header tags
+	// and before the first URI.
+	without := p.Playlist("?token=a")
+	if strings.Replace(pl, "#EXT-X-START:TIME-OFFSET=13.250,PRECISE=YES\n", "", 1) != without {
+		t.Errorf("playlist with a start:\n%s\nis not the one without:\n%s", pl, without)
+	}
+	if i, j := strings.Index(pl, "#EXT-X-START"), strings.Index(pl, "#EXT-X-MAP"); i < strings.Index(pl, "#EXT-X-INDEPENDENT-SEGMENTS") || i > j {
+		t.Errorf("the start tag is at %d, the header ends at %d and the first URI is at %d", i, strings.Index(pl, "#EXT-X-INDEPENDENT-SEGMENTS"), j)
+	}
+	if strings.Contains(startTag(pl)[0], "token") {
+		t.Error("token in the start tag")
+	}
+
+	// Positive control for the cases below: Playlist never has it.
+	if got := startTag(without); len(got) != 0 {
+		t.Errorf("Playlist has a start tag: %q", got)
+	}
+	for name, at := range map[string]float64{"the beginning": 0, "before it": -3, "not a number": math.NaN(), "infinity": math.Inf(1),
+		"minus infinity": math.Inf(-1), "the end": 30, "past the end": 31} {
+		if got := startTag(p.PlaylistFrom("", at)); len(got) != 0 {
+			t.Errorf("a start at %s (%v) has a tag: %q", name, at, got)
+		}
+	}
+	if got := startTag(p.PlaylistFrom("", 29.999)); len(got) != 1 {
+		t.Errorf("a start just inside the file has tags %q, want one", got)
+	}
+}
+
+// A seek lands inside the segment that covers it, on a keyframe at or before the target: the segment starts
+// up to one segment-length before the time asked for, never after it, and a player that seeks to the time
+// has the data it needs. (How far the server cuts in before the target is this, and no more.)
+func TestSeekTargetsAreCoveredByTheSegmentThatStartsBeforeThem(t *testing.T) {
+	for name, kf := range map[string][]float64{
+		"even 2 s GOPs":  evenKeyframes(3600, 2),
+		"10 s GOPs":      evenKeyframes(720, 10),
+		"irregular GOPs": {0, 1.4, 5.1, 9.9, 10.4, 18, 19.5, 30, 41.7, 42, 60, 83.2, 90},
+	} {
+		p, err := NewPlan(kf, kf[len(kf)-1]+4, 6)
+		if err != nil {
+			t.Fatal(err)
+		}
+		worst, at := 0.0, 0.0
+		for target := 0.0; target < p.Duration; target += 0.37 {
+			s := p.Segments[p.SegmentAt(target)]
+			left := target - s.Start
+			if left < 0 || left >= s.Duration+1e-9 {
+				t.Fatalf("%s: %.2f s is in the segment %+v, which does not cover it", name, target, s)
+			}
+			if k := p.TimeOf(s.First); s.Start != 0 && k != s.Start {
+				t.Fatalf("%s: the segment %+v does not start on its keyframe %.3f", name, s, k)
+			}
+			if left > worst {
+				worst, at = left, target
+			}
+		}
+		longest := 0.0
+		for _, s := range p.Segments {
+			longest = max(longest, s.Duration)
+		}
+		t.Logf("%s: a seek lands at most %.2f s into its segment (at %.2f s); the longest segment is %.2f s", name, worst, at, longest)
+		if worst > longest {
+			t.Errorf("%s: the segment starts %.2f s before the target, more than the longest segment (%.2f s)", name, worst, longest)
+		}
+	}
+}
+
 func TestNames(t *testing.T) {
 	valid := []string{"init.mp4", "seg00000.m4s", "seg00042.m4s", "seg99999.m4s"}
 	invalid := []string{"", "index.m3u8", "ffmpeg.m3u8", "gop00000.m4s", "seg0.m4s", "seg0000.m4s", "seg000000.m4s",

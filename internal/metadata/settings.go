@@ -198,6 +198,11 @@ type Settings struct {
 	tvdbBy       [3]string // key, PIN, language
 	cachedMDB    *MDBListClient
 	cachedMDBKey string
+
+	// testMu guards tests, and puts the keeping of a test (which looks at the key in use first) in
+	// order with the settling of an Update. tests is the last test of each provider's key (keytest.go).
+	testMu sync.Mutex
+	tests  map[string]keyTestRec
 }
 
 // String, GoString and LogValue keep the keys and the PIN, which the options hold,
@@ -376,6 +381,11 @@ type Update struct {
 // it is when the key in use is gone. The key in use is the flag's, the environment's, the stored
 // one or the build's, in that order: a key that replaces another, or a stored one that comes or
 // goes under one of the others, does not clear it.
+//
+// The last test of a key (KeyTest) follows the key in use: a check that passes here is kept as the
+// test of the key it checked, when that is the key in use once the change is stored, and a change of
+// the key in use clears the old test. A check that fails is kept only for the key already in use.
+// Where a test is kept (memory, and the settings table when every secret is stored there) is in keytest.go.
 func (s *Settings) Update(ctx context.Context, u Update) error {
 	key, err := cleanSecret(u.Key, keyValidationMsg)
 	if err != nil {
@@ -409,10 +419,13 @@ func (s *Settings) Update(ctx context.Context, u Update) error {
 	if u.Language != nil {
 		lang = *u.Language
 	}
+	passed := map[string]string{} // provider: fingerprint of the key whose check passed
 	if u.Key != nil && key != "" && !s.o.Disabled {
+		fp := fingerprint(SourceTMDB, key)
 		if err := s.checkKey(ctx, key, lang); err != nil {
-			return err
+			return s.failedCheck(ctx, SourceTMDB, fp, err)
 		}
+		passed[SourceTMDB] = fp
 	}
 	// A key is tried with the PIN that will go with it; a PIN with the key it will go with.
 	newKey, newPIN := cur.tvdbKey, cur.tvdbPIN
@@ -423,18 +436,22 @@ func (s *Settings) Update(ctx context.Context, u Update) error {
 		newPIN = tvdbPIN
 	}
 	if ((u.TVDBKey != nil && tvdbKey != "") || (u.TVDBPIN != nil && tvdbPIN != "")) && newKey != "" && !s.o.Disabled {
+		fp := fingerprint(SourceTVDB, newKey, newPIN)
 		if err := s.checkTVDB(ctx, newKey, newPIN, lang); err != nil {
-			return err
+			return s.failedCheck(ctx, SourceTVDB, fp, err)
 		}
+		passed[SourceTVDB] = fp
 		// It logged in: the refusal, or the outage, that the status line may be telling of is over.
 		s.tvdbDown.Store(false)
 		s.tvdbRefused.Store(false)
 	}
 
 	if u.MDBListKey != nil && mdbKey != "" && !s.o.Disabled {
+		fp := fingerprint(SourceMDBList, mdbKey)
 		if err := s.checkMDBList(ctx, mdbKey); err != nil {
-			return err
+			return s.failedCheck(ctx, SourceMDBList, fp, err)
 		}
+		passed[SourceMDBList] = fp
 		s.mdblistRefused.Store(false)
 	}
 	if u.RatingsPrimary != nil {
@@ -496,8 +513,11 @@ func (s *Settings) Update(ctx context.Context, u Update) error {
 		s.mdblistRefused.Store(false) // a new key (or none) is not the one that was refused
 	}
 	if u.Key != nil {
-		return s.storeSecret(ctx, SettingTMDBKey, key)
+		if err := s.storeSecret(ctx, SettingTMDBKey, key); err != nil {
+			return err
+		}
 	}
+	s.afterUpdate(ctx, cur, passed)
 	return nil
 }
 
@@ -607,6 +627,8 @@ func (s *Settings) NoteMDBList(err error) {
 // ErrLookupsOff when nothing may leave the machine, ErrNoTMDB or ErrNoTVDB for no key, and
 // what Update says of a key that is refused or cannot be checked. None holds a key or a PIN.
 // A TVDB key that logs in clears what the status line says of TVDB (refused, unreachable).
+// What the check answers is kept as the last test of that key (KeyTest): a key that works, one that
+// is refused and a provider out of reach alike. An error before any check was made is not a test.
 func (s *Settings) Test(ctx context.Context, provider string) error {
 	if provider != SourceTMDB && provider != SourceTVDB && provider != SourceMDBList {
 		return fmt.Errorf("%w: provider must be tmdb, tvdb or mdblist", ErrInvalidSetting)
@@ -622,13 +644,16 @@ func (s *Settings) Test(ctx context.Context, provider string) error {
 		if err == nil {
 			s.mdblistRefused.Store(false)
 		}
+		s.recordKeyTest(ctx, provider, r.keyFingerprint(provider), err == nil)
 		return err
 	case provider == SourceTMDB && !r.KeySet():
 		return ErrNoTMDB
 	case provider == SourceTVDB && !r.TVDBKeySet():
 		return ErrNoTVDB
 	case provider == SourceTMDB:
-		return s.checkKey(ctx, r.key, r.Language)
+		err := s.checkKey(ctx, r.key, r.Language)
+		s.recordKeyTest(ctx, provider, r.keyFingerprint(provider), err == nil)
+		return err
 	}
 	err := s.checkTVDB(ctx, r.tvdbKey, r.tvdbPIN, r.Language)
 	if err == nil {
@@ -636,6 +661,7 @@ func (s *Settings) Test(ctx context.Context, provider string) error {
 		s.tvdbDown.Store(false)
 		s.tvdbRefused.Store(false)
 	}
+	s.recordKeyTest(ctx, provider, r.keyFingerprint(provider), err == nil)
 	return err
 }
 

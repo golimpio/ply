@@ -14,7 +14,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -43,11 +45,19 @@ type Store struct {
 	bg       context.Context // ends at Close: what the store does on its own stops with it
 	stopBG   context.CancelFunc
 	warnings []string
+	notices  []string
+	gen      atomic.Uint64 // see Generation
+	// marks is set once the database has title_watch (migration 012): see markWatchedFiles.
+	marks bool
 }
 
 // Warnings returns what Open could live with but the caller should log: the
 // store has no logger of its own.
 func (s *Store) Warnings() []string { return s.warnings }
+
+// Notices returns what Open did that the caller should log as information (it backed
+// the database up before upgrading it).
+func (s *Store) Notices() []string { return s.notices }
 
 // Open opens (creating if needed) the database at path and applies pending
 // migrations. The parent directory is created (readable by its owner only) if
@@ -83,40 +93,46 @@ func open(path string, chmod func(string, os.FileMode) error) (*Store, error) {
 	rw.SetMaxIdleConns(1)
 
 	s := &Store{rw: rw}
+	s.gen.Store(uint64(time.Now().UnixNano()))
 	ctx := context.Background()
 	if err := rw.PingContext(ctx); err != nil {
 		rw.Close()
 		return nil, fmt.Errorf("open %s: %w", abs, err)
 	}
+	// An existing database that is about to be upgraded is copied first, so that a migration
+	// that goes wrong, or turns out to be unwanted, has something to go back to.
+	var unsupported error
+	if from, pending, err := s.pendingMigrations(ctx); err != nil {
+		rw.Close()
+		return nil, fmt.Errorf("open %s: %w", abs, err)
+	} else if pending && from > 0 {
+		notice, soft, err := s.backupBeforeMigration(ctx, abs, from, chmod)
+		if err != nil {
+			rw.Close()
+			return nil, fmt.Errorf("back up %s before migrating it: %w", abs, err)
+		}
+		s.notices = append(s.notices, notice)
+		unsupported = soft
+	}
 	if err := s.migrate(ctx); err != nil {
 		rw.Close()
 		return nil, fmt.Errorf("migrate %s: %w", abs, err)
 	}
+	s.marks = true
 	if err := s.stampSince(ctx); err != nil {
 		rw.Close()
 		return nil, fmt.Errorf("open %s: %w", abs, err)
 	}
 	// The metadata keys (TMDB's, TVDB's and its PIN) are in here. A database an earlier version left readable is
 	// closed up now.
-	var unsupported error
 	for _, suffix := range []string{"", "-wal", "-shm"} {
-		err := chmod(abs+suffix, 0o600)
-		switch {
-		case err == nil || errors.Is(err, os.ErrNotExist):
-		case noPermissions(err):
-			// Only a file of ours on a filesystem that ignores modes is let
-			// through: EPERM also means "someone else's file", and that is no
-			// place for the key.
-			if err := ownFile(abs + suffix); err != nil {
-				rw.Close()
-				return nil, err
-			}
-			if unsupported == nil {
-				unsupported = err
-			}
-		default:
+		soft, err := closeUp(abs+suffix, chmod)
+		if err != nil {
 			rw.Close()
 			return nil, err
+		}
+		if unsupported == nil {
+			unsupported = soft
 		}
 	}
 	if unsupported != nil {
@@ -151,6 +167,24 @@ func open(path string, chmod func(string, os.FileMode) error) (*Store, error) {
 // where more readers stop paying (BenchmarkListItemsReaders), and each connection
 // keeps a page cache of its own.
 func readConns() int { return max(2, min(runtime.NumCPU(), 4)) }
+
+// closeUp makes the file at path owner-only. A file that is not there is let go (nothing
+// to protect). On a filesystem that has no permissions the chmod fails and that is
+// soft, to be warned of: but only for a file of ours (EPERM also means "someone else's
+// file", and that is no place for the key). Any other failure is err.
+func closeUp(path string, chmod func(string, os.FileMode) error) (soft, err error) {
+	err = chmod(path, 0o600)
+	switch {
+	case err == nil || errors.Is(err, os.ErrNotExist):
+		return nil, nil
+	case noPermissions(err):
+		if oerr := ownFile(path); oerr != nil {
+			return nil, oerr
+		}
+		return err, nil
+	}
+	return nil, err
+}
 
 // ownFile returns an error unless path is a regular file owned by this user
 // (or is not there: nothing to protect).
@@ -257,47 +291,69 @@ func (s *Store) migrate(ctx context.Context) error {
 	}
 	// Every version that is not recorded is applied, in order: a database that has 8 and
 	// not 7 (a branch that numbered its migration later than the other's) gets 7 too.
+	applied, err := s.appliedMigrations(ctx)
+	if err != nil {
+		return err
+	}
+	files, err := migrationFiles()
+	if err != nil {
+		return err
+	}
+	for _, m := range files {
+		if applied[m.version] {
+			continue
+		}
+		body, err := migrationFS.ReadFile("migrations/" + m.name)
+		if err != nil {
+			return err
+		}
+		if err := s.applyMigration(ctx, m.version, string(body)); err != nil {
+			return fmt.Errorf("migration %s: %w", m.name, err)
+		}
+	}
+	return nil
+}
+
+// appliedMigrations returns the versions recorded in schema_version, which must exist.
+func (s *Store) appliedMigrations(ctx context.Context) (map[int]bool, error) {
 	applied := map[int]bool{}
 	rows, err := s.rw.QueryContext(ctx, `SELECT version FROM schema_version`)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var v int
 		if err := rows.Scan(&v); err != nil {
-			rows.Close()
-			return err
+			return nil, err
 		}
 		applied[v] = true
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return err
-	}
-	rows.Close()
+	return applied, rows.Err()
+}
+
+type migrationFile struct {
+	name    string
+	version int
+}
+
+// migrationFiles lists the migrations, by version.
+func migrationFiles() ([]migrationFile, error) {
 	entries, err := migrationFS.ReadDir("migrations")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	files := make([]migrationFile, 0, len(entries))
 	for _, e := range entries {
 		num, _, _ := strings.Cut(e.Name(), "_")
 		version, err := strconv.Atoi(num)
 		if err != nil {
-			return fmt.Errorf("migration %q: name must start with a number", e.Name())
+			return nil, fmt.Errorf("migration %q: name must start with a number", e.Name())
 		}
-		if applied[version] {
-			continue
-		}
-		body, err := migrationFS.ReadFile("migrations/" + e.Name())
-		if err != nil {
-			return err
-		}
-		if err := s.applyMigration(ctx, version, string(body)); err != nil {
-			return fmt.Errorf("migration %s: %w", e.Name(), err)
-		}
+		files = append(files, migrationFile{e.Name(), version})
 	}
-	return nil
+	return files, nil
 }
 
 // foreignKeysOff is the line a migration starts with when it rebuilds a table that

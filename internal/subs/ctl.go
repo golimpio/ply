@@ -22,6 +22,11 @@ type ctl struct {
 	held    bool // the pacer wants it suspended
 	stopped bool // suspended now
 	bud     *budget
+
+	// progress, if set before ffmpeg runs, is told how far into the film it has read: what
+	// the run reads from ffmpeg's output (see progressWriter). Not guarded by mu: it is set
+	// once, before the run starts.
+	progress func(at time.Duration)
 }
 
 // started is told the pid of ffmpeg. nice is the niceness of background work.

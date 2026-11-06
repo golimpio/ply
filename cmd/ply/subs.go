@@ -139,22 +139,20 @@ func registerSubs(q *jobs.Queue, d queueDeps) {
 			if len(srcs) == 0 {
 				return nil
 			}
-			const reading = "Reading the file"
-			r.Progress(0, 0, reading)
-			pace := func() (bool, string) { return hold.check(e.Path) }
-			note := func(why string) {
-				if why == "" {
-					r.Progress(0, 0, reading)
-				} else {
-					r.Progress(0, 0, "Waiting: "+why)
-				}
+			// The bar and "Reading the file: 43%, about 12 min left" (subsMeter), from how far into
+			// the film ffmpeg has read. Over a slow share the read takes the better part of an hour.
+			var film time.Duration
+			if s := e.DurationSec; s > 0 && s < 1e7 {
+				film = time.Duration(s * float64(time.Second))
 			}
+			meter := newSubsMeter(r.Progress, film)
+			pace := func() (bool, string) { return hold.check(e.Path) }
 			var errs []error
 			for _, step := range subsSteps(srcs) {
 				if err := r.Yield(ctx); err != nil {
 					return err
 				}
-				if err := d.subs.Fill(ctx, step, pace, note); err != nil {
+				if err := d.subs.FillProgress(ctx, step, pace, meter.wait, meter.read); err != nil {
 					if ctx.Err() != nil {
 						return err
 					}
@@ -370,7 +368,7 @@ func nextEpisodes(eps []store.Entry, limit int) []store.Entry {
 	}
 	var picks []pick
 	for show, l := range lastOf {
-		if next := l.idx + 1; next < len(eps) && eps[next].Show == show && (eps[next].Progress == nil || !eps[next].Progress.Watched) {
+		if next := l.idx + 1; next < len(eps) && eps[next].Show == show && (eps[next].Progress == nil || !eps[next].Progress.Watched()) {
 			picks = append(picks, pick{eps[next], l.at})
 		}
 	}

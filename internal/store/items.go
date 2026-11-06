@@ -76,11 +76,15 @@ type ListFilter struct {
 	Show string
 }
 
-// Show summarises the episodes of one show.
+// Show summarises the episodes of one show: its seasons, and how many of its
+// episodes there are, are watched, and are started (for each season, and for the
+// whole show, which does not count the specials: see totalOf). An episode is one
+// whatever number of files it is on.
 type Show struct {
-	Name         string
-	Seasons      []int
-	EpisodeCount int
+	Name    string
+	Seasons []int
+	EpisodeCounts
+	BySeason map[int]EpisodeCounts
 }
 
 const itemCols = `id, kind, title, year, show, season, episode, path, root, size, mtime,
@@ -341,11 +345,10 @@ func prefixed(prefix, cols string) string {
 }
 
 // Shows lists shows (episodes grouped by show name, ordered by name) with
-// their seasons.
+// their seasons and the counts of their episodes.
 func (s *Store) Shows(ctx context.Context) ([]Show, error) {
-	rows, err := s.ro.QueryContext(ctx, `
-		SELECT show, season, COUNT(*) FROM items WHERE kind = 'episode'
-		GROUP BY show, season ORDER BY LOWER(show), show, season`)
+	rows, err := s.ro.QueryContext(ctx, episodeCountsSQL("i.show", `FROM items i LEFT JOIN progress p ON p.item_id = i.id`, `i.kind = 'episode'`)+
+		` ORDER BY LOWER(g), g, season`)
 	if err != nil {
 		return nil, err
 	}
@@ -355,17 +358,20 @@ func (s *Store) Shows(ctx context.Context) ([]Show, error) {
 		var (
 			name   string
 			season int
-			n      int
+			c      EpisodeCounts
 		)
-		if err := rows.Scan(&name, &season, &n); err != nil {
+		if err := rows.Scan(&name, &season, &c.EpisodeCount, &c.Watched, &c.InProgress); err != nil {
 			return nil, err
 		}
 		if len(shows) == 0 || shows[len(shows)-1].Name != name {
-			shows = append(shows, Show{Name: name})
+			shows = append(shows, Show{Name: name, BySeason: map[int]EpisodeCounts{}})
 		}
 		last := &shows[len(shows)-1]
 		last.Seasons = append(last.Seasons, season)
-		last.EpisodeCount += n
+		last.BySeason[season] = c
+	}
+	for i := range shows {
+		shows[i].EpisodeCounts = totalOf(shows[i].BySeason)
 	}
 	return shows, rows.Err()
 }
@@ -420,6 +426,10 @@ func (s *Store) FileStates(ctx context.Context) (states map[string]FileState, er
 func (s *Store) DeleteItems(ctx context.Context, ids []int64) error {
 	for chunk := range slices.Chunk(ids, writeChunk) {
 		err := s.write(ctx, prioLow, func(tx *sql.Tx) error {
+			// What was watched is not forgotten with the file: see markWatchedFiles.
+			if err := s.markWatchedFiles(ctx, tx, chunk, time.Now()); err != nil {
+				return err
+			}
 			_, err := tx.ExecContext(ctx, `DELETE FROM items WHERE id IN (`+placeholders(len(chunk))+`)`, idArgs(chunk)...)
 			return err
 		})

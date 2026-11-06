@@ -18,7 +18,8 @@ func TestMigration005CreatesFoldersAndKeepsData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SetProgress(ctx, id, 100, 1000); err != nil {
+	// The database is the one of a version before watch state: its progress has a flag, not a time.
+	if _, err := s.rw.Exec(`INSERT INTO progress (item_id, position_sec, duration_sec, watched, updated_at) VALUES (?, 100, 1000, 0, 5)`, id); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
@@ -38,7 +39,7 @@ func TestMigration005CreatesFoldersAndKeepsData(t *testing.T) {
 	}
 	for table, want := range map[string][]string{
 		"folders":      {"id", "path", "kind", "guessed", "added_at"},
-		"item_archive": {"path", "size", "tmdb_id", "tmdb_kind", "position_sec", "duration_sec", "watched", "progress_at", "archived_at", "series_id", "series_show", "series_tvdb_id"},
+		"item_archive": {"path", "size", "tmdb_id", "tmdb_kind", "position_sec", "duration_sec", "progress_at", "archived_at", "series_id", "series_show", "series_tvdb_id", "watched_at", "play_count"},
 	} {
 		if got := columns(t, s.rw, table); !slices.Equal(got, want) {
 			t.Errorf("%s columns = %v, want %v", table, got, want)
@@ -319,13 +320,14 @@ type archiveRow struct {
 	seriesID               int64  // a show's match
 	seriesShow             string // the show it was for
 	position, duration     float64
-	watched                bool
+	watched                bool // watched_at is set
+	playCount              int
 	progressAt, archivedAt int64
 }
 
 func archived(t *testing.T, s *Store) map[string]archiveRow {
 	t.Helper()
-	rows, err := s.rw.Query(`SELECT path, size, tmdb_id, tmdb_kind, series_id, series_show, position_sec, duration_sec, watched,
+	rows, err := s.rw.Query(`SELECT path, size, tmdb_id, tmdb_kind, series_id, series_show, position_sec, duration_sec, watched_at <> 0, play_count,
 			progress_at, archived_at
 		FROM item_archive`)
 	if err != nil {
@@ -338,7 +340,7 @@ func archived(t *testing.T, s *Store) map[string]archiveRow {
 			p string
 			r archiveRow
 		)
-		if err := rows.Scan(&p, &r.size, &r.tmdbID, &r.tmdbKind, &r.seriesID, &r.seriesShow, &r.position, &r.duration, &r.watched,
+		if err := rows.Scan(&p, &r.size, &r.tmdbID, &r.tmdbKind, &r.seriesID, &r.seriesShow, &r.position, &r.duration, &r.watched, &r.playCount,
 			&r.progressAt, &r.archivedAt); err != nil {
 			t.Fatal(err)
 		}
@@ -381,7 +383,7 @@ func TestArchiveAndDeleteRoot(t *testing.T) {
 	got := archived(t, s)
 	want := map[string]archiveRow{
 		"/lib/progress.mp4":          {size: 100, position: 600, duration: 7200, progressAt: prog.Progress.UpdatedAt},
-		"/lib/watched.mp4":           {size: 200, position: 7100, duration: 7200, watched: true},
+		"/lib/watched.mp4":           {size: 200, position: 7100, duration: 7200, watched: true, playCount: 1},
 		"/lib/manual.mp4":            {size: 300, tmdbID: 603, tmdbKind: KindMovie},
 		"/lib/Fixed Show/S01E01.mkv": {size: 600, seriesID: 1396, seriesShow: "Fixed Show"},
 	}
@@ -530,7 +532,7 @@ func TestRestoreArchived(t *testing.T) {
 	if _, _, ok, _ := s.RestoreArchived(ctx, wid, "/lib/watched.mp4", 200); !ok {
 		t.Fatal("watched: not restored")
 	}
-	if w, _ := s.GetEntry(ctx, wid); w.Progress == nil || !w.Progress.Watched {
+	if w, _ := s.GetEntry(ctx, wid); w.Progress == nil || !w.Progress.Watched() {
 		t.Errorf("watched item restored as %+v", w.Progress)
 	}
 

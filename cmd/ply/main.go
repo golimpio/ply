@@ -76,6 +76,9 @@ func run() error {
 		return err
 	}
 	defer st.Close()
+	for _, n := range st.Notices() {
+		log.Info(n)
+	}
 	for _, w := range st.Warnings() {
 		log.Warn(w)
 	}

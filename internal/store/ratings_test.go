@@ -75,8 +75,8 @@ func TestMigration010OnAV9Database(t *testing.T) {
 	}
 	defer s.Close()
 	var version int
-	if err := s.rw.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&version); err != nil || version != 10 {
-		t.Fatalf("schema version = %d, %v; want 10", version, err)
+	if err := s.rw.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&version); err != nil || version != slices.Max(migrationNumbers(t)) {
+		t.Fatalf("schema version = %d, %v; want the last migration", version, err)
 	}
 	for table, want := range map[string][]string{
 		"title_ratings":   {"title_id", "source", "value", "scale", "votes", "state", "url", "fetched_at"},

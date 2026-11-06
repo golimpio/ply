@@ -20,12 +20,16 @@ const (
 // TitleCard is a title as a tile shows it. Poster and the other image fields are
 // relative URLs that carry the token.
 type TitleCard struct {
-	ID       int64  `json:"id"`
-	Kind     string `json:"kind"` // movie | series
-	Title    string `json:"title"`
-	Year     int    `json:"year"` // 0 when unknown
-	Poster   string `json:"poster,omitempty"`
-	Backdrop string `json:"backdrop,omitempty"`
+	ID    int64  `json:"id"`
+	Kind  string `json:"kind"` // movie | series
+	Title string `json:"title"`
+	// SortTitle is the name the card is listed under, and what GET /api/titles is ordered by:
+	// compare it without regard to case (ASCII), then Year, then ID. It is the title's sort title
+	// ("Matrix, The"), or its title when it has none; see sortTitleOf.
+	SortTitle string `json:"sortTitle"`
+	Year      int    `json:"year"` // 0 when unknown
+	Poster    string `json:"poster,omitempty"`
+	Backdrop  string `json:"backdrop,omitempty"`
 	// Rating (M10) is the primary source's rating, or the first the title has in the fixed order
 	// (its source says which); null when it has none.
 	Rating *RatingEntry `json:"rating"`
@@ -35,6 +39,11 @@ type TitleCard struct {
 	// NextAirDate is when a show's next episode airs (YYYY-MM-DD); it can be in the
 	// past until the show is next refreshed.
 	NextAirDate string `json:"nextAirDate,omitempty"`
+
+	// Watched: a film was watched in any of its versions; a series, in all of its episodes. A
+	// series card also carries episodeCount, watchedEpisodes and inProgress (a film's has none).
+	Watched bool `json:"watched"`
+	*EpisodeCounts
 }
 
 // Genre, CollectionRef, CastMember and CrewMember are parts of a TitleDetail.
@@ -177,7 +186,10 @@ type EpisodeInfo struct {
 
 // MetaFields are the metadata fields that list rows (items, shows) carry.
 type MetaFields struct {
-	TitleID       *int64   `json:"titleId,omitempty"`
+	TitleID *int64 `json:"titleId,omitempty"`
+	// SortTitle is what a movie or a show is sorted by, as TitleCard.SortTitle is (not there for an
+	// episode: it is sorted by its show, season and number).
+	SortTitle     string   `json:"sortTitle,omitempty"`
 	Poster        string   `json:"poster,omitempty"`
 	Backdrop      string   `json:"backdrop,omitempty"`
 	Logo          string   `json:"logo,omitempty"`
@@ -191,20 +203,20 @@ type MetaFields struct {
 
 // SeasonInfo is a season of GET /api/shows/{name}.
 type SeasonInfo struct {
-	Season       int    `json:"season"`
-	Name         string `json:"name"`
-	Overview     string `json:"overview,omitempty"`
-	Poster       string `json:"poster,omitempty"`
-	AirDate      string `json:"airDate,omitempty"`
-	EpisodeCount int    `json:"episodeCount"` // episode files in the library
+	Season        int    `json:"season"`
+	Name          string `json:"name"`
+	Overview      string `json:"overview,omitempty"`
+	Poster        string `json:"poster,omitempty"`
+	AirDate       string `json:"airDate,omitempty"`
+	EpisodeCounts        // of the season's episodes in the library
 }
 
 // ShowDetail is GET /api/shows/{name}.
 type ShowDetail struct {
-	Show         string `json:"show"`
-	EpisodeCount int    `json:"episodeCount"`
-	Year         *int   `json:"year,omitempty"`
-	Overview     string `json:"overview,omitempty"`
+	Show string `json:"show"`
+	EpisodeCounts
+	Year     *int   `json:"year,omitempty"`
+	Overview string `json:"overview,omitempty"`
 	MetaFields
 	Meta    *TitleDetail `json:"meta,omitempty"`
 	Seasons []SeasonInfo `json:"seasons"`
@@ -299,6 +311,18 @@ type SettingsView struct {
 	MDBListAttribution    string   `json:"mdblistAttribution"`
 	MDBListAttributionURL string   `json:"mdblistAttributionUrl"`
 	IMDbDatasetUpdatedAt  *string  `json:"imdbDatasetUpdatedAt"`
+
+	// The last test of the key in use for each provider (POST /api/settings/test, or a save that
+	// checked the key). KeyTestedAt is in unix seconds; 0 means the key was never tested, or it
+	// changed since (stored, removed, or now shadowed by a flag or the environment). KeyTestOk is
+	// whether the test passed, false when there is none. TVDB's logs in with the key and the PIN,
+	// so its test is stale when either changes.
+	TMDBKeyTestedAt    int64 `json:"tmdbKeyTestedAt"`
+	TMDBKeyTestOK      bool  `json:"tmdbKeyTestOk"`
+	TVDBKeyTestedAt    int64 `json:"tvdbKeyTestedAt"`
+	TVDBKeyTestOK      bool  `json:"tvdbKeyTestOk"`
+	MDBListKeyTestedAt int64 `json:"mdblistKeyTestedAt"`
+	MDBListKeyTestOK   bool  `json:"mdblistKeyTestOk"`
 }
 
 // TVDBAttribution is the notice TheTVDB asks of an application that shows its metadata
@@ -335,6 +359,18 @@ func (s *Server) imageURL(ref, size string) string {
 
 func ptr[T any](v T) *T { return &v }
 
+// sortTitleOf is the name a movie or a show is sorted by in a list. When it is matched to a title
+// (matched, with its brief b) it is the one GET /api/titles is ordered by: the title's sort title,
+// which a person can edit, or else its title. Without a title it is the name from the files, with
+// a leading article moved to the end the way the sort title of a matched title is made: the one
+// function (metadata.SortTitle), not a copy of it.
+func sortTitleOf(b store.TitleBrief, matched bool, name string) string {
+	if matched && b.SortTitle != "" {
+		return b.SortTitle
+	}
+	return metadata.SortTitle(name)
+}
+
 // optFloat is nil for 0 ("unknown").
 func optFloat(v float64) *float64 {
 	if v == 0 {
@@ -352,11 +388,14 @@ func optInt(v int) *int {
 
 // titleCard builds a card; primary is the source whose rating it shows (see primaryRating).
 func (s *Server) titleCard(c store.TitleCard, primary string) TitleCard {
-	out := TitleCard{ID: c.ID, Kind: c.Kind, Title: c.Title, Year: c.Year, Poster: s.imageURL(c.Poster, posterSize),
+	out := TitleCard{ID: c.ID, Kind: c.Kind, Title: c.Title, SortTitle: c.SortTitle, Year: c.Year, Poster: s.imageURL(c.Poster, posterSize),
 		Backdrop: s.imageURL(c.Backdrop, backdropSize), Rating: primaryRating(c.Ratings, primary), Show: c.Show,
-		NextAirDate: c.NextAirDate}
+		NextAirDate: c.NextAirDate, Watched: c.Watched}
 	if c.ItemID != 0 {
 		out.ItemID = ptr(c.ItemID)
+	}
+	if c.Episodes != nil {
+		out.EpisodeCounts = ptr(episodeCounts(*c.Episodes))
 	}
 	return out
 }

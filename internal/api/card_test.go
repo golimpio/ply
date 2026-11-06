@@ -1,0 +1,257 @@
+package api
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"net/http"
+	"path/filepath"
+	"slices"
+	"testing"
+
+	"ply/internal/art"
+	"ply/internal/probe"
+)
+
+// cardEnv is the metadata env with artwork, in which the film "Movie (2020)", matched to The Matrix,
+// is HDR, has been started and has a picture with a colour: the one row with every field there is.
+func cardEnv(t *testing.T) *menv {
+	t.Helper()
+	m := newMetaEnvWith(t, "", func(m *menv, o *Options) {
+		g, err := art.New(context.Background(), art.Options{Dir: filepath.Join(t.TempDir(), "art"), FFmpeg: fakeFFmpeg(t, fakeArtScript)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(g.Close)
+		o.Art = g
+	})
+	ctx := context.Background()
+	entry, err := m.store.GetEntry(ctx, m.mp4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.store.UpsertItem(ctx, &entry.Item, []probe.Stream{
+		{Index: 0, Type: "video", Codec: "hevc", Width: 3840, Height: 2160, PixFmt: "yuv420p10le", ColorTransfer: "smpte2084", Default: true},
+		{Index: 1, Type: "audio", Codec: "eac3", Channels: 6, Language: "eng", Default: true}}); err != nil {
+		t.Fatal(err)
+	}
+	wantStatus(t, m.putProgress(m.mp4, `{"positionSec": 100, "durationSec": 120}`, nil), 200)
+	wantStatus(t, m.get(fmt.Sprintf("/api/items/%d/art/thumb", m.mp4)), 200) // makes the picture and learns its colour
+	return m
+}
+
+func fieldNames(v any) []string {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+func wantKeys(t *testing.T, what string, v any, want ...string) {
+	t.Helper()
+	slices.Sort(want)
+	if got := fieldNames(v); !slices.Equal(got, want) {
+		t.Errorf("%s has the fields %v, want exactly %v", what, got, want)
+	}
+}
+
+func TestItemCardHasExactlyTheFields(t *testing.T) {
+	m := cardEnv(t)
+	cardURL, fullURL := "/api/items?kind=movie&fields=card", "/api/items?kind=movie"
+
+	raw := decode[[]map[string]any](t, m.get(cardURL))
+	rows := map[int64]map[string]any{}
+	for _, r := range raw {
+		rows[int64(r["id"].(float64))] = r
+	}
+
+	// The film with everything.
+	full := rows[m.mp4]
+	if full == nil {
+		t.Fatalf("no card for the film; have %v", raw)
+	}
+	wantKeys(t, "the card of a film that has everything", full, "id", "kind", "title", "sortTitle", "year", "titleId", "addedAt", "poster", "art",
+		"rating", "watched", "progress", "durationSec", "width", "height", "hdr", "genres", "matchState", "needsReview")
+	wantKeys(t, "its art", full["art"], "color")
+	wantKeys(t, "its rating", full["rating"], "source", "value", "scale", "score100")
+	wantKeys(t, "its progress", full["progress"], "positionSec", "watched")
+
+	// The film with nothing: no title, never started, no picture with a colour. Only what is always there.
+	bare := rows[m.multi]
+	if bare == nil {
+		t.Fatalf("no card for the other film; have %v", raw)
+	}
+	wantKeys(t, "the card of a film with nothing", bare, "id", "kind", "title", "sortTitle", "year", "addedAt", "rating", "watched", "progress",
+		"durationSec", "width", "height", "matchState", "needsReview")
+	if bare["rating"] != nil || bare["progress"] != nil {
+		t.Errorf("rating %v and progress %v of a film with neither: want null", bare["rating"], bare["progress"])
+	}
+
+	// The values are the full row's.
+	fullRows := map[int64]ItemSummary{}
+	for _, it := range decode[[]ItemSummary](t, m.get(fullURL)) {
+		fullRows[it.ID] = it
+	}
+	cards := map[int64]ItemCard{}
+	for _, c := range decode[[]ItemCard](t, m.get(cardURL)) {
+		cards[c.ID] = c
+	}
+	if len(cards) != len(fullRows) {
+		t.Fatalf("%d cards for %d films", len(cards), len(fullRows))
+	}
+	for id, it := range fullRows {
+		c := cards[id]
+		if c.Kind != it.Kind || c.Title != it.Title || c.SortTitle != it.SortTitle || c.AddedAt != it.AddedAt || c.Poster != it.Poster ||
+			c.Watched != it.WatchState.Watched || c.DurationSec != it.DurationSec || c.Width != it.Width || c.Height != it.Height ||
+			c.HDR != it.HDR || c.MatchState != it.MatchState || c.NeedsReview != it.NeedsReview ||
+			!slices.Equal(c.Genres, it.Genres) || (c.Year == nil) != (it.Year == nil) || (c.TitleID == nil) != (it.TitleID == nil) {
+			t.Errorf("card %+v\nis not the row %+v", c, it)
+		}
+		if (c.Year != nil && *c.Year != *it.Year) || (c.TitleID != nil && *c.TitleID != *it.TitleID) {
+			t.Errorf("card %d: year/titleId differ from the row's", id)
+		}
+		if (c.Progress == nil) != (it.Progress == nil) || (c.Progress != nil && *c.Progress != *it.Progress) {
+			t.Errorf("card %d: progress %+v, row %+v", id, c.Progress, it.Progress)
+		}
+		if (c.Rating == nil) != (it.Rating == nil) || (c.Rating != nil &&
+			*c.Rating != CardRating{Source: it.Rating.Source, Value: it.Rating.Value, Scale: it.Rating.Scale, Score100: it.Rating.Score100}) {
+			t.Errorf("card %d: rating %+v, row %+v", id, c.Rating, it.Rating)
+		}
+		if wantColour := it.Art != nil && it.Art.Color != ""; (c.Art != nil) != wantColour || (wantColour && c.Art.Color != it.Art.Color) {
+			t.Errorf("card %d: art %+v, row's colour %+v", id, c.Art, it.Art)
+		}
+	}
+	// And the film that has everything has what it should (a control for the loop above comparing nothing).
+	c := cards[m.mp4]
+	if c.SortTitle != "Matrix, The" || c.HDR != "hdr10" || c.Width != 3840 || c.Art == nil || c.Art.Color == "" || c.Rating == nil || c.Rating.Source != "tmdb" ||
+		c.Progress == nil || c.Progress.PositionSec != 100 || !slices.Equal(c.Genres, []string{"Action", "Science Fiction"}) || c.TitleID == nil || *c.TitleID != m.matrixTitle {
+		t.Errorf("the card of the film with everything: %+v", c)
+	}
+}
+
+// The same films in the same order, whatever the filters; and it is a lean list.
+func TestItemCardListIsTheFullListInAnotherShape(t *testing.T) {
+	m := cardEnv(t)
+	for _, q := range []string{"", "&sort=rating", "&minRating=50", "&sort=rating&minRating=90"} {
+		var full, card []int64
+		for _, it := range decode[[]ItemSummary](t, m.get("/api/items?kind=movie"+q)) {
+			full = append(full, it.ID)
+		}
+		for _, c := range decode[[]ItemCard](t, m.get("/api/items?kind=movie&fields=card"+q)) {
+			card = append(card, c.ID)
+		}
+		if !slices.Equal(full, card) {
+			t.Errorf("%q: the cards are %v, the rows %v", q, card, full)
+		}
+		if q == "&minRating=50" && len(card) == 0 {
+			t.Error("control: the filter left nothing")
+		}
+	}
+	if q := "&minRating=99"; len(decode[[]ItemCard](t, m.get("/api/items?kind=movie&fields=card"+q))) != 0 {
+		t.Error("control: a rating of 99 leaves films")
+	}
+	if full, card := m.get("/api/items?kind=movie").Body.Len(), m.get("/api/items?kind=movie&fields=card").Body.Len(); card*100 > full*65 { // two films with little in them; 5,000 real ones are a third (see TestListPayload)
+		t.Errorf("a card list is %d bytes, the full one %d: not lean", card, full)
+	}
+}
+
+func TestItemCardAsksNeedKindMovie(t *testing.T) {
+	m := cardEnv(t)
+	for _, url := range []string{"/api/items?fields=card", "/api/items?kind=episode&fields=card", "/api/items?kind=movie&fields=lean", "/api/items?kind=movie&fields=Card",
+		"/api/items?fields=bogus"} {
+		rec := m.get(url)
+		wantJSONError(t, rec, http.StatusBadRequest)
+		if rec.Header().Get("ETag") != "" {
+			t.Errorf("GET %s: a 400 with ETag %q", url, rec.Header().Get("ETag"))
+		}
+	}
+	wantStatus(t, m.get("/api/items?kind=movie&fields="), 200) // empty is the full list
+	if n := len(decode[[]ItemSummary](t, m.get("/api/items?kind=movie&fields="))); n == 0 {
+		t.Error("control: no films")
+	}
+}
+
+// The projection is in the key: a tag of the full list is not one of the card list, nor the other way round.
+func TestItemCardETagIsItsOwn(t *testing.T) {
+	m := cardEnv(t)
+	cardURL, fullURL := "/api/items?kind=movie&fields=card", "/api/items?kind=movie"
+	card, full := m.get(cardURL).Header().Get("ETag"), m.get(fullURL).Header().Get("ETag")
+	if card == "" || full == "" || card == full {
+		t.Fatalf("ETags: card %q, full %q: want two, and different", card, full)
+	}
+	if rec := m.condGet(cardURL, card); rec.Code != http.StatusNotModified {
+		t.Errorf("the card list with its own tag = %d, want 304", rec.Code)
+	}
+	if rec := m.condGet(fullURL, full); rec.Code != http.StatusNotModified {
+		t.Errorf("the full list with its own tag = %d, want 304", rec.Code)
+	}
+	if rec := m.condGet(cardURL, full); rec.Code != 200 {
+		t.Errorf("the card list with the tag of the full one = %d, want 200", rec.Code)
+	}
+	if rec := m.condGet(fullURL, card); rec.Code != 200 {
+		t.Errorf("the full list with the tag of the card one = %d, want 200", rec.Code)
+	}
+	// And it moves with the library like the other.
+	wantStatus(t, m.putProgress(m.mkv, `{"positionSec": 100, "durationSec": 2400}`, nil), 200)
+	if rec := m.condGet(cardURL, card); rec.Code != 200 || rec.Header().Get("ETag") == card {
+		t.Errorf("the card list after a progress save, with the old tag: %d, ETag %q", rec.Code, rec.Header().Get("ETag"))
+	}
+}
+
+// dropTable removes a table behind the store's back, so that what reads it fails and the rest does not.
+func dropTable(t *testing.T, m *menv, table string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(filepath.Dir(m.dir), "data dir", "ply.db")+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec("DROP TABLE " + table); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A list that could not be filled in (the rows are sent without their titles, or their episodes)
+// is not one to keep: no ETag, no-store. The control is the same list before the table went.
+func TestDegradedListIsNotKept(t *testing.T) {
+	for _, c := range []struct {
+		name, table string
+		urls        []string
+	}{
+		{"the genres of the titles cannot be read", "title_genres", []string{"/api/items?kind=movie", "/api/items?kind=movie&fields=card", "/api/items", "/api/shows"}},
+		{"the episodes cannot be read", "episodes", []string{"/api/items?kind=episode", "/api/items"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			m := newMetaEnv(t, "")
+			healthy := map[string]string{}
+			for _, url := range c.urls {
+				rec := m.get(url)
+				wantStatus(t, rec, 200)
+				if rec.Header().Get("ETag") == "" || rec.Header().Get("Cache-Control") != "private, no-cache" {
+					t.Fatalf("control, GET %s while whole: ETag %q, Cache-Control %q", url, rec.Header().Get("ETag"), rec.Header().Get("Cache-Control"))
+				}
+				healthy[url] = rec.Body.String()
+			}
+			dropTable(t, m, c.table)
+			for _, url := range c.urls {
+				rec := m.get(url)
+				wantStatus(t, rec, 200)
+				if rec.Header().Get("ETag") != "" || rec.Header().Get("Cache-Control") != "no-store" {
+					t.Errorf("GET %s with %s: ETag %q, Cache-Control %q; want none and no-store", url, c.table, rec.Header().Get("ETag"), rec.Header().Get("Cache-Control"))
+				}
+				if rec.Body.Len() < 100 {
+					t.Errorf("GET %s: the list is not sent (%q)", url, rec.Body.String())
+				}
+				if rec.Body.String() == healthy[url] {
+					t.Errorf("GET %s: the same list as when whole; the control did not take something away", url)
+				}
+			}
+		})
+	}
+}

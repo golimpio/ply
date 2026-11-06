@@ -204,7 +204,8 @@ func (s *Session) touch() {
 	s.stamp()
 }
 
-// Playlist renders the VOD playlist; suffix is appended to every URI. A plan
+// Playlist renders the VOD playlist; suffix is appended to every URI. It says where the
+// session was asked to start (see Plan.PlaylistFrom). A plan
 // read from the container is confirmed first, against the first fragment
 // ffmpeg writes (which the player waits for anyway): if it is wrong the plan
 // is rebuilt from a scan before anybody has seen it, and that is waited for, as
@@ -224,7 +225,7 @@ func (s *Session) Playlist(ctx context.Context, suffix string) (string, error) {
 	if err := s.awaitPlan(ctx, &w); err != nil {
 		return "", err
 	}
-	return s.Plan().Playlist(suffix), nil
+	return s.Plan().PlaylistFrom(suffix, s.req.StartSec), nil
 }
 
 func (s *Session) gopPath(g int) string { return filepath.Join(s.dir, fmt.Sprintf(gopPattern, g)) }

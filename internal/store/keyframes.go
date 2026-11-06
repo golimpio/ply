@@ -30,13 +30,14 @@ func (s *Store) Keyframes(ctx context.Context, itemID int64) (times []float64, o
 }
 
 // SetKeyframes caches the keyframe times of an item, replacing any earlier
-// entry. It fails with ErrNotFound when the item no longer exists.
+// entry. It fails with ErrNotFound when the item no longer exists. No list shows them:
+// it leaves Generation alone.
 func (s *Store) SetKeyframes(ctx context.Context, itemID int64, times []float64) error {
 	blob := make([]byte, 8*len(times))
 	for i, t := range times {
 		binary.LittleEndian.PutUint64(blob[i*8:], math.Float64bits(t))
 	}
-	res, err := s.exec(ctx, prioHigh, `
+	res, err := s.execQuiet(ctx, prioHigh, `
 		INSERT INTO keyframes (item_id, times) SELECT id, ? FROM items WHERE id = ?
 		ON CONFLICT (item_id) DO UPDATE SET times = excluded.times`, blob, itemID)
 	if err != nil {

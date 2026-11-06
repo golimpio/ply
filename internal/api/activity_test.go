@@ -277,8 +277,10 @@ func TestIsBrowse(t *testing.T) {
 		{"GET", "/api/metadata/status", false},          // polling
 		{"POST", "/api/items/12/playback", false},       // playback
 		{"PUT", "/api/items/12/progress", false},        // playback
-		{"GET", "/assets/app.js", false},                // the app itself
-		{"GET", "/api/../api/jobs", false},              // cleaned first
+		{"PUT", "/api/items/12/watched", false},         // a write
+		{"PUT", "/api/shows/Lost/seasons/1/watched", false},
+		{"GET", "/assets/app.js", false},   // the app itself
+		{"GET", "/api/../api/jobs", false}, // cleaned first
 	}
 	for _, c := range cases {
 		r := httptest.NewRequest(c.method, "http://x"+c.path, nil)

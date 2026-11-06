@@ -8,7 +8,9 @@ import (
 )
 
 // The background queue's table (jobs.Persist). Its writes are low priority: a
-// job's state can wait for a progress save or a setting.
+// job's state can wait for a progress save or a setting. No list shows a job, so they
+// leave Generation alone (execQuiet): a busy queue must not make every browser reload
+// the library.
 
 const jobCols = `id, kind, key, title, priority, state, user, payload, attempts, error,
 	created_at, run_at, started_at, finished_at`
@@ -29,7 +31,7 @@ func fromMS(v int64) time.Time {
 
 // InsertJob stores a new job and returns its id.
 func (s *Store) InsertJob(ctx context.Context, j jobs.Record) (int64, error) {
-	res, err := s.exec(ctx, prioLow, `INSERT INTO jobs (kind, key, title, priority, state, user, payload, attempts,
+	res, err := s.execQuiet(ctx, prioLow, `INSERT INTO jobs (kind, key, title, priority, state, user, payload, attempts,
 		error, created_at, run_at, started_at, finished_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		j.Kind, j.Key, j.Title, j.Priority, string(j.State), j.User, j.Payload, j.Attempts, j.Error,
 		ms(j.CreatedAt), ms(j.RunAt), ms(j.StartedAt), ms(j.FinishedAt))
@@ -41,7 +43,7 @@ func (s *Store) InsertJob(ctx context.Context, j jobs.Record) (int64, error) {
 
 // UpdateJob stores a job's new state.
 func (s *Store) UpdateJob(ctx context.Context, j jobs.Record) error {
-	_, err := s.exec(ctx, prioLow, `UPDATE jobs SET title = ?, priority = ?, state = ?, user = ?, payload = ?,
+	_, err := s.execQuiet(ctx, prioLow, `UPDATE jobs SET title = ?, priority = ?, state = ?, user = ?, payload = ?,
 		attempts = ?, error = ?, run_at = ?, started_at = ?, finished_at = ? WHERE id = ?`,
 		j.Title, j.Priority, string(j.State), j.User, j.Payload, j.Attempts, j.Error,
 		ms(j.RunAt), ms(j.StartedAt), ms(j.FinishedAt), j.ID)
@@ -94,7 +96,7 @@ func (s *Store) LoadJobs(ctx context.Context, history int) ([]jobs.Record, error
 func (s *Store) PruneJobs(ctx context.Context, before time.Time) (int, error) {
 	total := 0
 	for {
-		res, err := s.exec(ctx, prioLow, `DELETE FROM jobs WHERE id IN (
+		res, err := s.execQuiet(ctx, prioLow, `DELETE FROM jobs WHERE id IN (
 			SELECT id FROM jobs WHERE finished_at > 0 AND finished_at < ? LIMIT ?)`, ms(before), writeChunk)
 		if err != nil {
 			return total, err

@@ -314,6 +314,7 @@ func reads() []routed {
 		{name: "PathsWithFingerprint", call: func(ctx context.Context, s *Store) error { _, err := s.PathsWithFingerprint(ctx, 1, "f"); return err }},
 		{name: "WithoutFingerprint", call: func(ctx context.Context, s *Store) error { _, err := s.WithoutFingerprint(ctx, 0, 10); return err }},
 		{name: "Continue", call: func(ctx context.Context, s *Store) error { _, err := s.Continue(ctx, 10); return err }},
+		{name: "FilmWatches", call: func(ctx context.Context, s *Store) error { _, err := s.FilmWatches(ctx, []int64{1}); return err }},
 		{name: "GetTitleByTVDB", call: func(ctx context.Context, s *Store) error { _, err := s.GetTitleByTVDB(ctx, 1); return nf(err) }},
 		{name: "TMDBSeriesWithTVDBID", call: func(ctx context.Context, s *Store) error { _, err := s.TMDBSeriesWithTVDBID(ctx, 10); return err }},
 		{name: "MaxTitleID", call: func(ctx context.Context, s *Store) error { _, err := s.MaxTitleID(ctx); return err }},
@@ -346,6 +347,23 @@ func writes() []routed {
 		}},
 		{name: "SetProgress (a position)", prio: prioHigh, call: func(ctx context.Context, s *Store) error {
 			_, err := s.SetProgress(ctx, 1, 600, 7200)
+			return e(err)
+		}},
+		// Marking watched: a person's click, which covers many files in one write.
+		{name: "SetItemWatched", prio: prioHigh, call: func(ctx context.Context, s *Store) error {
+			_, err := s.SetItemWatched(ctx, 1, true)
+			return e(err)
+		}},
+		{name: "SetTitleWatched", prio: prioHigh, call: func(ctx context.Context, s *Store) error {
+			_, err := s.SetTitleWatched(ctx, 1, true)
+			return e(err)
+		}},
+		{name: "SetShowWatched", prio: prioHigh, call: func(ctx context.Context, s *Store) error {
+			_, err := s.SetShowWatched(ctx, "x", false)
+			return e(err)
+		}},
+		{name: "SetSeasonWatched", prio: prioHigh, call: func(ctx context.Context, s *Store) error {
+			_, err := s.SetSeasonWatched(ctx, "x", 1, false)
 			return e(err)
 		}},
 		{name: "SetSetting", prio: prioHigh, call: func(ctx context.Context, s *Store) error { return s.SetSetting(ctx, "k", "v") }},
@@ -454,7 +472,7 @@ func writes() []routed {
 // which: a method added without a line in reads or writes fails here, so that
 // nobody ships one that was never routed.
 func TestEveryStoreMethodIsRouted(t *testing.T) {
-	known := map[string]bool{"Close": true, "Warnings": true}
+	known := map[string]bool{"Close": true, "Warnings": true, "Notices": true, "Generation": true} // these touch no pool
 	for _, r := range reads() {
 		known[r.name] = true
 	}
@@ -737,8 +755,8 @@ func TestSaveProgressDoesNotWaitForABulkDelete(t *testing.T) {
 			go func() {
 				saved <- s.write(ctx, prioLow, func(tx *sql.Tx) error {
 					log.add("save")
-					_, err := tx.ExecContext(ctx, `INSERT INTO progress (item_id, position_sec, duration_sec, watched, updated_at)
-						VALUES (?, 100, 7200, 0, 1)`, keeper)
+					_, err := tx.ExecContext(ctx, `INSERT INTO progress (item_id, position_sec, duration_sec, updated_at)
+						VALUES (?, 100, 7200, 1)`, keeper)
 					return err
 				})
 			}()

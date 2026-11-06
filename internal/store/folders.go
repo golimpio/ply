@@ -313,14 +313,14 @@ func (s *Store) ArchiveAndDeleteRoot(ctx context.Context, root string, forget bo
 			} else {
 				if _, err := tx.ExecContext(ctx, `
 						INSERT INTO item_archive (path, size, tmdb_id, tmdb_kind, series_id, series_tvdb_id, series_show, position_sec,
-							duration_sec, watched, progress_at, archived_at)
+							duration_sec, watched_at, play_count, progress_at, archived_at)
 						SELECT i.path, i.size, COALESCE(tm.tmdb_id, 0), CASE WHEN tm.tmdb_id IS NULL THEN '' ELSE tm.kind END,
 							-- a show matched through TVDB is kept by its TVDB id, one matched through TMDB by its TMDB id
 							CASE WHEN ts.source = 'tvdb' THEN 0 ELSE COALESCE(ts.tmdb_id, 0) END,
 							CASE WHEN ts.source = 'tvdb' THEN COALESCE(ts.tvdb_id, 0) ELSE 0 END,
 							CASE WHEN COALESCE(CASE WHEN ts.source = 'tvdb' THEN ts.tvdb_id ELSE ts.tmdb_id END, 0) = 0 THEN '' ELSE i.show END,
-							COALESCE(p.position_sec, 0), COALESCE(p.duration_sec, 0), COALESCE(p.watched, 0),
-							COALESCE(p.updated_at, 0), ?
+							COALESCE(p.position_sec, 0), COALESCE(p.duration_sec, 0), COALESCE(p.watched_at, 0),
+							COALESCE(p.play_count, 0), COALESCE(p.updated_at, 0), ?
 						FROM items i
 						LEFT JOIN progress p ON p.item_id = i.id
 						LEFT JOIN titles tm ON tm.id = CASE WHEN i.kind <> 'episode' AND i.match_state = 'manual' THEN i.title_id END
@@ -336,7 +336,7 @@ func (s *Store) ArchiveAndDeleteRoot(ctx context.Context, root string, forget bo
 							series_tvdb_id = CASE WHEN excluded.series_id <> 0 OR excluded.series_tvdb_id <> 0 THEN excluded.series_tvdb_id ELSE item_archive.series_tvdb_id END,
 							series_show = CASE WHEN excluded.series_id <> 0 OR excluded.series_tvdb_id <> 0 THEN excluded.series_show ELSE item_archive.series_show END,
 							position_sec = excluded.position_sec,
-							duration_sec = excluded.duration_sec, watched = excluded.watched,
+							duration_sec = excluded.duration_sec, watched_at = excluded.watched_at, play_count = excluded.play_count,
 							progress_at = excluded.progress_at, archived_at = excluded.archived_at`,
 					append([]any{now}, args...)...); err != nil {
 					return err
@@ -388,12 +388,13 @@ func (s *Store) RestoreArchived(ctx context.Context, itemID int64, path string, 
 			archivedSize, progressAt, movieID, seriesID, seriesTVDB int64
 			movieKind                                               string
 			position, duration                                      float64
-			watched                                                 bool
+			watchedAt                                               int64
+			playCount                                               int
 		)
 		err := tx.QueryRowContext(ctx, `
-			SELECT size, tmdb_id, tmdb_kind, series_id, series_tvdb_id, position_sec, duration_sec, watched, progress_at
+			SELECT size, tmdb_id, tmdb_kind, series_id, series_tvdb_id, position_sec, duration_sec, watched_at, play_count, progress_at
 			FROM item_archive WHERE path = ?`, path).
-			Scan(&archivedSize, &movieID, &movieKind, &seriesID, &seriesTVDB, &position, &duration, &watched, &progressAt)
+			Scan(&archivedSize, &movieID, &movieKind, &seriesID, &seriesTVDB, &position, &duration, &watchedAt, &playCount, &progressAt)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -412,15 +413,15 @@ func (s *Store) RestoreArchived(ctx context.Context, itemID int64, path string, 
 			// The item may already have progress (it was played since it came back):
 			// that is newer.
 			if _, err := tx.ExecContext(ctx, `
-				INSERT INTO progress (item_id, position_sec, duration_sec, watched, updated_at)
-				SELECT id, ?, ?, ?, ? FROM items WHERE id = ?
-				ON CONFLICT (item_id) DO NOTHING`, position, duration, watched, progressAt, itemID); err != nil {
+				INSERT INTO progress (item_id, position_sec, duration_sec, watched_at, play_count, updated_at)
+				SELECT id, ?, ?, ?, ?, ? FROM items WHERE id = ?
+				ON CONFLICT (item_id) DO NOTHING`, position, duration, watchedAt, playCount, progressAt, itemID); err != nil {
 				return err
 			}
 		}
 		query := `DELETE FROM item_archive WHERE path = ?`
 		if tmdbID != 0 {
-			query = `UPDATE item_archive SET position_sec = 0, duration_sec = 0, watched = 0, progress_at = 0 WHERE path = ?`
+			query = `UPDATE item_archive SET position_sec = 0, duration_sec = 0, watched_at = 0, play_count = 0, progress_at = 0 WHERE path = ?`
 		}
 		if _, err := tx.ExecContext(ctx, query, path); err != nil {
 			return err

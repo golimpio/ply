@@ -55,7 +55,7 @@ func TestSetProgress(t *testing.T) {
 	if err != nil || p == nil {
 		t.Fatalf("SetProgress = %v, %v", p, err)
 	}
-	if got := stored(); got == nil || got.PositionSec != 125.5 || got.DurationSec != 7200 || got.Watched {
+	if got := stored(); got == nil || got.PositionSec != 125.5 || got.DurationSec != 7200 || got.Watched() {
 		t.Errorf("stored = %+v", got)
 	}
 
@@ -68,16 +68,16 @@ func TestSetProgress(t *testing.T) {
 	}
 
 	// Exactly 30 s counts as started.
-	if p, _ := s.SetProgress(ctx, id, 30, 7200); p == nil || p.Watched {
+	if p, _ := s.SetProgress(ctx, id, 30, 7200); p == nil || p.Watched() {
 		t.Errorf("SetProgress(30) = %+v, want an unwatched row", p)
 	}
 
 	// Watched at 90 %, and the row is kept.
 	p, err = s.SetProgress(ctx, id, 6600, 7200)
-	if err != nil || p == nil || !p.Watched {
+	if err != nil || p == nil || !p.Watched() {
 		t.Fatalf("SetProgress(6600) = %+v, %v; want watched", p, err)
 	}
-	if got := stored(); got == nil || !got.Watched {
+	if got := stored(); got == nil || !got.Watched() {
 		t.Errorf("stored = %+v, want watched", got)
 	}
 }
@@ -88,7 +88,7 @@ func TestSetProgressWatchedShortPositionKeepsRow(t *testing.T) {
 	id, _ := s.UpsertItem(ctx, movie("/media/a.mp4", "A"), nil)
 	// A 20 s clip played to its end is watched even though 20 s < 30 s.
 	p, err := s.SetProgress(ctx, id, 19, 20)
-	if err != nil || p == nil || !p.Watched {
+	if err != nil || p == nil || !p.Watched() {
 		t.Fatalf("SetProgress(19, 20) = %+v, %v; want a watched row", p, err)
 	}
 }

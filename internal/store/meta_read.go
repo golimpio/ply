@@ -22,6 +22,10 @@ type TitleCard struct {
 	ItemID   int64  // movies: the first file
 	Show     string // shows: the first show name that is linked to the title
 
+	// SortTitle is what Titles orders by (before the year): the title's sort title, or its title
+	// when it has none. Compare it with LOWER, as SQLite does: ASCII letters only.
+	SortTitle string
+
 	// NextAirDate is when a show's next episode airs, YYYY-MM-DD; it may be past
 	// until the show is refreshed.
 	NextAirDate string
@@ -29,6 +33,11 @@ type TitleCard struct {
 	// Ratings (M10) are the title's ratings from every source that has one, in the fixed order of
 	// RatingSources. TMDB's is titles.rating, not a stored row.
 	Ratings []Rating
+
+	// Watch state, filled with the ratings: a film is Watched when any of its files is; a
+	// series has its Episodes counts, and is Watched when all of its episodes are.
+	Watched  bool
+	Episodes *EpisodeCounts
 }
 
 // CastMember and CrewMember are a credit with its person's name and photo.
@@ -90,7 +99,7 @@ const (
 	cardCols = `t.id, t.kind, t.title, t.year, t.poster, t.backdrop, t.rating, COALESCE(t.next_air_date, ''),
 		COALESCE(mf.item_id, 0), COALESCE(mi.local_poster, ''), COALESCE(mi.local_backdrop, ''),
 		COALESCE(sf.show, ''), COALESCE(ss.rowid, 0), COALESCE(ss.local_poster, ''), COALESCE(ss.local_backdrop, ''),
-		t.source, COALESCE(t.tmdb_id, 0), t.vote_count, t.fetched_at`
+		t.source, COALESCE(t.tmdb_id, 0), t.vote_count, t.fetched_at, ` + sortTitleCol
 	cardJoins = `
 		LEFT JOIN (SELECT title_id, MIN(id) AS item_id FROM items
 			WHERE title_id IS NOT NULL GROUP BY title_id) mf ON mf.title_id = t.id
@@ -121,7 +130,7 @@ func scanCard(sc scanner, lead ...any) (TitleCard, error) {
 	)
 	err := sc.Scan(append(lead, &c.ID, &c.Kind, &c.Title, &c.Year, &c.Poster, &c.Backdrop, &c.Rating, &c.NextAirDate,
 		&c.ItemID, &itemPoster, &itemBackdrop, &c.Show, &seriesID, &seriesPoster, &seriesBackdr,
-		&source, &tmdbID, &votes, &fetchedAt)...)
+		&source, &tmdbID, &votes, &fetchedAt, &c.SortTitle)...)
 	if err != nil {
 		return c, err
 	}
@@ -168,11 +177,17 @@ func queryCards(ctx context.Context, q queryer, where string, args []any, order 
 		return nil, err
 	}
 	rows.Close() // the connection of a snapshot is one query at a time
-	return cards, attachRatings(ctx, q, cards)
+	if err := attachRatings(ctx, q, cards); err != nil {
+		return nil, err
+	}
+	return cards, attachWatch(ctx, q, cards)
 }
 
 const (
-	orderByName    = `LOWER(CASE WHEN t.sort_title <> '' THEN t.sort_title ELSE t.title END), t.year, t.id`
+	// sortTitleCol is the name a title is listed under: the one place that says so, for the order
+	// below and for the SortTitle that the cards carry.
+	sortTitleCol   = `CASE WHEN t.sort_title <> '' THEN t.sort_title ELSE t.title END`
+	orderByName    = `LOWER(` + sortTitleCol + `), t.year, t.id`
 	orderByRelease = `CASE WHEN t.release_date = '' THEN '9999' ELSE t.release_date END, t.year, t.id`
 )
 
@@ -508,6 +523,9 @@ func (s *Store) GetPerson(ctx context.Context, id int64) (d PersonDetail, err er
 			cards[i] = c.Title
 		}
 		if err := attachRatings(ctx, q, cards); err != nil {
+			return err
+		}
+		if err := attachWatch(ctx, q, cards); err != nil {
 			return err
 		}
 		for i := range d.Credits {

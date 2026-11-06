@@ -15,15 +15,20 @@ type metaView struct {
 	series   map[string]store.SeriesMatch
 	briefs   map[int64]store.TitleBrief
 	episodes map[int64]map[[2]int]store.Episode
+	films    map[int64]store.FilmWatch // the watched films among the entries' titles
+	// degraded is set when something could not be read: the rows then lack data that the library has,
+	// and a list built from them must not be kept (see writeList).
+	degraded bool
 }
 
 // newMetaView loads what the entries need. A failure to read metadata is
-// logged and gives a view that adds nothing: metadata must never break a list.
+// logged and gives a view that adds nothing, and says so (degraded): metadata must
+// never break a list, nor be cached as if it were whole.
 func (s *Server) newMetaView(ctx context.Context, entries []store.Entry) *metaView {
 	v := &metaView{s: s, primary: s.ratingsPrimary(ctx), series: map[string]store.SeriesMatch{}, briefs: map[int64]store.TitleBrief{},
 		episodes: map[int64]map[[2]int]store.Episode{}}
 	hasEpisodes := false
-	var ids []int64
+	var ids, films []int64
 	seen := map[int64]bool{}
 	add := func(id int64) {
 		if id != 0 && !seen[id] {
@@ -35,13 +40,26 @@ func (s *Server) newMetaView(ctx context.Context, entries []store.Entry) *metaVi
 		if e.Kind == store.KindEpisode {
 			hasEpisodes = true
 		} else {
+			if e.TitleID != 0 && !seen[e.TitleID] {
+				films = append(films, e.TitleID)
+			}
 			add(e.TitleID)
+		}
+	}
+	// A film is watched when any of its versions is, whichever version this entry is.
+	if len(films) > 0 {
+		if fw, err := s.Store.FilmWatches(ctx, films); err != nil {
+			s.Logger.Warn("watch state: reading films", "err", err)
+			v.degraded = true
+		} else {
+			v.films = fw
 		}
 	}
 	if hasEpisodes {
 		sm, err := s.Store.SeriesMatches(ctx)
 		if err != nil {
 			s.Logger.Warn("metadata: reading shows", "err", err)
+			v.degraded = true
 		}
 		v.series = sm
 		if v.series == nil {
@@ -55,6 +73,7 @@ func (s *Server) newMetaView(ctx context.Context, entries []store.Entry) *metaVi
 	}
 	if briefs, err := s.Store.TitleBriefs(ctx, ids); err != nil {
 		s.Logger.Warn("metadata: reading titles", "err", err)
+		v.degraded = true
 	} else {
 		v.briefs = briefs
 	}
@@ -69,6 +88,7 @@ func (s *Server) newMetaView(ctx context.Context, entries []store.Entry) *metaVi
 		eps, err := s.Store.Episodes(ctx, id)
 		if err != nil {
 			s.Logger.Warn("metadata: reading episodes", "err", err)
+			v.degraded = true
 		}
 		m := make(map[[2]int]store.Episode, len(eps))
 		for _, ep := range eps {
@@ -109,6 +129,9 @@ func (v *metaView) apply(sum *ItemSummary, e store.Entry) {
 	s := v.s
 	titleID := v.titleIDOf(e)
 	sum.MatchState, sum.NeedsReview = e.MatchState, e.NeedsReview
+	if w, ok := v.films[e.TitleID]; ok && e.Kind != store.KindEpisode {
+		sum.WatchState = WatchState{Watched: true, WatchedAt: &w.WatchedAt, PlayCount: w.PlayCount}
+	}
 	var show store.SeriesMatch // the episode's show; zero for a movie or a show nobody looked at
 	if e.Kind == store.KindEpisode {
 		var ok bool
@@ -124,6 +147,9 @@ func (v *metaView) apply(sum *ItemSummary, e store.Entry) {
 		sum.Ratings = []RatingEntry{} // an episode always says so, also when it has none
 	}
 	b, ok := v.briefs[titleID]
+	if e.Kind != store.KindEpisode {
+		sum.SortTitle = sortTitleOf(b, titleID != 0 && ok, e.Title)
+	}
 	if titleID != 0 && ok {
 		sum.TitleID = ptr(titleID)
 		sum.Logo = s.imageURL(b.Logo, logoSize)
@@ -170,12 +196,19 @@ func (v *metaView) episodeInfo(e store.Entry) *EpisodeInfo {
 
 // summaries builds the summaries of a list of entries with art and metadata.
 func (s *Server) summaries(ctx context.Context, entries []store.Entry) []ItemSummary {
+	out, _ := s.summariesChecked(ctx, entries)
+	return out
+}
+
+// summariesChecked is summaries that also says whether some metadata could not be read (see
+// metaView.degraded): the list is then not one to keep.
+func (s *Server) summariesChecked(ctx context.Context, entries []store.Entry) (out []ItemSummary, degraded bool) {
 	v := s.newMetaView(ctx, entries)
-	out := make([]ItemSummary, len(entries))
+	out = make([]ItemSummary, len(entries))
 	for i, e := range entries {
 		out[i] = summarize(e)
 		out[i].Art = s.artOf(e)
 		v.apply(&out[i], e)
 	}
-	return out
+	return out, v.degraded
 }

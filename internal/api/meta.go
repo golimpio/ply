@@ -197,13 +197,17 @@ func (s *Server) handleTitles(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	etag, notModified := s.listCache(w, r, "")
+	if notModified {
+		return
+	}
 	cards, err := s.Store.Titles(r.Context(), f)
 	if err != nil {
 		s.internalError(w, r, err)
 		return
 	}
 	out := applyRatingQuery(s.titleCards(cards, s.ratingsPrimary(r.Context())), rq, func(c TitleCard) *RatingEntry { return c.Rating })
-	writeJSON(w, http.StatusOK, out)
+	writeList(w, etag, out, false)
 }
 
 // handleUpcoming lists the library's shows with an episode still to air, soonest
@@ -270,8 +274,8 @@ func (s *Server) findShow(w http.ResponseWriter, r *http.Request) (store.Show, b
 }
 
 // showMeta fills the metadata fields of a show from its row and title.
-func (s *Server) showMeta(sm store.SeriesMatch, hasRow bool, b store.TitleBrief, hasBrief bool, primary string) (MetaFields, *int, string) {
-	m := MetaFields{MatchState: store.MatchPending}
+func (s *Server) showMeta(name string, sm store.SeriesMatch, hasRow bool, b store.TitleBrief, hasBrief bool, primary string) (MetaFields, *int, string) {
+	m := MetaFields{MatchState: store.MatchPending, SortTitle: sortTitleOf(b, hasBrief, name)}
 	if hasRow {
 		m.MatchState, m.NeedsReview = sm.State, sm.NeedsReview
 	}
@@ -305,6 +309,10 @@ func (s *Server) handleShows(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	etag, notModified := s.listCache(w, r, "")
+	if notModified {
+		return
+	}
 	shows, err := s.Store.Shows(r.Context())
 	if err != nil {
 		s.internalError(w, r, err)
@@ -322,7 +330,8 @@ func (s *Server) handleShows(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	briefs, err := s.Store.TitleBriefs(r.Context(), ids)
-	if err != nil {
+	degraded := err != nil
+	if degraded {
 		s.Logger.Warn("metadata: reading titles", "err", err)
 	}
 	primary := s.ratingsPrimary(r.Context())
@@ -330,11 +339,11 @@ func (s *Server) handleShows(w http.ResponseWriter, r *http.Request) {
 	for i, sh := range shows {
 		row, hasRow := rows[sh.Name]
 		b, hasBrief := briefs[row.TitleID]
-		m, year, overview := s.showMeta(row, hasRow, b, hasBrief && row.TitleID != 0, primary)
-		out[i] = ShowSummary{Show: sh.Name, Seasons: sh.Seasons, EpisodeCount: sh.EpisodeCount, Year: year, Overview: overview, MetaFields: m}
+		m, year, overview := s.showMeta(sh.Name, row, hasRow, b, hasBrief && row.TitleID != 0, primary)
+		out[i] = ShowSummary{Show: sh.Name, Seasons: sh.Seasons, EpisodeCounts: episodeCounts(sh.EpisodeCounts), Year: year, Overview: overview, MetaFields: m}
 	}
 	out = applyRatingQuery(out, rq, func(sh ShowSummary) *RatingEntry { return sh.Rating })
-	writeJSON(w, http.StatusOK, out)
+	writeList(w, etag, out, degraded)
 }
 
 func seasonName(n int) string {
@@ -371,20 +380,12 @@ func (s *Server) showDetail(ctx context.Context, sh store.Show) (ShowDetail, err
 			}
 		}
 	}
-	m, year, overview := s.showMeta(row, hasRow, brief, hasBrief, primary)
-	out := ShowDetail{Show: sh.Name, EpisodeCount: sh.EpisodeCount, Year: year, Overview: overview, MetaFields: m, Meta: detail,
+	m, year, overview := s.showMeta(sh.Name, row, hasRow, brief, hasBrief, primary)
+	out := ShowDetail{Show: sh.Name, EpisodeCounts: episodeCounts(sh.EpisodeCounts), Year: year, Overview: overview, MetaFields: m, Meta: detail,
 		Seasons: []SeasonInfo{}}
 
-	counts := map[int]int{}
-	items, err := s.Store.ShowItems(ctx, sh.Name)
-	if err != nil {
-		return ShowDetail{}, err
-	}
-	for _, it := range items {
-		counts[it.Season]++
-	}
 	for _, n := range sh.Seasons {
-		si := SeasonInfo{Season: n, Name: seasonName(n), EpisodeCount: counts[n]}
+		si := SeasonInfo{Season: n, Name: seasonName(n), EpisodeCounts: episodeCounts(sh.BySeason[n])}
 		if se, ok := stored[n]; ok {
 			si.Name = firstNonEmpty(se.Name, si.Name)
 			si.Overview, si.AirDate, si.Poster = se.Overview, se.AirDate, s.imageURL(se.Poster, posterSize)
@@ -823,6 +824,11 @@ func (s *Server) settingsView(ctx context.Context) SettingsView {
 			MetadataForcedOff: r.ForcedOff, Language: r.Language,
 			TVDBKeySet: r.TVDBKeySet(), TVDBPINSet: r.TVDBPINSet(), TVDBKeySource: string(r.TVDBKeySource), TVDBPINSource: string(r.TVDBPINSource),
 			MDBListKeySet: r.MDBListKeySet(), MDBListKeySource: string(r.MDBListKeySource)}
+		tmdb, tvdb, mdb := s.Settings.KeyTest(ctx, r, metadata.SourceTMDB), s.Settings.KeyTest(ctx, r, metadata.SourceTVDB),
+			s.Settings.KeyTest(ctx, r, metadata.SourceMDBList)
+		v.TMDBKeyTestedAt, v.TMDBKeyTestOK = tmdb.At, tmdb.OK
+		v.TVDBKeyTestedAt, v.TVDBKeyTestOK = tvdb.At, tvdb.OK
+		v.MDBListKeyTestedAt, v.MDBListKeyTestOK = mdb.At, mdb.OK
 	}
 	s.ratingsSettings(ctx, &v)
 	v.TVDBAttribution, v.TVDBAttributionURL = tvdbAttribution, tvdbAttributionURL

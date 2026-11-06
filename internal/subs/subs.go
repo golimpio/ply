@@ -155,6 +155,12 @@ type call struct {
 	// knows the file it is reading is not the one that will be finished.
 	dropped map[string]bool
 	gen     atomic.Int32
+
+	// How far into the film ffmpeg has read (a container's run only), and who wants to know.
+	progMu   sync.Mutex
+	at       time.Duration
+	hasAt    bool
+	watchers []func(at time.Duration)
 }
 
 // errFor is why the track with cache name was not written, nil if it was. Call it once
@@ -334,6 +340,16 @@ func (g *Generator) Follow(ctx context.Context, src Source, siblings []Source) (
 // the run: it stops waiting for pace. If ctx ends first the run is stopped, unless a
 // play is waiting for it.
 func (g *Generator) Fill(ctx context.Context, srcs []Source, pace Pace, note func(why string)) error {
+	return g.FillProgress(ctx, srcs, pace, note, nil)
+}
+
+// FillProgress is Fill, and tells progress, if not nil, how far into the film ffmpeg has
+// read the container: the time of the last subtitle packet it has written, about every half
+// second once there is one, and again from the start if the run is tried again with fewer
+// tracks. It is told by the goroutine that reads ffmpeg's output, one call at a time, and
+// must not call the Generator. A sidecar is a few kilobytes and has no progress, and a run
+// that a play started and that this one joins is told the same.
+func (g *Generator) FillProgress(ctx context.Context, srcs []Source, pace Pace, note func(why string), progress func(at time.Duration)) error {
 	var embedded []Source
 	var errs []error
 	for _, s := range srcs {
@@ -341,21 +357,21 @@ func (g *Generator) Fill(ctx context.Context, srcs []Source, pace Pace, note fun
 			embedded = append(embedded, s)
 			continue
 		}
-		if err := g.fillRun(ctx, []Source{s}, pace, note); err != nil {
+		if err := g.fillRun(ctx, []Source{s}, pace, note, progress); err != nil {
 			if ctx.Err() != nil || errors.Is(err, ErrUnavailable) {
 				return err
 			}
 			errs = append(errs, err)
 		}
 	}
-	if err := g.fillRun(ctx, embedded, pace, note); err != nil {
+	if err := g.fillRun(ctx, embedded, pace, note, progress); err != nil {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }
 
 // fillRun converts batch in as few runs as it takes.
-func (g *Generator) fillRun(ctx context.Context, batch []Source, pace Pace, note func(string)) error {
+func (g *Generator) fillRun(ctx context.Context, batch []Source, pace Pace, note func(string), progress func(time.Duration)) error {
 	var errs []error
 	for {
 		i := slices.IndexFunc(batch, func(s Source) bool { return !g.Cached(s) })
@@ -365,6 +381,7 @@ func (g *Generator) fillRun(ctx context.Context, batch []Source, pace Pace, note
 		batch = batch[i:]
 		c, err := g.begin(batch, false, pace, note)
 		if err == nil && c != nil {
+			c.watch(progress)
 			select {
 			case <-c.done:
 			case <-ctx.Done():
@@ -463,6 +480,7 @@ func (g *Generator) begin(batch []Source, waiter bool, pace Pace, note func(stri
 	// that took minutes), but not the generator.
 	ctx, cancel := context.WithCancelCause(g.ctx)
 	c := &call{done: make(chan struct{}), cancel: cancel, pace: pace, note: note}
+	c.ctl.progress = c.report
 	c.gen.Store(1)
 	if waiter {
 		c.ctl.waiters = 1
@@ -573,7 +591,11 @@ func (g *Generator) narrow(c *call, drop []Source) {
 func (g *Generator) attempt(ctx context.Context, c *call, run []Source) (map[string]error, error) {
 	first := run[0]
 	args := []string{"-nostdin", "-v", "error", "-y"}
-	if first.Stream < 0 {
+	if first.Stream >= 0 {
+		// How far the container has been read, on stdout (exec reads it): the whole file is read,
+		// and over a slow share that is the wait.
+		args = append(args, "-progress", "pipe:1")
+	} else {
 		// ffmpeg exits 0 after dropping the rest of a file that is not
 		// UTF-8, so say what it is.
 		if enc := legacyCharset(first.Input); enc != "" {
@@ -679,6 +701,9 @@ func (g *Generator) exec(ctx context.Context, args []string, p *ctl) (string, er
 	cmd := exec.CommandContext(ctx, g.ffmpeg, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
+	if p.progress != nil {
+		cmd.Stdout = &progressWriter{emit: p.progress}
+	}
 	proc.OwnGroup(cmd)
 	cmd.WaitDelay = 2 * time.Second
 	exited := make(chan error, 1)

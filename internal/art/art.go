@@ -122,6 +122,9 @@ type Generator struct {
 
 	now  func() time.Time // replaced in tests
 	runs atomic.Int64
+	// colourGen counts the changes to colors: the API tells a list that carries the colours from
+	// one that does not by it.
+	colourGen atomic.Uint64
 	// run executes ffmpeg with args and returns its stdout. Tests replace it.
 	run func(ctx context.Context, args []string) ([]byte, error)
 	// started, when set, is told the pid of every ffmpeg process (tests).
@@ -311,6 +314,10 @@ func (g *Generator) Defer(id int64) []Grab {
 	return out
 }
 
+// ColourVersion changes whenever a colour that Colour returns is added, replaced or dropped. It
+// starts at 0 and is not kept across runs.
+func (g *Generator) ColourVersion() uint64 { return g.colourGen.Load() }
+
 // Colour returns the dominant colour ("#rrggbb") of src's artwork if an image
 // for its current mtime has been generated.
 func (g *Generator) Colour(src Source) (string, bool) {
@@ -348,6 +355,7 @@ func (g *Generator) Prune(live map[int64]int64) (int, error) {
 	for id, c := range g.colors {
 		if m, ok := live[id]; !ok || m != c.mtime {
 			delete(g.colors, id)
+			g.colourGen.Add(1)
 		}
 	}
 	for key := range g.failed {
@@ -559,6 +567,7 @@ func (g *Generator) saveColour(src Source, hex string) {
 	}
 	g.mu.Lock()
 	g.colors[src.ID] = colour{mtime: src.MTime, hex: hex}
+	g.colourGen.Add(1)
 	g.mu.Unlock()
 }
 

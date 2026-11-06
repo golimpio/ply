@@ -40,13 +40,31 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	fields := q.Get("fields")
+	if fields != "" && fields != fieldsCard {
+		writeError(w, http.StatusBadRequest, `fields must be "card"`)
+		return
+	}
+	if fields == fieldsCard && kind != store.KindMovie {
+		writeError(w, http.StatusBadRequest, `fields=card is for kind=movie`)
+		return
+	}
+	etag, notModified := s.listCache(w, r, fields)
+	if notModified {
+		return
+	}
 	entries, err := s.Store.ListItems(r.Context(), store.ListFilter{Kind: kind, Show: q.Get("show")})
 	if err != nil {
 		s.internalError(w, r, err)
 		return
 	}
-	out := applyRatingQuery(s.summaries(r.Context(), entries), rq, func(it ItemSummary) *RatingEntry { return it.Rating })
-	writeJSON(w, http.StatusOK, out)
+	sums, degraded := s.summariesChecked(r.Context(), entries)
+	out := applyRatingQuery(sums, rq, func(it ItemSummary) *RatingEntry { return it.Rating })
+	if fields == fieldsCard {
+		writeList(w, etag, itemCards(out), degraded)
+		return
+	}
+	writeList(w, etag, out, degraded)
 }
 
 // loadEntry resolves {id}; it writes the error response and reports false if

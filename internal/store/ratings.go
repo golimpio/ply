@@ -388,9 +388,10 @@ func (s *Store) ReplaceMDBListRatings(ctx context.Context, titleID int64, rating
 }
 
 // TouchRatingsChecked records that MDBList was asked about the title at checkedAt and would not
-// give its ratings, keeping the ones it has. ErrNotFound for a title that is gone.
+// give its ratings, keeping the ones it has. ErrNotFound for a title that is gone. No list shows
+// when it was asked: it leaves Generation alone.
 func (s *Store) TouchRatingsChecked(ctx context.Context, titleID, checkedAt int64) error {
-	res, err := s.exec(ctx, prioLow, `UPDATE titles SET ratings_checked = ? WHERE id = ?`, checkedAt, titleID)
+	res, err := s.execQuiet(ctx, prioLow, `UPDATE titles SET ratings_checked = ? WHERE id = ?`, checkedAt, titleID)
 	if err != nil {
 		return err
 	}

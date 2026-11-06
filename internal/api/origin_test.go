@@ -71,6 +71,10 @@ func TestCrossSiteRequestsOfEveryMethodAreRefused(t *testing.T) {
 		{"PUT", fmt.Sprintf("/api/items/%d/match", m.multi), `{"tmdbId":603}`},
 		{"DELETE", fmt.Sprintf("/api/items/%d/match", m.mp4), ""},
 		{"PUT", fmt.Sprintf("/api/items/%d/progress", m.mp4), `{"positionSec":60,"durationSec":120}`},
+		{"PUT", fmt.Sprintf("/api/items/%d/watched", m.mp4), `{"watched":true}`},
+		{"PUT", fmt.Sprintf("/api/titles/%d/watched", m.matrixTitle), `{"watched":true}`},
+		{"PUT", "/api/shows/Cool%20Show/watched", `{"watched":true}`},
+		{"PUT", "/api/shows/Cool%20Show/seasons/1/watched", `{"watched":true}`},
 		{"PATCH", fmt.Sprintf("/api/titles/%d", m.matrixTitle), `{"title":"Hacked"}`},
 		{"DELETE", "/api/sessions/nope", ""},
 	} {

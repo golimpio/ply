@@ -58,8 +58,12 @@ type TitleBrief struct {
 	Genres        []string // names, by name
 }
 
-// briefChunk bounds the number of ids in one query.
-const briefChunk = 400
+// briefChunk bounds the number of ids in one query. SQLite takes 32,766 variables; the card query
+// reads the library's items and series to find each title's files, whatever it is asked for, so the
+// fewer queries a list of thousands of titles takes the better (a list of 5,000 films was 13 queries
+// of 400 ids and took 142 ms for its titles, one of 5,000 takes 62). A variable for the tests, which
+// make it small to cross a boundary with a few titles.
+var briefChunk = 5000
 
 // TitleBriefs returns the library titles among ids, keyed by id.
 func (s *Store) TitleBriefs(ctx context.Context, ids []int64) (m map[int64]TitleBrief, err error) {
@@ -288,7 +292,8 @@ func (s *Store) SetSeriesMatchIfPending(ctx context.Context, show string, m Matc
 
 // TouchTitle records that the title was looked at, without changing it: a
 // title TMDB no longer knows is then not asked for again at once. ErrNotFound
-// for an unknown title.
+// for an unknown title. It counts in Generation (it is exec, not execQuiet): fetched_at is the
+// time of TMDB's rating, which the lists show (rating.fetchedAt).
 func (s *Store) TouchTitle(ctx context.Context, titleID, fetchedAt int64) error {
 	res, err := s.exec(ctx, prioLow, `UPDATE titles SET fetched_at = ? WHERE id = ?`, fetchedAt, titleID)
 	if err != nil {

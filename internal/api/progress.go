@@ -52,11 +52,7 @@ func (s *Server) handleProgress(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	var out *Progress
-	if p != nil {
-		out = &Progress{PositionSec: p.PositionSec, Watched: p.Watched}
-	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, apiProgress(p))
 }
 
 // handleContinue lists the started, unfinished items, most recently played first.

@@ -84,6 +84,27 @@ This builds on M6 (docs/M6-METADATA.md). Only what differs is written here.
   `{"tvdbPin": ""}` is `409 {"error": "tvdbPin is set by -tvdb-pin and cannot be removed here"}` (`PLY_TVDB_PIN` for
   the environment), before anything is stored. Storing one is allowed (the flag still beats it), as for the key.
   The key is checked with a login (with the PIN that goes with it) before it is stored, as TMDB's is.
+- **Last tested:** `/api/settings` also has, for each provider (`tmdb`, `tvdb`, `mdblist`), `<p>KeyTestedAt` (unix seconds;
+  `0` = never tested, or the key in use changed since) and `<p>KeyTestOk` (`false` when there is no test): `tmdbKeyTestedAt`,
+  `tmdbKeyTestOk`, `tvdbKeyTestedAt`, `tvdbKeyTestOk`, `mdblistKeyTestedAt`, `mdblistKeyTestOk`, always present.
+  - What sets them: `POST /api/settings/test` (a key that is refused and a provider out of reach are both a failed test; the
+    answer keeps its shape) and a PUT/PATCH that saved a key and checked it (the `*KeyChecked` paths), with the outcome of
+    that check. A save that is refused records a failure only for the key already in use (saved again). A request that
+    made no check (no key, lookups off, another provider) is not a test.
+  - What clears them: any change of the key **in use** (stored, removed, or shadowed by a flag or the environment at
+    start). A stored key that comes or goes under a flag's changes nothing. TVDB's test is of the key and the PIN together,
+    so a PIN change clears it.
+  - How: the result is kept with a fingerprint, a 16 hex digit prefix of a SHA-256 of the provider and the key (and, for
+    TVDB, the PIN). It counts only while the key in use has that fingerprint (so a flag or the environment is caught at
+    start too); an `Update` that changes the key in use drops it as well, so an old key that comes back has no test. A
+    test that ends after the key was changed (a slow one) is not kept. Neither the key nor the fingerprint is returned or logged.
+  - **What is persisted:** the result is always kept in memory (`Settings.tests`; a restart loses it). It is also written
+    to the settings table, one row per provider, `keytest_<p>` = `<fingerprint> <unix seconds> <ok|failed>`, **only when every
+    secret the fingerprint covers is itself stored in that table**: the TMDB or MDBList key with `tmdbKeySource` or `mdblistKeySource` = `settings`;
+    for TVDB the key with `tvdbKeySource` = `settings` and, if there is a PIN, `tvdbPinSource` = `settings`. A key or PIN
+    from a flag, the environment or the build is never behind a row (the fingerprint is not salted, and a short PIN next to
+    one would be open to a guess made offline by whoever has the database). A row found while the key in use is not wholly
+    stored there is deleted (by `GET /api/settings`, or by a test), whatever wrote it.
 - **Show page:** an "Episode order" picker (Aired / DVD / Absolute) when the show came from TVDB.
   `PATCH /api/titles/{id} {episodeOrder}` re-maps the files and refreshes; its answer has `unmapped`, how many of the
   show's episode files have no episode in the new order. `episodeOrder` is in a title's detail only when its `source` is

@@ -78,6 +78,12 @@ func (s *Store) PruneMetadata(ctx context.Context) (PruneResult, error) {
 		var round PruneResult // counted into r only once the round has committed
 		more := false
 		err := s.write(ctx, prioLow, func(tx *sql.Tx) error {
+			// Marks that waited long enough for a replacement (see markWatchedFiles) go first, or they keep their titles.
+			if s.marks {
+				if _, err := tx.ExecContext(ctx, `DELETE FROM title_watch WHERE removed_at < ?`, time.Now().Add(-markTTL).Unix()); err != nil {
+					return err
+				}
+			}
 			// Order matters: each step can orphan the rows of the next. The
 			// conditions are on x, the row looked at.
 			for _, step := range []struct {
@@ -89,7 +95,8 @@ func (s *Store) PruneMetadata(ctx context.Context) (PruneResult, error) {
 				{&round.Series, "series_matches", `NOT EXISTS (
 					SELECT 1 FROM items WHERE kind = 'episode' AND show = x.show)`, writeChunk},
 				{&round.Titles, "titles", `NOT EXISTS (SELECT 1 FROM items WHERE title_id = x.id)
-					AND NOT EXISTS (SELECT 1 FROM series_matches WHERE title_id = x.id)`, titleChunk},
+					AND NOT EXISTS (SELECT 1 FROM series_matches WHERE title_id = x.id)
+					AND NOT EXISTS (SELECT 1 FROM title_watch WHERE title_id = x.id)`, titleChunk},
 				{&round.People, "people", `NOT EXISTS (SELECT 1 FROM credits WHERE person_id = x.id)`, writeChunk},
 				{&round.Collections, "collections", `NOT EXISTS (SELECT 1 FROM titles WHERE collection_id = x.id)`, writeChunk},
 				{&round.Genres, "genres", `NOT EXISTS (SELECT 1 FROM title_genres WHERE genre_id = x.id)`, writeChunk},

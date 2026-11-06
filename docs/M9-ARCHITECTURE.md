@@ -346,6 +346,14 @@ Design:
     reach (500 attempts with the queue's backoff: about ten days; the default is 5), and fails only for what ffmpeg
     cannot do. The job says "Waiting: a video is playing from the same disk" while suspended, and stops saying it
     when a viewer starts to wait for the run.
+    Progress: the container's ffmpeg is run with `-progress pipe:1` (`internal/subs/progress.go`; a sidecar's is not),
+    and `Generator.FillProgress` tells the job how far into the film its last subtitle packet is (`out_time_us`, about
+    twice a second; a Fill that joins a run a play started is told too). `subsMeter` (`cmd/ply/subs_meter.go`) turns
+    that into the job's bar (percent, 0-99 while reading) and a note, "Reading the file: 43%, about 12 min left": the
+    rest of the film at the speed of the last minute of running time, smoothed, with the time ffmpeg is suspended left
+    out; the bar stays where it was under "Waiting: ...". At most one update every 2 s. A film whose length is not
+    known gets the plain "Reading the file" and an unknown bar. A subtitle track is sparse, so the position moves in
+    steps and the time left is rough.
   - The light lane holds 3 jobs (`Options.Light`, up from 2), so a subtitle extraction or a picture that takes minutes
     leaves two for the lookups and the ratings.
   - `art.grab` (50, key `art:<itemID>:<kind>`, light lane): the frame grab that `GET .../art/...` put off because a

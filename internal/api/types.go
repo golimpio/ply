@@ -11,10 +11,38 @@ import (
 	"ply/internal/subs"
 )
 
-// Progress is the resume state of an item.
+// Progress is the resume state of one file: where it stopped, and whether this file was watched.
 type Progress struct {
 	PositionSec float64 `json:"positionSec"`
 	Watched     bool    `json:"watched"`
+}
+
+// WatchState says whether an item was watched (docs/DESIGN.md, "Watch state"). For an episode, or a
+// film that no title is known for, it is its file's; for a film that has a title it is the film's:
+// watched when any of its versions is, WatchedAt the latest time one was and PlayCount the highest
+// count of any.
+type WatchState struct {
+	Watched   bool   `json:"watched"`
+	WatchedAt *int64 `json:"watchedAt"` // unix seconds; null when not watched
+	PlayCount int    `json:"playCount"` // times watched to the end or marked; 0 when not watched
+}
+
+// EpisodeCounts is how far through its episodes a show, a season or a series card is.
+type EpisodeCounts struct {
+	EpisodeCount    int `json:"episodeCount"`    // episodes in the library (one that has two files is one)
+	WatchedEpisodes int `json:"watchedEpisodes"` // of them, watched
+	InProgress      int `json:"inProgress"`      // of them, started and not watched
+}
+
+func episodeCounts(c store.EpisodeCounts) EpisodeCounts {
+	return EpisodeCounts{EpisodeCount: c.EpisodeCount, WatchedEpisodes: c.Watched, InProgress: c.InProgress}
+}
+
+func watchState(p *store.Progress) WatchState {
+	if p == nil || !p.Watched() {
+		return WatchState{}
+	}
+	return WatchState{Watched: true, WatchedAt: &p.WatchedAt, PlayCount: p.PlayCount}
 }
 
 // ItemSummary is the list-view form of an item. addedAt is unix seconds; hdr
@@ -36,8 +64,9 @@ type ItemSummary struct {
 	Height       int       `json:"height"`
 	HDR          string    `json:"hdr,omitempty"`
 	AddedAt      int64     `json:"addedAt"`
-	Progress     *Progress `json:"progress"` // null when the item has not been started
+	Progress     *Progress `json:"progress"` // null when the file has not been started or watched
 	Art          *ArtURLs  `json:"art"`      // null when there is no artwork
+	WatchState
 
 	// Metadata (M6): poster, backdrop and logo are image URLs, the frame-grab
 	// Art above stays the fallback. Overview and Still are an episode's.
@@ -95,9 +124,9 @@ type Playback struct {
 
 // ShowSummary is one entry of GET /api/shows.
 type ShowSummary struct {
-	Show         string `json:"show"`
-	Seasons      []int  `json:"seasons"`
-	EpisodeCount int    `json:"episodeCount"`
+	Show    string `json:"show"`
+	Seasons []int  `json:"seasons"`
+	EpisodeCounts
 
 	Year     *int   `json:"year,omitempty"`
 	Overview string `json:"overview,omitempty"`
@@ -132,9 +161,7 @@ func summarize(e store.Entry) ItemSummary {
 	if a, ok := playback.AudioStream(e.Streams, -1); ok {
 		s.AudioCodec = a.Codec
 	}
-	if p := e.Progress; p != nil {
-		s.Progress = &Progress{PositionSec: p.PositionSec, Watched: p.Watched}
-	}
+	s.Progress, s.WatchState = apiProgress(e.Progress), watchState(e.Progress)
 	return s
 }
 

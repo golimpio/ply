@@ -134,7 +134,7 @@ func TestUpsertTitleRoundTripAndDetail(t *testing.T) {
 		t.Fatal(err)
 	}
 	// TMDB's score is a rating of the card (M10); the time it was fetched is not what is tested here.
-	card := TitleCard{ID: titleID, Kind: KindMovie, Title: "The Matrix", Year: 1999,
+	card := TitleCard{ID: titleID, Kind: KindMovie, Title: "The Matrix", SortTitle: "Matrix, The", Year: 1999,
 		Poster: "tmdb:/p603.jpg", Backdrop: "tmdb:/b603.jpg", Rating: 8.2, ItemID: itemID,
 		Ratings: []Rating{{Source: RatingTMDB, Value: 8.2, Scale: 10, Votes: 1000, URL: "https://www.themoviedb.org/movie/603"}}}
 	got := d.TitleCard
