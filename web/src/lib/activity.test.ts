@@ -3,6 +3,7 @@ import { ApiError, normaliseSnapshot, type Job, type JobsSnapshot } from './api'
 import {
   actionError,
   applyEvent,
+  countText,
   describeTiers,
   FAILURE_WINDOW_MS,
   groupQueued,
@@ -418,5 +419,23 @@ describe('openActivity', () => {
     mod.activity.markSeen();
     expect(mod.activity.summary.recentFailure).toBeNull();
     expect(Number(localStorage.getItem('ply.activitySeen'))).toBeGreaterThan(0);
+  });
+});
+
+describe('countText', () => {
+  const subs = 'subs.preextract';
+  it('shows done of total for a plain count', () => {
+    expect(countText({ kind: 'scan.full', done: 1204, total: 5000 })).toBe((1204).toLocaleString() + ' of ' + (5000).toLocaleString());
+    expect(countText({ kind: 'meta.match', done: 43, total: 100, note: 'Matching titles' })).toBe('43 of 100');
+  });
+  it('hides the count when the note already gives a percentage', () => {
+    // Positive control above: the same done/total without a percentage note shows "43 of 100".
+    expect(countText({ kind: subs, done: 43, total: 100, note: 'Reading the file: 43%, about 12 min left' })).toBe('');
+  });
+  it('shows a percentage job as a percentage while its note has none (held: "Waiting: …")', () => {
+    expect(countText({ kind: subs, done: 43, total: 100, note: 'Waiting: a film is playing' })).toBe('43%');
+  });
+  it('hides the count when there is no total', () => {
+    expect(countText({ kind: 'scan.full', done: 0, total: 0 })).toBe('');
   });
 });

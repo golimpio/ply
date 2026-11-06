@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { activity, actionError, describeTiers, groupQueued, isSynthetic } from '../lib/activity.svelte';
+  import { activity, actionError, describeTiers, countText, groupQueued, isSynthetic } from '../lib/activity.svelte';
   import { api, ApiError, type Job, type PlayingSession } from '../lib/api';
   import { formatClock } from '../lib/format';
   import BackButton from '../components/BackButton.svelte';
@@ -294,7 +294,7 @@
                 </div>
                 <span class="sub muted">
                   {#if j.note}<span class="note">{j.note}</span>{/if}
-                  {#if j.total > 0}<span class="tabular">{j.done.toLocaleString()} of {j.total.toLocaleString()}</span>{/if}
+                  {#if countText(j)}<span class="tabular">{countText(j)}</span>{/if}
                 </span>
                 {@render jobError(j)}
               </div>

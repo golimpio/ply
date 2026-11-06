@@ -31,6 +31,19 @@ export const isFinished = (s: JobState) => s === 'done' || s === 'failed' || s =
 /** Work outside the queue (reading the library folders): shown, never acted on. */
 export const isSynthetic = (j: Job) => j.id < 0;
 
+/** Jobs whose done/total is a percentage (0–99 of 100), not a count of things. */
+const PERCENT_KINDS = new Set(['subs.preextract']);
+
+/**
+ * The count under a running job: "1,204 of 5,000", or "43%" for a percentage job. '' when there's no
+ * total or the note already gives a percentage.
+ */
+export function countText(j: Pick<Job, 'kind' | 'done' | 'total' | 'note'>): string {
+  if (j.total <= 0 || /\d%/.test(j.note ?? '')) return '';
+  if (PERCENT_KINDS.has(j.kind)) return `${Math.round((j.done / j.total) * 100)}%`;
+  return `${j.done.toLocaleString()} of ${j.total.toLocaleString()}`;
+}
+
 /** The queue's start order (jobs.before): priority, then age, then id. */
 function startOrder(a: Job, b: Job): number {
   return a.priority - b.priority || Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id - b.id;
