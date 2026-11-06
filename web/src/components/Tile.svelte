@@ -15,11 +15,12 @@
     place-items: center;
     width: 100%;
     border-radius: var(--radius);
-    background: linear-gradient(145deg, hsl(var(--h) 50% 36%), hsl(calc(var(--h) + 45) 45% 15%));
-    color: rgb(255 255 255 / 0.82);
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    font-size: clamp(1.4rem, 5vw, 2.4rem);
+    /* --h, the title's hue, is set inline; the rest of the colour is the theme's. */
+    background: linear-gradient(145deg, hsl(var(--h) var(--tile-from)), hsl(calc(var(--h) + var(--tile-hue-shift)) var(--tile-to)));
+    color: var(--text-on-art);
+    font-weight: var(--fw-bold);
+    letter-spacing: var(--tracking-widest);
+    font-size: var(--fs-tile);
     user-select: none;
   }
 </style>

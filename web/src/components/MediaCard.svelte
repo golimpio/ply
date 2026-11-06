@@ -78,7 +78,7 @@
     position: relative;
     border-radius: var(--radius);
     overflow: hidden;
-    box-shadow: 0 0 0 1px rgb(255 255 255 / 0.06);
+    box-shadow: var(--ring-hairline);
   }
   .frame::after {
     content: '';
@@ -86,16 +86,16 @@
     inset: 0;
     border-radius: inherit;
     box-shadow: inset 0 0 0 2px transparent;
-    transition: box-shadow 0.15s;
+    transition: box-shadow var(--motion-hover);
   }
   .card:hover .frame::after {
-    box-shadow: inset 0 0 0 2px rgb(255 255 255 / 0.55);
+    box-shadow: var(--ring-hover-inset);
   }
   .card:focus-visible {
     outline: none;
   }
   .card:focus-visible .frame::after {
-    box-shadow: inset 0 0 0 3px var(--text);
+    box-shadow: var(--ring-focus-inset);
   }
   .badges {
     position: absolute;
@@ -109,11 +109,11 @@
     top: 8px;
     right: 8px;
     padding: 0.15rem 0.5rem;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: var(--accent);
     color: var(--on-accent);
-    font-size: 0.75rem;
-    font-weight: 700;
+    font-size: var(--fs-2xs-2);
+    font-weight: var(--fw-bold);
   }
   .progress {
     position: absolute;
@@ -121,7 +121,7 @@
     right: 0;
     bottom: 0;
     height: 4px;
-    background: rgb(0 0 0 / 0.5);
+    background: var(--progress-track);
   }
   .progress span {
     display: block;
@@ -130,8 +130,8 @@
   }
   .title {
     margin-top: 0.6rem;
-    font-weight: 650;
-    line-height: 1.25;
+    font-weight: var(--fw-semibold-2);
+    line-height: var(--lh-snug);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -140,8 +140,8 @@
     display: flex;
     gap: 0.75rem;
     margin-top: 0.1rem;
-    color: var(--muted);
-    font-size: 0.875rem;
+    color: var(--text-muted);
+    font-size: var(--fs-sm);
     font-variant-numeric: tabular-nums;
     overflow: hidden;
     text-overflow: ellipsis;

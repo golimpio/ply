@@ -121,7 +121,7 @@
   }
   h2 {
     margin: 0;
-    font-size: 1.15rem;
+    font-size: var(--fs-xl);
   }
   h2:focus {
     outline: none;
@@ -142,7 +142,7 @@
     justify-content: space-between;
     gap: 0.75rem;
     padding: 0.5rem 0.5rem 0.5rem 0.8rem;
-    background: var(--bg-2);
+    background: var(--surface-raised);
     border: 1px solid var(--line);
     border-radius: var(--radius);
   }
@@ -151,19 +151,19 @@
     min-width: 0;
   }
   .title {
-    font-weight: 650;
+    font-weight: var(--fw-semibold-2);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .what .muted {
-    font-size: 0.85rem;
+    font-size: var(--fs-xs-3);
   }
   .tabular {
     font-variant-numeric: tabular-nums;
   }
   button[aria-disabled='true'] {
-    opacity: 0.5;
+    opacity: var(--opacity-disabled);
     cursor: default;
   }
   .actions {
@@ -173,7 +173,7 @@
     gap: 0.6rem 1rem;
   }
   .small {
-    font-size: 0.875rem;
+    font-size: var(--fs-sm);
   }
   .error {
     color: var(--danger);

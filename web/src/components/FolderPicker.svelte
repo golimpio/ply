@@ -96,6 +96,7 @@
     <label class="sr-only" for="folder-path">Folder path</label>
     <input
       id="folder-path"
+      class="text-field"
       bind:this={pathEl}
       bind:value={typed}
       placeholder="/Volumes/Media/Movies"
@@ -178,18 +179,7 @@
   .where input {
     flex: 1;
     min-width: 0;
-    min-height: 2.5rem;
-    padding: 0.45rem 0.85rem;
-    font: inherit;
-    font-size: 0.92rem;
-    color: var(--text);
-    background: var(--bg);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-  }
-  .where input:focus-visible {
-    border-color: var(--text);
-    outline: none;
+    font-size: var(--fs-sm-4);
   }
   .crumbs {
     display: flex;
@@ -199,7 +189,7 @@
   .btn.small {
     min-height: 2rem;
     padding: 0.25rem 0.7rem;
-    font-size: 0.85rem;
+    font-size: var(--fs-xs-3);
   }
   .btn.small :global(svg) {
     width: 1rem;
@@ -210,7 +200,7 @@
     overflow-y: auto;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: rgb(0 0 0 / 0.18);
+    background: var(--surface-well);
   }
   .list:focus-visible {
     outline: 2px solid var(--text);
@@ -218,7 +208,7 @@
   }
   .list[aria-busy='true'] ul {
     opacity: 0.55;
-    transition: opacity 0.2s 0.15s; /* only a slow listing dims */
+    transition: opacity var(--motion-toggle) var(--motion-delay-dim); /* only a slow listing dims */
   }
   .list ul {
     list-style: none;
@@ -232,7 +222,7 @@
   .still {
     display: block;
     margin-top: 0.25rem;
-    color: var(--muted);
+    color: var(--text-muted);
     overflow-wrap: anywhere;
   }
   .rows {
@@ -246,12 +236,12 @@
     min-height: 2.4rem;
     padding: 0.35rem 0.7rem;
     font: inherit;
-    font-size: 0.95rem;
+    font-size: var(--fs-md-2);
     text-align: left;
     color: var(--text);
     background: none;
     border: 0;
-    border-radius: 8px;
+    border-radius: var(--radius-row);
     cursor: pointer;
   }
   .dir :global(svg) {
@@ -267,11 +257,11 @@
   }
   .dir .where-is {
     margin-left: auto;
-    font-size: 0.8rem;
+    font-size: var(--fs-xs);
   }
   .dir:hover,
   .dir:focus-visible {
-    background: var(--bg-3);
+    background: var(--surface-control);
     outline: none;
   }
   .kind {
@@ -298,7 +288,7 @@
   }
   .kind label:has(input:checked) {
     border-color: var(--accent);
-    background: rgb(240 182 78 / 0.08);
+    background: var(--accent-wash);
   }
   .kind label:has(input:focus-visible) {
     outline: 2px solid var(--text);
@@ -313,7 +303,7 @@
     gap: 0.15rem;
   }
   .kind .muted {
-    font-size: 0.85rem;
+    font-size: var(--fs-xs-3);
   }
   .error {
     margin: 0.75rem 0 0;

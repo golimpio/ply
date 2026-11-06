@@ -445,7 +445,7 @@
     grid-template-rows: auto 1fr auto;
     grid-template-columns: minmax(0, 1fr); /* never wider than the frame */
     color: var(--text);
-    transition: opacity 0.3s var(--ease);
+    transition: opacity var(--motion-fade) var(--ease);
     user-select: none;
     -webkit-user-select: none;
     touch-action: manipulation;
@@ -474,36 +474,39 @@
     align-items: center;
     gap: 0.75rem;
     padding-top: max(0.75rem, env(safe-area-inset-top));
-    background: linear-gradient(to bottom, rgb(0 0 0 / 0.65), transparent);
+    background: linear-gradient(to bottom, var(--scrim-player-top), transparent);
   }
   .bottom {
     grid-row: 3;
     padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
-    background: linear-gradient(to top, rgb(0 0 0 / 0.75), transparent);
+    /* Not "to top, scrim, transparent": with a literal colour the minifier rewrote it into this
+       top-to-bottom form, which Chrome rasterises a row differently; it leaves var() gradients
+       alone, so this form keeps the pixels the tokens started from (see Hero.svelte's scrim). */
+    background: linear-gradient(transparent, var(--scrim-player-bottom));
   }
   .titles {
     min-width: 0;
   }
   .title {
-    font-weight: 700;
-    font-size: 1.05rem;
+    font-weight: var(--fw-bold);
+    font-size: var(--fs-lg);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .subtitle {
-    color: rgb(244 239 230 / 0.75);
-    font-size: 0.875rem;
+    color: var(--text-dim);
+    font-size: var(--fs-sm);
   }
   .spinner {
     grid-row: 2;
     place-self: center;
     width: 2.75rem;
     height: 2.75rem;
-    border: 3px solid rgb(255 255 255 / 0.2);
+    border: 3px solid var(--line-spinner);
     border-top-color: var(--text);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
+    border-radius: var(--radius-round);
+    animation: spin var(--motion-spin) var(--ease-linear) infinite;
     pointer-events: none;
   }
   @keyframes spin {
@@ -522,10 +525,10 @@
     left: 0;
     right: 0;
     height: 4px;
-    border-radius: 2px;
-    background: rgb(255 255 255 / 0.22);
+    border-radius: var(--radius-xs);
+    background: var(--fill-track);
     overflow: hidden;
-    transition: height 0.15s;
+    transition: height var(--motion-hover);
   }
   .scrubber:hover .rail {
     height: 6px;
@@ -538,7 +541,7 @@
     left: 0;
   }
   .buffered {
-    background: rgb(255 255 255 / 0.35);
+    background: var(--fill-buffered);
   }
   .played {
     background: var(--tint);
@@ -561,10 +564,10 @@
     bottom: 1.6rem;
     transform: translateX(-50%);
     padding: 0.15rem 0.45rem;
-    font-size: 0.8rem;
-    font-weight: 600;
-    background: rgb(16 14 12 / 0.9);
-    border-radius: 4px;
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-semibold);
+    background: var(--surface-tooltip);
+    border-radius: var(--radius-sm);
     pointer-events: none;
   }
   .row {
@@ -587,11 +590,11 @@
     color: inherit;
     background: none;
     border: 0;
-    border-radius: 50%;
+    border-radius: var(--radius-round);
     cursor: pointer;
   }
   .ctl:hover {
-    background: rgb(255 255 255 / 0.12);
+    background: var(--fill-strong);
   }
   .ctl :global(svg) {
     width: 1.5rem;
@@ -612,8 +615,8 @@
     width: 0;
     opacity: 0;
     transition:
-      width 0.2s,
-      opacity 0.2s;
+      width var(--motion-toggle),
+      opacity var(--motion-toggle);
     accent-color: var(--text);
   }
   .volume:hover input,
@@ -623,7 +626,7 @@
   }
   .time {
     margin-left: 0.5rem;
-    font-size: 0.9rem;
+    font-size: var(--fs-sm-3);
   }
   .menu-anchor {
     position: relative;
@@ -636,28 +639,28 @@
     max-height: 50vh;
     overflow-y: auto;
     padding: 0.35rem;
-    background: rgb(26 23 20 / 0.95);
-    backdrop-filter: blur(16px);
-    border: 1px solid rgb(255 255 255 / 0.1);
+    background: var(--surface-popover);
+    backdrop-filter: var(--blur-popover);
+    border: 1px solid var(--line-overlay);
     border-radius: var(--radius);
-    box-shadow: 0 16px 40px rgb(0 0 0 / 0.5);
+    box-shadow: var(--shadow-popover);
   }
   .menu button {
     display: block;
     width: 100%;
     padding: 0.55rem 0.8rem 0.55rem 2rem;
     font: inherit;
-    font-size: 0.9rem;
+    font-size: var(--fs-sm-3);
     text-align: left;
     color: var(--text);
     background: none;
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--radius-item);
     cursor: pointer;
     position: relative;
   }
   .menu button:hover {
-    background: rgb(255 255 255 / 0.08);
+    background: var(--fill);
   }
   .menu button[aria-checked='true']::before {
     content: '';
@@ -667,7 +670,7 @@
     width: 0.45rem;
     height: 0.45rem;
     margin-top: -0.225rem;
-    border-radius: 50%;
+    border-radius: var(--radius-round);
     background: var(--tint);
   }
   @media (max-width: 600px) {

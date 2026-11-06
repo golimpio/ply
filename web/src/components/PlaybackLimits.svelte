@@ -103,7 +103,7 @@
   });
 </script>
 
-<div class="card" bind:this={card}>
+<div class="settings-panel card" bind:this={card}>
   {#each ROWS as r (r.field)}
     {@const lock = isLocked(r)}
     {@const note = notes[r.field]}
@@ -115,6 +115,7 @@
       </div>
       <input
         id={r.id}
+        class="text-field"
         type="number"
         inputmode="numeric"
         min="1"
@@ -134,21 +135,6 @@
 </div>
 
 <style>
-  .card {
-    display: grid;
-    gap: 1.1rem;
-    padding: 1.1rem 1.25rem;
-    background: var(--bg-2);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
-  }
-  .card p {
-    margin: 0;
-  }
-  h3 {
-    margin: 0 0 0.15rem;
-    font-size: 1rem;
-  }
   h3 label {
     cursor: pointer;
   }
@@ -165,23 +151,13 @@
   }
   .card .lock {
     margin-top: 0.3rem;
-    font-size: 0.875rem;
+    font-size: var(--fs-sm);
   }
   input {
     flex: none;
     width: 5.5rem;
-    min-height: 2.5rem;
     padding: 0.45rem 0.6rem 0.45rem 0.85rem;
-    font: inherit;
     font-variant-numeric: tabular-nums;
-    color: var(--text);
-    background: var(--bg);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-  }
-  input:focus-visible {
-    border-color: var(--text);
-    outline: none;
   }
   input:disabled {
     opacity: 0.6;

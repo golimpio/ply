@@ -345,7 +345,7 @@
   }
   .shown li:hover,
   .shown li:focus-within {
-    background: var(--bg-3);
+    background: var(--surface-control);
   }
   .shown input {
     width: 1.1rem;
@@ -359,7 +359,7 @@
     cursor: pointer;
   }
   .off label {
-    color: var(--muted);
+    color: var(--text-muted);
   }
   .note {
     font-size: var(--fs-sm);

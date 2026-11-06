@@ -55,9 +55,9 @@
     font: inherit;
     padding: 0.65rem 0.8rem;
     color: var(--text);
-    background: var(--bg-2);
+    background: var(--surface-raised);
     border: 1px solid var(--line);
-    border-radius: 8px;
+    border-radius: var(--radius-row);
   }
   input:focus {
     outline: 2px solid var(--accent);

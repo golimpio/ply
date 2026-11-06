@@ -163,7 +163,7 @@
         {#if feature.genres?.length}<span>{feature.genres.slice(0, 3).join(', ')}</span>{/if}
         <span class="badges"><Badges item={feature} /></span>
       </div>
-      <div class="actions">
+      <div class="hero-actions">
         <a class="btn primary" href={href.play(feature.id, resumeAt(feature))}>
           <Icon name="play" />{resumeAt(feature) ? 'Resume' : 'Play'}
         </a>
@@ -244,25 +244,7 @@
 
 <style>
   .meta {
-    color: rgb(244 239 230 / 0.82);
-  }
-  .cert {
-    padding: 0 0.4rem;
-    font-size: 0.8rem;
-    font-weight: 700;
-    line-height: 1.5;
-    border: 1px solid currentColor;
-    border-radius: 4px;
-  }
-  .badges {
-    display: inline-flex;
-    gap: 4px;
-  }
-  .actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-    margin-top: 0.4rem;
+    color: var(--text-hero-meta);
   }
   .rails {
     padding-bottom: 4rem;
@@ -278,7 +260,7 @@
     padding: 1.1rem 1.25rem;
     background:
       radial-gradient(120% 140% at 0% 0%, color-mix(in oklab, var(--accent) 16%, transparent), transparent 60%),
-      var(--bg-2);
+      var(--surface-raised);
     border: 1px solid var(--line);
     border-radius: var(--radius-lg);
   }
@@ -301,8 +283,7 @@
     padding: 0 0 4rem;
   }
   .hero-sk {
-    height: min(82vh, 64vw);
-    border-radius: 0;
+    height: min(82vh, 64vw); /* the home page's hero is the tall one */
   }
   .row-sk {
     display: flex;

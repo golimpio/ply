@@ -68,13 +68,13 @@
     width: 100%;
     overflow: hidden;
     border-radius: inherit;
-    background: var(--bg-2);
+    background: var(--surface-raised);
   }
   img {
     width: 100%;
     height: 100%;
     opacity: 0;
-    transition: opacity 0.35s var(--ease);
+    transition: opacity var(--motion-image) var(--ease);
   }
   img.loaded {
     opacity: 1;

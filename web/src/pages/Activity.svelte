@@ -402,11 +402,11 @@
     margin: 0;
   }
   .small {
-    font-size: 0.85rem;
+    font-size: var(--fs-xs-3);
   }
   .err {
     color: var(--danger);
-    font-size: 0.85rem;
+    font-size: var(--fs-xs-3);
   }
 
   /* ---- header: title, and the queue's switch */
@@ -427,7 +427,7 @@
     gap: 1rem;
     max-width: 24rem;
     padding: 0.7rem 0.8rem 0.7rem 1rem;
-    background: var(--bg-2);
+    background: var(--surface-raised);
     border: 1px solid var(--line);
     border-radius: var(--radius-lg);
   }
@@ -436,7 +436,7 @@
     gap: 0.1rem;
   }
   .pause .label {
-    font-weight: 650;
+    font-weight: var(--fw-semibold-2);
   }
   .pause.paused {
     border-color: color-mix(in oklab, var(--warn) 40%, var(--line));
@@ -444,41 +444,10 @@
   .pause.paused .small {
     color: var(--warn);
   }
+  /* The shared switch (app.css), green when the queue runs. */
   .switch {
-    flex: none;
-    position: relative;
-    width: 3.1rem;
-    height: 1.8rem;
-    padding: 0;
-    background: var(--bg-3);
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    cursor: pointer;
-    transition: background 0.2s;
-  }
-  .switch span {
-    position: absolute;
-    top: 3px;
-    left: 3px;
-    width: calc(1.8rem - 8px);
-    height: calc(1.8rem - 8px);
-    background: var(--muted);
-    border-radius: 50%;
-    transition:
-      transform 0.2s var(--ease),
-      background 0.2s;
-  }
-  .switch[aria-checked='true'] {
-    background: var(--ok);
-    border-color: var(--ok);
-  }
-  .switch[aria-checked='true'] span {
-    transform: translateX(1.3rem);
-    background: var(--bg);
-  }
-  .switch:disabled {
-    opacity: 0.5;
-    cursor: default;
+    --switch-on: var(--ok);
+    --switch-knob-on: var(--surface-room);
   }
 
   /* ---- the tiers, in priority order */
@@ -486,9 +455,9 @@
     gap: 0.9rem;
   }
   .headline {
-    font-size: 1.15rem;
-    font-weight: 600;
-    letter-spacing: -0.01em;
+    font-size: var(--fs-xl);
+    font-weight: var(--fw-semibold);
+    letter-spacing: var(--tracking-tight);
     text-wrap: pretty;
   }
   .lanes {
@@ -497,7 +466,7 @@
     padding: 0;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    background: var(--bg-2);
+    background: var(--surface-raised);
     border: 1px solid var(--line);
     border-radius: var(--radius-lg);
     overflow: hidden;
@@ -518,32 +487,32 @@
     place-items: center;
     width: 1.6rem;
     height: 1.6rem;
-    font-size: 0.8rem;
-    font-weight: 700;
-    color: var(--muted);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-bold);
+    color: var(--text-muted);
     border: 1.5px solid var(--line);
-    border-radius: 50%;
+    border-radius: var(--radius-round);
   }
   .lane-text {
     display: grid;
     min-width: 0;
   }
   .lane .name {
-    font-weight: 650;
-    font-size: 0.95rem;
+    font-weight: var(--fw-semibold-2);
+    font-size: var(--fs-md-2);
   }
   .lane .state {
-    color: var(--muted);
-    font-size: 0.85rem;
+    color: var(--text-muted);
+    font-size: var(--fs-xs-3);
   }
   .lane.idle .name {
-    color: var(--muted);
+    color: var(--text-muted);
   }
   .lane.active {
     background: color-mix(in oklab, var(--ok) 7%, transparent);
   }
   .lane.active .rank {
-    color: var(--bg);
+    color: var(--text-inverse);
     background: var(--ok);
     border-color: var(--ok);
   }
@@ -560,13 +529,13 @@
 
   /* ---- lists */
   h2 .count {
-    font-size: 0.8em;
+    font-size: var(--fs-rel-sm);
   }
   .panel {
     list-style: none;
     margin: 0;
     padding: 0;
-    background: var(--bg-2);
+    background: var(--surface-raised);
     border: 1px solid var(--line);
     border-radius: var(--radius-lg);
     overflow: hidden;
@@ -594,7 +563,7 @@
     min-width: 0;
   }
   .title {
-    font-weight: 600;
+    font-weight: var(--fw-semibold);
     overflow-wrap: anywhere;
   }
   .sub {
@@ -602,7 +571,7 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 0.2rem 0.9rem;
-    font-size: 0.85rem;
+    font-size: var(--fs-xs-3);
   }
   .retry {
     color: var(--warn);
@@ -622,30 +591,30 @@
   .btn.sm {
     min-height: 2rem;
     padding: 0.25rem 0.85rem;
-    font-size: 0.85rem;
+    font-size: var(--fs-xs-3);
     gap: 0.35rem;
   }
   .btn.ghost {
     background: transparent;
     border-color: transparent;
-    color: var(--muted);
+    color: var(--text-muted);
   }
   .btn.ghost:hover:not(:disabled) {
     color: var(--text);
   }
   .btn.danger {
-    color: var(--bg);
+    color: var(--text-inverse);
     background: var(--danger);
     border-color: var(--danger);
   }
   .btn.danger:hover:not(:disabled) {
-    background: color-mix(in oklab, var(--danger) 85%, white);
+    background: color-mix(in oklab, var(--danger) 85%, var(--lighten));
   }
   .empty-note {
     padding: 0.9rem 1rem;
     border: 1px dashed var(--line);
     border-radius: var(--radius-lg);
-    font-size: 0.92rem;
+    font-size: var(--fs-sm-4);
   }
   .panel.empty {
     display: grid;
@@ -668,8 +637,8 @@
     padding-top: 0.05rem;
   }
   .elapsed {
-    font-size: 0.85rem;
-    color: var(--muted);
+    font-size: var(--fs-xs-3);
+    color: var(--text-muted);
   }
   .hold {
     display: inline-flex;
@@ -677,11 +646,11 @@
     justify-self: start;
     gap: 0.4rem;
     padding: 0.15rem 0.6rem 0.15rem 0.45rem;
-    font-size: 0.85rem;
-    font-weight: 550;
+    font-size: var(--fs-xs-3);
+    font-weight: var(--fw-medium-2);
     color: var(--warn);
     background: color-mix(in oklab, var(--warn) 12%, transparent);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
   }
   .hold :global(svg) {
     flex: none;
@@ -692,8 +661,8 @@
     position: relative;
     height: 4px;
     margin: 0.35rem 0 0.1rem;
-    background: var(--bg-3);
-    border-radius: 999px;
+    background: var(--surface-control);
+    border-radius: var(--radius-pill);
     overflow: hidden;
   }
   .bar span {
@@ -701,14 +670,14 @@
     inset: 0 auto 0 0;
     background: var(--tint);
     border-radius: inherit;
-    transition: width 0.4s var(--ease);
+    transition: width var(--motion-progress) var(--ease);
   }
   .bar.unknown span {
     width: 30%;
-    animation: slide 1.6s var(--ease) infinite;
+    animation: slide var(--motion-sweep) var(--ease) infinite;
   }
   .held .bar span {
-    background: color-mix(in oklab, var(--warn) 55%, var(--bg-3));
+    background: color-mix(in oklab, var(--warn) 55%, var(--surface-control));
     animation-play-state: paused;
   }
   @keyframes slide {
@@ -740,8 +709,8 @@
   }
   .chev {
     display: inline-flex;
-    color: var(--muted);
-    transition: transform 0.2s var(--ease);
+    color: var(--text-muted);
+    transition: transform var(--motion-toggle) var(--ease);
   }
   .chev :global(svg) {
     width: 1rem;
@@ -751,7 +720,7 @@
     transform: rotate(90deg);
   }
   .group ol {
-    background: rgb(0 0 0 / 0.12);
+    background: var(--surface-inset);
   }
 
   /* ---- recent */
@@ -768,7 +737,7 @@
     gap: 0.4rem;
   }
   .chip-n {
-    font-size: 0.8rem;
+    font-size: var(--fs-xs);
     opacity: 0.8;
   }
   .past {
@@ -781,9 +750,9 @@
     width: 1.6rem;
     height: 1.6rem;
     margin-top: -0.05rem;
-    border-radius: 50%;
-    color: var(--muted);
-    background: var(--bg-3);
+    border-radius: var(--radius-round);
+    color: var(--text-muted);
+    background: var(--surface-control);
   }
   .mark :global(svg) {
     width: 0.95rem;
@@ -798,10 +767,10 @@
     background: color-mix(in oklab, var(--danger) 14%, transparent);
   }
   .past.cancelled .title {
-    color: var(--muted);
+    color: var(--text-muted);
   }
   .reason {
-    font-size: 0.85rem;
+    font-size: var(--fs-xs-3);
     color: var(--danger);
     overflow-wrap: anywhere;
   }
@@ -809,8 +778,8 @@
     flex: none;
     display: grid;
     justify-items: end;
-    font-size: 0.82rem;
-    line-height: 1.35;
+    font-size: var(--fs-xs-2);
+    line-height: var(--lh-compact);
     padding-top: 0.1rem;
   }
   .took {
@@ -823,8 +792,8 @@
     justify-self: start;
   }
   .confirm-q {
-    font-size: 0.85rem;
-    color: var(--muted);
+    font-size: var(--fs-xs-3);
+    color: var(--text-muted);
   }
 
   @media (max-width: 600px) {

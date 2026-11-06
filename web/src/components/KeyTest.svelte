@@ -78,7 +78,7 @@
     gap: 0.5rem 0.9rem;
   }
   .why {
-    font-size: 0.875rem;
+    font-size: var(--fs-sm);
   }
   .result {
     margin: 0;

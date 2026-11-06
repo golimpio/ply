@@ -22,14 +22,14 @@
     .tabs {
       position: fixed;
       inset: auto 0 0;
-      z-index: 20;
+      z-index: var(--z-bar);
       display: grid;
       grid-template-columns: repeat(5, 1fr);
       padding: 0.35rem 0.5rem calc(0.35rem + env(safe-area-inset-bottom));
-      background: rgb(16 14 12 / 0.86);
-      backdrop-filter: saturate(1.4) blur(18px);
-      -webkit-backdrop-filter: saturate(1.4) blur(18px);
-      box-shadow: 0 -1px 0 rgb(255 255 255 / 0.06);
+      background: var(--surface-tabbar);
+      /* Unprefixed only: the build adds -webkit- itself, and drops this one when both are written. */
+      backdrop-filter: var(--blur-bar);
+      box-shadow: var(--shadow-tabbar);
     }
   }
   a,
@@ -40,9 +40,9 @@
     min-height: 44px;
     padding: 0.3rem 0;
     font: inherit;
-    font-size: 0.7rem;
-    font-weight: 550;
-    color: var(--muted);
+    font-size: var(--fs-3xs);
+    font-weight: var(--fw-medium-2);
+    color: var(--text-muted);
     background: none;
     border: 0;
     cursor: pointer;

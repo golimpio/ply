@@ -181,7 +181,7 @@
       {#if meta}<SourceBadge source={meta.source} />{/if}
     </div>
     <Ratings {ratings} />
-    <div class="actions">
+    <div class="hero-actions">
       {#if next}
         <a class="btn primary" href={href.play(next.id, resumeAt(next))}>
           <Icon name="play" />
@@ -195,7 +195,7 @@
 
   <div class="body">
     {#if needsReview}
-      <div class="review" role="note">
+      <div class="review-note" role="note">
         <Icon name="alert" />
         <p>This might not be the right show.</p>
         <button class="btn" onclick={() => (fixing = true)}>Check the match</button>
@@ -205,7 +205,7 @@
 
     {#if meta?.overview || summary?.overview || meta?.genres.length || credits.length}
       <section class="about">
-        {#if meta?.overview || summary?.overview}<p class="overview">{meta?.overview || summary?.overview}</p>{/if}
+        {#if meta?.overview || summary?.overview}<p class="title-overview">{meta?.overview || summary?.overview}</p>{/if}
         {#if meta?.genres.length}
           <ul class="genres" aria-label="Genres">
             {#each meta.genres as g (g.id)}<li><a class="chip" href={href.genre(g.id)}>{g.name}</a></li>{/each}
@@ -227,7 +227,7 @@
     {#if order}
       <div class="order">
         <label for="episode-order">Episode order</label>
-        <select id="episode-order" value={order} disabled={ordering} aria-describedby="episode-order-hint" onchange={changeOrder}>
+        <select id="episode-order" class="settings-input" value={order} disabled={ordering} aria-describedby="episode-order-hint" onchange={changeOrder}>
           {#each ORDERS as [value, label] (value)}<option {value}>{label}</option>{/each}
         </select>
         <span id="episode-order-hint" class="muted">
@@ -298,25 +298,6 @@
 {/if}
 
 <style>
-  .hero-sk {
-    height: min(68vh, 56vw);
-    border-radius: 0;
-  }
-  .cert {
-    padding: 0 0.4rem;
-    font-size: 0.8rem;
-    font-weight: 700;
-    line-height: 1.5;
-    border: 1px solid currentColor;
-    border-radius: 4px;
-  }
-  .actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.75rem;
-    margin-top: 0.4rem;
-  }
   .body {
     padding: 0.5rem var(--gutter) 0;
     max-width: 72rem;
@@ -329,27 +310,6 @@
   .body:last-child {
     padding-bottom: 4rem;
   }
-  .review {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.75rem 1rem;
-    padding: 0.85rem 1rem;
-    background: color-mix(in oklab, var(--warn) 12%, var(--bg-2));
-    border: 1px solid color-mix(in oklab, var(--warn) 40%, transparent);
-    border-radius: var(--radius);
-  }
-  .review :global(svg) {
-    width: 1.3rem;
-    height: 1.3rem;
-    color: var(--warn);
-    flex: none;
-  }
-  .review p {
-    margin: 0;
-    flex: 1;
-    min-width: 12rem;
-  }
   .notice {
     margin: 0;
   }
@@ -360,27 +320,16 @@
     gap: 0.5rem 0.75rem;
   }
   .order label {
-    font-weight: 650;
+    font-weight: var(--fw-semibold-2);
   }
   .order select {
-    min-height: 2.5rem;
-    padding: 0.45rem 0.85rem;
-    font: inherit;
-    color: var(--text);
-    background: var(--bg-2);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-  }
-  .order select:focus-visible {
-    border-color: var(--text);
-    outline: 2px solid var(--text);
-    outline-offset: 2px;
+    background: var(--surface-raised);
   }
   .order select:disabled {
     opacity: 0.6;
   }
   .order .muted {
-    font-size: 0.875rem;
+    font-size: var(--fs-sm);
   }
   .order-msg {
     margin: -1.25rem 0 0;
@@ -389,36 +338,6 @@
     display: grid;
     gap: 1.25rem;
     max-width: 60rem;
-  }
-  .overview {
-    margin: 0;
-    max-width: 65ch;
-    font-size: 1.08rem;
-    line-height: 1.6;
-  }
-  .genres {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-  }
-  .genres .chip {
-    display: inline-flex;
-    align-items: center;
-  }
-  .credits {
-    display: grid;
-    grid-template-columns: max-content 1fr;
-    gap: 0.4rem 1.5rem;
-    margin: 0;
-  }
-  .credits dt {
-    color: var(--muted);
-  }
-  .credits dd {
-    margin: 0;
   }
   .season-overview {
     margin: 0.9rem 0 0;
@@ -441,7 +360,7 @@
   }
   li:hover,
   li:focus-within {
-    background: rgb(255 255 255 / 0.04);
+    background: var(--fill-faint);
   }
   .ep {
     flex: 1;
@@ -464,13 +383,13 @@
     overflow: hidden;
   }
   .thumb :global(.tile) {
-    font-size: 1.2rem;
+    font-size: var(--fs-xl-2);
   }
   .bar {
     position: absolute;
     inset: auto 0 0;
     height: 4px;
-    background: rgb(0 0 0 / 0.5);
+    background: var(--progress-track);
   }
   .bar span {
     display: block;
@@ -482,10 +401,10 @@
     top: 6px;
     right: 6px;
     padding: 0.05rem 0.45rem;
-    font-size: 0.72rem;
-    font-weight: 650;
-    background: rgb(16 14 12 / 0.75);
-    border-radius: 4px;
+    font-size: var(--fs-2xs);
+    font-weight: var(--fw-semibold-2);
+    background: var(--surface-tag);
+    border-radius: var(--radius-sm);
   }
   .text {
     min-width: 0;
@@ -496,11 +415,11 @@
     align-items: baseline;
   }
   .num {
-    color: var(--muted);
+    color: var(--text-muted);
     min-width: 1.5rem;
   }
   .title {
-    font-weight: 650;
+    font-weight: var(--fw-semibold-2);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -508,24 +427,20 @@
   .small {
     margin-top: 0.2rem;
     padding-left: 2.25rem;
-    font-size: 0.875rem;
+    font-size: var(--fs-sm);
   }
   .ep-overview {
     margin: 0.35rem 0 0;
     padding-left: 2.25rem;
     max-width: 70ch;
-    color: var(--muted);
-    font-size: 0.9rem;
-    line-height: 1.45;
+    color: var(--text-muted);
+    font-size: var(--fs-sm-3);
+    line-height: var(--lh-body-2);
     display: -webkit-box;
     -webkit-line-clamp: 2;
     line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
-  }
-  .badges {
-    display: inline-flex;
-    gap: 4px;
   }
   .play {
     flex: none;
@@ -545,13 +460,6 @@
     }
     .num {
       display: none;
-    }
-    .credits {
-      grid-template-columns: 1fr;
-      gap: 0.1rem;
-    }
-    .credits dd {
-      margin-bottom: 0.5rem;
     }
   }
 </style>

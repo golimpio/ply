@@ -48,18 +48,18 @@
     height: 2.5rem;
     min-width: 2.5rem;
     padding: 0 0.6rem;
-    color: var(--muted);
+    color: var(--text-muted);
     border: 1px solid transparent;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     transition:
-      background 0.15s,
-      color 0.15s,
-      border-color 0.15s;
+      background var(--motion-hover),
+      color var(--motion-hover),
+      border-color var(--motion-hover);
   }
   .act:hover,
   .act[aria-current='page'] {
     color: var(--text);
-    background: rgb(255 255 255 / 0.08);
+    background: var(--fill);
   }
   .act :global(svg) {
     width: 1.15rem;
@@ -72,8 +72,8 @@
   .queued,
   .running {
     color: var(--text);
-    background: rgb(255 255 255 / 0.08);
-    border-color: rgb(255 255 255 / 0.12);
+    background: var(--fill);
+    border-color: var(--line-control);
   }
   .count {
     padding: 0 0.75rem 0 0.6rem;
@@ -85,9 +85,9 @@
     border-color: color-mix(in oklab, var(--warn) 35%, transparent);
   }
   .n {
-    font-size: 0.85rem;
-    font-weight: 700;
-    line-height: 1;
+    font-size: var(--fs-xs-3);
+    font-weight: var(--fw-bold);
+    line-height: var(--lh-none);
   }
   .ring {
     overflow: visible;
@@ -105,7 +105,7 @@
     stroke-linecap: round;
     stroke-dasharray: 28 72;
     transform-origin: 10px 10px;
-    animation: turn 1.1s linear infinite;
+    animation: turn var(--motion-turn) var(--ease-linear) infinite;
   }
   .paused .arc,
   .failed .arc,
@@ -115,7 +115,7 @@
   /* Held by playback or browsing: it breathes instead of turning. */
   .held .arc {
     stroke-dasharray: 100 0;
-    animation: breathe 2.4s ease-in-out infinite;
+    animation: breathe var(--motion-breathe) var(--ease-in-out) infinite;
   }
   .dot {
     position: absolute;
@@ -124,8 +124,8 @@
     width: 0.5rem;
     height: 0.5rem;
     background: var(--warn);
-    border: 2px solid var(--bg);
-    border-radius: 50%;
+    border: 2px solid var(--surface-room);
+    border-radius: var(--radius-round);
   }
   @keyframes turn {
     to {

@@ -67,25 +67,25 @@
   <form id="edit-title" class="fields" onsubmit={save}>
     <label>
       <span>Title</span>
-      <input bind:value={form.title} required />
+      <input class="text-field" bind:value={form.title} required />
     </label>
     <div class="pair">
       <label>
         <span>Sort as</span>
-        <input bind:value={form.sortTitle} placeholder={meta.title} />
+        <input class="text-field" bind:value={form.sortTitle} placeholder={meta.title} />
       </label>
       <label>
         <span>Year</span>
-        <input bind:value={form.year} inputmode="numeric" maxlength="4" />
+        <input class="text-field" bind:value={form.year} inputmode="numeric" maxlength="4" />
       </label>
     </div>
     <label>
       <span>Tagline</span>
-      <input bind:value={form.tagline} />
+      <input class="text-field" bind:value={form.tagline} />
     </label>
     <label>
       <span>Overview</span>
-      <textarea bind:value={form.overview} rows="6"></textarea>
+      <textarea class="text-field" bind:value={form.overview} rows="6"></textarea>
     </label>
     <p class="muted note">Refreshing the metadata keeps what you write here.</p>
     {#if error}<p class="error" role="alert">{error}</p>{/if}
@@ -112,28 +112,19 @@
     gap: 0.3rem;
   }
   label span {
-    font-size: 0.85rem;
-    color: var(--muted);
+    font-size: var(--fs-xs-3);
+    color: var(--text-muted);
   }
   input,
   textarea {
     width: 100%;
+    min-height: auto;
     padding: 0.55rem 0.8rem;
-    font: inherit;
-    color: var(--text);
-    background: var(--bg);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
     resize: vertical;
-  }
-  input:focus-visible,
-  textarea:focus-visible {
-    border-color: var(--text);
-    outline: none;
   }
   .note,
   .error {
     margin: 0;
-    font-size: 0.875rem;
+    font-size: var(--fs-sm);
   }
 </style>

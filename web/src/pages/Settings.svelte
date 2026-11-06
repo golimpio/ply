@@ -160,7 +160,7 @@
       <div class="skeleton block" aria-busy="true"></div>
     {:else}
       {@const s = settings.data}
-      <div class="card">
+      <div class="settings-panel card">
         <div class="row">
           <div>
             <h3>TMDB key</h3>
@@ -179,6 +179,7 @@
           <label class="sr-only" for="tmdb-key">{s.tmdbKeySet ? 'Replace the key' : 'TMDB key'}</label>
           <input
             id="tmdb-key"
+            class="text-field"
             bind:value={key}
             type="password"
             autocomplete="new-password"
@@ -236,6 +237,7 @@
           </div>
           <select
             id="lang"
+            class="text-field"
             value={s.language}
             disabled={saving}
             onchange={(e) => save({ language: e.currentTarget.value }, 'Language saved. Refresh details to see it everywhere.')}
@@ -253,7 +255,7 @@
     {#if status.data}
       {@const m = status.data}
       {@const anyKey = m.keySet || !!m.tvdbKeySet}
-      <div class="card status">
+      <div class="settings-panel card status">
         <p>
           {#if !m.enabled}
             Matching is off.
@@ -404,23 +406,8 @@
     margin: 0;
     max-width: 62ch;
   }
-  h3 {
-    margin: 0 0 0.15rem;
-    font-size: 1rem;
-  }
   h3 label {
     cursor: pointer;
-  }
-  .card {
-    display: grid;
-    gap: 1.1rem;
-    padding: 1.1rem 1.25rem;
-    background: var(--bg-2);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
-  }
-  .card p {
-    margin: 0;
   }
   .row {
     display: flex;
@@ -438,66 +425,14 @@
     flex-wrap: wrap;
     gap: 0.6rem;
   }
-  input,
-  select {
-    min-height: 2.5rem;
-    padding: 0.45rem 0.85rem;
-    font: inherit;
-    color: var(--text);
-    background: var(--bg);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-  }
   input {
     flex: 1 1 16rem;
-  }
-  input:focus-visible,
-  select:focus-visible {
-    border-color: var(--text);
-    outline: none;
   }
   .ok {
     color: var(--ok);
   }
   .warn {
     color: var(--warn);
-  }
-  /* An on/off switch: role="switch" with aria-checked. */
-  .switch {
-    flex: none;
-    position: relative;
-    width: 3.1rem;
-    height: 1.8rem;
-    padding: 0;
-    background: var(--bg-3);
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    cursor: pointer;
-    transition: background 0.2s;
-  }
-  .switch span {
-    position: absolute;
-    top: 3px;
-    left: 3px;
-    width: calc(1.8rem - 8px);
-    height: calc(1.8rem - 8px);
-    background: var(--muted);
-    border-radius: 50%;
-    transition:
-      transform 0.2s var(--ease),
-      background 0.2s;
-  }
-  .switch[aria-checked='true'] {
-    background: var(--accent);
-    border-color: var(--accent);
-  }
-  .switch[aria-checked='true'] span {
-    transform: translateX(1.3rem);
-    background: var(--on-accent);
-  }
-  .switch:disabled {
-    opacity: 0.5;
-    cursor: default;
   }
   .status .buttons {
     display: flex;
@@ -520,33 +455,33 @@
     align-items: center;
     gap: 0.9rem;
     padding: 0.5rem 0.75rem 0.5rem 0.5rem;
-    background: var(--bg-2);
+    background: var(--surface-raised);
     border-radius: var(--radius);
   }
   .review .poster {
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     overflow: hidden;
   }
   .review .poster :global(.tile) {
-    font-size: 0.7rem;
+    font-size: var(--fs-3xs);
   }
   .review .text {
     min-width: 0;
   }
   .review .title {
-    font-weight: 650;
+    font-weight: var(--fw-semibold-2);
   }
   .review .year {
     margin-left: 0.5rem;
-    font-weight: 500;
+    font-weight: var(--fw-medium);
   }
   .review p {
     margin: 0.1rem 0 0;
-    font-size: 0.875rem;
+    font-size: var(--fs-sm);
   }
   .episodes {
     margin-top: 0.3rem;
-    font-size: 0.85rem;
+    font-size: var(--fs-xs-3);
   }
   .episodes summary {
     color: var(--warn);
@@ -561,7 +496,7 @@
   }
   .attribution p {
     margin: 0;
-    font-size: 0.85rem;
+    font-size: var(--fs-xs-3);
   }
   @media (max-width: 600px) {
     .row {

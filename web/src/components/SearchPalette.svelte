@@ -232,16 +232,16 @@
     margin: 12vh auto auto;
     padding: 0;
     color: var(--text);
-    background: rgb(26 23 20 / 0.92);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border: 1px solid rgb(255 255 255 / 0.1);
+    background: var(--surface-palette);
+    /* Unprefixed only: the build adds -webkit- itself, and drops this one when both are written. */
+    backdrop-filter: var(--blur-dialog);
+    border: 1px solid var(--line-overlay);
     border-radius: var(--radius-lg);
-    box-shadow: 0 30px 80px rgb(0 0 0 / 0.55);
+    box-shadow: var(--shadow-dialog);
     overflow: hidden;
   }
   dialog::backdrop {
-    background: rgb(8 7 6 / 0.6);
+    background: var(--scrim);
   }
   .panel {
     display: grid;
@@ -252,7 +252,7 @@
     width: 100%;
     padding: 1.1rem 1.25rem;
     font: inherit;
-    font-size: 1.15rem;
+    font-size: var(--fs-xl);
     color: var(--text);
     background: transparent;
     border: 0;
@@ -278,25 +278,25 @@
     cursor: pointer;
   }
   li[aria-selected='true'] {
-    background: rgb(255 255 255 / 0.08);
+    background: var(--fill);
   }
   .thumb {
-    border-radius: 6px;
+    border-radius: var(--radius-item);
     overflow: hidden;
   }
   .thumb.round {
     width: 3.25rem;
     justify-self: center; /* centred in the artwork column, so the text lines up with the other rows */
-    border-radius: 50%;
+    border-radius: var(--radius-round);
   }
   .thumb :global(.tile) {
-    font-size: 1rem;
+    font-size: var(--fs-base);
   }
   .text {
     min-width: 0;
   }
   .title {
-    font-weight: 650;
+    font-weight: var(--fw-semibold-2);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -308,8 +308,8 @@
   .sub,
   .empty,
   .tip {
-    color: var(--muted);
-    font-size: 0.875rem;
+    color: var(--text-muted);
+    font-size: var(--fs-sm);
   }
   .empty,
   .tip {

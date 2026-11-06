@@ -102,8 +102,8 @@
     margin-bottom: 0.75rem;
   }
   .more {
-    font-size: 0.9rem;
-    color: var(--muted);
+    font-size: var(--fs-sm-3);
+    color: var(--text-muted);
   }
   .arrows {
     margin-left: auto;

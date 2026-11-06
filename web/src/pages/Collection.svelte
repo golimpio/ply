@@ -43,7 +43,7 @@
     {#if titles.length === 0}
       <p class="muted">None of this collection is in your library right now.</p>
     {:else}
-      <div class={wide ? 'grid' : 'posters'}>
+      <div class={wide ? 'grid' : 'poster-grid'}>
         {#each titles as card (card.id)}
           <MediaCard
             shape={wide ? 'wide' : 'poster'}
@@ -60,29 +60,14 @@
 {/if}
 
 <style>
-  .hero-sk {
-    height: min(68vh, 56vw);
-    border-radius: 0;
-  }
   .overview {
     margin: 0;
     max-width: 65ch;
-    font-size: clamp(1rem, 1.6vw, 1.15rem);
-    line-height: 1.6;
-    color: rgb(244 239 230 / 0.86);
+    font-size: var(--fs-lede-2);
+    line-height: var(--lh-relaxed);
+    color: var(--text-lede);
   }
   .heading {
     margin: 0.5rem 0 1.25rem;
-  }
-  .posters {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(170px, 100%), 1fr));
-    gap: 1.75rem 1.25rem;
-  }
-  @media (max-width: 600px) {
-    .posters {
-      grid-template-columns: repeat(auto-fill, minmax(min(140px, 100%), 1fr));
-      gap: 1.25rem 0.75rem;
-    }
   }
 </style>

@@ -305,7 +305,7 @@
   }
   .card {
     padding: 1rem 1.25rem;
-    background: var(--bg-2);
+    background: var(--surface-raised);
     border: 1px solid var(--line);
     border-radius: var(--radius-lg);
   }
@@ -325,7 +325,7 @@
   }
   .folders p {
     margin: 0;
-    font-size: 0.9rem;
+    font-size: var(--fs-sm-3);
   }
   .head {
     display: flex;
@@ -342,16 +342,16 @@
   .path {
     min-width: 0;
     overflow-wrap: anywhere;
-    font-size: 0.95rem;
+    font-size: var(--fs-md-2);
   }
   .tag {
     flex: none;
     margin-left: auto;
     padding: 0.1rem 0.55rem;
-    font-size: 0.78rem;
-    color: var(--muted);
+    font-size: var(--fs-2xs-3);
+    color: var(--text-muted);
     border: 1px solid var(--line);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
   }
   .ok {
     color: var(--ok);
@@ -368,31 +368,31 @@
   }
   .note {
     flex: 1 1 14rem;
-    font-size: 0.85rem;
+    font-size: var(--fs-xs-3);
   }
   /* Movies | TV shows: two buttons, the folder's type pressed. */
   .seg {
     display: inline-flex;
     padding: 3px;
-    background: var(--bg);
+    background: var(--surface-room);
     border: 1px solid var(--line);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
   }
   .seg button {
     min-height: 2rem;
     padding: 0.2rem 0.9rem;
     font: inherit;
-    font-size: 0.88rem;
-    color: var(--muted);
+    font-size: var(--fs-sm-2);
+    color: var(--text-muted);
     background: none;
     border: 0;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     cursor: pointer;
   }
   .seg button[aria-pressed='true'] {
     color: var(--on-accent);
     background: var(--accent);
-    font-weight: 650;
+    font-weight: var(--fw-semibold-2);
   }
   .seg button:hover:not(:disabled):not([aria-pressed='true']) {
     color: var(--text);
@@ -411,7 +411,7 @@
     margin-left: auto;
   }
   .btn.danger {
-    color: #2a0c08;
+    color: var(--on-danger);
     background: var(--danger);
     border-color: var(--danger);
   }
@@ -440,7 +440,7 @@
     gap: 0.15rem;
   }
   .forget .muted {
-    font-size: 0.85rem;
+    font-size: var(--fs-xs-3);
   }
   .wait {
     margin: 0.75rem 0 0;

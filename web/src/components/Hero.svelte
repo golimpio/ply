@@ -49,10 +49,10 @@
   .backdrop {
     position: absolute;
     inset: 0;
-    z-index: -2;
+    z-index: var(--z-backdrop);
     /* Dissolve into the room (and its projection light) instead of ending on an edge. */
-    mask-image: linear-gradient(to bottom, #000 50%, transparent 100%);
-    -webkit-mask-image: linear-gradient(to bottom, #000 50%, transparent 100%);
+    mask-image: linear-gradient(to bottom, var(--mask-opaque) 50%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, var(--mask-opaque) 50%, transparent 100%);
   }
   .backdrop :global(.picture) {
     height: 100%;
@@ -67,10 +67,15 @@
   .scrim {
     position: absolute;
     inset: 0;
-    z-index: -1;
+    z-index: var(--z-under);
+    /* Written top to bottom on purpose; don't turn it back into "to top, ... 0%, 30%, 62%". With
+       literal colours the minifier rewrote that into this form (stops 38%, 70%, 100%), and Chrome
+       rasterises the two forms one row apart (a 1-level difference around y=261 at 1280 px). With
+       var() colours the minifier leaves a gradient alone, so this is the form that matches what
+       was on screen before the tokens. The same holds for the narrow scrim below. */
     background:
-      linear-gradient(to top, rgb(16 14 12 / 0.55) 0%, rgb(16 14 12 / 0.45) 30%, transparent 62%),
-      linear-gradient(to right, rgb(16 14 12 / 0.85) 0%, rgb(16 14 12 / 0.35) 45%, transparent 75%);
+      linear-gradient(transparent 38%, var(--scrim-hero-mid) 70%, var(--scrim-hero-bottom) 100%),
+      linear-gradient(90deg, var(--scrim-hero-side) 0%, var(--scrim-hero-side-mid) 45%, transparent 75%);
   }
   .content {
     padding: calc(var(--bar-h) + 2rem) var(--gutter) clamp(1.5rem, 4vw, 3rem);
@@ -79,8 +84,8 @@
     gap: 0.85rem;
   }
   .content :global(h1) {
-    font-size: clamp(2.2rem, 5.2vw, 4.4rem);
-    text-shadow: 0 2px 30px rgb(0 0 0 / 0.35);
+    font-size: var(--fs-display);
+    text-shadow: var(--text-shadow-hero);
   }
   /* A title's logo stands in for its h1 (the h1 stays, for screen readers). */
   .content :global(.logo) {
@@ -91,7 +96,7 @@
     height: auto;
     object-fit: contain;
     object-position: left bottom;
-    filter: drop-shadow(0 2px 24px rgb(0 0 0 / 0.45));
+    filter: var(--drop-shadow-logo);
   }
   @media (max-width: 600px) {
     .hero,
@@ -99,7 +104,7 @@
       min-height: 72vh;
     }
     .scrim {
-      background: linear-gradient(to top, rgb(16 14 12 / 0.6) 0%, rgb(16 14 12 / 0.55) 38%, transparent 75%);
+      background: linear-gradient(transparent 25%, var(--scrim-hero-narrow-mid) 62%, var(--scrim-hero-narrow) 100%);
     }
   }
 </style>

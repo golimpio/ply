@@ -96,7 +96,7 @@
   }
 </script>
 
-<div class="card tvdb" role="group" aria-labelledby="tvdb-h">
+<div class="settings-panel card tvdb" role="group" aria-labelledby="tvdb-h">
   <div>
     <h3 id="tvdb-h">TVDB key</h3>
     <p class="muted">
@@ -118,6 +118,7 @@
         <label for="tvdb-key">{s.tvdbKeySet ? 'Replace the key' : 'Key'}</label>
         <input
           id="tvdb-key"
+          class="text-field"
           bind:value={key}
           type="password"
           autocomplete="new-password"
@@ -137,6 +138,7 @@
         <label for="tvdb-pin">Subscriber PIN <span class="muted">(optional)</span></label>
         <input
           id="tvdb-pin"
+          class="text-field"
           bind:value={pin}
           type="password"
           autocomplete="new-password"
@@ -180,21 +182,6 @@
 </div>
 
 <style>
-  .card {
-    display: grid;
-    gap: 1.1rem;
-    padding: 1.1rem 1.25rem;
-    background: var(--bg-2);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
-  }
-  .card p {
-    margin: 0;
-  }
-  h3 {
-    margin: 0 0 0.15rem;
-    font-size: 1rem;
-  }
   .fields {
     display: grid;
     gap: 0.9rem;
@@ -205,27 +192,16 @@
   }
   label,
   .label {
-    font-weight: 600;
-    font-size: 0.925rem;
+    font-weight: var(--fw-semibold);
+    font-size: var(--fs-md);
   }
   label .muted {
-    font-weight: 400;
+    font-weight: var(--fw-regular);
   }
-  .hint {
-    font-size: 0.85rem;
-  }
-  input {
-    min-height: 2.5rem;
-    padding: 0.45rem 0.85rem;
-    font: inherit;
-    color: var(--text);
-    background: var(--bg);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-  }
-  input:focus-visible {
-    border-color: var(--text);
-    outline: none;
+  /* A notch smaller than the shared .settings-panel .hint: .tvdb makes this rule the more specific
+     one, rather than leaving it to the order of the stylesheets. */
+  .tvdb .hint {
+    font-size: var(--fs-xs-3);
   }
   .buttons {
     display: flex;
@@ -238,6 +214,6 @@
   .attribution {
     padding-top: 1.1rem;
     border-top: 1px solid var(--line);
-    font-size: 0.85rem;
+    font-size: var(--fs-xs-3);
   }
 </style>

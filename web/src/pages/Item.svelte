@@ -175,7 +175,7 @@
       <span class="badges"><Badges {item} /><SourceBadge source={meta?.source} /></span>
     </div>
     <Ratings {ratings} />
-    <div class="actions">
+    <div class="hero-actions">
       {#if resumeAt}
         <a class="btn primary" href={href.play(item.id, resumeAt)}>
           <Icon name="play" />Resume from {formatClock(resumeAt)}
@@ -190,7 +190,7 @@
 
   <div class="body">
     {#if needsReview}
-      <div class="review" role="note">
+      <div class="review-note" role="note">
         <Icon name="alert" />
         <p>{isEpisode ? 'This might not be the right show.' : 'This might not be the right film.'}</p>
         <button class="btn" onclick={() => (fixing = true)}>Check the match</button>
@@ -200,7 +200,7 @@
 
     {#if overview || meta?.genres.length || credits.length || meta?.collection}
       <section class="about">
-        {#if overview}<p class="overview">{overview}</p>{/if}
+        {#if overview}<p class="title-overview">{overview}</p>{/if}
         {#if meta?.genres.length}
           <ul class="genres" aria-label="Genres">
             {#each meta.genres as g (g.id)}<li><a class="chip" href={href.genre(g.id)}>{g.name}</a></li>{/each}
@@ -367,52 +367,29 @@
 {/if}
 
 <style>
-  .hero-sk {
-    height: min(68vh, 56vw);
-    border-radius: 0;
-  }
   .show {
-    font-weight: 650;
-    font-size: 1.05rem;
+    font-weight: var(--fw-semibold-2);
+    font-size: var(--fs-lg);
     width: fit-content;
   }
   .tagline {
     margin: -0.2rem 0 0;
-    font-size: clamp(1rem, 1.6vw, 1.2rem);
+    font-size: var(--fs-lede);
     font-style: italic;
-    color: rgb(244 239 230 / 0.86);
+    color: var(--text-lede);
     text-wrap: balance;
-  }
-  .badges {
-    display: inline-flex;
-    gap: 4px;
-  }
-  .cert {
-    padding: 0 0.4rem;
-    font-size: 0.8rem;
-    font-weight: 700;
-    line-height: 1.5;
-    border: 1px solid currentColor;
-    border-radius: 4px;
   }
   .rating {
     display: inline-flex;
     align-items: center;
     gap: 0.3rem;
     color: var(--text);
-    font-weight: 650;
+    font-weight: var(--fw-semibold-2);
   }
   .rating :global(svg) {
     width: 0.95em;
     height: 0.95em;
     color: var(--rating-star);
-  }
-  .actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.75rem;
-    margin-top: 0.4rem;
   }
   .body {
     padding: 0.5rem var(--gutter) 0;
@@ -423,27 +400,6 @@
   .body:last-of-type {
     padding-bottom: 4rem;
   }
-  .review {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.75rem 1rem;
-    padding: 0.85rem 1rem;
-    background: color-mix(in oklab, var(--warn) 12%, var(--bg-2));
-    border: 1px solid color-mix(in oklab, var(--warn) 40%, transparent);
-    border-radius: var(--radius);
-  }
-  .review :global(svg) {
-    width: 1.3rem;
-    height: 1.3rem;
-    color: var(--warn);
-    flex: none;
-  }
-  .review p {
-    margin: 0;
-    flex: 1;
-    min-width: 12rem;
-  }
   .notice {
     margin: 0;
   }
@@ -451,40 +407,13 @@
     display: grid;
     gap: 1.25rem;
   }
-  .overview {
-    margin: 0;
-    max-width: 65ch;
-    font-size: 1.08rem;
-    line-height: 1.6;
-  }
-  .genres {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-  }
-  .genres .chip,
   .versions .chip {
     display: inline-flex;
     align-items: center;
   }
-  .credits {
-    display: grid;
-    grid-template-columns: max-content 1fr;
-    gap: 0.4rem 1.5rem;
-    margin: 0;
-  }
-  .credits dt {
-    color: var(--muted);
-  }
-  .credits dd {
-    margin: 0;
-  }
   .collection {
     margin: 0;
-    color: var(--muted);
+    color: var(--text-muted);
   }
   .versions h2 {
     margin-bottom: 0.6rem;
@@ -495,7 +424,7 @@
     padding: 0;
   }
   .versions [aria-current='page'] {
-    color: var(--bg);
+    color: var(--text-inverse);
     background: var(--text);
     border-color: var(--text);
   }
@@ -509,18 +438,18 @@
     display: grid;
     gap: 0.1rem;
     padding: 0.85rem 1rem;
-    background: var(--bg-2);
+    background: var(--surface-raised);
     border-radius: var(--radius);
   }
   .siblings a:hover {
-    background: var(--bg-3);
+    background: var(--surface-control);
   }
   .siblings .next {
     grid-column: 2;
     text-align: right;
   }
   .siblings span:last-child {
-    font-weight: 600;
+    font-weight: var(--fw-semibold);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -541,21 +470,21 @@
   }
   .tech summary {
     cursor: pointer;
-    font-weight: 650;
+    font-weight: var(--fw-semibold-2);
     width: fit-content;
   }
   .tech h3 {
     margin: 1.5rem 0 0.6rem;
-    font-size: 1rem;
+    font-size: var(--fs-base);
   }
   .source {
     margin: 1rem 0 0;
-    font-size: 0.9rem;
+    font-size: var(--fs-sm-3);
   }
   .reasons {
     margin: 0;
     padding-left: 1.2rem;
-    color: var(--muted);
+    color: var(--text-muted);
   }
   .reasons .muted {
     margin-left: 0.6rem;
@@ -567,7 +496,7 @@
     margin: 0;
   }
   .kv dt {
-    color: var(--muted);
+    color: var(--text-muted);
   }
   .kv dd {
     margin: 0;
@@ -584,13 +513,6 @@
     }
     .siblings .next {
       grid-column: 1;
-    }
-    .credits {
-      grid-template-columns: 1fr;
-      gap: 0.1rem;
-    }
-    .credits dd {
-      margin-bottom: 0.5rem;
     }
   }
 </style>

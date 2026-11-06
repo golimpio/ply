@@ -35,7 +35,7 @@
 {:else if !titles.data || genres.loading}
   <div class="page" aria-busy="true">
     <div class="skeleton sk-name"></div>
-    <div class="posters">
+    <div class="poster-grid">
       {#each Array(8) as _, i (i)}<div class="skeleton sk-card"></div>{/each}
     </div>
   </div>
@@ -52,7 +52,7 @@
         {/each}
       </div>
 
-      <div class={wide ? 'grid' : 'posters'}>
+      <div class={wide ? 'grid' : 'poster-grid'}>
         {#each shown as card (card.id)}
           <MediaCard
             shape={wide ? 'wide' : 'poster'}
@@ -75,23 +75,9 @@
   .empty {
     margin-top: 1.25rem;
   }
-  .posters {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(170px, 100%), 1fr));
-    gap: 1.75rem 1.25rem;
-  }
   .sk-name {
     height: 2.6rem;
     width: min(14rem, 70%);
     margin-bottom: 4.25rem;
-  }
-  .sk-card {
-    aspect-ratio: 2 / 3;
-  }
-  @media (max-width: 600px) {
-    .posters {
-      grid-template-columns: repeat(auto-fill, minmax(min(140px, 100%), 1fr));
-      gap: 1.25rem 0.75rem;
-    }
   }
 </style>

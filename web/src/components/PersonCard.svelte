@@ -24,34 +24,34 @@
   .frame {
     border-radius: var(--radius);
     overflow: hidden;
-    box-shadow: 0 0 0 1px rgb(255 255 255 / 0.06);
-    transition: box-shadow 0.15s;
+    box-shadow: var(--ring-hairline);
+    transition: box-shadow var(--motion-hover);
   }
   .person:hover .frame {
-    box-shadow: 0 0 0 2px rgb(255 255 255 / 0.55);
+    box-shadow: var(--ring-hover);
   }
   .person:focus-visible {
     outline: none;
   }
   .person:focus-visible .frame {
-    box-shadow: 0 0 0 3px var(--text);
+    box-shadow: var(--ring-focus);
   }
   .frame :global(.tile) {
-    font-size: 1.3rem;
+    font-size: var(--fs-2xl);
   }
   .name {
     margin-top: 0.5rem;
-    font-weight: 650;
-    font-size: 0.92rem;
-    line-height: 1.25;
+    font-weight: var(--fw-semibold-2);
+    font-size: var(--fs-sm-4);
+    line-height: var(--lh-snug);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .role {
-    color: var(--muted);
-    font-size: 0.82rem;
-    line-height: 1.3;
+    color: var(--text-muted);
+    font-size: var(--fs-xs-2);
+    line-height: var(--lh-snug-2);
     display: -webkit-box;
     -webkit-line-clamp: 2;
     line-clamp: 2;

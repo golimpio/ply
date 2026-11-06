@@ -547,7 +547,7 @@
 <style>
   .frame {
     position: relative;
-    background: #000;
+    background: var(--surface-video);
     border-radius: var(--radius);
     overflow: hidden;
     aspect-ratio: 16 / 9;
@@ -562,7 +562,7 @@
     width: 100%;
     height: 100%;
     display: block;
-    background: #000;
+    background: var(--surface-video);
     object-fit: contain;
   }
   .overlay {
@@ -575,32 +575,32 @@
     gap: 0.6rem;
     padding: 1rem;
     text-align: center;
-    background: rgb(0 0 0 / 0.72);
+    background: var(--scrim-player);
   }
   .overlay.passive {
     flex-direction: row;
     pointer-events: none;
-    color: var(--muted);
+    color: var(--text-muted);
   }
   .overlay strong {
     color: var(--danger);
   }
   .overlay.stopped strong {
     color: var(--text);
-    font-size: 1.15rem;
+    font-size: var(--fs-xl);
   }
   .overlay.limit {
     justify-content: safe center;
     overflow-y: auto;
-    background: rgb(0 0 0 / 0.86);
+    background: var(--scrim-player-strong);
   }
   .spinner {
     width: 1.1em;
     height: 1.1em;
     border: 2px solid var(--line);
     border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
+    border-radius: var(--radius-round);
+    animation: spin var(--motion-spin) var(--ease-linear) infinite;
   }
   @keyframes spin {
     to {
@@ -609,7 +609,7 @@
   }
   .why {
     margin-top: 0.8rem;
-    font-size: 0.9rem;
+    font-size: var(--fs-sm-3);
   }
   .why summary {
     cursor: pointer;
@@ -623,6 +623,6 @@
   }
   .why ul {
     padding-left: 1.2rem;
-    color: var(--muted);
+    color: var(--text-muted);
   }
 </style>

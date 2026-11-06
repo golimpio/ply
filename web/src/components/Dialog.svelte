@@ -53,12 +53,12 @@
     margin: 8vh auto auto;
     padding: 0;
     color: var(--text);
-    background: rgb(26 23 20 / 0.94);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border: 1px solid rgb(255 255 255 / 0.1);
+    background: var(--surface-dialog);
+    /* Unprefixed only: the build adds -webkit- itself, and drops this one when both are written. */
+    backdrop-filter: var(--blur-dialog);
+    border: 1px solid var(--line-overlay);
     border-radius: var(--radius-lg);
-    box-shadow: 0 30px 80px rgb(0 0 0 / 0.55);
+    box-shadow: var(--shadow-dialog);
   }
   dialog[open] {
     display: grid;
@@ -68,7 +68,7 @@
     width: min(42rem, calc(100vw - 2rem));
   }
   dialog::backdrop {
-    background: rgb(8 7 6 / 0.6);
+    background: var(--scrim);
   }
   header {
     display: flex;

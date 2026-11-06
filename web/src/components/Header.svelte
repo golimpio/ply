@@ -52,35 +52,36 @@
   .bar {
     position: fixed;
     inset: 0 0 auto;
-    z-index: 20;
+    z-index: var(--z-bar);
     height: calc(var(--bar-h) + env(safe-area-inset-top));
     display: flex;
     align-items: center;
     gap: 1.25rem;
     padding: env(safe-area-inset-top) var(--gutter) 0;
-    background: linear-gradient(to bottom, rgb(16 14 12 / 0.7), transparent);
+    background: linear-gradient(to bottom, var(--surface-bar-fade), transparent);
     transition:
-      background 0.25s,
-      box-shadow 0.25s;
+      background var(--motion-bar),
+      box-shadow var(--motion-bar);
   }
   .bar.scrolled {
-    background: rgb(16 14 12 / 0.78);
-    backdrop-filter: saturate(1.4) blur(18px);
-    -webkit-backdrop-filter: saturate(1.4) blur(18px);
-    box-shadow: 0 1px 0 rgb(255 255 255 / 0.06);
+    background: var(--surface-bar);
+    /* Unprefixed only: the build adds -webkit- itself, and drops this one when both are written. */
+    backdrop-filter: var(--blur-bar);
+    box-shadow: var(--shadow-bar);
   }
   .brand {
-    font-weight: 850;
-    font-size: 1.45rem;
-    letter-spacing: -0.04em;
+    font-family: var(--font-display);
+    font-weight: var(--fw-black);
+    font-size: var(--fs-3xl);
+    letter-spacing: var(--tracking-brand);
   }
   nav {
     display: flex;
     gap: 1.1rem;
   }
   nav a {
-    color: var(--muted);
-    font-weight: 550;
+    color: var(--text-muted);
+    font-weight: var(--fw-medium-2);
     padding: 0.35rem 0;
     border-bottom: 2px solid transparent;
   }
@@ -95,8 +96,8 @@
     flex: 1;
   }
   .status {
-    color: var(--muted);
-    font-size: 0.85rem;
+    color: var(--text-muted);
+    font-size: var(--fs-xs-3);
   }
   .search {
     display: inline-flex;
@@ -105,11 +106,11 @@
     min-height: 2.5rem;
     padding: 0 0.6rem 0 0.85rem;
     font: inherit;
-    font-size: 0.9rem;
-    color: var(--muted);
-    background: rgb(255 255 255 / 0.07);
-    border: 1px solid rgb(255 255 255 / 0.1);
-    border-radius: 999px;
+    font-size: var(--fs-sm-3);
+    color: var(--text-muted);
+    background: var(--fill-subtle);
+    border: 1px solid var(--line-overlay);
+    border-radius: var(--radius-pill);
     cursor: pointer;
   }
   .search:hover {
@@ -121,16 +122,16 @@
   }
   kbd {
     font: inherit;
-    font-size: 0.75rem;
+    font-size: var(--fs-2xs-2);
     padding: 0.05rem 0.4rem;
-    border: 1px solid rgb(255 255 255 / 0.14);
-    border-radius: 5px;
+    border: 1px solid var(--line-quiet);
+    border-radius: var(--radius-kbd);
   }
   .spin {
     display: inline-flex;
   }
   .spin.on {
-    animation: turn 1s linear infinite;
+    animation: turn var(--motion-spin-slow) var(--ease-linear) infinite;
   }
   @keyframes turn {
     to {

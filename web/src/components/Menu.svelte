@@ -82,18 +82,18 @@
   }
   .list {
     position: absolute;
-    z-index: 20;
+    z-index: var(--z-bar);
     top: calc(100% + 0.4rem);
     left: 0;
     min-width: 13rem;
     padding: 0.35rem;
     display: grid;
-    background: rgb(26 23 20 / 0.96);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border: 1px solid rgb(255 255 255 / 0.1);
+    background: var(--surface-menu);
+    /* Unprefixed only: the build adds -webkit- itself, and drops this one when both are written. */
+    backdrop-filter: var(--blur-menu);
+    border: 1px solid var(--line-overlay);
     border-radius: var(--radius);
-    box-shadow: 0 20px 50px rgb(0 0 0 / 0.5);
+    box-shadow: var(--shadow-menu);
   }
   [role='menuitem'] {
     padding: 0.6rem 0.8rem;
@@ -102,12 +102,12 @@
     color: var(--text);
     background: transparent;
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--radius-item);
     cursor: pointer;
   }
   [role='menuitem']:hover,
   [role='menuitem']:focus-visible {
-    background: rgb(255 255 255 / 0.08);
+    background: var(--fill);
     outline: none;
   }
 </style>

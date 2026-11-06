@@ -145,14 +145,14 @@
     position: fixed;
     inset: 0 0 auto;
     height: 90vh;
-    z-index: -1;
+    z-index: var(--z-under);
     pointer-events: none;
     background: radial-gradient(120% 70% at 30% 0%, var(--tint), transparent 70%);
-    opacity: 0.12;
-    transition: opacity 0.8s var(--ease);
+    opacity: var(--light-dim);
+    transition: opacity var(--motion-light) var(--ease);
   }
   :global(html[data-lit]) .light {
-    opacity: 0.3;
+    opacity: var(--light-lit);
   }
   /* The player page has no header bar above it. */
   .play-page {

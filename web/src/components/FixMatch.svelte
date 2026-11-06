@@ -165,6 +165,7 @@
     <label class="q">
       <span class="sr-only">{hint}</span>
       <input
+        class="text-field"
         bind:this={input}
         bind:value={query}
         type="search"
@@ -175,7 +176,7 @@
     </label>
     <label class="y">
       <span class="sr-only">Year</span>
-      <input bind:value={year} inputmode="numeric" maxlength="4" placeholder="Year" />
+      <input class="text-field" bind:value={year} inputmode="numeric" maxlength="4" placeholder="Year" />
     </label>
     <button class="btn" disabled={busy || !query.trim() || !!pasted}>Search</button>
   </form>
@@ -254,17 +255,7 @@
   }
   input {
     width: 100%;
-    min-height: 2.5rem;
     padding: 0.5rem 0.85rem;
-    font: inherit;
-    color: var(--text);
-    background: var(--bg);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-  }
-  input:focus-visible {
-    border-color: var(--text);
-    outline: none;
   }
   .pasted {
     display: flex;
@@ -273,12 +264,12 @@
     gap: 1rem;
     margin-top: 1rem;
     padding: 0.75rem 0.9rem;
-    background: var(--bg-2);
+    background: var(--surface-raised);
     border-radius: var(--radius);
   }
   .pasted p {
     margin: 0;
-    font-weight: 600;
+    font-weight: var(--fw-semibold);
   }
   .error {
     margin: 1rem 0 0;
@@ -309,20 +300,20 @@
   }
   .result:hover:not(:disabled),
   .result:focus-visible {
-    background: rgb(255 255 255 / 0.07);
+    background: var(--fill-subtle);
   }
   .poster {
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     overflow: hidden;
   }
   .poster :global(.tile) {
-    font-size: 0.8rem;
+    font-size: var(--fs-xs);
   }
   .text {
     min-width: 0;
   }
   .title {
-    font-weight: 650;
+    font-weight: var(--fw-semibold-2);
   }
   .title .badge {
     margin-left: 0.5rem;
@@ -330,17 +321,17 @@
   }
   .year {
     margin-left: 0.5rem;
-    color: var(--muted);
-    font-weight: 500;
+    color: var(--text-muted);
+    font-weight: var(--fw-medium);
     font-variant-numeric: tabular-nums;
   }
   .orig {
-    font-size: 0.85rem;
+    font-size: var(--fs-xs-3);
   }
   .overview {
     margin: 0.2rem 0 0;
-    color: var(--muted);
-    font-size: 0.875rem;
+    color: var(--text-muted);
+    font-size: var(--fs-sm);
     display: -webkit-box;
     -webkit-line-clamp: 2;
     line-clamp: 2;
@@ -352,7 +343,7 @@
   }
   .by-id {
     margin: 0.75rem 0.5rem 0;
-    font-size: 0.9rem;
+    font-size: var(--fs-sm-3);
   }
   .link-btn {
     padding: 0;

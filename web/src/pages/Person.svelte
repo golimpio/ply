@@ -79,7 +79,7 @@
         <div class="skeleton sk-line short"></div>
       </div>
     </div>
-    <div class="posters">
+    <div class="poster-grid">
       {#each Array(6) as _, i (i)}<div class="skeleton sk-card"></div>{/each}
     </div>
   </div>
@@ -115,7 +115,7 @@
     {#each sections as section (section.group)}
       <section class="group" aria-labelledby="group-{section.group}">
         <h3 id="group-{section.group}">{section.group}<span class="n">{section.entries.length}</span></h3>
-        <div class={wide ? 'grid' : 'posters'}>
+        <div class={wide ? 'grid' : 'poster-grid'}>
           {#each section.entries as { card, detail: role } (card.id)}
             <MediaCard
               shape={wide ? 'wide' : 'poster'}
@@ -146,10 +146,10 @@
     width: 12rem;
     border-radius: var(--radius);
     overflow: hidden;
-    box-shadow: 0 0 0 1px rgb(255 255 255 / 0.06);
+    box-shadow: var(--ring-hairline);
   }
   .portrait :global(.tile) {
-    font-size: 2.2rem;
+    font-size: var(--fs-4xl);
   }
   .who {
     min-width: 0;
@@ -167,7 +167,7 @@
   .bio p {
     margin: 0;
     max-width: 65ch;
-    line-height: 1.6;
+    line-height: var(--lh-relaxed);
     white-space: pre-line;
   }
   .bio p.clamped {
@@ -180,7 +180,7 @@
   .more {
     padding: 0;
     font: inherit;
-    font-weight: 650;
+    font-weight: var(--fw-semibold-2);
     background: none;
     border: 0;
     cursor: pointer;
@@ -193,21 +193,15 @@
   }
   h3 {
     margin-bottom: 1rem;
-    font-size: 1.05rem;
-    font-weight: 650;
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-semibold-2);
   }
   .n {
     margin-left: 0.6rem;
-    font-weight: 400;
-    color: var(--muted);
+    font-weight: var(--fw-regular);
+    color: var(--text-muted);
     font-variant-numeric: tabular-nums;
   }
-  .posters {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(170px, 100%), 1fr));
-    gap: 1.75rem 1.25rem;
-  }
-
   .sk-portrait {
     aspect-ratio: 2 / 3;
   }
@@ -222,9 +216,6 @@
   .sk-line.short {
     width: 60%;
   }
-  .sk-card {
-    aspect-ratio: 2 / 3;
-  }
 
   @media (max-width: 700px) {
     .head {
@@ -237,7 +228,8 @@
     .who {
       width: 100%;
     }
-    .posters {
+    /* As the shared .poster-grid below 600 px, from 700 px here (the head stacks there too). */
+    .poster-grid {
       grid-template-columns: repeat(auto-fill, minmax(min(140px, 100%), 1fr));
       gap: 1.25rem 0.75rem;
     }
