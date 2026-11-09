@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"testing"
 
 	"ply/internal/art"
 	"ply/internal/probe"
+	"ply/internal/store"
 )
 
 // cardEnv is the metadata env with artwork, in which the film "Movie (2020)", matched to The Matrix,
@@ -76,19 +78,21 @@ func TestItemCardHasExactlyTheFields(t *testing.T) {
 	if full == nil {
 		t.Fatalf("no card for the film; have %v", raw)
 	}
-	wantKeys(t, "the card of a film that has everything", full, "id", "kind", "title", "sortTitle", "year", "titleId", "addedAt", "poster", "art",
-		"rating", "watched", "progress", "durationSec", "width", "height", "hdr", "genres", "matchState", "needsReview")
-	wantKeys(t, "its art", full["art"], "color")
+	wantKeys(t, "the card of a film that has everything", full, "id", "kind", "title", "sortTitle", "year", "titleId", "addedAt", "poster", "backdrop", "art",
+		"rating", "watched", "progress", "durationSec", "container", "width", "height", "hdr", "genres", "matchState", "needsReview")
+	wantKeys(t, "its art", full["art"], "thumb", "color")
 	wantKeys(t, "its rating", full["rating"], "source", "value", "scale", "score100")
 	wantKeys(t, "its progress", full["progress"], "positionSec", "watched")
 
-	// The film with nothing: no title, never started, no picture with a colour. Only what is always there.
+	// The film with nothing: no title, never started, no picture with a colour. Only what is always there
+	// (its art is the link to a frame grab that is not made yet: no colour).
 	bare := rows[m.multi]
 	if bare == nil {
 		t.Fatalf("no card for the other film; have %v", raw)
 	}
-	wantKeys(t, "the card of a film with nothing", bare, "id", "kind", "title", "sortTitle", "year", "addedAt", "rating", "watched", "progress",
-		"durationSec", "width", "height", "matchState", "needsReview")
+	wantKeys(t, "the card of a film with nothing", bare, "id", "kind", "title", "sortTitle", "year", "addedAt", "art", "rating", "watched", "progress",
+		"durationSec", "container", "width", "height", "matchState", "needsReview")
+	wantKeys(t, "its art", bare["art"], "thumb")
 	if bare["rating"] != nil || bare["progress"] != nil {
 		t.Errorf("rating %v and progress %v of a film with neither: want null", bare["rating"], bare["progress"])
 	}
@@ -109,6 +113,7 @@ func TestItemCardHasExactlyTheFields(t *testing.T) {
 		c := cards[id]
 		if c.Kind != it.Kind || c.Title != it.Title || c.SortTitle != it.SortTitle || c.AddedAt != it.AddedAt || c.Poster != it.Poster ||
 			c.Watched != it.WatchState.Watched || c.DurationSec != it.DurationSec || c.Width != it.Width || c.Height != it.Height ||
+			c.Backdrop != it.Backdrop || c.Container != it.Container ||
 			c.HDR != it.HDR || c.MatchState != it.MatchState || c.NeedsReview != it.NeedsReview ||
 			!slices.Equal(c.Genres, it.Genres) || (c.Year == nil) != (it.Year == nil) || (c.TitleID == nil) != (it.TitleID == nil) {
 			t.Errorf("card %+v\nis not the row %+v", c, it)
@@ -120,18 +125,161 @@ func TestItemCardHasExactlyTheFields(t *testing.T) {
 			t.Errorf("card %d: progress %+v, row %+v", id, c.Progress, it.Progress)
 		}
 		if (c.Rating == nil) != (it.Rating == nil) || (c.Rating != nil &&
-			*c.Rating != CardRating{Source: it.Rating.Source, Value: it.Rating.Value, Scale: it.Rating.Scale, Score100: it.Rating.Score100}) {
+			*c.Rating != CardRating{Source: it.Rating.Source, Value: it.Rating.Value, Scale: it.Rating.Scale, Score100: it.Rating.Score100, State: it.Rating.State}) {
 			t.Errorf("card %d: rating %+v, row %+v", id, c.Rating, it.Rating)
 		}
-		if wantColour := it.Art != nil && it.Art.Color != ""; (c.Art != nil) != wantColour || (wantColour && c.Art.Color != it.Art.Color) {
-			t.Errorf("card %d: art %+v, row's colour %+v", id, c.Art, it.Art)
+		if (c.Art == nil) != (it.Art == nil) || (c.Art != nil && *c.Art != CardArt{Thumb: it.Art.Thumb, Color: it.Art.Color}) {
+			t.Errorf("card %d: art %+v, row's art %+v", id, c.Art, it.Art)
 		}
 	}
 	// And the film that has everything has what it should (a control for the loop above comparing nothing).
 	c := cards[m.mp4]
-	if c.SortTitle != "Matrix, The" || c.HDR != "hdr10" || c.Width != 3840 || c.Art == nil || c.Art.Color == "" || c.Rating == nil || c.Rating.Source != "tmdb" ||
+	if c.SortTitle != "Matrix, The" || c.HDR != "hdr10" || c.Width != 3840 || c.Art == nil || c.Art.Color == "" || c.Art.Thumb == "" || c.Backdrop == "" || c.Container != "mp4" ||
+		c.Rating == nil || c.Rating.Source != "tmdb" ||
 		c.Progress == nil || c.Progress.PositionSec != 100 || !slices.Equal(c.Genres, []string{"Action", "Science Fiction"}) || c.TitleID == nil || *c.TitleID != m.matrixTitle {
 		t.Errorf("the card of the film with everything: %+v", c)
+	}
+}
+
+// wantObjectOf checks an object of a card (its art, its rating) against the row's: both null, or each of
+// the fields in keep there in both or in neither, with the same value, and no other field on the card.
+func wantObjectOf(t *testing.T, what string, card, row any, keep ...string) {
+	t.Helper()
+	if card == nil || row == nil {
+		if card != nil || row != nil {
+			t.Errorf("%s: the card has %v, the row %v: one is null and the other is not", what, card, row)
+		}
+		return
+	}
+	c, r := card.(map[string]any), row.(map[string]any)
+	for _, k := range keep {
+		cv, inCard := c[k]
+		rv, inRow := r[k]
+		if inCard != inRow || !reflect.DeepEqual(cv, rv) {
+			t.Errorf("%s.%s: the card has %v (there: %v), the row %v (there: %v)", what, k, cv, inCard, rv, inRow)
+		}
+	}
+	for k := range c {
+		if !slices.Contains(keep, k) {
+			t.Errorf("%s: the card has the field %q, which it should not", what, k)
+		}
+	}
+}
+
+// The frame grab (art.thumb, with the ?v=<mtime> of its link), the TMDB backdrop, the container and
+// the state of the rating are the full row's, field for field and omitted when the row omits them.
+// Four films: the one with all of them; one with a frame grab to come, a rating that is verified hot
+// and no backdrop; one that has no more than a frame grab (m.multi); and one with none (no video
+// stream, so no art; no container; no title).
+func TestItemCardFieldsAreTheFullRows(t *testing.T) {
+	m := cardEnv(t)
+	ctx := context.Background()
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := fetchedAt.Unix()
+
+	// The Matrix is certified on Rotten Tomatoes' critics, which is its card's rating now (the first there is).
+	must(m.store.ReplaceMDBListRatings(ctx, m.matrixTitle, []store.Rating{
+		{Source: store.RatingRTCritics, Value: 94, Scale: 100, State: store.StateCertified, URL: "https://www.rottentomatoes.com/m/matrix"}}, now))
+
+	add := func(name, container string, streams []probe.Stream) int64 {
+		id, err := m.store.UpsertItem(ctx, &store.Item{Kind: store.KindMovie, Title: name, Year: 2001, Path: "/media/" + name + ".mkv", Root: "/media",
+			Size: 1, MTime: 1_700_000_000_123_456_789, Container: container}, streams)
+		must(err)
+		return id
+	}
+	hot := add("Hot", "matroska,webm", streamsH264())
+	hotTitle, err := m.store.UpsertTitle(ctx, &store.TitleInput{Title: store.Title{Kind: store.KindMovie, Title: "Hot", Year: 2001, Source: store.SourceNFO}})
+	must(err)
+	must(m.store.SetItemMatch(ctx, hot, store.Match{TitleID: hotTitle, State: store.MatchMatched, Score: 1}))
+	must(m.store.ReplaceMDBListRatings(ctx, hotTitle, []store.Rating{
+		{Source: store.RatingRTAudience, Value: 97, Scale: 100, State: store.StateVerifiedHot, URL: "https://www.rottentomatoes.com/m/hot"}}, now))
+	bare := add("Bare", "", nil)
+
+	rows := func(url string) map[int64]map[string]any {
+		t.Helper()
+		out := map[int64]map[string]any{}
+		for _, r := range decode[[]map[string]any](t, m.get(url)) {
+			out[int64(r["id"].(float64))] = r
+		}
+		return out
+	}
+	cards, fulls := rows("/api/items?kind=movie&fields=card"), rows("/api/items?kind=movie")
+	for _, id := range []int64{m.mp4, m.multi, hot, bare} { // a control for the loop below comparing nothing
+		if cards[id] == nil || fulls[id] == nil {
+			t.Fatalf("film %d: card %v, row %v", id, cards[id], fulls[id])
+		}
+	}
+
+	for id, row := range fulls {
+		card := cards[id]
+		for _, k := range []string{"container", "backdrop", "art", "rating"} { // art and rating are null when there is none, not absent
+			cv, inCard := card[k]
+			rv, inRow := row[k]
+			if inCard != inRow || (k == "container" || k == "backdrop") && cv != rv {
+				t.Errorf("film %d, %s: the card has %v (there: %v), the row %v (there: %v)", id, k, cv, inCard, rv, inRow)
+			}
+		}
+		wantObjectOf(t, fmt.Sprintf("film %d art", id), card["art"], row["art"], "thumb", "color")
+		wantObjectOf(t, fmt.Sprintf("film %d rating", id), card["rating"], row["rating"], "source", "value", "scale", "score100", "state")
+	}
+
+	// And the controls: what each of the four has.
+	at := func(v any, keys ...string) any {
+		for _, k := range keys {
+			obj, _ := v.(map[string]any)
+			v = obj[k]
+		}
+		return v
+	}
+	thumb := func(id int64) string {
+		e, err := m.store.GetEntry(ctx, id)
+		must(err)
+		return fmt.Sprintf("/api/items/%d/art/thumb?v=%d", id, e.MTime)
+	}
+	for _, tc := range []struct {
+		name                       string
+		id                         int64
+		colour, backdrop, nullArt  bool
+		container, state, ratingBy string
+	}{
+		{"the film with everything", m.mp4, true, true, false, "mp4", "certified", "rt_critics"},
+		{"the verified hot one", hot, false, false, false, "matroska,webm", "verified_hot", "rt_audience"},
+		{"the one with a frame grab and no more", m.multi, false, false, false, "mp4", "", ""},
+		{"the one with none", bare, false, false, true, "", "", ""},
+	} {
+		c := cards[tc.id]
+		if _, there := c["container"]; !there || c["container"] != tc.container {
+			t.Errorf("%s: container %v (there: %v), want %q, always there", tc.name, c["container"], there, tc.container)
+		}
+		if _, there := c["backdrop"]; there != tc.backdrop || (tc.backdrop && c["backdrop"] == "") {
+			t.Errorf("%s: backdrop %v (there: %v), want there: %v", tc.name, c["backdrop"], there, tc.backdrop)
+		}
+		if tc.nullArt {
+			if v, there := c["art"]; !there || v != nil {
+				t.Errorf("%s: art %v (there: %v), want null", tc.name, v, there)
+			}
+		} else {
+			if got := at(c, "art", "thumb"); got != thumb(tc.id) {
+				t.Errorf("%s: art.thumb %v, want %q", tc.name, got, thumb(tc.id))
+			}
+			if _, there := at(c, "art").(map[string]any)["color"]; there != tc.colour {
+				t.Errorf("%s: art.color there: %v, want %v", tc.name, there, tc.colour)
+			}
+		}
+		if tc.ratingBy == "" {
+			if v, there := c["rating"]; !there || v != nil {
+				t.Errorf("%s: rating %v (there: %v), want null", tc.name, v, there)
+			}
+			continue
+		}
+		if at(c, "rating", "source") != tc.ratingBy || at(c, "rating", "state") != tc.state {
+			t.Errorf("%s: rating %v, want %s in the state %q", tc.name, c["rating"], tc.ratingBy, tc.state)
+		}
 	}
 }
 
@@ -156,7 +304,7 @@ func TestItemCardListIsTheFullListInAnotherShape(t *testing.T) {
 	if q := "&minRating=99"; len(decode[[]ItemCard](t, m.get("/api/items?kind=movie&fields=card"+q))) != 0 {
 		t.Error("control: a rating of 99 leaves films")
 	}
-	if full, card := m.get("/api/items?kind=movie").Body.Len(), m.get("/api/items?kind=movie&fields=card").Body.Len(); card*100 > full*65 { // two films with little in them; 5,000 real ones are a third (see TestListPayload)
+	if full, card := m.get("/api/items?kind=movie").Body.Len(), m.get("/api/items?kind=movie&fields=card").Body.Len(); card*100 > full*75 { // two films with little in them; 5,000 real ones are two thirds (see TestListPayload)
 		t.Errorf("a card list is %d bytes, the full one %d: not lean", card, full)
 	}
 }

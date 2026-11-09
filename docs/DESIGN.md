@@ -372,10 +372,14 @@ the disk.
   `/api/collections/{id}`, `/api/shows/{name}`, `/api/items/{id}`.
 - **`?fields=card`** on `GET /api/items?kind=movie` (movies only: any other `kind`, or none, is 400, as is any other value
   of `fields`) answers `[ItemCard]` with exactly `{id, kind, title, sortTitle, year?, titleId?, addedAt, poster?,
-  art?: {color}, rating: {source, value, scale, score100}|null, watched, progress: {positionSec, watched}|null,
-  durationSec, width, height, hdr?, genres?: [name], matchState, needsReview}`: the same rows in the same order, the
-  `sort` and `minRating` filters apply, a third of the bytes (308 B a row for 5,000 films against 884). Its ETag is a
-  variant of the full list's (`"<generation>.<colours>.card"`). Everything else about a film is in `GET /api/items/{id}`.
+  backdrop?, art: {thumb, color?}|null, rating: {source, value, scale, score100, state?}|null, watched,
+  progress: {positionSec, watched}|null, durationSec, container, width, height, hdr?, genres?: [name], matchState,
+  needsReview}`, each with the name, the shape and the omitempty of the full row (`art.thumb` is its frame-grab link with
+  the `?v=<mtime>` stamp, `backdrop` its TMDB 16:9 link, `rating.state` Rotten Tomatoes' word): the same rows in the same
+  order, the `sort` and `minRating` filters apply, two thirds of the bytes (581 B a row for 5,000 films against 884, 430
+  before these four). Its ETag is a variant of the full list's (`"<generation>.<colours>.card"`); a change in the shape
+  needs no new key, because the generation starts anew on every run. Everything else about a film is in
+  `GET /api/items/{id}`.
 - **`sortTitle`.** The name a title is listed under: `titles.sort_title` ("Matrix, The": `metadata.SortTitle` moves a
   leading The, A or An to the end when it is made, and a person can write their own with `PATCH /api/titles/{id}`),
   or its title when it has none (`store.sortTitleCol`, which `GET /api/titles` is ordered by, lower-cased by SQLite:
