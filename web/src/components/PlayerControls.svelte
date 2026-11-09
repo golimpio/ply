@@ -848,24 +848,39 @@
     color: var(--tint);
   }
   .volume {
+    position: relative;
     display: flex;
     align-items: center;
   }
-  /* The slider takes its room at once and fades in: only opacity is animated. */
+  /* The slider slides open without a layout per frame over the playing film: its room is kept, as
+     the clock's margin, with the clock moved back over it while it is shut. Opening wipes the slider
+     in (clip-path) as the clock slides aside (transform); the bar around them never moves. */
   .volume input {
-    width: 0;
+    position: absolute;
+    left: 100%;
+    width: var(--volume-w);
+    margin: 0;
+    clip-path: inset(0 100% 0 0);
     opacity: 0;
-    transition: opacity var(--motion-toggle);
+    transition:
+      clip-path var(--motion-toggle) var(--ease),
+      opacity var(--motion-toggle) var(--ease);
     accent-color: var(--text);
   }
-  .volume:hover input,
-  .volume:focus-within input {
-    width: 5.5rem;
+  /* Open under the pointer, with keyboard focus, or while the slider has the focus (a mouse click on
+     the mute button leaves it focused, but not :focus-visible: that doesn't hold it open). */
+  .volume:is(:hover, :has(:focus-visible, input:focus)) input {
+    clip-path: inset(calc(-1 * (var(--focus-offset) + var(--focus-ring-w)))); /* the focus ring shows */
     opacity: 1;
   }
   .time {
-    margin-left: 0.5rem;
+    margin-left: calc(0.5rem + var(--volume-w));
     font-size: var(--fs-sm-3);
+    transform: translateX(calc(-1 * var(--volume-w)));
+    transition: transform var(--motion-toggle) var(--ease);
+  }
+  .volume:is(:hover, :has(:focus-visible, input:focus)) ~ .time {
+    transform: none;
   }
   .menu-anchor {
     position: relative;
@@ -911,6 +926,17 @@
     margin-top: -0.225rem;
     border-radius: var(--radius-round);
     background: var(--tint);
+  }
+  /* A narrow window has no room to keep for the slider (the bar would wrap): mute stays, and the
+     arrow keys still set the volume. */
+  @media (max-width: 700px) {
+    .volume input {
+      display: none;
+    }
+    .time {
+      margin-left: 0.5rem;
+      transform: none;
+    }
   }
   @media (max-width: 600px) {
     /* Phones: double-tap skips 10 s and PiP is a system gesture; Full screen,

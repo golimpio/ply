@@ -273,7 +273,8 @@
   --ring-focus-inset: inset 0 0 0 3px var(--text);
   --text-shadow-hero: 0 2px 30px var(--black-a35);
   --drop-shadow-logo: drop-shadow(0 2px 24px var(--black-a45));
-  --focus-ring: 2px solid var(--text);
+  --focus-ring-w: 2px;
+  --focus-ring: var(--focus-ring-w) solid var(--text);
   --focus-offset: 3px;
 
   /* Radii. */
@@ -331,6 +332,7 @@
   --gutter: clamp(1rem, 4vw, 3rem);
   --gutter-player: clamp(0.75rem, 2.5vw, 1.5rem); /* the player's bars, from the window's edges */
   --bar-h: 3.5rem;
+  --volume-w: 5.5rem; /* the player's volume slider, open */
   --chip-h: 2rem; /* a rating chip */
   --chip-pad: 0.2rem 0.7rem;
   --chip-gap: 0.4rem;

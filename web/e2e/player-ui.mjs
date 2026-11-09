@@ -512,6 +512,171 @@ try {
     check('overlay: stays while keyboard focus is inside', focused && (await s.hidden()) === false);
   });
 
+  // The volume slider slides open on the mute button's hover or keyboard focus, the clock moving aside
+  // with it, and slides shut: not a jump, and with no layout while it slides (only clip-path, opacity
+  // and transform move; the bar's boxes stay put). The transitions are paused a quarter of the way
+  // (Web Animations on the CSS transitions) and the slider measured as shown: the part of it the
+  // pointer can hit. A mouse click on mute doesn't hold it open; reduced motion opens it at once.
+  // Mutants: the instant slider of 3da7639 (width 0 to 5.5rem at once, only its opacity animated); an
+  // in-flow width transition (the slide before 3da7639); :focus-within holding it open after a click.
+  const volumeState = (s) => s.page.evaluate(() => {
+    const input = document.querySelector('.volume input');
+    const r = input.getBoundingClientRect();
+    const y = r.top + r.height / 2;
+    let shown = 0;
+    for (let x = Math.ceil(r.left); x < r.right; x++) if (document.elementFromPoint(x, y) === input) shown = x + 1 - r.left;
+    const clock = document.querySelector('.controls .time').getBoundingClientRect().left;
+    // The layout around it: what a slide that moves boxes would change.
+    const w = (sel) => document.querySelector(sel).getBoundingClientRect().width;
+    const layout = [w('.controls .grow'), w('.volume'), document.querySelector('.controls .row').getBoundingClientRect().height].join(' ');
+    return { left: r.left, width: r.width, shown, clock, gap: clock - (r.left + shown), layout };
+  });
+  await scenario('volume', {}, async (s) => {
+    await s.go('#/play/1');
+    await s.ready(false);
+    await s.page.evaluate(() => document.querySelector('video').pause()); // the overlay stays up
+    const state = () => volumeState(s);
+    /** Pauses the row's running transitions at a quarter of their course; their properties. */
+    const pauseAtQuarter = () => s.page.evaluate(() => document.getAnimations()
+      .filter((a) => a instanceof CSSTransition && a.effect?.target?.closest?.('.controls .row'))
+      .map((a) => {
+        a.pause();
+        a.currentTime = a.effect.getComputedTiming().duration / 4;
+        return a.transitionProperty;
+      }));
+    const resume = () => s.page.evaluate(() => document.getAnimations().forEach((a) => a.playState === 'paused' && a.play()));
+    const COMPOSITED = new Set(['clip-path', 'opacity', 'transform']);
+    const noLayout = (props) => props.length > 0 && props.every((p) => COMPOSITED.has(p));
+    const mute = await s.page.locator('.volume button').boundingBox();
+    const onMute = () => s.page.mouse.move(mute.x + mute.width / 2, mute.y + mute.height / 2);
+    const off = () => s.page.mouse.move(700, 400);
+
+    await off();
+    await sleep(500);
+    const shut = await state();
+    check('volume: shut, none of the slider shows (control)', shut.shown === 0, JSON.stringify(shut));
+
+    await onMute();
+    const opening = await pauseAtQuarter();
+    const mid = await state();
+    await resume();
+    await sleep(500);
+    const open = await state();
+    check('volume: open, all of the slider shows (control)', open.shown > 0 && open.shown >= open.width - 2, JSON.stringify(open));
+    check('volume: the clock moves aside by the slider\'s room', Math.abs(open.clock - shut.clock - open.width) <= 4, `${shut.clock} → ${open.clock}`);
+    check('volume: opening, part way: some of the slider shows, not all', mid.shown > 2 && mid.shown < open.shown - 2,
+      `${mid.shown} of ${open.shown}; transitions ${JSON.stringify(opening)}`);
+    check('volume: opening, part way: so is the clock', mid.clock > shut.clock + 2 && mid.clock < open.clock - 2, `${shut.clock} < ${mid.clock} < ${open.clock}`);
+    check('volume: opening, the clock stays clear of the slider', mid.gap >= 0 && mid.gap <= 16, JSON.stringify(mid));
+    check('volume: opening animates only clip-path, opacity and transform', noLayout(opening), JSON.stringify(opening));
+
+    await off();
+    const closing = await pauseAtQuarter();
+    const midShut = await state();
+    await resume();
+    await sleep(500);
+    const shutAgain = await state();
+    check('volume: shutting, part way', midShut.shown > 2 && midShut.shown < open.shown - 2 && midShut.clock > shut.clock + 2 && midShut.clock < open.clock - 2, JSON.stringify(midShut));
+    check('volume: shutting animates only clip-path, opacity and transform', noLayout(closing), JSON.stringify(closing));
+    check('volume: then shut, the clock back', shutAgain.shown === 0 && Math.abs(shutAgain.clock - shut.clock) <= 1, JSON.stringify(shutAgain));
+    const layouts = [shut, mid, open, midShut, shutAgain].map((x) => x.layout);
+    check('volume: the bar\'s layout is the same shut, sliding and open', layouts.every((l) => l === layouts[0]), JSON.stringify(layouts));
+
+    // A mouse click on mute leaves the button focused, but doesn't hold the slider open.
+    await onMute();
+    await s.page.mouse.down();
+    await s.page.mouse.up();
+    const clicked = await s.page.evaluate(() => document.activeElement?.closest('.volume') !== null);
+    await off();
+    await sleep(500);
+    check('volume: after a click on mute, the pointer gone, it shuts', (await state()).shown === 0, `mute focused: ${clicked}`);
+    await onMute();
+    await s.page.mouse.down();
+    await s.page.mouse.up(); // unmuted again
+    await off();
+
+    // The keyboard: Tab onto mute opens it; so does focus on the slider, however it got there.
+    await s.page.focus('button[aria-label="Forward 10 seconds"]');
+    await s.page.keyboard.press('Tab');
+    await sleep(500);
+    const tabbed = await state();
+    const onMuteKey = await s.page.evaluate(() => document.activeElement?.matches('.volume button:focus-visible'));
+    check('volume: Tab onto mute opens it', onMuteKey && tabbed.shown >= open.width - 2 && Math.abs(tabbed.clock - open.clock) <= 1, JSON.stringify({ onMuteKey, ...tabbed }));
+    await s.page.focus('.volume input');
+    await sleep(500);
+    const focused = await state();
+    check('volume: focus on the slider opens it', focused.shown >= open.width - 2 && Math.abs(focused.clock - open.clock) <= 1, JSON.stringify(focused));
+    await s.page.evaluate(() => document.activeElement.blur());
+    await sleep(500);
+    check('volume: shut once it loses focus (control)', (await state()).shown === 0);
+
+    // Reduced motion: open at once (well inside the 200 ms of a slide).
+    await s.page.emulateMedia({ reducedMotion: 'reduce' });
+    await onMute();
+    await sleep(50);
+    const reduced = await state();
+    check('volume: with reduced motion it opens at once', reduced.shown >= open.width - 2 && Math.abs(reduced.clock - open.clock) <= 1, JSON.stringify(reduced));
+  });
+
+  // Every control there (subtitles, two audio tracks, PiP) and an h:mm:ss clock: the room kept for the
+  // slider never wraps the bar. Just over 700 px it fits with room to spare for Safari's AirPlay
+  // button; at 700 px and below the slider goes (mute stays) and its room with it.
+  // Mutant: the 700 px rule dropped (the bar wraps at 620 px).
+  const everyControl = { item: { subtitles: [{ key: '3', language: 'eng', format: 'dvd_subtitle', image: true, default: false }] } };
+  const atAnHour = (s) => s.page.evaluate(async () => {
+    const v = document.querySelector('video');
+    v.pause();
+    v.currentTime = 3600;
+    await new Promise((r) => v.addEventListener('seeked', r, { once: true }));
+  });
+  const bar = (s) => s.page.evaluate(() => {
+    const row = document.querySelector('.controls .row');
+    const ctl = document.querySelector('.controls .row .ctl').getBoundingClientRect().height;
+    const shown = [...row.querySelectorAll('button')].filter((b) => b.offsetParent !== null).map((b) => b.getAttribute('aria-label'));
+    return {
+      oneLine: row.getBoundingClientRect().height <= ctl + 1, shown, clock: row.querySelector('.time').textContent.trim(),
+      slider: getComputedStyle(row.querySelector('.volume input')).display, margin: getComputedStyle(row.querySelector('.time')).marginLeft,
+      spare: row.querySelector('.grow').getBoundingClientRect().width,
+      airplay: row.querySelector('.ctl').getBoundingClientRect().width + parseFloat(getComputedStyle(row).columnGap),
+    };
+  });
+  for (const w of [701, 700, 620]) {
+    await scenario(`volume: ${w} px wide`, { width: w, height: 800, ...everyControl }, async (s) => {
+      await s.go('#/play/1');
+      await s.ready(false);
+      await atAnHour(s);
+      await s.page.mouse.move(300, 300);
+      await sleep(300);
+      const b = await bar(s);
+      const all = ['Subtitles', 'Audio track', 'Picture in picture', 'Full screen', 'Mute'].every((l) => b.shown.includes(l));
+      check(`volume: ${w} px, every control and an h:mm:ss clock (control)`, all && /^1:00:00 \/ 2:00:00$/.test(b.clock), JSON.stringify(b));
+      check(`volume: ${w} px, the bar is one line`, b.oneLine, JSON.stringify(b));
+      if (w > 700) {
+        check(`volume: ${w} px, the slider is there`, b.slider !== 'none', JSON.stringify(b));
+        check(`volume: ${w} px, with room left for an AirPlay button`, b.spare >= b.airplay, JSON.stringify(b));
+      } else {
+        check(`volume: ${w} px, no slider and no room kept for it`, b.slider === 'none' && b.margin === '8px', JSON.stringify(b));
+      }
+    });
+  }
+  await scenario('volume: phone', { width: 500, height: 900 }, async (s) => {
+    await s.go('#/play/1');
+    await s.ready(false);
+    await s.page.mouse.move(250, 400);
+    const r = await s.page.evaluate(() => {
+      const play = document.querySelector('.controls .row .ctl.big').getBoundingClientRect();
+      const clock = document.querySelector('.controls .time').getBoundingClientRect();
+      const time = getComputedStyle(document.querySelector('.controls .time'));
+      return {
+        volume: getComputedStyle(document.querySelector('.volume')).display, gap: clock.left - play.right, top: clock.top - play.top, clock: clock.width,
+        margin: time.marginLeft, transform: time.transform,
+      };
+    });
+    check('volume: on a phone there is no slider', r.volume === 'none', JSON.stringify(r));
+    check('volume: and the clock sits just after the play button', r.clock > 0 && r.gap > 0 && r.gap <= 16 && Math.abs(r.top) < 40, JSON.stringify(r));
+    check('volume: the room kept for the slider is given back (margin 0.5rem, no shift)', r.margin === '8px' && r.transform === 'none', JSON.stringify(r));
+  });
+
   // The cost: hidden and idle, nothing runs (no frame loop, no DOM change, hardly a timer); a
   // mousemove reads no layout and sets no timer of its own.
   // Mutants: a timer per mousemove (clearTimeout + setTimeout in poke); the scrubber's rect read on
