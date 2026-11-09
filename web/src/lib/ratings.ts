@@ -1,7 +1,10 @@
 // What the pages show of the M10 ratings (docs/M10-RATINGS.md): the words and numbers of a rating
 // chip, the order the chips go in, and how the lists sort and filter by rating. The server gives
 // every entry a score100 (0 to 100), so nothing here needs to know a source's scale to compare.
-import type { RatingEntry, RatingSource } from './api';
+import type { CardRating, RatingEntry, RatingSource } from './api';
+
+/** A rating as a full row or a movie card has it: a card's has no link, votes or fetch time. */
+export type RatingLike = CardRating & Partial<Pick<RatingEntry, 'votes' | 'url' | 'fetchedAt'>>;
 
 /** The server's fixed order (title detail `ratings`), and the order of the settings list. */
 export const RATING_SOURCES: RatingSource[] = ['imdb', 'rt_critics', 'rt_audience', 'metacritic', 'letterboxd', 'trakt', 'tmdb'];
@@ -107,7 +110,7 @@ const STATE_WORDS: Record<string, string> = {
  * a chip says aloud. It holds what the chip shows, in the same order (WCAG 2.5.3, label in name):
  * IMDb's chip shows its votes right after the number, so its scale is not put between them.
  */
-export function ratingAriaLabel(e: RatingEntry): string {
+export function ratingAriaLabel(e: RatingLike): string {
   const state = STATE_WORDS[tomatoState(e)];
   const votes = shortVotes(e.votes);
   const scale = e.source === 'imdb' && votes ? '' : outOf(e);
@@ -123,8 +126,8 @@ export function ratedAgo(fetchedAt: string | undefined | null, now: Date = new D
   return days === 1 ? 'rated 1 day ago' : `rated ${days} days ago`;
 }
 
-/** The tooltip of a chip: the source, the votes in full and how old the number is. */
-export function ratingTooltip(e: RatingEntry, now: Date = new Date()): string {
+/** The tooltip of a chip: the source, the votes in full and how old the number is (when known). */
+export function ratingTooltip(e: RatingLike, now: Date = new Date()): string {
   const votes = e.votes && e.votes > 0 ? `${e.votes.toLocaleString('en-US')} ${e.votes === 1 ? 'vote' : 'votes'}` : '';
   const head = [SOURCE_NAMES[e.source] ?? e.source, votes].filter(Boolean).join(', ');
   const ago = ratedAgo(e.fetchedAt, now);
@@ -135,7 +138,7 @@ export function ratingTooltip(e: RatingEntry, now: Date = new Date()): string {
  * The entries to show, in the order the settings ask for (ratingsShown). With no settings (they
  * could not be read) every entry is shown, in the order the server sent them.
  */
-export function orderShown(ratings: RatingEntry[], shown: readonly string[] | null | undefined): RatingEntry[] {
+export function orderShown<R extends Pick<RatingEntry, 'source'>>(ratings: R[], shown: readonly string[] | null | undefined): R[] {
   const valid = ratings.filter((r) => isSource(r.source));
   if (!shown) return valid;
   const bySource = new Map(valid.map((r) => [r.source, r]));
@@ -145,25 +148,29 @@ export function orderShown(ratings: RatingEntry[], shown: readonly string[] | nu
 /**
  * A title's ratings for its detail page: the detail's own list once it has come; before that (the
  * cached summary paints the page first), or from a server that has no list, the one rating the
- * card had.
+ * card had. A card's rating (no link, votes or age) may come back, so the entries are typed as
+ * either side's: full entries only when both sides are full.
  */
-export function titleRatings(
-  meta: { ratings?: RatingEntry[] | null; rating?: RatingEntry | null } | undefined | null,
-  summary: { rating?: RatingEntry | null } | undefined | null,
-): RatingEntry[] {
+export function titleRatings<M extends RatingLike, S extends RatingLike>(
+  meta: { ratings?: M[] | null; rating?: M | null } | undefined | null,
+  summary: { rating?: S | null } | undefined | null,
+): (M | S)[] {
   if (meta?.ratings) return meta.ratings;
   const one = meta?.rating ?? summary?.rating;
   return one && typeof one === 'object' ? [one] : [];
 }
 
+/** A row, card, show or credit with its one rating: the lists read only its score100. */
+type Rated = { rating?: Pick<RatingEntry, 'score100'> | null } | undefined | null;
+
 /** The number the lists sort by: score100, or -1 for a title with no rating (it goes last). */
-export function ratingScore(x: { rating?: RatingEntry | null } | undefined | null): number {
+export function ratingScore(x: Rated): number {
   const r = x?.rating;
   return r && typeof r === 'object' && Number.isFinite(r.score100) ? r.score100 : -1;
 }
 
 /** Whether a title passes a minimum rating (0 for any). A title with no rating passes only "any". */
-export function passesMinRating(x: { rating?: RatingEntry | null } | undefined | null, min: number): boolean {
+export function passesMinRating(x: Rated, min: number): boolean {
   return min <= 0 || ratingScore(x) >= min;
 }
 

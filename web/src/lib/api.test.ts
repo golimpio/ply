@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MovieCard } from './api';
 
 // The token lives in module state, read from localStorage once: import a fresh copy for each test.
 let m: typeof import('./api');
@@ -221,6 +222,62 @@ describe('response shapes', () => {
     await m.api.deleteSession('a/b c');
     expect((fetchFn.mock.calls[0] as unknown as FetchCall)[0]).toBe('/api/sessions/a%2Fb%20c');
     expect((fetchFn.mock.calls[0] as unknown as FetchCall)[1].method).toBe('DELETE');
+  });
+});
+
+describe('movieCards', () => {
+  // A card as the server sends one with no artwork, no rating and not started (internal/api/card.go).
+  const bare = {
+    id: 1, kind: 'movie', title: 'Heat', sortTitle: 'Heat', addedAt: 5, art: null, rating: null, watched: false, progress: null,
+    durationSec: 60, container: 'mkv', width: 1920, height: 1080, matchState: 'matched', needsReview: false,
+  } satisfies MovieCard;
+  const card = (over: Record<string, unknown> = {}) => ({ ...bare, ...over });
+  const imdb = { source: 'imdb', value: 8.3, scale: 10, score100: 83 };
+
+  /** Answers `rows` as the parsed body itself, so the test can see which objects come back unchanged. */
+  function answer(rows: unknown) {
+    const fn = vi.fn(async (_path: string, _init: RequestInit) => ({ ok: true, status: 200, json: async () => rows }) as unknown as Response);
+    vi.stubGlobal('fetch', fn);
+    return fn;
+  }
+
+  it('always asks for the card list of the movies, with a GET', async () => {
+    const fetchFn = stubFetch(json([]));
+    await m.api.movieCards();
+    const [path, init] = fetchFn.mock.calls[0] as unknown as FetchCall;
+    expect(path).toBe('/api/items?kind=movie&fields=card');
+    expect(init.method).toBe('GET');
+  });
+
+  it('turns the null Go sends for no movies into []', async () => {
+    stubFetch(json(null));
+    expect(await m.api.movieCards()).toEqual([]);
+  });
+
+  it('hands back the rows that need nothing as the very objects it was given', async () => {
+    const none = card({ id: 1 });
+    const rt = { source: 'rt_critics', value: 94, scale: 100, score100: 94, state: 'certified' };
+    const known = card({ id: 2, art: { thumb: '/api/items/2/thumb?v=7', color: '#112233' }, rating: rt, backdrop: '/b.jpg' });
+    answer([none, known]);
+    const [a, b] = await m.api.movieCards();
+    expect(a).toBe(none);
+    expect(b).toBe(known);
+    expect(b.rating).toEqual(rt);
+  });
+
+  it('makes a rating the page cannot show null, as for the full rows, and keeps the rest of the row', async () => {
+    const odd = card({ id: 3, rating: { ...imdb, source: 'myanimelist' } });
+    const junk = card({ id: 4, rating: 'imdb' });
+    answer([odd, junk]);
+    const [a, b] = await m.api.movieCards();
+    expect(a).toEqual({ ...odd, rating: null });
+    expect(b).toEqual({ ...junk, rating: null });
+    expect(odd.rating).toMatchObject({ source: 'myanimelist' }); // the server's object is not changed
+  });
+
+  it('throws the server\'s error (fields=card is only for movies)', async () => {
+    stubFetch(json({ error: 'fields=card is for kind=movie' }, 400)); // internal/api/handlers.go
+    await expect(m.api.movieCards()).rejects.toMatchObject({ name: 'ApiError', status: 400, message: 'fields=card is for kind=movie' });
   });
 });
 

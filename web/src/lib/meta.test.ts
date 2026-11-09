@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ItemSummary, MetadataStatus } from './api';
+import type { ItemSummary, MetadataStatus, MovieCard } from './api';
 import {
   airLabel,
   backdropImg,
@@ -36,6 +36,28 @@ function item(over: Partial<ItemSummary>): ItemSummary {
     width: 1920,
     height: 1080,
     addedAt: 0,
+    ...over,
+  };
+}
+
+// A movie as the card list sends it: none of a full row's other fields.
+function card(over: Partial<MovieCard>): MovieCard {
+  return {
+    id: 1,
+    kind: 'movie',
+    title: 'Film',
+    sortTitle: 'Film',
+    addedAt: 0,
+    durationSec: 6000,
+    width: 1920,
+    height: 1080,
+    container: 'mkv',
+    watched: false,
+    progress: null,
+    matchState: 'matched',
+    needsReview: false,
+    art: null,
+    rating: null,
     ...over,
   };
 }
@@ -92,6 +114,31 @@ describe('pictures', () => {
     expect(prefersPosters([{ poster: 'a' }, {}, {}])).toBe(false);
     expect(prefersPosters([{}, {}])).toBe(false);
   });
+
+  describe('of a movie card', () => {
+    it('thumb only: the wide card is the frame grab, and there is no backdrop to fall back on', () => {
+      const c = card({ art: { color: '#123456', thumb: '/api/items/1/art/thumb' } });
+      expect(wideImg(c)!.src).toContain('/api/items/1/art/thumb');
+      expect(backdropImg(c)).toBeNull();
+    });
+
+    it('backdrop only: the TMDB backdrop, at card and full-bleed sizes', () => {
+      const c = card({ backdrop: T('w1280', 'b') });
+      expect(wideImg(c)!.src).toContain('/w500/b.jpg');
+      expect(backdropImg(c)!.src).toContain('/w1280/b.jpg');
+    });
+
+    it('neither (no metadata, no artwork yet): no picture', () => {
+      expect(wideImg(card({}))).toBeNull();
+      expect(backdropImg(card({}))).toBeNull();
+      expect(wideImg(card({ art: { thumb: '' } }))).toBeNull(); // an empty link is none
+    });
+
+    it('lists of cards turn to posters as lists of rows do', () => {
+      expect(prefersPosters([card({ poster: 'a' }), card({})])).toBe(true);
+      expect(prefersPosters([card({ poster: 'a' }), card({}), card({})])).toBe(false);
+    });
+  });
 });
 
 describe('labels', () => {
@@ -108,6 +155,12 @@ describe('labels', () => {
     expect(ratingLabel({ source: 'imdb', value: 8.66, scale: 10, score100: 87, url: '', fetchedAt: at })).toBe('8.7');
     expect(ratingLabel({ source: 'rt_critics', value: 93, scale: 100, score100: 93, url: '', fetchedAt: at })).toBe('93%');
     expect(ratingLabel({ source: 'metacritic', value: 74, scale: 100, score100: 74, url: '', fetchedAt: at })).toBe('74');
+  });
+
+  it("a card's rating (no link, no fetch time) reads the same", () => {
+    expect(ratingLabel(card({ rating: { source: 'imdb', value: 8.66, scale: 10, score100: 87 } }).rating)).toBe('8.7');
+    expect(ratingLabel(card({ rating: { source: 'rt_critics', value: 93, scale: 100, score100: 93, state: 'fresh' } }).rating)).toBe('93%');
+    expect(ratingLabel(card({}).rating)).toBe('');
   });
 
   it('air dates in words, as local calendar days', () => {
@@ -181,6 +234,13 @@ describe('labels', () => {
     expect(versionLabel(item({ height: 1080, hdr: false, container: 'mp4' }))).toBe('1080p, MP4');
     expect(versionLabel(item({ height: 720, hdr: true, container: 'mkv' }))).toBe('720p HDR, MKV');
   });
+
+  it('a card says its container when the server sends one, and leaves it out when not', () => {
+    expect(versionLabel(card({ height: 2160, hdr: 'hdr10', container: 'mkv' }))).toBe('4K HDR10, MKV');
+    expect(versionLabel(card({ height: 2160, hdr: 'dv', container: '' }))).toBe('4K DV');
+    expect(versionLabel(card({ height: 1080, container: '' }))).toBe('1080p');
+    expect(versionLabel({ height: 1080, hdr: 'hlg' })).toBe('1080p HLG'); // an older server sends none at all
+  });
 });
 
 describe('crewWith', () => {
@@ -215,6 +275,13 @@ describe('onePerTitle', () => {
       item({ id: 6, titleId: 8 }),
     ];
     expect(onePerTitle(list).map((i) => i.id)).toEqual([1, 2, 4, 5, 6]);
+  });
+
+  it('works on cards, and gives cards back', () => {
+    const list = [card({ id: 1, titleId: 7 }), card({ id: 3, titleId: 7 }), card({ id: 4 })];
+    const out: MovieCard[] = onePerTitle(list);
+    expect(out.map((i) => i.id)).toEqual([1, 4]);
+    expect(out[0]).toBe(list[0]);
   });
 });
 
@@ -285,6 +352,20 @@ describe('filmPasses', () => {
     expect(passes(film({ height: 1080, watched: false, progress: { positionSec: 6000, watched: true } }), 'unwatched')).toBe(true);
     expect(passes(film({ height: 2160, progress: { positionSec: 60, watched: false } }), 'unwatched')).toBe(true);
   });
+
+  it('filters films of cards the same way', () => {
+    const is4kCard = (c: MovieCard) => c.height >= 2000;
+    const isHdrCard = (c: MovieCard) => !!c.hdr;
+    const of = (...v: Partial<MovieCard>[]) => groupByTitle(v.map((o, i) => card({ id: i + 1, titleId: 9, ...o })))[0];
+    const pass = (g: ReturnType<typeof of>, ...filters: string[]) => filmPasses(g, { is4k: is4kCard, isHdr: isHdrCard, filters });
+    const split = of({ height: 2160 }, { height: 1080, hdr: 'hdr10' });
+    expect(pass(split, '4k')).toBe(true);
+    expect(pass(split, 'hdr')).toBe(true);
+    expect(pass(split, '4k', 'hdr')).toBe(false);
+    expect(pass(of({ height: 2160, hdr: 'dv' }), '4k', 'hdr')).toBe(true);
+    expect(pass(of({ height: 2160, watched: true }), 'unwatched')).toBe(false);
+    expect(pass(of({ height: 2160, watched: false }), 'unwatched')).toBe(true);
+  });
 });
 
 describe('groupByTitle', () => {
@@ -328,5 +409,17 @@ describe('groupByTitle', () => {
     const w = item({ id: 3, titleId: 8, height: 1080, progress: { positionSec: 300, watched: true } });
     const x = item({ id: 4, titleId: 8, height: 2160 });
     expect(groupByTitle([w, x])[0].item.id).toBe(4); // watched does not count as started
+  });
+
+  it('groups cards as it groups rows, and gives the cards back', () => {
+    const a = card({ id: 1, titleId: 9, height: 1080 });
+    const b = card({ id: 2, titleId: 9, height: 2160 });
+    const c = card({ id: 3, height: 1080 }); // unmatched
+    const started = card({ id: 4, titleId: 8, height: 1080, progress: { positionSec: 300, watched: false } });
+    const sharp = card({ id: 5, titleId: 8, height: 2160 });
+    const g = groupByTitle([a, b, c, started, sharp]);
+    expect(g.map((x) => x.versions.map((v) => v.id))).toEqual([[2, 1], [3], [5, 4]]);
+    expect(g[0].item).toBe(b); // the sharpest
+    expect(g[2].item).toBe(started); // the started one
   });
 });

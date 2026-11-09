@@ -1,14 +1,15 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import type { ItemSummary } from '../lib/api';
   import type { Img } from '../lib/meta';
-  import Art from './Art.svelte';
+  import Art, { type ArtItem } from './Art.svelte';
 
   // Full-bleed backdrop with the page's headline set over its lower-left
   // corner. `tall` is for the home page; detail pages use the shorter default
   // and are the landing point of the card morph (`landing`, see lib/nav).
   // `img` replaces the item's own backdrop (a show's, a collection's). `back` keeps the top clear
-  // for the page's floating Back button when the headline is taller than the hero.
+  // for the page's floating Back button when the headline is taller than the hero. The hero only
+  // draws the picture, so a movie card will do for a first paint; the page's `children` draw the
+  // rest (logo, certification) from whatever the item has.
   let {
     item,
     img = undefined,
@@ -18,7 +19,7 @@
     back = false,
     children,
   }: {
-    item: ItemSummary | undefined;
+    item: ArtItem | undefined;
     img?: Img | null;
     label?: string;
     tall?: boolean;

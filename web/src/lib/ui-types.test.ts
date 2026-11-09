@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { setToken, type ItemSummary } from './api';
-import { artOf, artSrc, progressOf, type WithArt } from './ui-types';
+import { setToken, type ItemSummary, type MovieCard } from './api';
+import { artOf, artSrc, progressOf } from './ui-types';
 
 const base: ItemSummary = {
   id: 1,
@@ -27,14 +27,20 @@ describe('progressOf', () => {
   ])('%s', (_name, extra, want) => {
     expect(progressOf({ ...base, ...extra })).toBe(want);
   });
+
+  it('reads a movie card as it reads a row', () => {
+    const c: Pick<MovieCard, 'progress' | 'durationSec'> = { durationSec: 120, progress: { positionSec: 30, watched: false } };
+    expect(progressOf(c)).toBe(0.25);
+    expect(progressOf({ ...c, progress: null })).toBe(0);
+  });
 });
 
 describe('artOf / artSrc', () => {
-  const withArt: WithArt = { ...base, art: { thumb: '/api/items/1/art/thumb?v=5', backdrop: '/api/items/1/art/backdrop?v=5', color: '#123456' } };
+  const withArt: ItemSummary = { ...base, art: { thumb: '/api/items/1/art/thumb?v=5', backdrop: '/api/items/1/art/backdrop?v=5', color: '#123456' } };
 
   it('is absent until the server sends artwork', () => {
     expect(artOf(base)).toBeNull();
-    expect(artOf({ ...base, art: null } as WithArt)).toBeNull();
+    expect(artOf({ ...base, art: null })).toBeNull();
     expect(artOf(undefined)).toBeNull();
     expect(artSrc(base, 'thumb')).toBe('');
   });
@@ -48,5 +54,13 @@ describe('artOf / artSrc', () => {
 
     const already = { ...withArt, art: { ...withArt.art!, thumb: '/api/items/1/art/thumb?v=5&token=s3cret' } };
     expect(new URL(artSrc(already, 'thumb')).searchParams.getAll('token')).toEqual(['s3cret']);
+  });
+
+  it("a movie card's artwork: its colour and thumb, never a backdrop", () => {
+    const c: Pick<MovieCard, 'art'> = { art: { color: '#123456', thumb: '/api/items/1/art/thumb?v=5' } };
+    expect(artOf(c)?.color).toBe('#123456');
+    expect(new URL(artSrc(c, 'thumb')).pathname).toBe('/api/items/1/art/thumb');
+    expect(artSrc(c, 'backdrop')).toBe(''); // not a URL made of "undefined"
+    expect(artSrc({ art: null }, 'thumb')).toBe(''); // no artwork yet
   });
 });

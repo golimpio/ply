@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { RatingEntry, RatingSource } from './api';
+import type { CardRating, RatingEntry, RatingSource } from './api';
 import {
   linkParts,
   metacriticBand,
@@ -16,6 +16,7 @@ import {
   shortVotes,
   titleRatings,
   tomatoState,
+  type RatingLike,
 } from './ratings';
 
 const at = '2026-11-02T10:00:00Z';
@@ -27,6 +28,18 @@ const entry = (source: RatingSource, value: number, scale: number, over: Partial
   url: '',
   fetchedAt: at,
   ...over,
+});
+
+// true only when A and B are the same type (not merely assignable).
+type Same<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+
+// A rating as a movie card has it: no link, votes or fetch time, and `state` only from a newer server.
+const cardRating = (source: RatingSource, value: number, scale: number, state?: string): CardRating => ({
+  source,
+  value,
+  scale,
+  score100: Math.round((value / scale) * 100),
+  ...(state ? { state } : {}),
 });
 
 describe('shortVotes', () => {
@@ -86,6 +99,12 @@ describe('tomatoState', () => {
     expect(tomatoState(entry('rt_critics', 40, 100, { state: 'upright' }))).toBe('rotten');
     expect(tomatoState(entry('imdb', 9, 10, { state: 'fresh' }))).toBe('');
   });
+
+  it("a card's rating: the server's word when it sends one, else the 60% line", () => {
+    expect(tomatoState(cardRating('rt_critics', 97, 100, 'certified'))).toBe('certified');
+    expect(tomatoState(cardRating('rt_critics', 97, 100))).toBe('fresh');
+    expect(tomatoState(cardRating('rt_audience', 41, 100))).toBe('spilled');
+  });
 });
 
 describe('labels and tooltips', () => {
@@ -104,6 +123,14 @@ describe('labels and tooltips', () => {
     expect(ratingTooltip(entry('imdb', 8.7, 10, { votes: 1_234_567 }), now)).toBe('IMDb, 1,234,567 votes. Rated 2 days ago.');
     expect(ratingTooltip(entry('tmdb', 7.8, 10, { votes: 1 }), now)).toBe('TMDB, 1 vote. Rated 2 days ago.');
     expect(ratingTooltip(entry('metacritic', 74, 100, { fetchedAt: '' }), now)).toBe('Metacritic.');
+  });
+
+  it("a card's rating has no votes or age: its label and tooltip leave them out", () => {
+    const now = new Date('2026-11-05T09:00:00Z');
+    expect(ratingTooltip(cardRating('imdb', 8.7, 10), now)).toBe('IMDb.');
+    expect(ratingAriaLabel(cardRating('imdb', 8.7, 10))).toBe('IMDb 8.7 out of 10');
+    expect(ratingAriaLabel(cardRating('rt_critics', 97, 100, 'certified'))).toBe('Rotten Tomatoes critics 97%, certified fresh');
+    expect(ratingAriaLabel(cardRating('rt_critics', 93, 100))).toBe('Rotten Tomatoes critics 93%, fresh');
   });
 
   it('ratedAgo counts whole days', () => {
@@ -151,6 +178,32 @@ describe('titleRatings', () => {
     expect(titleRatings(undefined, { rating: null })).toEqual([]);
     expect(titleRatings(undefined, undefined)).toEqual([]);
   });
+
+  it("a card's rating stands in until the detail comes", () => {
+    const one = cardRating('imdb', 8.7, 10);
+    expect(titleRatings(undefined, { rating: one })).toEqual([one]);
+    expect(titleRatings({ ratings: [imdb, rt] }, { rating: one })).toEqual([imdb, rt]);
+    // A detail with no list (an older server) and a card: the card's entry, and it orders.
+    const mixed = titleRatings({ rating: null }, { rating: one });
+    expect(mixed).toEqual([one]);
+    expect(orderShown(mixed, ['rt_critics', 'imdb'])).toEqual([one]);
+  });
+
+  it('types the entries as either side has them (checked by npm run check)', () => {
+    const one = cardRating('imdb', 8.7, 10);
+    // Both sides full: full entries, as Ratings and orderShown take them today.
+    const full: RatingEntry[] = titleRatings({ ratings: [imdb, rt] }, { rating: imdb });
+    // A card summary with a full detail: a card's entry may come back, so not RatingEntry[]...
+    const mixed = titleRatings({ ratings: [imdb, rt] }, { rating: one }) satisfies RatingLike[];
+    // @ts-expect-error a card's entry has no url or fetchedAt
+    const notFull: RatingEntry[] = mixed;
+    // ...but each entry is still either a full one or a card's, not narrowed to the card's fields.
+    const either: Same<typeof mixed, (RatingEntry | CardRating)[]> = true;
+    const shown = orderShown(mixed, null);
+    const ordered: Same<typeof shown, typeof mixed> = true; // orderShown keeps the entries' type
+    expect([full.length, notFull.length, mixed.length]).toEqual([2, 2, 2]);
+    expect([either, ordered]).toEqual([true, true]);
+  });
 });
 
 describe('sorting and filtering by rating', () => {
@@ -170,6 +223,15 @@ describe('sorting and filtering by rating', () => {
     expect(passesMinRating({ rating: entry('imdb', 8.1, 10) }, 80)).toBe(true); // 81, not 8.1
     expect(passesMinRating({ rating: null }, 60)).toBe(false);
     expect(passesMinRating({ rating: null }, 0)).toBe(true);
+  });
+
+  it("a card's rating sorts and filters by the same score100, with or without a state", () => {
+    expect(ratingScore({ rating: cardRating('imdb', 8, 10) })).toBe(80);
+    expect(ratingScore({ rating: cardRating('rt_critics', 75, 100, 'fresh') })).toBe(75);
+    expect(ratingScore({ rating: cardRating('letterboxd', 4.5, 5) })).toBe(90);
+    expect(passesMinRating({ rating: cardRating('rt_critics', 70, 100) }, 70)).toBe(true);
+    expect(passesMinRating({ rating: cardRating('rt_critics', 70, 100, 'fresh') }, 71)).toBe(false);
+    expect(passesMinRating({ rating: cardRating('imdb', 8.1, 10) }, 80)).toBe(true);
   });
 });
 

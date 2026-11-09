@@ -8,13 +8,12 @@ import {
   type CrewMember,
   type ItemSummary,
   type MetadataStatus,
-  type RatingEntry,
   type TitleCard,
   type TitleDetail,
 } from './api';
-import { ratingValue } from './ratings';
+import { ratingValue, type RatingLike } from './ratings';
 import { href } from './router.svelte';
-import { artOf } from './ui-types';
+import { artOf, type ArtLinks } from './ui-types';
 
 /** An image to show: src, plus a srcset when the server has it in several sizes. */
 export interface Img {
@@ -51,16 +50,19 @@ export function profileImg(x: { profile?: string } | undefined | null): Img | nu
   return tmdb(x?.profile, ['w92', 'w185', 'w342'], 'w185');
 }
 
-function frameGrab(item: ItemSummary | undefined | null, kind: 'thumb' | 'backdrop'): Img | null {
-  const a = artOf(item);
-  return a?.[kind] ? { src: mediaUrl(a[kind]) } : null;
+/** What the 16:9 and full-bleed pictures read of a row: a movie card or a full row. */
+export type PictureSource = Pick<ItemSummary, 'kind' | 'still' | 'backdrop'> & { art?: ArtLinks | null };
+
+function frameGrab(item: { art?: ArtLinks | null } | undefined | null, kind: 'thumb' | 'backdrop'): Img | null {
+  const rel = artOf(item)?.[kind];
+  return rel ? { src: mediaUrl(rel) } : null;
 }
 
 /**
  * The 16:9 picture of a wide card: an episode's still, a movie's backdrop
  * (the poster's landscape sibling), else the frame grab.
  */
-export function wideImg(item: ItemSummary | undefined | null): Img | null {
+export function wideImg(item: PictureSource | undefined | null): Img | null {
   if (!item) return null;
   if (item.kind === 'episode') return tmdb(item.still, WIDE_SIZES, 'w500') ?? frameGrab(item, 'thumb');
   return tmdb(item.backdrop, WIDE_SIZES, 'w500') ?? frameGrab(item, 'thumb');
@@ -70,14 +72,14 @@ export function wideImg(item: ItemSummary | undefined | null): Img | null {
  * The full-bleed picture behind a page's headline: for an episode its still,
  * then its show's backdrop; for a movie its backdrop; else the frame grab.
  */
-export function backdropImg(item: ItemSummary | undefined | null): Img | null {
+export function backdropImg(item: PictureSource | undefined | null): Img | null {
   if (!item) return null;
   const own = item.kind === 'episode' ? tmdb(item.still, BACKDROP_SIZES, 'w1280') : null;
   return own ?? tmdb(item.backdrop, BACKDROP_SIZES, 'w1280') ?? frameGrab(item, 'backdrop');
 }
 
 /** A show's 16:9 card: its backdrop, else the frame grab of its first episode. */
-export function showWideImg(meta: { backdrop?: string } | undefined | null, cover: ItemSummary | undefined): Img | null {
+export function showWideImg(meta: { backdrop?: string } | undefined | null, cover: { art?: ArtLinks | null } | undefined): Img | null {
   return tmdb(meta?.backdrop, WIDE_SIZES, 'w500') ?? frameGrab(cover, 'thumb');
 }
 
@@ -122,7 +124,7 @@ export function airLabel(date: string, now: Date = new Date()): string {
  * "7.8" for a rating out of 10 (an episode's TMDB score); for a rating entry (M10) its number as
  * its source shows it ("8.7", "93%", "74"). '' when there is none.
  */
-export function ratingLabel(r: number | RatingEntry | undefined | null): string {
+export function ratingLabel(r: number | RatingLike | undefined | null): string {
   if (r && typeof r === 'object') return r.score100 >= 0 ? ratingValue(r) : '';
   return typeof r === 'number' && r > 0 ? (Math.round(r * 10) / 10).toFixed(1) : '';
 }
@@ -182,15 +184,18 @@ export const CREDIT_LINES: { label: string; plural: string; jobs: string[] }[] =
   { label: 'Cinematography', plural: 'Cinematography', jobs: ['Director of Photography'] },
 ];
 
+/** What grouping and the film filters read of a row: a movie card or a full row. */
+export type GroupRow = Pick<ItemSummary, 'id' | 'kind' | 'titleId' | 'height' | 'progress' | 'watched'>;
+
 /** A film and the files of it in the library (versions: 4K and 1080p, a director's cut). */
-export interface TitleGroup {
+export interface TitleGroup<T extends GroupRow = ItemSummary> {
   key: string;
   /** The version a card opens: the one being watched, else the sharpest. */
-  item: ItemSummary;
-  versions: ItemSummary[];
+  item: T;
+  versions: T[];
 }
 
-function rank(i: ItemSummary): number {
+function rank(i: GroupRow): number {
   const started = i.progress && !i.progress.watched && i.progress.positionSec > 0 ? 1 : 0;
   return started * 1e6 + (i.height || 0);
 }
@@ -200,8 +205,8 @@ function rank(i: ItemSummary): number {
  * Unmatched files stay on their own. Order follows the first file of each
  * group in items.
  */
-export function groupByTitle(items: ItemSummary[]): TitleGroup[] {
-  const groups = new Map<string, TitleGroup>();
+export function groupByTitle<T extends GroupRow>(items: T[]): TitleGroup<T>[] {
+  const groups = new Map<string, TitleGroup<T>>();
   for (const it of items) {
     const key = it.kind === 'movie' && it.titleId ? `t${it.titleId}` : `i${it.id}`;
     const g = groups.get(key);
@@ -221,15 +226,15 @@ export function groupByTitle(items: ItemSummary[]): TitleGroup[] {
  * the newest version when list is newest first, the one played last in
  * Continue. Episodes and unmatched files all stay.
  */
-export function onePerTitle(list: ItemSummary[]): ItemSummary[] {
+export function onePerTitle<T extends Pick<ItemSummary, 'kind' | 'titleId'>>(list: T[]): T[] {
   const seen = new Set<number>();
   return list.filter((i) => i.kind !== 'movie' || !i.titleId || (!seen.has(i.titleId) && !!seen.add(i.titleId)));
 }
 
 /** The Movies page's filters, applied to a whole film. */
-export interface FilmFilter {
-  is4k: (i: ItemSummary) => boolean;
-  isHdr: (i: ItemSummary) => boolean;
+export interface FilmFilter<T extends GroupRow = ItemSummary> {
+  is4k: (i: T) => boolean;
+  isHdr: (i: T) => boolean;
   filters: string[];
 }
 
@@ -239,7 +244,7 @@ export interface FilmFilter {
  * an item's `watched` is its film's, across all its versions (a film seen in 1080p that also has a
  * 4K file is a watched film).
  */
-export function filmPasses(g: TitleGroup, f: FilmFilter): boolean {
+export function filmPasses<T extends GroupRow>(g: TitleGroup<T>, f: FilmFilter<T>): boolean {
   const picture = [f.filters.includes('4k') ? f.is4k : null, f.filters.includes('hdr') ? f.isHdr : null].filter((p) => p !== null);
   return (
     (!picture.length || g.versions.some((v) => picture.every((p) => p(v)))) &&
@@ -263,8 +268,8 @@ export function isMatching(
   return !!s.tvdbKeySet && s.running;
 }
 
-/** A short label telling versions apart: "4K HDR10, MKV", "1080p, MP4". */
-export function versionLabel(i: ItemSummary): string {
+/** A short label telling versions apart: "4K HDR10, MKV", "1080p, MP4" (no container: "4K HDR10"). */
+export function versionLabel(i: Pick<ItemSummary, 'height' | 'hdr'> & { container?: string }): string {
   const h = i.height || 0;
   const res = h >= 2000 ? '4K' : h >= 1400 ? '1440p' : h >= 1000 ? '1080p' : h >= 700 ? '720p' : h ? `${h}p` : '';
   const hdr = i.hdr ? (typeof i.hdr === 'string' ? i.hdr.toUpperCase() : 'HDR') : '';

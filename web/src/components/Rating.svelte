@@ -1,12 +1,12 @@
 <script lang="ts">
-  import type { RatingEntry } from '../lib/api';
-  import { metacriticBand, ratingAriaLabel, ratingTooltip, ratingValue, safeRatingUrl, shortVotes, SOURCE_SHORT } from '../lib/ratings';
+  import { metacriticBand, ratingAriaLabel, ratingTooltip, ratingValue, safeRatingUrl, shortVotes, SOURCE_SHORT, type RatingLike } from '../lib/ratings';
   import RatingGlyph, { hasGlyph } from './RatingGlyph.svelte';
 
   // One rating. The chip of a detail page names its source, links to the title's page there and
   // has the votes and the age of the number in its tooltip. `compact` is the quiet form of cards
   // and rows: a glyph (or the source's short name) and the number, never a link (a card is one).
-  let { entry, compact = false, now = new Date() }: { entry: RatingEntry; compact?: boolean; now?: Date } = $props();
+  // A movie card's rating has no link, votes or fetch time: the chip goes without them.
+  let { entry, compact = false, now = new Date() }: { entry: RatingLike; compact?: boolean; now?: Date } = $props();
 
   const url = $derived(compact ? '' : safeRatingUrl(entry.url));
   const value = $derived(ratingValue(entry));

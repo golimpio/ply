@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { ItemSummary } from './api';
-import { fold, search } from './fuzzy';
+import type { ItemSummary, MovieCard } from './api';
+import { fold, foldedHaystack, search } from './fuzzy';
 
 let nextId = 1;
 const item = (title: string, extra: Partial<ItemSummary> = {}): ItemSummary => ({
@@ -16,7 +16,26 @@ const item = (title: string, extra: Partial<ItemSummary> = {}): ItemSummary => (
   addedAt: 0,
   ...extra,
 });
-const titles = (list: ItemSummary[]) => list.map((i) => i.title);
+// A movie as the card list sends it: none of a full row's other fields.
+const card = (title: string, extra: Partial<MovieCard> = {}): MovieCard => ({
+  id: nextId++,
+  kind: 'movie',
+  title,
+  sortTitle: title,
+  addedAt: 0,
+  durationSec: 0,
+  width: 0,
+  height: 0,
+  container: 'mp4',
+  watched: false,
+  progress: null,
+  matchState: 'matched',
+  needsReview: false,
+  art: null,
+  rating: null,
+  ...extra,
+});
+const titles = (list: { title: string }[]) => list.map((i) => i.title);
 
 describe('search', () => {
   const library = [item('Blade Runner'), item('Carrie'), item('Arrival'), item('Paterson')];
@@ -53,6 +72,33 @@ describe('search', () => {
   it('respects the limit', () => {
     const many = Array.from({ length: 50 }, (_, i) => item(`Movie ${i}`));
     expect(search(many, 'movie', 5)).toHaveLength(5);
+  });
+
+  it('finds movie cards as it finds full rows, in the same order, and gives the cards back', () => {
+    const names = ['Blade Runner', 'Carrie', 'Arrival', 'Paterson', 'Amélie'];
+    const rows = names.map((t) => item(t));
+    const cards = names.map((t) => card(t, { year: 2001 }));
+    for (const q of ['ar', 'amelie', 'xyz', 'lvr', 'pat']) {
+      expect(titles(search(cards, q))).toEqual(titles(search(rows, q)));
+    }
+    const hit: MovieCard[] = search(cards, 'carrie');
+    expect(hit).toEqual([cards[1]]);
+    expect(hit[0]).toBe(cards[1]);
+    expect(search(cards, '2001')).toHaveLength(names.length);
+  });
+});
+
+describe('foldedHaystack', () => {
+  it('folds a row once: the same row object gives the text it gave first, a new object fresh text', () => {
+    const row = card('Amélie', { year: 2001 });
+    expect(foldedHaystack(row)).toBe('amelie 2001');
+    // Rows are replaced, never changed; changing one in place shows the text is kept, not refolded.
+    row.title = 'Pokémon';
+    expect(foldedHaystack(row)).toBe('amelie 2001');
+    expect(search([row], 'pokemon')).toEqual([]);
+    const replaced = { ...row };
+    expect(foldedHaystack(replaced)).toBe('pokemon 2001');
+    expect(search([replaced], 'pokemon')).toEqual([replaced]);
   });
 });
 

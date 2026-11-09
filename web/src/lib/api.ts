@@ -1,5 +1,5 @@
 // Typed client for the ply HTTP API (see docs/DESIGN.md "HTTP API").
-import { normaliseRating, normaliseRatings } from './ratings';
+import { normaliseRating, normaliseRatings, RATING_SOURCES } from './ratings';
 
 export type Kind = 'movie' | 'episode';
 export type Method = 'direct' | 'remux' | 'transcode';
@@ -102,6 +102,26 @@ export interface ItemSummary extends Partial<MetaFields> {
   watched?: boolean;
   watchedAt?: number | null;
   playCount?: number;
+}
+
+/** A card's rating: the entry without its link, votes and fetch time. `state` only on Rotten Tomatoes'. */
+export type CardRating = Pick<RatingEntry, 'source' | 'value' | 'scale' | 'score100' | 'state'>;
+
+/** A card's frame-grab artwork without the backdrop: the thumb, and its colour once the picture exists. */
+export type CardArt = Pick<ArtUrls, 'thumb' | 'color'>;
+
+/**
+ * A movie as GET /api/items?kind=movie&fields=card sends it (internal/api/card.go): the full row's
+ * fields, with the same names and shapes, reduced to what a grid needs. Anything else is on the
+ * item's detail. `art` and `rating` are always sent, null for none.
+ */
+export interface MovieCard
+  extends Pick<ItemSummary, 'id' | 'kind' | 'title' | 'year' | 'titleId' | 'addedAt' | 'poster' | 'backdrop' | 'durationSec' | 'container' | 'width' | 'height' | 'genres'>,
+    Required<Pick<ItemSummary, 'sortTitle' | 'watched' | 'progress' | 'matchState' | 'needsReview'>> {
+  // Not picked: the full row's art and rating carry more fields than these.
+  art: CardArt | null;
+  rating: CardRating | null;
+  hdr?: string;
 }
 
 /** One file a PUT .../watched covered, as it is now; progress is the file's own (null: not started). */
@@ -523,6 +543,15 @@ function normaliseRow<T extends { rating?: unknown; ratings?: unknown; kind?: st
   if ('rating' in r) out.rating = normaliseRating(r.rating as RatingEntry | null);
   if ('ratings' in r || (r.kind === 'episode' && 'rating' in r)) out.ratings = normaliseRatings(r.ratings as RatingEntry[] | null);
   return out;
+}
+
+/**
+ * A card with a rating the page can show, without copying it: only a row whose rating is of a
+ * source this page does not know is copied, with the rating null.
+ */
+function normaliseCard(c: MovieCard): MovieCard {
+  const r = c.rating;
+  return r && (typeof r !== 'object' || !RATING_SOURCES.includes(r.source)) ? { ...c, rating: null } : c;
 }
 
 function normaliseTitle<T extends TitleDetail>(t: T): T {
@@ -1044,6 +1073,11 @@ export const api = {
   // Go encodes nil slices as null; normalise so callers can iterate safely.
   async items(params: { kind?: Kind; show?: string } = {}): Promise<ItemSummary[]> {
     return ((await request<ItemSummary[] | null>('GET', `/api/items${qs(params)}`)) ?? []).map(normaliseRow);
+  },
+
+  /** The movies as the grid needs them (a third of the full rows' weight); the rest is on api.item. */
+  async movieCards(): Promise<MovieCard[]> {
+    return ((await request<MovieCard[] | null>('GET', '/api/items?kind=movie&fields=card')) ?? []).map(normaliseCard);
   },
 
   async shows(): Promise<ShowSummary[]> {

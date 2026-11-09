@@ -1,5 +1,12 @@
-<script lang="ts">
+<script lang="ts" module>
   import type { ItemSummary } from '../lib/api';
+  import type { PictureSource } from '../lib/meta';
+
+  /** What Art reads of an item: a movie card (lib/api MovieCard) and a full row both fit. */
+  export type ArtItem = PictureSource & Pick<ItemSummary, 'title' | 'show'>;
+</script>
+
+<script lang="ts">
   import { backdropImg, wideImg, type Img } from '../lib/meta';
   import Picture from './Picture.svelte';
 
@@ -15,7 +22,7 @@
     img = undefined,
     sizes = undefined,
   }: {
-    item: ItemSummary | undefined;
+    item: ArtItem | undefined;
     kind?: 'thumb' | 'backdrop';
     ratio?: string;
     label?: string;

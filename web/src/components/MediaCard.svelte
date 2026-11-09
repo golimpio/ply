@@ -1,5 +1,13 @@
+<script lang="ts" module>
+  import type { CardRating, ItemSummary } from '../lib/api';
+  import type { PictureSource } from '../lib/meta';
+
+  /** What a card reads of its item: a movie card (lib/api MovieCard) and a full row both fit. */
+  export type CardItem = PictureSource &
+    Pick<ItemSummary, 'width' | 'height' | 'hdr' | 'durationSec' | 'progress' | 'poster' | 'watched'>;
+</script>
+
 <script lang="ts">
-  import type { ItemSummary, RatingEntry } from '../lib/api';
   import { posterImg, wideImg, type Img } from '../lib/meta';
   import { morph } from '../lib/nav';
   import { progressOf } from '../lib/ui-types';
@@ -32,7 +40,7 @@
     hold = false,
     watch = undefined,
   }: {
-    item?: ItemSummary;
+    item?: CardItem;
     img?: Img | null;
     shape?: 'wide' | 'poster';
     href: string;
@@ -40,7 +48,7 @@
     sub?: string | (string | number | null | undefined)[];
     label?: string;
     note?: string;
-    rating?: RatingEntry | null;
+    rating?: CardRating | null;
     priority?: 'high' | 'low';
     sizes?: string;
     hold?: boolean;
