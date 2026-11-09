@@ -549,6 +549,17 @@ Svelte 5 (runes) + Vite + TypeScript, hls.js. No UI framework; small hand-writte
   not its film (a film seen in one version and being watched again in another stays). Card lines say the same
   distinct-episode count as the badge.
   Tested by `lib/watched.test.ts`, `lib/library.test.ts` and `e2e/watched-ui.mjs`.
+- **Library cache** (`lib/library.svelte.ts` on `lib/rowstore.svelte.ts`, `lib/details.svelte.ts`): two lists, each
+  loaded once per library version. `movies` holds the movie cards (`GET /api/items?kind=movie&fields=card`) and
+  `episodes` the full episode rows, with `/api/shows` alongside (a failed show list costs only the show metadata).
+  Movies loads only the cards, Shows and Show only the episodes; Home, Item and search load both. Rows are
+  `$state.raw` and never changed in place: a write replaces the row and the list, and a write made while a list is
+  loading is applied again when it lands. A page that needs a film's full item (Item, Home's hero) asks
+  `detail(id)`: shared in flight, 32 kept, cleared on a scan; it paints the cached copy at once and always
+  refetches, and Item's playback decision reads only the fresh one. Watch state comes from the list row, never the
+  detail. Search runs over both lists only while the palette is open. Tested by `lib/rowstore.svelte.test.ts`,
+  `lib/details.test.ts`, `lib/library.test.ts`, `lib/palette-search.test.ts` and `e2e/library-ui.mjs` (a Movies
+  revisit sends only the card request, then a 304).
 - Dev: `vite` proxy `/api` → `http://localhost:8420`. `npm run build` → `web/dist`, embedded by `web/embed.go`.
   Keep `web/dist/.gitkeep` so `go build` works before the first web build (`all:dist`).
 
