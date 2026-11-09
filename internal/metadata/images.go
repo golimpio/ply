@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"ply/internal/probe"
+	"ply/internal/refctx"
 )
 
 // TMDBImageSizes are the sizes of TMDB images that are served and cached.
@@ -120,9 +121,12 @@ type ImageCache struct {
 	failed   map[string]time.Time // key -> when to try again
 }
 
+// imageCall is one download or extraction, shared by the callers that want the
+// same image. It runs under refs, which is cancelled when the last of them leaves.
 type imageCall struct {
 	done chan struct{}
 	err  error
+	refs *refctx.Ctx
 }
 
 // NewImageCache creates the cache directory and returns the cache.
@@ -171,8 +175,9 @@ func (c *ImageCache) Close() {
 }
 
 // TMDB returns the path of the cached image, downloading it first when it is
-// not there. Concurrent callers for one image share one download. A request
-// that is cancelled stops waiting; the download goes on for the others.
+// not there. Concurrent callers for one image share one download. A caller whose
+// ctx ends stops waiting; the download goes on while another waits for it, and is
+// cancelled (queued or under way) when the last one has gone.
 func (c *ImageCache) TMDB(ctx context.Context, size, file string) (string, error) {
 	if !ValidTMDBImage(size, file) {
 		return "", ErrBadImage
@@ -180,6 +185,9 @@ func (c *ImageCache) TMDB(ctx context.Context, size, file string) (string, error
 	dest := filepath.Join(c.dir, "tmdb", size, file)
 	if fi, err := os.Stat(dest); err == nil && fi.Mode().IsRegular() && fi.Size() > 0 {
 		return dest, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err // the client is gone: no settings lookup, no download
 	}
 	if c.url == nil {
 		return "", ErrImageUnavailable
@@ -189,12 +197,10 @@ func (c *ImageCache) TMDB(ctx context.Context, size, file string) (string, error
 	}
 	key := "tmdb/" + size + "/" + file
 	err := c.once(ctx, key, func(ctx context.Context) error {
-		select {
-		case c.downloads <- struct{}{}:
-			defer func() { <-c.downloads }()
-		case <-ctx.Done():
-			return ctx.Err()
+		if err := acquire(ctx, c.downloads); err != nil {
+			return err
 		}
+		defer func() { <-c.downloads }()
 		return c.download(ctx, size, file, dest)
 	})
 	if err != nil {
@@ -208,8 +214,7 @@ func (c *ImageCache) TMDB(ctx context.Context, size, file string) (string, error
 // optional). The sizes w92 to w342 are TVDB's thumbnail (the same name with "_t"
 // before the extension) and the others the original; a thumbnail TVDB does not
 // have is made up for by the original. Concurrent callers for one image share one
-// download. A request that is cancelled stops waiting; the download goes on for
-// the others.
+// download, which is cancelled when the last of them has gone (see TMDB).
 func (c *ImageCache) TVDB(ctx context.Context, size, file string) (string, error) {
 	if !ValidTVDBImage(size, file) {
 		return "", ErrBadImage
@@ -219,6 +224,9 @@ func (c *ImageCache) TVDB(ctx context.Context, size, file string) (string, error
 	if fi, err := os.Stat(dest); err == nil && fi.Mode().IsRegular() && fi.Size() > 0 {
 		return dest, nil
 	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if c.tvdbURL == nil {
 		return "", ErrImageUnavailable
 	}
@@ -227,12 +235,10 @@ func (c *ImageCache) TVDB(ctx context.Context, size, file string) (string, error
 	}
 	key := "tvdb/" + size + file
 	err := c.once(ctx, key, func(ctx context.Context) error {
-		select {
-		case c.downloads <- struct{}{}:
-			defer func() { <-c.downloads }()
-		case <-ctx.Done():
-			return ctx.Err()
+		if err := acquire(ctx, c.downloads); err != nil {
+			return err
 		}
+		defer func() { <-c.downloads }()
 		return c.downloadTVDB(ctx, size, file, dest)
 	})
 	if err != nil {
@@ -270,50 +276,109 @@ func (c *ImageCache) Prefetch(ctx context.Context, size, ref string) error {
 }
 
 // once runs fn for key unless a run is already under way, and waits for it.
-// fn runs on its own goroutine under the cache's context, so that a caller
-// that goes away does not abort the work for the others.
+// fn runs on its own goroutine, under a context that lives as long as any caller
+// waits for it (refctx): one caller going away does not abort the work for the
+// others, and the last one going cancels it, wherever it is (waiting for a slot,
+// downloading, extracting). A caller that is a background job waits with the job's
+// context, so the work lasts as long as the job does, whoever else leaves.
 func (c *ImageCache) once(ctx context.Context, key string, fn func(ctx context.Context) error) error {
-	c.mu.Lock()
-	if c.closed {
-		c.mu.Unlock()
-		return ErrImageUnavailable
+	call, err := c.join(ctx, key, fn)
+	if err != nil {
+		return err
 	}
-	if until, ok := c.failed[key]; ok {
-		if c.now().Before(until) {
-			c.mu.Unlock()
-			return ErrImageUnavailable
-		}
-		delete(c.failed, key)
-	}
-	call, running := c.inflight[key]
-	if !running {
-		call = &imageCall{done: make(chan struct{})}
-		c.inflight[key] = call
-		c.wg.Add(1)
-		go func() {
-			defer c.wg.Done()
-			err := fn(c.base)
-			c.mu.Lock()
-			delete(c.inflight, key)
-			failed := err != nil && c.base.Err() == nil
-			if failed {
-				c.noteFailedLocked(key)
-			}
-			c.mu.Unlock()
-			if failed {
-				// The error holds no address: redactURL took it out.
-				c.log.Warn("metadata: image unavailable", "image", key, "err", err)
-			}
-			call.err = err
-			close(call.done)
-		}()
-	}
-	c.mu.Unlock()
-
+	defer call.refs.Leave()
 	select {
 	case <-call.done:
 		if call.err != nil {
 			return ErrImageUnavailable
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// join returns the run for key, with the caller counted among its waiters (the
+// caller Leaves): the one under way, or a new one it starts. When the run under way
+// was abandoned but got the image all the same, that finished run is the answer.
+func (c *ImageCache) join(ctx context.Context, key string, fn func(ctx context.Context) error) (*imageCall, error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		c.mu.Lock()
+		if c.closed {
+			c.mu.Unlock()
+			return nil, ErrImageUnavailable
+		}
+		if until, ok := c.failed[key]; ok {
+			if c.now().Before(until) {
+				c.mu.Unlock()
+				return nil, ErrImageUnavailable
+			}
+			delete(c.failed, key)
+		}
+		call, running := c.inflight[key]
+		if !running {
+			call = &imageCall{done: make(chan struct{}), refs: refctx.New(c.base)}
+			call.refs.Join()
+			c.inflight[key] = call
+			c.wg.Add(1)
+			go c.run(key, call, fn)
+			c.mu.Unlock()
+			return call, nil
+		}
+		joined := call.refs.Join()
+		c.mu.Unlock()
+		if joined {
+			return call, nil
+		}
+		// Everyone left it and it is being stopped. A new run would write the same
+		// temporary file: wait until the old one is out of the way, then start afresh,
+		// unless it got the image just as the last waiter left.
+		select {
+		case <-call.done:
+			if call.err == nil {
+				return call, nil
+			}
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+}
+
+// run is the goroutine of a call. A failure is remembered for imageFailureTTL,
+// unless the call was cut short (shutdown, or nobody wanted it any more): that
+// says nothing about the image. An error of the image itself (a 404) is a failure
+// even when the cut came a moment after it.
+func (c *ImageCache) run(key string, call *imageCall, fn func(ctx context.Context) error) {
+	defer c.wg.Done()
+	defer call.refs.Cancel(nil)
+	ctx := call.refs.Context()
+	err := fn(ctx)
+	c.mu.Lock()
+	delete(c.inflight, key)
+	failed := err != nil && !call.refs.Stopped(err)
+	if failed {
+		c.noteFailedLocked(key)
+	}
+	c.mu.Unlock()
+	if failed {
+		// The error holds no address: redactURL took it out.
+		c.log.Warn("metadata: image unavailable", "image", key, "err", err)
+	}
+	call.err = err
+	close(call.done)
+}
+
+// acquire takes a place in sem, or gives up when ctx ends, holding nothing. The
+// caller frees the place with <-sem.
+func acquire(ctx context.Context, sem chan struct{}) error {
+	select {
+	case sem <- struct{}{}:
+		if err := ctx.Err(); err != nil { // both were ready: ctx wins
+			<-sem
+			return err
 		}
 		return nil
 	case <-ctx.Done():
@@ -466,12 +531,10 @@ func (c *ImageCache) Embedded(ctx context.Context, itemID int64, media string, s
 	}
 	key := fmt.Sprintf("embedded/%d/%d", itemID, mfi.ModTime().UnixNano())
 	err = c.once(ctx, key, func(ctx context.Context) error {
-		select {
-		case c.covers <- struct{}{}:
-			defer func() { <-c.covers }()
-		case <-ctx.Done():
-			return ctx.Err()
+		if err := acquire(ctx, c.covers); err != nil {
+			return err
 		}
+		defer func() { <-c.covers }()
 		return probe.ExtractCover(ctx, c.ffmpeg, media, stream, dest, c.nice)
 	})
 	if err != nil {

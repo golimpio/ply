@@ -566,36 +566,6 @@ func TestImageOfflineAndClosed(t *testing.T) {
 	}
 }
 
-func TestImageCallerCancelDoesNotAbortTheDownload(t *testing.T) {
-	gate := make(chan struct{})
-	srv := newImageServer(t, func(w http.ResponseWriter, r *http.Request) {
-		<-gate
-		w.Write(jpegBytes)
-	})
-	c := newCache(t, srv)
-
-	ctx, cancel := context.WithCancel(t.Context())
-	first := make(chan error, 1)
-	go func() { _, err := c.TMDB(ctx, "w342", "shared.jpg"); first <- err }()
-	for srv.hits.Load() == 0 {
-		time.Sleep(5 * time.Millisecond)
-	}
-	cancel()
-	if err := <-first; !errors.Is(err, context.Canceled) {
-		t.Errorf("cancelled caller: %v", err)
-	}
-	second := make(chan error, 1)
-	go func() { _, err := c.TMDB(t.Context(), "w342", "shared.jpg"); second <- err }()
-	time.Sleep(30 * time.Millisecond)
-	close(gate)
-	if err := <-second; err != nil {
-		t.Errorf("second caller: %v", err)
-	}
-	if srv.hits.Load() != 1 {
-		t.Errorf("%d downloads, want the one the first caller started", srv.hits.Load())
-	}
-}
-
 func TestImageCloseStopsAHungDownload(t *testing.T) {
 	block := make(chan struct{})
 	srv := newImageServer(t, func(w http.ResponseWriter, r *http.Request) {

@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"ply/internal/proc"
+	"ply/internal/refctx"
 )
 
 // Kind is an artwork variant.
@@ -136,12 +137,14 @@ type colour struct {
 	hex   string
 }
 
+// call is one frame grab, shared by the requests for the same image. It runs under
+// refs: cancelled when the last of them leaves, or by Defer or Close.
 type call struct {
-	done   chan struct{}
-	err    error
-	src    Source
-	kind   Kind
-	cancel context.CancelCauseFunc
+	done chan struct{}
+	err  error
+	src  Source
+	kind Kind
+	refs *refctx.Ctx
 }
 
 // failure is a remembered generation error; a zero until never expires (it
@@ -210,9 +213,12 @@ func (g *Generator) Close() {
 }
 
 // Path returns the cached image of kind k for src, generating it first if
-// needed. Concurrent requests for the same image share one ffmpeg run. A file
-// without usable video is not retried until its mtime changes; transient
-// failures are retried after failureTTL.
+// needed. Concurrent requests for the same image share one ffmpeg run. A request
+// whose ctx ends stops waiting; the run goes on while another waits for it, and
+// is cancelled (queued for a slot, or ffmpeg killed) when the last one has gone.
+// A background job waits with the job's context, which keeps the run alive as
+// long as the job lives. A file without usable video is not retried until its
+// mtime changes; transient failures are retried after failureTTL.
 func (g *Generator) Path(ctx context.Context, src Source, k Kind) (string, error) {
 	name := filepath.Join(g.dir, imageName(src.ID, k, src.MTime))
 	if _, err := os.Stat(name); err == nil {
@@ -224,31 +230,11 @@ func (g *Generator) Path(ctx context.Context, src Source, k Kind) (string, error
 	}
 	key := filepath.Base(name)
 
-	g.mu.Lock()
-	if g.closed {
-		g.mu.Unlock()
-		return "", ErrClosed
+	c, err := g.join(ctx, key, src, k, name)
+	if err != nil {
+		return "", err
 	}
-	if f, ok := g.failed[key]; ok {
-		if f.until.IsZero() || g.now().Before(f.until) {
-			g.mu.Unlock()
-			return "", f.err
-		}
-		delete(g.failed, key)
-	}
-	c, ok := g.inflight[key]
-	if !ok {
-		c = &call{done: make(chan struct{}), src: src, kind: k}
-		var ctx context.Context
-		ctx, c.cancel = context.WithCancelCause(g.base)
-		g.inflight[key] = c
-		g.wg.Add(1)
-		// The work outlives the first request (a client navigating away must not
-		// throw away an image the next request will want) but not the generator.
-		go g.fill(ctx, c, key, src, k, name)
-	}
-	g.mu.Unlock()
-
+	defer c.refs.Leave()
 	select {
 	case <-c.done:
 	case <-ctx.Done():
@@ -260,9 +246,61 @@ func (g *Generator) Path(ctx context.Context, src Source, k Kind) (string, error
 	return name, nil
 }
 
-func (g *Generator) fill(ctx context.Context, c *call, key string, src Source, k Kind, name string) {
+// join returns the grab of the image called key, with the caller counted among its
+// waiters (the caller Leaves): the one under way, or a new one it starts. When the
+// one under way was abandoned but made the image all the same, that finished grab is
+// the answer. It fails with the remembered failure of the image, ErrClosed, or the
+// end of ctx.
+func (g *Generator) join(ctx context.Context, key string, src Source, k Kind, name string) (*call, error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		g.mu.Lock()
+		if g.closed {
+			g.mu.Unlock()
+			return nil, ErrClosed
+		}
+		if f, ok := g.failed[key]; ok {
+			if f.until.IsZero() || g.now().Before(f.until) {
+				g.mu.Unlock()
+				return nil, f.err
+			}
+			delete(g.failed, key)
+		}
+		c, running := g.inflight[key]
+		if !running {
+			c = &call{done: make(chan struct{}), src: src, kind: k, refs: refctx.New(g.base)}
+			c.refs.Join()
+			g.inflight[key] = c
+			g.wg.Add(1)
+			go g.fill(c, key, src, k, name)
+			g.mu.Unlock()
+			return c, nil
+		}
+		joined := c.refs.Join()
+		g.mu.Unlock()
+		if joined {
+			return c, nil
+		}
+		// Everyone left it and ffmpeg is being stopped. A new run would write the same
+		// temporary file: wait until the old one is out of the way, then start afresh,
+		// unless it made the image just as the last waiter left.
+		select {
+		case <-c.done:
+			if c.err == nil {
+				return c, nil
+			}
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+}
+
+func (g *Generator) fill(c *call, key string, src Source, k Kind, name string) {
 	defer g.wg.Done()
-	defer c.cancel(nil)
+	defer c.refs.Cancel(nil)
+	ctx := c.refs.Context()
 	c.err = g.generate(ctx, src, k, name)
 	if c.err != nil && errors.Is(context.Cause(ctx), ErrDeferred) {
 		c.err = ErrDeferred // whatever the killed ffmpeg said
@@ -270,9 +308,10 @@ func (g *Generator) fill(ctx context.Context, c *call, key string, src Source, k
 	g.mu.Lock()
 	delete(g.inflight, key)
 	switch {
-	case c.err == nil, g.base.Err() != nil, errors.Is(c.err, fs.ErrNotExist), errors.Is(c.err, ErrDeferred):
-		// Success, shutdown, a missing file (cheap to re-check: no ffmpeg runs), or a grab
-		// that was put off.
+	case c.err == nil, g.base.Err() != nil, errors.Is(c.err, fs.ErrNotExist), errors.Is(c.err, ErrDeferred), c.refs.Stopped(c.err):
+		// Success, shutdown, a missing file (cheap to re-check: no ffmpeg runs), a grab
+		// that was put off, or one cut short because nobody waited for it any more. An
+		// error of the file itself counts even when the cut came a moment after it.
 	case errors.Is(c.err, ErrNoFrame):
 		g.failed[key] = failure{err: c.err}
 	default:
@@ -306,9 +345,9 @@ func (g *Generator) Defer(id int64) []Grab {
 	defer g.mu.Unlock()
 	var out []Grab
 	for _, c := range g.inflight {
-		if c.src.ID == id {
+		if c.src.ID == id && !c.refs.Abandoned() { // an abandoned grab is not wanted by anyone
 			out = append(out, Grab{c.src, c.kind})
-			c.cancel(ErrDeferred)
+			c.refs.Cancel(ErrDeferred)
 		}
 	}
 	return out
@@ -378,6 +417,9 @@ func (g *Generator) generate(ctx context.Context, src Source, k Kind, dst string
 		return ctx.Err()
 	}
 	defer func() { <-g.sem }()
+	if err := ctx.Err(); err != nil { // the slot and the end of ctx were ready together
+		return err
+	}
 
 	sample, err := g.grab(ctx, src, k, dst, seekPoint(src.DurationSec))
 	if errors.Is(err, ErrNoFrame) && seekPoint(src.DurationSec) > 0 {

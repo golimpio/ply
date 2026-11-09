@@ -114,6 +114,13 @@ Moving/renaming a file keeps its item id (see Watching), so progress, match and 
   working offline; profile photos and stills are fetched lazily. After a manual match the prefetch runs in the
   background (the request is answered once the match is stored). At most 4 images are downloaded at once; a failed
   one is not retried for 10 minutes (at most 1024 failures are remembered).
+- A request whose client has gone (a fast scroll: the browser aborts what it no longer shows) stops the work for
+  it. A download, or an embedded-cover extraction, is shared by every request for the same image and lives while
+  any of them waits (`internal/refctx`); when the last one leaves it is cancelled, whether it is queued for one of
+  the 4 slots or under way, and is not remembered as a failure (an error of the image itself, a 404, still is, even
+  when the last one left a moment after it). A background caller (`Prefetch`, the metadata
+  worker) is a waiter like the others, so it keeps the download for as long as it waits. The same holds for the
+  frame grab of `GET /api/items/{id}/art/{kind}` (ffmpeg is killed), and the `art.grab` job keeps its grab.
 - Local artwork names (case-insensitive, jpg/jpeg/png/webp): movie `<base>-poster`, `poster`, `folder`, `cover`;
   backdrop `<base>-fanart`, `fanart`, `backdrop`, `background`; episode thumb `<base>-thumb`, `<base>`;
   show folder `poster`, `folder`, `fanart`, `backdrop`; season `seasonNN-poster`, `Season NN/poster`.

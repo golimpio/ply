@@ -31,6 +31,7 @@ type stub struct {
 	mu        sync.Mutex
 	active    int
 	maxActive int
+	cancelled int // runs that were cancelled while they waited on block
 	calls     [][]string
 }
 
@@ -49,6 +50,9 @@ func (s *stub) run(ctx context.Context, args []string) ([]byte, error) {
 		select {
 		case <-s.block:
 		case <-ctx.Done():
+			s.mu.Lock()
+			s.cancelled++
+			s.mu.Unlock()
 			time.Sleep(s.slowStop)
 			return nil, ctx.Err()
 		}
@@ -67,6 +71,12 @@ func (s *stub) run(ctx context.Context, args []string) ([]byte, error) {
 		return nil, err
 	}
 	return bytes.Repeat(s.fill[:], 16*9), nil
+}
+
+func (s *stub) cancels() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cancelled
 }
 
 func (s *stub) snapshot() (active, maxActive int) {
@@ -185,28 +195,6 @@ func TestConcurrencyIsCapped(t *testing.T) {
 	wg.Wait()
 	if _, m := s.snapshot(); m != 2 || g.Runs() != 6 {
 		t.Fatalf("after release: max = %d, runs = %d; want 2, 6", m, g.Runs())
-	}
-}
-
-func TestCancelledRequestDoesNotAbandonTheWork(t *testing.T) {
-	s := &stub{block: make(chan struct{})}
-	g := newTestGenerator(t, t.TempDir(), s)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error)
-	go func() { _, err := g.Path(ctx, src(1, 10), Thumb); done <- err }()
-	waitFor(t, func() bool { a, _ := s.snapshot(); return a == 1 })
-	cancel()
-	if err := <-done; !errors.Is(err, context.Canceled) {
-		t.Fatalf("cancelled request err = %v, want context.Canceled", err)
-	}
-	close(s.block)
-	p, err := g.Path(context.Background(), src(1, 10), Thumb)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(p); err != nil || g.Runs() != 1 {
-		t.Fatalf("image %v, runs %d; want the first run's image reused", err, g.Runs())
 	}
 }
 

@@ -152,7 +152,8 @@ Target: about 1-2 s to first frame even over SMB.
    serves the image if it is cached; otherwise it answers `503` with `Retry-After` (at least a second; the placeholder the
    page already shows for an image that is not there) and does *not* start ffmpeg. A play that was refused (the limit on
    plays) holds nothing. A grab that is already running for the item when the play begins is stopped
-   (`art.Generator.Defer`; its waiters get the same `503`, nothing is remembered against the file). Whatever was put off
+   (`art.Generator.Defer`; its waiters get the same `503`, nothing is remembered against the file; a grab that nobody
+   waits for any more is not handed back and not queued). Whatever was put off
    is queued as `art.grab` (key `art:<item>:<kind>`, needs the CPU and the item's disk), so it runs when no play reads
    the disk; a grab that was stopped is queued again whatever was asked a moment ago, and repeated asks are passed on
    once in 30 s. The job looks at the file when it runs: one that was replaced since (another mtime than the one it
