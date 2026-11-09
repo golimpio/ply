@@ -213,6 +213,169 @@ func TestCloseWaitsForExitsThatComeInTime(t *testing.T) {
 	}
 }
 
+// A seek kills the ffmpeg and waits for its exit under the session lock, and a stop
+// needs that lock to finish. With the exit not seen (a read from a share that is gone)
+// the stop, and so Close and Delete, must not wait for it, and the seek must not go on
+// to start another ffmpeg when the wait is over: it would run in a session that is gone.
+func TestStopDuringASeekWaitingForAStuckExit(t *testing.T) {
+	for _, how := range []string{"Close", "Delete"} {
+		t.Run(how, func(t *testing.T) {
+			f := newFake(t)
+			m := fakeManager(t, f, func(o *Options) { o.CloseWait = 300 * time.Millisecond })
+			release := m.HoldExits()
+			t.Cleanup(release)
+			ctx := context.Background()
+			s, err := m.Create(ctx, fakeRequest())
+			if err != nil {
+				t.Fatal(err)
+			}
+			seg, err := s.OpenSegment(ctx, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			seg.Close()
+			leader := leaderOf(s)
+
+			seeked := make(chan error, 1)
+			go func() { // far away: kills the ffmpeg and waits for its exit
+				c, cancel := context.WithTimeout(ctx, 20*time.Second)
+				defer cancel()
+				_, err := s.OpenSegment(c, 100)
+				seeked <- err
+			}()
+			waitUntil(t, "the seek to kill the ffmpeg", 5*time.Second, func() bool { return !pidAlive(leader) })
+			// Positive control: the seek is waiting for the exit, holding the lock.
+			if s.mu.TryLock() {
+				s.mu.Unlock()
+				t.Fatal("setup: the session lock is free while a seek waits for the exit")
+			}
+
+			var took time.Duration
+			if how == "Close" {
+				took = answered(t, "Close", m.Close)
+			} else {
+				took = answered(t, "Delete", func() { m.Delete(s.ID) })
+			}
+			if took > 1500*time.Millisecond {
+				t.Errorf("%s took %v with the exit of a replaced ffmpeg not seen", how, took)
+			}
+			select {
+			case err := <-seeked:
+				if !errors.Is(err, ErrClosed) {
+					t.Errorf("the seek of a stopped session = %v, want ErrClosed", err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Error("the seek did not come back after the stop")
+			}
+			if n := m.Count(); n != 1 { // positive control: the exit is still held back
+				t.Errorf("Count() = %d with the exit not seen, want 1", n)
+			}
+
+			release()
+			waitUntil(t, "the session to be let go of", 5*time.Second, func() bool { return m.Count() == 0 })
+			s.mu.Lock()
+			runs := s.runSeq
+			s.mu.Unlock()
+			if runs != 1 {
+				t.Errorf("%d ffmpeg runs were started, want 1: the seek started another after the stop", runs)
+			}
+		})
+	}
+}
+
+// The same wait is in the plan guard, which stops the run from the monitor, under the
+// lock, when a fragment shows the index wrong.
+func TestStopDuringTheGuardsWaitForAStuckExit(t *testing.T) {
+	for _, path := range []string{"refute", "fail"} {
+		t.Run(path, func(t *testing.T) {
+			f := newFake(t)
+			m := fakeManager(t, f, func(o *Options) { o.Tick = time.Hour }) // no monitor to compare anything
+			release := m.HoldExits()
+			t.Cleanup(release)
+			s, err := m.Create(context.Background(), fakeRequest())
+			if err != nil {
+				t.Fatal(err)
+			}
+			g := newPlanGuard(nil, 0, time.Now().Add(time.Minute))
+			s.mu.Lock()
+			s.guard = g
+			s.mu.Unlock()
+			leader := leaderOf(s)
+
+			returned := make(chan struct{})
+			go func() {
+				s.mu.Lock()
+				defer s.mu.Unlock()
+				if path == "refute" {
+					s.refuteLocked(0, "a test")
+				} else {
+					s.failLocked(0, "a test")
+				}
+				close(returned)
+			}()
+			waitUntil(t, "the guard to kill the ffmpeg", 5*time.Second, func() bool { return !pidAlive(leader) })
+			select { // positive control: it is waiting for the exit
+			case <-returned:
+				t.Fatal("setup: the guard did not wait for the exit")
+			case <-time.After(200 * time.Millisecond):
+			}
+
+			gone := s.stop()
+			select {
+			case <-returned:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the stop did not cut short the guard's wait for the exit")
+			}
+			if path == "refute" && (!g.final() || !errors.Is(g.err, ErrClosed)) {
+				t.Errorf("the plan of a session stopped during its refutation: final %v, err %v, want ErrClosed", g.final(), g.err)
+			}
+			select {
+			case <-gone:
+				t.Error("the session was let go of before the exit was seen")
+			default:
+			}
+			release()
+			select {
+			case <-gone:
+			case <-time.After(5 * time.Second):
+				t.Error("the session was not let go of after the exit was seen")
+			}
+		})
+	}
+}
+
+// Stop sets s.closed only when shutdown has the lock, and a request that holds it first
+// must not start an ffmpeg meanwhile: nobody would wait for it but the kill that follows.
+func TestNoFFmpegStartsOnceStopHasBeenCalled(t *testing.T) {
+	f := newFake(t)
+	m := fakeManager(t, f, nil)
+	s, err := m.Create(context.Background(), fakeRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A request holds the lock, and the ffmpeg of the session is over (it ended by itself, say).
+	s.mu.Lock()
+	if !s.stopRunLocked() || s.run != nil {
+		t.Fatal("setup: the run was not stopped")
+	}
+	gone := s.stop() // shutdown now waits for the lock
+	err = s.startRunLocked(5)
+	runs := s.runSeq
+	s.mu.Unlock()
+	if !errors.Is(err, ErrClosed) {
+		t.Errorf("startRunLocked of a session that has been told to stop = %v, want ErrClosed", err)
+	}
+	if runs != 1 {
+		t.Errorf("%d ffmpeg runs were started, want 1", runs)
+	}
+	select {
+	case <-gone:
+	case <-time.After(5 * time.Second):
+		t.Error("the session was not let go of")
+	}
+}
+
 // The stand-in for `ply --reap` of TestExitingWithoutWaitingLeavesNoFFmpeg: this
 // test binary, run as the reaper.
 func TestHelperReaps(t *testing.T) {

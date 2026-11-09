@@ -401,17 +401,28 @@ func run() error {
 	clean := stopper{log: log, every: 2 * time.Second, deadline: 30 * time.Second, quick: sigC}.run([]stopStep{
 		{"network announcement", adv.Shutdown},
 		// Kill every ffmpeg and drop the temp dirs first: requests waiting on
-		// segments return at once instead of holding the HTTP shutdown up.
-		{"playback", streams.Close},
-		{"subtitle extraction", func() {
-			if subGen != nil {
-				subGen.Close() // a first extraction of a big file can run for minutes
+		// segments return at once instead of holding the HTTP shutdown up. All three
+		// at once: each waits a moment for the exits (an ffmpeg in a read from a slow
+		// share does not die until the read returns), and the waits must not add up.
+		{"playback, subtitle extraction and artwork", func() {
+			var wg sync.WaitGroup
+			for _, closeFn := range []func(){
+				streams.Close,
+				func() { // a first extraction of a big file can run for minutes
+					if subGen != nil {
+						subGen.Close()
+					}
+				},
+				func() { // a frame grab on a slow mount can too
+					if artGen != nil {
+						artGen.Close()
+					}
+				},
+			} {
+				wg.Add(1)
+				go func() { defer wg.Done(); closeFn() }()
 			}
-		}},
-		{"artwork", func() {
-			if artGen != nil {
-				artGen.Close() // a frame grab on a slow mount can too
-			}
+			wg.Wait()
 		}},
 		{"web requests", func() {
 			if err := srv.Shutdown(shutCtx); err != nil {

@@ -364,9 +364,10 @@ func TestNoOrphanFFmpeg(t *testing.T) {
 		if !m.Delete(s.ID) {
 			t.Fatal("Delete found no session")
 		}
-		if p := procsFor(t, f); len(p) > 0 {
-			t.Errorf("ffmpeg still running after DELETE: %v", p)
-		}
+		// Delete kills at once but waits for the exit StopWait at most: a real ffmpeg
+		// sometimes takes longer than that to be gone (measured: 0.6 s).
+		waitFor(t, "ffmpeg to be gone after DELETE", 10*time.Second, func() bool { return len(procsFor(t, f)) == 0 })
+		waitFor(t, "the session to be let go of after DELETE", 10*time.Second, func() bool { return m.Count() == 0 })
 		if _, err := os.Stat(dir); !os.IsNotExist(err) {
 			t.Errorf("session dir still exists after DELETE: %v", err)
 		}

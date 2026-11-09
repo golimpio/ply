@@ -89,8 +89,8 @@ type Session struct {
 	// gone is closed when the session has let go of everything: its ffmpeg has been
 	// seen to exit, and the registry entry, the reaper and the directory are gone.
 	gone chan struct{}
-	// dying is the pid of the ffmpeg that stop is waiting for the exit of (0 if none).
-	dying atomic.Int64
+	// pid is that of the ffmpeg started last (0 if none), for the log of a stop that waits for it.
+	pid atomic.Int64
 }
 
 // run is one ffmpeg process producing GOP fragments from GOP start onwards.
@@ -239,7 +239,7 @@ func (s *Session) gopPath(g int) string { return filepath.Join(s.dir, fmt.Sprint
 // fragments from GOP g on. Fragments from g on that an earlier run left
 // behind are removed so the new run's progress can be read off the directory.
 func (s *Session) startRunLocked(g int) error {
-	if s.closed {
+	if s.closed || s.stopping() { // closed is set when shutdown has the lock, stopping before
 		return ErrClosed
 	}
 	// A run that died by itself before anything was served is the signal that
@@ -247,7 +247,9 @@ func (s *Session) startRunLocked(g int) error {
 	if old := s.run; old != nil && old.exited() && old.err != nil && !old.replaced {
 		s.fallBackLocked(old.failure())
 	}
-	s.stopRunLocked()
+	if !s.stopRunLocked() {
+		return ErrClosed
+	}
 	s.clearFromLocked(g)
 	if g < s.pruned {
 		s.pruned = g
@@ -315,6 +317,7 @@ func (s *Session) startRunLocked(g int) error {
 	}
 	s.recordRun(r)
 	s.run = r
+	s.pid.Store(int64(cmd.Process.Pid))
 	s.m.log.Debug("ffmpeg started", "session", s.ID, "run", r.id, "gop", g, "seek", spec.SeekSec)
 	return nil
 }
@@ -395,17 +398,38 @@ func (s *Session) killRunLocked() *run {
 	return r
 }
 
-// stopRunLocked is killRunLocked and then waits for the ffmpeg to be gone: a new
-// run may not start before that, as the fragment files are shared between runs.
-func (s *Session) stopRunLocked() {
-	r := s.killRunLocked()
+// stopRunLocked kills the current ffmpeg and waits for it to be gone: a new run may
+// not start before that, as the fragment files are shared between runs. The wait is
+// under the session lock, so a stop of the session (which needs the lock to finish)
+// cuts it short: it returns false then, with the run still in s.run for shutdown to
+// wait for, and the caller must not start another or touch the files.
+func (s *Session) stopRunLocked() bool {
+	r := s.run
 	if r == nil {
-		return
+		return true
 	}
-	<-r.done
+	r.replaced = true
+	r.cancel()
+	select {
+	case <-r.done:
+	case <-s.stopCh:
+		return false
+	}
+	s.run = nil
 	_ = os.Remove(filepath.Join(s.dir, pidFile))
 	if p := filepath.Join(s.dir, r.initName); p != s.initPath {
 		_ = os.Remove(p)
+	}
+	return true
+}
+
+// stopping reports whether stop has been called on the session.
+func (s *Session) stopping() bool {
+	select {
+	case <-s.stopCh:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -585,9 +609,6 @@ func (s *Session) shutdown() {
 	s.closed = true
 	r := s.killRunLocked()
 	s.mu.Unlock()
-	if r != nil {
-		s.dying.Store(int64(r.cmd.Process.Pid))
-	}
 	if g := s.m.stopGate; g != nil {
 		<-g
 	}

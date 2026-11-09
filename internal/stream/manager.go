@@ -548,7 +548,7 @@ func (m *Manager) end(id string, onPurpose bool) bool {
 		select {
 		case <-gone:
 		case <-t.C:
-			m.log.Info("ffmpeg is slow to exit; answering without waiting", "session", id, "pid", s.dying.Load(), "waited", m.o.StopWait)
+			m.log.Info("ffmpeg is slow to exit; answering without waiting", "session", id, "pid", s.pid.Load(), "waited", m.o.StopWait)
 		}
 	}
 	return ok || dropped
@@ -598,7 +598,7 @@ func (m *Manager) Close() {
 		select {
 		case <-g:
 		case <-expired:
-			late = append(late, fmt.Sprintf("%s (pid %d)", all[i].ID, all[i].dying.Load()))
+			late = append(late, fmt.Sprintf("%s (pid %d)", all[i].ID, all[i].pid.Load()))
 		}
 	}
 	if len(late) > 0 {

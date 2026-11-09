@@ -37,14 +37,14 @@ func brief(m *Manager, k DirectKey, title, client string, pos float64) (string, 
 }
 
 // The player's own stop-then-start must not be turned away at the limit by the
-// session it has just stopped: a session on its way out (its ffmpeg is being
-// killed, its directory removed) is held by Delete for as long as that takes, and
-// does not count.
+// session it has just stopped: a session on its way out (its ffmpeg is killed but
+// not seen to have exited, its directory not yet removed) is kept by the manager until
+// it has (Delete waits for that StopWait at most), and does not count.
 func TestStopThenStartAtTheCap(t *testing.T) {
 	f := newFake(t)
 	m := fakeManager(t, f, func(o *Options) { o.MaxSessions = 1 })
 	gate := make(chan struct{})
-	m.stopGate = gate // set before any session exists: stop() holds here until it is closed
+	m.stopGate = gate // set before any session exists: shutdown holds here, after the kill, until it is closed
 	var open sync.Once
 	release := func() { open.Do(func() { close(gate) }) }
 	t.Cleanup(release) // runs before the manager's Close

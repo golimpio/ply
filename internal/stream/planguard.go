@@ -314,7 +314,10 @@ func (s *Session) refuteLocked(gop int, why string) {
 		"session", s.ID, "path", filepath.Base(s.req.Path), "gop", gop, "why", why)
 	g.refuted = true
 	s.m.distrustIndex(s.req.Path)
-	s.stopRunLocked()
+	if !s.stopRunLocked() { // the session is being stopped: nothing is rebuilt
+		g.finish(ErrClosed)
+		return
+	}
 	s.clearFromLocked(0) // the fragments of the old numbering are of no use to the new
 	s.pruned = 0
 	s.m.wg.Add(1)
@@ -334,7 +337,7 @@ func (s *Session) failLocked(gop int, why string) {
 		"session", s.ID, "path", filepath.Base(s.req.Path), "gop", gop, "why", why)
 	s.m.distrustIndex(s.req.Path)
 	s.failure = fmt.Errorf("%w: %s", ErrIndex, why)
-	s.stopRunLocked()
+	s.stopRunLocked() // (if the session is being stopped meanwhile, shutdown is what waits for the run)
 	if s.m.o.Cache != nil && g.itemID > 0 {
 		s.m.wg.Add(1)
 		go func() {
