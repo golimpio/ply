@@ -231,6 +231,34 @@ func (g guardRig) open(t *testing.T) {
 	}
 }
 
+// writeAfterTheDeadline has the fake write the first n fragments of s only once
+// the deadline of its plan guard is past, and returns when they are on disk and
+// nobody has looked at them: the tests that use it keep the monitor from ticking,
+// so the one who finds them is the client that asks for the playlist late.
+//
+// It waits for what it needs and does not sleep for it. The first run of a new
+// executable takes 250 to 600 ms on macOS, and more under load, so a sleep of
+// any fixed length can be over before the fake has written anything, and then
+// the plan is given up on, as it ought to be.
+func (g guardRig) writeAfterTheDeadline(t *testing.T, s *Session, n int) {
+	t.Helper()
+	g.hold(t, 0)
+	g.open(t)
+	waitUntil(t, "the deadline", 5*time.Second, func() bool { return time.Now().After(s.guard.deadline) })
+	if s.guard.final() { // the control: the plan is still to be judged, and there is nothing to judge it by
+		t.Fatal("the plan was settled before any fragment was written")
+	}
+	g.release(t, 0)
+	waitUntil(t, "the first fragments", 30*time.Second, func() bool {
+		for i := range n {
+			if _, err := os.Stat(s.gopPath(i)); err != nil {
+				return false
+			}
+		}
+		return true
+	})
+}
+
 func (g guardRig) starts() []string {
 	b, _ := os.ReadFile(g.log)
 	return strings.Split(strings.TrimSpace(string(b)), "\n")
@@ -457,8 +485,7 @@ func TestPlanGuardRefutesAfterTheDeadlineToo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rig.open(t)
-	time.Sleep(700 * time.Millisecond) // the deadline is long past
+	rig.writeAfterTheDeadline(t, s, 2)
 	if n := strings.Count(playlistOf(t, s), "#EXTINF"); n != 15 {
 		t.Errorf("%d segments in the playlist, want the 15 of the scan", n)
 	}
@@ -536,8 +563,10 @@ func TestPlanGuardJudgesTheFragmentsThatAreThereAfterTheDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rig.open(t)
-	time.Sleep(700 * time.Millisecond) // the deadline is long past
+	rig.writeAfterTheDeadline(t, s, 2)
+	if n := cache.total(); n != 0 { // the control: it is the late judgement that caches
+		t.Fatalf("%d writes to the cache before the playlist was asked for", n)
+	}
 	if pl := playlistOf(t, s); strings.Count(pl, "#EXTINF") != 20 {
 		t.Fatalf("playlist:\n%s", pl)
 	}
