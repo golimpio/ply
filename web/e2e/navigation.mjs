@@ -483,6 +483,70 @@ const scenarios = {
     await context.close();
   },
 
+  // The card → detail morph (lib/nav) in Chrome. A show's hero is the landing point of the morph
+  // (hero-art) and its episodes are cards that morph: two elements of one name abort the transition
+  // ("Transition was aborted because of invalid state. Snapshot capture failed", a page error). A
+  // second card before the first is drawn skips the first ("Transition was skipped. New
+  // ViewTransition started", an AbortError, expected). Mutants caught: go() leaving the show's hero
+  // named while the episode is captured (InvalidStateError outcomes and their page errors); go() not
+  // handling ready (the skip as a page error); a second go() navigating without a transition while
+  // the first is pending (no skip: the two cards' outcomes differ).
+  async 'The morph: from a show to its episodes and back, and two cards at once, without page errors'(browser) {
+    const { context, page, errors } = await open(browser);
+    // What became of each transition's ready: "ready" once it animates, or the rejection's name. The
+    // app gets a relay of ready that settles the same way, so a rejection it leaves unhandled is
+    // still a page error (observing the real one marks that one handled).
+    await page.addInitScript(() => {
+      const start = document.startViewTransition?.bind(document);
+      if (!start) return;
+      window.__vt = [];
+      document.startViewTransition = (cb) => {
+        const vt = start(cb);
+        const ready = vt.ready;
+        const i = window.__vt.push('pending') - 1;
+        ready.then(() => (window.__vt[i] = 'ready'), (e) => (window.__vt[i] = e.name));
+        Object.defineProperty(vt, 'ready', { value: new Promise((ok, fail) => ready.then(ok, fail)) });
+        return vt;
+      };
+    });
+    const outcomes = () => page.evaluate(() => window.__vt ?? null);
+    /** The outcomes of the transitions after the first `from`, once none is pending. */
+    const since = async (from, count) => {
+      await until(async () => {
+        const all = (await outcomes()) ?? [];
+        return all.length >= from + count && !all.slice(from).includes('pending');
+      }, 2000);
+      return ((await outcomes()) ?? []).slice(from);
+    };
+    await page.goto(`${base}/#/shows/Lost`);
+    for (const id of [2001, 2002]) {
+      const ep = page.locator(`a.ep[href="#/item/${id}"]`);
+      await ep.waitFor();
+      check(`episode ${id}: the show's hero holds the morph's name`, await page.evaluate(() => [...document.querySelectorAll('.hero .backdrop')].some((el) => el.style.viewTransitionName === 'hero-art')));
+      const n = (await outcomes())?.length ?? -1;
+      await ep.click();
+      await until(async () => (await hash(page)) === `#/item/${id}`);
+      check(`episode ${id}: its page opens`, (await hash(page)) === `#/item/${id}`, await hash(page));
+      const got = await since(n, 1);
+      check(`episode ${id}: the morph ran`, JSON.stringify(got) === '["ready"]', JSON.stringify(got));
+      await back(page).waitFor();
+      await back(page).click();
+      await until(async () => (await hash(page)) === '#/shows/Lost');
+      check(`episode ${id}: Back returns to the show`, (await hash(page)) === '#/shows/Lost', await hash(page));
+    }
+    await page.goto(`${base}/#/movies`);
+    await page.locator('a.card[href="#/item/2"]').waitFor();
+    const n = (await outcomes())?.length ?? -1;
+    await page.evaluate(() => ['#/item/1', '#/item/2'].forEach((h) => document.querySelector(`a.card[href="${h}"]`).click()));
+    await until(async () => (await hash(page)) === '#/item/2');
+    const got = await since(n, 2);
+    check('two cards at once: the first transition skipped (AbortError), the second animated', JSON.stringify(got) === '["AbortError","ready"]', JSON.stringify(got));
+    check('two cards at once: the second one opens', (await hash(page)) === '#/item/2', await hash(page));
+    await sleep(600); // past the morph
+    check('the morph: no page errors', errors.length === 0, errors.join('; '));
+    await context.close();
+  },
+
   // Mutant caught: the Back button of an episode reached by a deep link naming Movies (the film
   // fallback) until the item is in, then its show.
   async "An episode's deep link: Back names its show, never Movies"(browser) {
