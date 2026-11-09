@@ -124,6 +124,8 @@ type Generator struct {
 	reaper   string
 	holdFn   func(input string) (bool, string)
 	log      *slog.Logger
+	// closeWait is how long Close waits for the runs it cancelled to exit (proc.ExitGrace).
+	closeWait time.Duration
 
 	ctx    context.Context // ends with Close; every conversion runs under it
 	cancel context.CancelFunc
@@ -230,6 +232,8 @@ func New(o Options) (*Generator, error) {
 		log:      o.Logger,
 		inflight: map[string]*call{},
 		failed:   map[string]failure{},
+
+		closeWait: proc.ExitGrace,
 	}
 	g.run = g.exec
 	return g, nil
@@ -251,13 +255,18 @@ func cacheName(src Source) string {
 func failName(name string) string { return strings.TrimSuffix(name, ".vtt") + ".fail" }
 
 // Close stops the conversions in progress (killing their ffmpeg and removing
-// their half-written files) and waits for them. Path fails afterwards.
+// their half-written files) and waits for them, but not for longer than
+// proc.ExitGrace: an ffmpeg that is reading from a share that is slow or gone does
+// not die until the read returns, and then only ply's own exit, with the guard of
+// its group, ends it. Path fails afterwards.
 func (g *Generator) Close() {
 	g.mu.Lock()
 	g.closed = true
 	g.mu.Unlock()
 	g.cancel()
-	g.wg.Wait()
+	if !proc.Await(&g.wg, g.closeWait) {
+		g.log.Warn("subtitles: not waiting any longer for ffmpeg to exit", "after", g.closeWait)
+	}
 }
 
 // Cached reports whether the WebVTT of src is in the cache: serving it needs no

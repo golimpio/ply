@@ -241,6 +241,73 @@ func TestSessionDelete(t *testing.T) {
 	wantJSONError(t, e.do("DELETE", "/api/sessions/"+pb.SessionID, nil, ""), 404)
 }
 
+// An ffmpeg stuck in a read from a share that is slow or gone is killed at once but
+// is not seen to exit until the read returns (18 s measured): the DELETE must not wait
+// for that. It answers, the session counts until its ffmpeg has really gone, and the
+// directory is removed then.
+func TestSessionDeleteAnswersWhileFFmpegIsStillExiting(t *testing.T) {
+	e := newEnv(t, "")
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	m := e.withStreams(fakeFFmpeg(t, fmt.Sprintf("echo $$ > %q; exec sleep 60", pidFile)), nil)
+	release := m.HoldExits()
+	t.Cleanup(release) // before the manager's Close
+	pb := e.startSession("", `{}`)
+	sess, ok := m.Get(pb.SessionID)
+	if !ok {
+		t.Fatal("session missing")
+	}
+	dir := sess.Dir()
+	var pid int
+	for deadline := time.Now().Add(5 * time.Second); pid == 0 && time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		b, _ := os.ReadFile(pidFile)
+		pid, _ = strconv.Atoi(strings.TrimSpace(string(b)))
+	}
+	if pid == 0 || !processAlive(pid) { // positive control: there is a process to kill
+		t.Fatalf("setup: ffmpeg did not start (pid %d)", pid)
+	}
+
+	answer := make(chan int, 1)
+	start := time.Now()
+	go func() { answer <- e.do("DELETE", "/api/sessions/"+pb.SessionID, nil, "").Code }()
+	select {
+	case code := <-answer:
+		if code != 204 {
+			t.Errorf("DELETE = %d, want 204", code)
+		}
+		if d := time.Since(start); d > 1500*time.Millisecond {
+			t.Errorf("DELETE took %v while ffmpeg's exit was not seen", d)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("DELETE did not answer while ffmpeg's exit was not seen")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for processAlive(pid) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if processAlive(pid) {
+		t.Errorf("ffmpeg (pid %d) still running after DELETE", pid)
+	}
+	if m.Count() != 1 { // positive control: the exit really was held back
+		t.Errorf("sessions = %d while the exit is not seen, want 1", m.Count())
+	}
+	if _, err := os.Stat(dir); err != nil { // positive control for its removal below
+		t.Errorf("session dir removed before the exit was seen: %v", err)
+	}
+	wantJSONError(t, e.get("/api/sessions/"+pb.SessionID+"/index.m3u8"), 410) // stopped, not lost
+
+	release()
+	deadline = time.Now().Add(5 * time.Second)
+	for m.Count() > 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if m.Count() != 0 {
+		t.Fatal("the session was not let go of after ffmpeg's exit was seen")
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("session dir still exists: %v", err)
+	}
+}
+
 // The player recovers from an expired session by starting a new one, and
 // tells it apart from other failures by the 404 (web/src/lib/session.ts).
 func TestExpiredSessionAnswers404(t *testing.T) {

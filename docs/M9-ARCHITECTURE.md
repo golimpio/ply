@@ -218,6 +218,14 @@ Design:
    reaper: shared with the subtitle and artwork extractions) for the code. Found while testing: the kernel ends a
    *stopped* orphaned process group with SIGHUP in some cases only, so a running ffmpeg outlives a killed ply (and a
    stopped one is not safe for sure); the reaper and the registry matter for those.
+
+   **Stopping does not wait for the exit.** A process stuck in an SMB read does not die until the read returns (18 s
+   measured), though SIGKILL is sent at once. `Session.stop` kills and returns a channel; a goroutine waits for the exit
+   and only then removes the registry entry, ends the reaper and removes the directory, so the guards last until the
+   real exit. The session counts in `Count` meanwhile, against the limits only after `StopGrace`. `Delete` waits at
+   most `Options.StopWait` (500 ms); `Close` kills all sessions first, then waits once for all at most `CloseWait`
+   (2 s, `proc.ExitGrace`, which the subtitle and artwork generators use too); the next start finishes the rest. A seek
+   still waits for the old run (the GOP file names are shared between runs).
 5. A leak check in the manager's housekeeping (every 5 s): the registry files vs the sessions; a registered group (pid
    alive, started when the file says) that belongs to no session is killed. Not built, from the review, for later: a
    maximum time for a paused session; a flag for the heartbeat window; the client address behind a reverse proxy

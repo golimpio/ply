@@ -110,6 +110,8 @@ type Generator struct {
 	toneMap  string // filter chain applied to HDR sources; "" when ffmpeg lacks zscale
 	reaper   string
 	log      *slog.Logger
+	// closeWait is how long Close waits for the runs it cancelled to exit (proc.ExitGrace).
+	closeWait time.Duration
 
 	base   context.Context // parent of every generation; cancelled by Close
 	cancel context.CancelFunc
@@ -189,6 +191,8 @@ func New(ctx context.Context, o Options) (*Generator, error) {
 		failed:   map[string]failure{},
 		colors:   map[int64]colour{},
 		now:      time.Now,
+
+		closeWait: proc.ExitGrace,
 	}
 	g.base, g.cancel = context.WithCancel(context.Background())
 	g.run = g.exec
@@ -203,13 +207,18 @@ func New(ctx context.Context, o Options) (*Generator, error) {
 func (g *Generator) Runs() int64 { return g.runs.Load() }
 
 // Close cancels every generation in flight (killing its ffmpeg process group)
-// and waits for them to finish. Path returns ErrClosed afterwards.
+// and waits for them to finish, but not for longer than proc.ExitGrace: an ffmpeg
+// that is reading from a share that is slow or gone does not die until the read
+// returns, and then only ply's own exit, with the guard of its group, ends it.
+// Path returns ErrClosed afterwards.
 func (g *Generator) Close() {
 	g.mu.Lock()
 	g.closed = true
 	g.mu.Unlock()
 	g.cancel()
-	g.wg.Wait()
+	if !proc.Await(&g.wg, g.closeWait) {
+		g.log.Warn("artwork: not waiting any longer for ffmpeg to exit", "after", g.closeWait)
+	}
 }
 
 // Path returns the cached image of kind k for src, generating it first if

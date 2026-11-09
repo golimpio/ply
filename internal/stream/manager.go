@@ -95,6 +95,16 @@ type Options struct {
 	Clock func() time.Time
 	// LeakCheck is how often the registry is compared with the sessions [5s].
 	LeakCheck time.Duration
+	// StopWait is how long stopping a session (Delete, an idle end) waits for its ffmpeg
+	// to be seen gone before answering [500ms]. The kill is sent at once, and a process
+	// that is reading from a share that is slow or gone does not die until the read
+	// returns; the session is let go of when it has (it counts in Count until then).
+	StopWait time.Duration
+	// CloseWait is how long Close waits, once for all of them, for the ffmpeg of the
+	// sessions it has killed to be seen gone [proc.ExitGrace, 2s]. What is left is
+	// finished by the next start, through the registry and the sweep of the temp
+	// directories.
+	CloseWait time.Duration
 
 	// Throttling, in segments between ffmpeg's output and the player: pause
 	// above ThrottleHigh [20], resume below ThrottleLow [10].
@@ -150,6 +160,12 @@ func (o *Options) defaults() {
 	}
 	if o.LeakCheck <= 0 {
 		o.LeakCheck = 5 * time.Second
+	}
+	if o.StopWait <= 0 {
+		o.StopWait = 500 * time.Millisecond
+	}
+	if o.CloseWait <= 0 {
+		o.CloseWait = proc.ExitGrace
 	}
 	if o.SegmentSec <= 0 {
 		o.SegmentSec = DefaultSegmentSec
@@ -244,9 +260,15 @@ type Manager struct {
 	waiting   atomic.Int32           // requests blocked on ffmpeg right now (see waiter)
 	onLoad    atomic.Pointer[func()] // OnLoadChange
 
-	reg       *registry     // nil without Options.RegistryDir
-	reaperExe string        // what is run as the reaper (see reaperLink); empty for none
-	stopGate  chan struct{} // a test's: Session.stop waits for it to be closed
+	reg       *registry // nil without Options.RegistryDir
+	reaperExe string    // what is run as the reaper (see reaperLink); empty for none
+	// Test seams, set before any session exists. stopGate holds Session.shutdown, after the
+	// kill, until it is closed. exitGate holds the exit of every ffmpeg, once it has died and
+	// before anything is released for it: a process that is gone and whose exit is not seen
+	// yet. noKill makes the kill of a run do nothing: a process that does not die.
+	stopGate chan struct{}
+	exitGate chan struct{}
+	noKill   bool
 
 	kfMu    sync.Mutex
 	kfCalls map[string]*kfCall
@@ -452,6 +474,17 @@ func killLeftoverFFmpeg(dir string, log *slog.Logger) {
 // Dir is the directory holding this manager's session directories.
 func (m *Manager) Dir() string { return m.dir }
 
+// HoldExits is for tests of what is above this package: it makes the exit of every
+// ffmpeg started from now on wait, after the process has died, for release to be
+// called (as of a process that was killed but whose exit is not seen yet, as when it
+// is stuck in a read from a share). Call it before the first session.
+func (m *Manager) HoldExits() (release func()) {
+	gate := make(chan struct{})
+	m.exitGate = gate
+	var once sync.Once
+	return func() { once.Do(func() { close(gate) }) }
+}
+
 // Count returns the number of sessions that still hold resources: live ones,
 // and ones being stopped. When it drops, their ffmpeg has exited and their
 // directory is gone.
@@ -509,21 +542,32 @@ func (m *Manager) end(id string, onPurpose bool) bool {
 	m.loadDirty = m.loadDirty || ok || dropped
 	m.unlock()
 	if ok {
-		s.stop()
-		m.stopped(id)
+		gone := s.stop()
+		t := time.NewTimer(m.o.StopWait)
+		defer t.Stop()
+		select {
+		case <-gone:
+		case <-t.C:
+			m.log.Info("ffmpeg is slow to exit; answering without waiting", "session", id, "pid", s.dying.Load(), "waited", m.o.StopWait)
+		}
 	}
 	return ok || dropped
 }
 
-// stopped records that a session taken out of the map is completely gone.
+// stopped records that a session taken out of the map is completely gone (the
+// session does, when it has let go of everything).
 func (m *Manager) stopped(id string) {
 	m.mu.Lock()
 	delete(m.stopping, id)
 	m.mu.Unlock()
 }
 
-// Close stops every session, waits for their processes to exit and removes
-// the temp directory. Create fails afterwards.
+// Close stops every session and removes the temp directory. Create fails
+// afterwards. Every ffmpeg is killed first; then it waits for them to be seen gone,
+// all of them together for no more than CloseWait: a process stuck in a read from a
+// share does not die until the read returns, and the shutdown must not wait for it.
+// Such a session keeps its registry entry and its reaper, which end when it does, or
+// when ply does; the directory is left for the next start to remove.
 func (m *Manager) Close() {
 	m.mu.Lock()
 	m.closed = true
@@ -538,15 +582,36 @@ func (m *Manager) Close() {
 	m.recentDirect = map[DirectKey]time.Time{}
 	m.unlock()
 
-	var wg sync.WaitGroup
-	for _, s := range all {
-		wg.Add(1)
-		go func() { defer wg.Done(); s.stop(); m.stopped(s.ID) }()
+	gone := make([]<-chan struct{}, len(all))
+	for i, s := range all {
+		gone[i] = s.stop()
 	}
-	wg.Wait()
+	expired := make(chan struct{})
+	defer time.AfterFunc(m.o.CloseWait, func() { close(expired) }).Stop()
+	var late []string
+	for i, g := range gone {
+		select {
+		case <-g:
+			continue
+		default:
+		}
+		select {
+		case <-g:
+		case <-expired:
+			late = append(late, fmt.Sprintf("%s (pid %d)", all[i].ID, all[i].dying.Load()))
+		}
+	}
+	if len(late) > 0 {
+		m.log.Warn("not waiting for ffmpeg to exit", "after", m.o.CloseWait, "sessions", late)
+	}
 	m.cancel() // aborts keyframe scans
 	m.wg.Wait()
-	_ = os.RemoveAll(m.dir)
+	m.mu.Lock()
+	left := len(m.stopping)
+	m.mu.Unlock()
+	if left == 0 { // else the directories of what is left are removed by the next start
+		_ = os.RemoveAll(m.dir)
+	}
 }
 
 // Create starts a session for r. The keyframe index is read from the cache or

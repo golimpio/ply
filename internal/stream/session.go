@@ -86,6 +86,11 @@ type Session struct {
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
+	// gone is closed when the session has let go of everything: its ffmpeg has been
+	// seen to exit, and the registry entry, the reaper and the directory are gone.
+	gone chan struct{}
+	// dying is the pid of the ffmpeg that stop is waiting for the exit of (0 if none).
+	dying atomic.Int64
 }
 
 // run is one ffmpeg process producing GOP fragments from GOP start onwards.
@@ -143,7 +148,7 @@ func (r *run) failure() string {
 }
 
 func newSession(m *Manager, id, dir string, r Request, plan Plan) *Session {
-	s := &Session{ID: id, m: m, req: r, plan: plan, dir: dir, stopCh: make(chan struct{}),
+	s := &Session{ID: id, m: m, req: r, plan: plan, dir: dir, stopCh: make(chan struct{}), gone: make(chan struct{}),
 		kind: KindRemux, title: r.Title, client: r.Client, started: m.clock()}
 	if r.transcode() {
 		s.kind = KindTranscode
@@ -280,6 +285,9 @@ func (s *Session) startRunLocked(g int) error {
 	cmd.Stderr = r.stderr
 	cmd.WaitDelay = 3 * time.Second
 	proc.OwnGroup(cmd)
+	if s.m.noKill {
+		cmd.Cancel = func() error { return nil }
+	}
 	r.cmd, r.cancel = cmd, cancel
 	started := time.Now()
 	err := proc.Start(cmd, func(waitErr error) {
@@ -293,6 +301,9 @@ func (s *Session) startRunLocked(g int) error {
 		if diedByItself {
 			// What ffmpeg said is the only account of why (a client just gets a 500).
 			s.m.log.Warn("ffmpeg failed", "session", s.ID, "run", r.id, "exit", exitText(r.err), "stderr", r.stderr.String())
+		}
+		if g := s.m.exitGate; g != nil {
+			<-g
 		}
 		s.m.reg.removeRun(s.ID, cmd.Process.Pid)
 		r.stopReaper()
@@ -368,17 +379,30 @@ func (s *Session) fallBackLocked(failure string) bool {
 	return true
 }
 
-// stopRunLocked kills the current ffmpeg (even a paused one) and waits for
-// it to be gone.
-func (s *Session) stopRunLocked() {
+// killRunLocked kills the current ffmpeg (even a paused one) and lets go of it,
+// without waiting for it to exit: r.done is closed when it has. A process that is
+// reading from a share that is slow or gone does not die until the read returns,
+// and nobody who stops a session should have to wait for that. What the exit
+// releases (the registry entry, the reaper) stays in place until it has happened.
+func (s *Session) killRunLocked() *run {
 	r := s.run
 	if r == nil {
-		return
+		return nil
 	}
 	r.replaced = true
 	r.cancel()
-	<-r.done
 	s.run = nil
+	return r
+}
+
+// stopRunLocked is killRunLocked and then waits for the ffmpeg to be gone: a new
+// run may not start before that, as the fragment files are shared between runs.
+func (s *Session) stopRunLocked() {
+	r := s.killRunLocked()
+	if r == nil {
+		return
+	}
+	<-r.done
 	_ = os.Remove(filepath.Join(s.dir, pidFile))
 	if p := filepath.Join(s.dir, r.initName); p != s.initPath {
 		_ = os.Remove(p)
@@ -539,23 +563,43 @@ func throttle(ahead int, paused bool, high, low int) throttleAction {
 	return actionNone
 }
 
-// stop ends the session: the process group is killed and awaited, then the
-// temp directory removed. It is idempotent.
-func (s *Session) stop() {
+// stop ends the session, in the background: the process group is killed at once,
+// and the registry entry, the reaper and the temp directory are let go of when the
+// process has exited, which nobody waits for (see killRunLocked). It returns the
+// channel that is closed when all that is done. It is idempotent.
+func (s *Session) stop() <-chan struct{} {
 	s.stopOnce.Do(func() {
 		close(s.stopCh)
-		if s.m.stopGate != nil {
-			<-s.m.stopGate
-		}
-		s.mu.Lock()
-		s.closed = true
-		s.stopRunLocked()
-		s.mu.Unlock()
-		s.m.reg.remove(s.ID)
-		if err := os.RemoveAll(s.dir); err != nil {
-			s.m.log.Warn("remove session dir", "session", s.ID, "err", err)
-		}
+		go s.shutdown()
 	})
+	return s.gone
+}
+
+// shutdown is what stop starts: it kills the run, waits for its exit and lets go of
+// what the session held. The manager forgets the session last, so that Count is
+// never lower than what is still there. (It is a goroutine of its own also because
+// the lock may be held by a seek that is waiting for the old run to exit.)
+func (s *Session) shutdown() {
+	defer close(s.gone)
+	s.mu.Lock()
+	s.closed = true
+	r := s.killRunLocked()
+	s.mu.Unlock()
+	if r != nil {
+		s.dying.Store(int64(r.cmd.Process.Pid))
+	}
+	if g := s.m.stopGate; g != nil {
+		<-g
+	}
+	if r != nil {
+		<-r.done
+		_ = os.Remove(filepath.Join(s.dir, pidFile))
+	}
+	s.m.reg.remove(s.ID)
+	if err := os.RemoveAll(s.dir); err != nil {
+		s.m.log.Warn("remove session dir", "session", s.ID, "err", err)
+	}
+	s.m.stopped(s.ID)
 }
 
 // gopFile returns the finished fragment for GOP g.
