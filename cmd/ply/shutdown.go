@@ -2,6 +2,7 @@ package main
 
 import (
 	"log/slog"
+	"os"
 	"time"
 )
 
@@ -17,6 +18,8 @@ type stopper struct {
 	log      *slog.Logger
 	every    time.Duration // how often a slow step is reported
 	deadline time.Duration // after this the rest is not waited for
+	quick    <-chan os.Signal
+	onQuick  func()
 }
 
 // run reports false if it gave up waiting: the process should exit anyway.
@@ -35,6 +38,14 @@ func (s stopper) run(steps []stopStep) bool {
 			select {
 			case <-done:
 				break wait
+			case <-s.quick:
+				s.log.Warn("interrupted during shutdown; quitting at once")
+				if s.onQuick != nil {
+					s.onQuick()
+				} else {
+					os.Exit(130)
+				}
+				return false
 			case <-tick.C:
 				s.log.Info("still stopping", "step", st.name, "waited", time.Since(began).Round(time.Second),
 					"left", len(steps)-i)

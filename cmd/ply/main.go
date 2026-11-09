@@ -83,8 +83,12 @@ func run() error {
 		log.Warn(w)
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigC := make(chan os.Signal, 2)
+	signal.Notify(sigC, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigC)
 
 	// Listen before anything advertises the address, so ":0" works.
 	ln, err := net.Listen("tcp", cfg.Addr)
@@ -384,18 +388,16 @@ func run() error {
 
 	var serveFailure error
 	select {
-	case <-ctx.Done():
+	case <-sigC:
 		log.Info("shutting down; press Ctrl-C again to quit at once")
+		cancel()
 	case serveFailure = <-serveErr:
+		cancel()
 	}
-	// Cancels the scanner and the queue, and gives the signals back: a second
-	// Ctrl-C now ends the process, and takes its ffmpeg along (playback, subtitles and
-	// artwork alike: the kernel's Pdeathsig on Linux, a reaper for each group on macOS).
-	stop()
 
-	shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	stopper{log: log, every: 2 * time.Second, deadline: 30 * time.Second}.run([]stopStep{
+	shutCtx, cancelShut := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelShut()
+	clean := stopper{log: log, every: 2 * time.Second, deadline: 30 * time.Second, quick: sigC}.run([]stopStep{
 		{"network announcement", adv.Shutdown},
 		// Kill every ffmpeg and drop the temp dirs first: requests waiting on
 		// segments return at once instead of holding the HTTP shutdown up.
@@ -420,6 +422,10 @@ func run() error {
 		{"library scan", scanner.Wait},
 		{"image downloads", images.Close},
 	})
+	if !clean {
+		log.Warn("shutdown timed out; forcing exit")
+		os.Exit(1)
+	}
 	return serveFailure
 }
 
