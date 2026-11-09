@@ -16,6 +16,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { routeItems } from './mock-items.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = process.env.PLY_E2E_DIST ?? join(here, '..', 'dist');
@@ -51,7 +52,7 @@ const base = `http://127.0.0.1:${server.address().port}`;
 const movie = (id) => ({
   id, kind: 'movie', title: `Film ${String(id).padStart(3, '0')}`, year: 1950 + ((id * 37) % 70), durationSec: 6000 + id, container: 'mkv',
   videoCodec: 'h264', audioCodec: 'aac', width: 1920, height: 1080, addedAt: id, art: null, titleId: 1000 + id, matchState: 'matched',
-  needsReview: false, rating: null, progress: id % 3 === 0 ? { positionSec: 0, watched: true } : null,
+  needsReview: false, rating: null, watched: id % 3 === 0, progress: id % 3 === 0 ? { positionSec: 0, watched: true } : null,
 });
 const MOVIES = Array.from({ length: 120 }, (_, i) => movie(i + 1));
 const episode = (id, ep) => ({
@@ -109,7 +110,7 @@ async function open(browser, opts = {}) {
     if (p === '/api/info') return json(route, { id: 'x', name: 'e2e', version: 'dev', authRequired: false });
     if (p === '/api/scan') return json(route, { running: false, itemCount: items.length, watching: [] });
     if (opts.slowItems && p.startsWith('/api/items')) await sleep(opts.slowItems);
-    if (p === '/api/items') return json(route, items);
+    if (p === '/api/items') return routeItems(route, items);
     if (p === '/api/shows') return json(route, SHOWS);
     if (['/api/continue', '/api/upcoming', '/api/folders', '/api/metadata/review', '/api/sessions'].includes(p)) return json(route, []);
     if (p === '/api/genres') return json(route, [{ id: 18, name: 'Drama', count: GENRE_TITLES.length }]);

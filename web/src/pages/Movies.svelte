@@ -1,8 +1,8 @@
 <script lang="ts">
-  import type { ItemSummary } from '../lib/api';
+  import type { MovieCard } from '../lib/api';
   import { byName, railLetters } from '../lib/az';
   import { formatDuration, hdrLabel, resolutionLabel } from '../lib/format';
-  import { byAdded, ensureLibrary, library } from '../lib/library.svelte';
+  import { byAdded, ensureMovies, movies } from '../lib/library.svelte';
   import { filmPasses, groupByTitle, prefersPosters, type TitleGroup } from '../lib/meta';
   import { passesMinRating, ratingScore } from '../lib/ratings';
   import { href, type LibraryView } from '../lib/router.svelte';
@@ -13,14 +13,14 @@
   import VirtualGrid from '../components/VirtualGrid.svelte';
 
   let { view }: { view: LibraryView } = $props();
-  let grid = $state<VirtualGrid<TitleGroup>>();
+  let grid = $state<VirtualGrid<TitleGroup<MovieCard>>>();
 
   $effect(() => {
     void app.libraryVersion;
-    void ensureLibrary();
+    void ensureMovies();
   });
 
-  const order: Record<LibraryView['sort'], (a: ItemSummary, b: ItemSummary) => number> = {
+  const order: Record<LibraryView['sort'], (a: MovieCard, b: MovieCard) => number> = {
     title: byName, // the server's order of names (lib/az)
     added: byAdded,
     year: (a, b) => (b.year ?? 0) - (a.year ?? 0) || byName(a, b),
@@ -30,10 +30,10 @@
   };
 
   // One card per film: its files (4K and 1080p, say) are versions of it.
-  const all = $derived(groupByTitle(library.items.filter((i) => i.kind === 'movie')));
+  const all = $derived(groupByTitle(movies.rows.slice()));
   // See filmPasses: 4K or HDR when any version is, both when one version is; watched when any version was.
-  const is4k = (i: ItemSummary) => resolutionLabel(i.width, i.height) === '4K';
-  const isHdr = (i: ItemSummary) => hdrLabel(i.hdr) !== '';
+  const is4k = (i: MovieCard) => resolutionLabel(i.width, i.height) === '4K';
+  const isHdr = (i: MovieCard) => hdrLabel(i.hdr) !== '';
   const shown = $derived(
     all
       .filter((g) => filmPasses(g, { is4k, isHdr, filters: view.filters }) && passesMinRating(g.item, view.minRating))
@@ -42,7 +42,7 @@
   const posters = $derived(prefersPosters(all.map((g) => g.item)));
   const letters = $derived(view.sort === 'title' ? railLetters(shown.map((g) => g.item.sortTitle || g.item.title)) : []);
 
-  const sub = (g: TitleGroup) => [
+  const sub = (g: TitleGroup<MovieCard>) => [
     g.item.year,
     formatDuration(g.item.durationSec),
     g.versions.length > 1 ? `${g.versions.length} versions` : '',
@@ -50,7 +50,7 @@
 </script>
 
 <div class="page">
-  <h1>Movies{#if library.loaded}<span class="count">{all.length}</span>{/if}</h1>
+  <h1>Movies{#if movies.loaded}<span class="count">{all.length}</span>{/if}</h1>
 
   <LibraryControls
     {view}
@@ -70,9 +70,9 @@
     ]}
   />
 
-  {#if library.error && !library.loaded}
-    <p class="error">{library.error}</p>
-  {:else if !library.loaded}
+  {#if movies.error && !movies.loaded}
+    <p class="error">{movies.error}</p>
+  {:else if !movies.loaded}
     <div class="grid" aria-busy="true">
       {#each Array(8) as _, i (i)}<div class="skeleton sk"></div>{/each}
     </div>

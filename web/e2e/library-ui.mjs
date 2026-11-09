@@ -20,6 +20,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { serveItems } from './mock-items.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = process.env.PLY_E2E_DIST ?? join(here, '..', 'dist');
@@ -116,7 +117,8 @@ function list(req, res, body) {
   const etag = `"${createHash('sha1').update(text).digest('hex').slice(0, 20)}"`;
   const inm = req.headers['if-none-match'] ?? '';
   const status = inm === etag ? 304 : 200;
-  mock.log.push({ path: req.url, inm, status });
+  const u = new URL(req.url, 'http://x');
+  mock.log.push({ path: u.pathname, query: u.search, inm, status });
   const headers = { etag, 'cache-control': 'private, no-cache' };
   if (status === 304) return res.writeHead(304, headers).end();
   res.writeHead(200, { ...headers, 'content-type': 'application/json' }).end(text);
@@ -149,7 +151,7 @@ function api(req, res, u) {
   const items = [...mock.films, ...Array.from({ length: mock.shows }, (_, i) => episode(i + 1))];
   if (p === '/api/info') return json(res, { id: 'x', name: 'e2e', version: 'dev', authRequired: false });
   if (p === '/api/scan') return json(res, { running: false, itemCount: items.length, watching: [] });
-  if (p === '/api/items') return list(req, res, items);
+  if (p === '/api/items') return serveItems(req, res, items, (body) => list(req, res, body));
   if (p === '/api/shows') return list(req, res, Array.from({ length: mock.shows }, (_, i) => showRow(i + 1)));
   if (['/api/continue', '/api/upcoming', '/api/folders', '/api/metadata/review', '/api/sessions', '/api/genres'].includes(p)) return json(res, []);
   if (p === '/api/metadata/status') return json(res, { enabled: true, keySet: true, running: false, pending: 0, unmatched: 0, needsReview: 0, lastError: '' });
@@ -677,16 +679,22 @@ const scenarios = {
     await context.close();
   },
 
-  // Mutant caught: the list fetched with cache: 'no-store' (no If-None-Match: a 200 every time).
+  // Mutants caught: the list fetched with cache: 'no-store' (no If-None-Match: a 200 every time);
+  // Movies loading the whole library (ensureLibrary for ensureMovies: the episodes and the shows too).
   async 'A revisit of the list asks with If-None-Match and is answered 304'(browser) {
     const { context, page } = await open(browser);
     await movies(page);
-    const first = mock.log.filter((l) => l.path === '/api/items');
-    check('the first visit gets the list (200)', first.length === 1 && first[0].status === 200 && first[0].inm === '', JSON.stringify(first));
+    const CARDS = '?kind=movie&fields=card';
+    const lists = () => mock.log.filter((l) => l.path === '/api/items' || l.path === '/api/shows');
+    const said = (ls) => JSON.stringify(ls.map((l) => `${l.path}${l.query} ${l.status} ${l.inm ? 'If-None-Match' : '-'}`));
+    const first = lists();
+    check('the first visit gets the card list (200), and nothing else', first.length === 1 && first[0].query === CARDS && first[0].status === 200 && first[0].inm === '', said(first));
     await page.reload();
     await page.locator('main a.card').first().waitFor();
-    const again = mock.log.filter((l) => l.path === '/api/items' || l.path === '/api/shows');
-    check('the revisit sends its ETag: 304 for the items and the shows', again.length === 4 && again.slice(2).every((l) => l.inm && l.status === 304), JSON.stringify(again.map((l) => `${l.path} ${l.status} ${l.inm ? 'If-None-Match' : '-'}`)));
+    await sleep(500); // a late fetch of the rest of the library would be in the log by now
+    const again = lists();
+    check('the revisit asks for the card list again with its ETag: 304', again.length === 2 && again[1].query === CARDS && again[1].inm && again[1].status === 304, said(again));
+    check('Movies asks for nothing else: no plain list, no episodes, no shows', again.every((l) => l.path === '/api/items' && l.query === CARDS), said(again));
     check('and shows the films from the cache', (await page.locator('h1 .count').textContent())?.trim() === '5000');
     await context.close();
   },

@@ -16,6 +16,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { routeItems } from './mock-items.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = process.env.PLY_E2E_DIST ?? join(here, '..', 'dist');
@@ -108,7 +109,7 @@ async function open(browser, opts = {}) {
     if (p.startsWith('/api/images/')) return route.fulfill({ status: 404, body: '' });
     if (p === '/api/info') return json(route, { id: 'x', name: 'e2e', version: 'dev', authRequired: false });
     if (p === '/api/scan') return json(route, { running: false, itemCount: ITEMS.length, watching: [] });
-    if (p === '/api/items') return json(route, opts.items ?? ITEMS);
+    if (p === '/api/items') return routeItems(route, opts.items ?? ITEMS);
     if (p === '/api/continue') return json(route, opts.continueItems ?? []);
     if (p === '/api/shows' || p === '/api/upcoming' || p === '/api/genres') return json(route, []);
     if (p === '/api/settings' && req.method() === 'PUT')

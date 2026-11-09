@@ -1,7 +1,7 @@
 // The parts of the search palette that are not about drawing it: when people
 // are looked up, which genres a query finds, and how to tell an answer for the
 // query on screen from one for a query typed over since.
-import type { GenreCount, ItemSummary } from './api';
+import type { GenreCount } from './api';
 import { search } from './fuzzy';
 
 /** Typing pauses this long (ms) before people are looked up. */
@@ -40,19 +40,7 @@ export class Latest {
 
 /** The genres a query finds, best match first (the same fuzzy match as titles). */
 export function matchGenres(genres: GenreCount[], q: string, limit = 4): GenreCount[] {
-  // The matcher works on library items; a genre stands in as one that only has a title.
-  const stand = (genre: GenreCount): ItemSummary & { genre: GenreCount } => ({
-    genre,
-    id: genre.id,
-    kind: 'movie',
-    title: genre.name,
-    durationSec: 0,
-    container: '',
-    videoCodec: '',
-    audioCodec: '',
-    width: 0,
-    height: 0,
-    addedAt: 0,
-  });
+  // The matcher reads a title: a genre stands in as a row that only has one.
+  const stand = (genre: GenreCount) => ({ genre, title: genre.name });
   return search(genres.map(stand), q, limit).map((s) => s.genre);
 }

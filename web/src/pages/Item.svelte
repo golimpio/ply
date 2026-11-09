@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, type ItemSummary, type ItemWatch, type Stream } from '../lib/api';
+  import { api, type ItemDetail, type ItemSummary, type ItemWatch, type Stream } from '../lib/api';
   import { useAmbient } from '../lib/ambient.svelte';
   import {
     channelLabel,
@@ -11,11 +11,11 @@
     formatDuration,
     methodLabel,
   } from '../lib/format';
-  import { ensureLibrary, findItem, library, markWatched } from '../lib/library.svelte';
+  import { detail as loadDetail } from '../lib/details.svelte';
+  import { ensureLibrary, episodesOf, findItem, markWatched, versionsOf, type LibraryRow } from '../lib/library.svelte';
   import { CREDIT_LINES, crewWith, logoSrc, ratingLabel, runtimeLabel, versionLabel, yearOf } from '../lib/meta';
   import { titleRatings } from '../lib/ratings';
   import { href } from '../lib/router.svelte';
-  import { resource } from '../lib/resource.svelte';
   import { app } from '../lib/state.svelte';
   import { artOf, progressOf } from '../lib/ui-types';
   import { WATCHED } from '../lib/watched';
@@ -43,25 +43,64 @@
   // The item request carries the playback decision for the built-in browser
   // profile. The server describes it without starting a session: no ffmpeg runs
   // until Play (the player then POSTs this browser's measured profile).
-  const detail = resource(() => {
+  // The copy of an earlier visit (lib/details) paints at once; the fresh one replaces it when it
+  // lands. The decision is only ever the fresh one's: a copy's may be out of date. An error keeps
+  // what was there, and an answer for a request this page has given up on is dropped.
+  let shown = $state.raw<ItemDetail>(); // the fresh detail, else the earlier visit's copy
+  let fresh = $state.raw<ItemDetail>();
+  let error = $state('');
+  $effect(() => {
     void app.libraryVersion;
-    return api.item(id, 'browser');
+    const ac = new AbortController();
+    const d = loadDetail(id, ac.signal);
+    if (d.cached) shown = d.cached;
+    d.fresh.then(
+      (got) => {
+        if (ac.signal.aborted) return;
+        shown = fresh = got;
+        error = '';
+      },
+      (e: unknown) => {
+        if (ac.signal.aborted) return;
+        error = e instanceof Error ? e.message : String(e);
+      },
+    );
+    return () => ac.abort();
   });
-  const decision = $derived({ data: detail.data?.playback, error: detail.error });
+  const detail = {
+    get data() {
+      return shown;
+    },
+    get error() {
+      return error;
+    },
+  };
+  const decision = $derived({ data: fresh?.playback, error });
 
-  // The cached summary paints the hero at once (and lands the card morph);
-  // the full detail fills in the metadata and the technical section. The watch state is the
-  // cached one's when there is one: a mark (here, or on another page) changes it there.
-  // An item the cached list doesn't have (it is still loading, or failed) keeps the state of the
-  // last mark made here.
-  const cached = $derived(findItem(id));
+  // What the page reads of an item: a list row (a movie card has no episode fields) or the detail.
+  type PageItem = LibraryRow & Partial<Pick<ItemSummary, 'show' | 'season' | 'episode' | 'episodeTitle' | 'overview' | 'ratings'>>;
+
+  // The list row paints the hero at once (and lands the card morph), with only what it has; the
+  // full detail fills in the metadata and the technical section. The watch state is the row's when
+  // there is one: a mark (here, or on another page) changes it there. A movie card has no time or
+  // count of watching: those are the last mark's made here, else the detail's. An item no list has
+  // (they are still loading, or failed) keeps the state of the last mark made here.
+  const row = $derived(findItem(id));
   let own = $state<ItemWatch>();
-  const watch = $derived(cached ?? (own?.id === id ? own : undefined));
-  const item = $derived<ItemSummary | undefined>(
-    detail.data && watch
-      ? { ...detail.data, watched: watch.watched, watchedAt: watch.watchedAt, playCount: watch.playCount, progress: watch.progress }
-      : (detail.data ?? cached),
-  );
+  const mark = $derived(own?.id === id ? own : undefined);
+  const item = $derived.by((): PageItem | undefined => {
+    const d = detail.data;
+    if (!d) return row;
+    const w = row ?? mark;
+    if (!w) return d;
+    return {
+      ...d,
+      watched: w.watched,
+      progress: w.progress,
+      watchedAt: 'watchedAt' in w ? w.watchedAt : (mark ?? d).watchedAt,
+      playCount: 'playCount' in w ? w.playCount : (mark ?? d).playCount,
+    };
+  });
   const isEpisode = $derived(item?.kind === 'episode');
   const resumeAt = $derived(item && progressOf(item) > 0 ? (item.progress?.positionSec ?? 0) : 0);
   // The movie's title, or the episode's show.
@@ -71,16 +110,14 @@
   // Other files of the same film (4K and 1080p, a director's cut).
   const versions = $derived.by(() => {
     if (!item || item.kind !== 'movie' || !item.titleId) return [];
-    const all = library.items.filter((i) => i.kind === 'movie' && i.titleId === item.titleId);
-    return all.length > 1 ? all.sort((a, b) => (b.height || 0) - (a.height || 0) || a.id - b.id) : [];
+    const all = versionsOf(item.titleId);
+    return all.length > 1 ? [...all].sort((a, b) => (b.height || 0) - (a.height || 0) || a.id - b.id) : [];
   });
 
   // Previous / next episode of the same show.
   const siblings = $derived.by(() => {
-    if (!item || item.kind !== 'episode') return { prev: undefined, next: undefined };
-    const eps = library.items
-      .filter((i) => i.kind === 'episode' && i.show === item.show)
-      .sort((a, b) => (a.season ?? 0) - (b.season ?? 0) || (a.episode ?? 0) - (b.episode ?? 0));
+    if (!item || item.kind !== 'episode' || !item.show) return { prev: undefined, next: undefined };
+    const eps = [...episodesOf(item.show)].sort((a, b) => (a.season ?? 0) - (b.season ?? 0) || (a.episode ?? 0) - (b.episode ?? 0));
     const i = eps.findIndex((e) => e.id === item.id);
     return { prev: i > 0 ? eps[i - 1] : undefined, next: i >= 0 ? eps[i + 1] : undefined };
   });
@@ -117,7 +154,7 @@
     if (!item || marking) return;
     const watched = !item.watched;
     const was = own;
-    if (!cached) {
+    if (!row) {
       own = { id, watched, watchedAt: null, playCount: watched ? 1 : 0, progress: watched ? { positionSec: 0, watched: true } : null };
     }
     marking = true;

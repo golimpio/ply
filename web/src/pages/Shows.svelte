@@ -1,6 +1,6 @@
 <script lang="ts">
   import { byName, railLetters } from '../lib/az';
-  import { ensureLibrary, library, showsOf, type ShowEntry } from '../lib/library.svelte';
+  import { ensureEpisodes, episodes, showsOf, type ShowEntry } from '../lib/library.svelte';
   import { posterImg, prefersPosters, showWideImg } from '../lib/meta';
   import { passesMinRating, ratingScore } from '../lib/ratings';
   import { href, type LibraryView } from '../lib/router.svelte';
@@ -16,14 +16,14 @@
 
   $effect(() => {
     void app.libraryVersion;
-    void ensureLibrary();
+    void ensureEpisodes();
   });
 
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
   const nameOf = (s: ShowEntry) => s.meta?.sortTitle || s.show;
   // By name as the server lists names (lib/az): its sort title, year, then the show's own name.
   const all = $derived(
-    showsOf(library.items, library.shows)
+    showsOf(episodes.rows)
       .map((s) => ({ s, n: { title: s.show, sortTitle: s.meta?.sortTitle, year: s.meta?.year, id: s.show } }))
       .sort((a, b) => byName(a.n, b.n))
       .map((x) => x.s),
@@ -44,7 +44,7 @@
 </script>
 
 <div class="page">
-  <h1>Shows{#if library.loaded}<span class="count">{all.length}</span>{/if}</h1>
+  <h1>Shows{#if episodes.loaded}<span class="count">{all.length}</span>{/if}</h1>
 
   <LibraryControls
     {view}
@@ -57,9 +57,9 @@
     minRatings
   />
 
-  {#if library.error && !library.loaded}
-    <p class="error">{library.error}</p>
-  {:else if !library.loaded}
+  {#if episodes.error && !episodes.loaded}
+    <p class="error">{episodes.error}</p>
+  {:else if !episodes.loaded}
     <div class="grid" aria-busy="true">
       {#each Array(8) as _, i (i)}<div class="skeleton sk"></div>{/each}
     </div>

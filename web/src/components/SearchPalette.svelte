@@ -1,8 +1,8 @@
 <script lang="ts">
   import { api, type GenreCount, type ItemSummary, type PersonCard } from '../lib/api';
   import { episodeLabel, formatDuration } from '../lib/format';
-  import { search } from '../lib/fuzzy';
-  import { ensureLibrary, library, showsOf } from '../lib/library.svelte';
+  import { search, type Searchable } from '../lib/fuzzy';
+  import { bothLists, ensureLibrary, episodes, libraryRows, showsOf, type LibraryRow, type ShowEntry } from '../lib/library.svelte';
   import { profileImg, type Img } from '../lib/meta';
   import { go } from '../lib/nav';
   import { palette } from '../lib/palette.svelte';
@@ -23,7 +23,7 @@
     href: string;
     title: string;
     sub: (string | number | undefined)[];
-    item?: ItemSummary;
+    item?: LibraryRow;
     portrait?: Img | null;
     label: string; // fallback-tile initials source
   }
@@ -45,35 +45,43 @@
     );
   }
 
-  const hits = $derived.by((): Hit[] => {
-    if (!query.trim()) return [];
-    const shows = showsOf(library.items);
-    const showHits = search(
-      shows.map((s) => ({ ...s.cover, title: s.show, episodeTitle: undefined, year: undefined })),
-      query,
-      5,
-    ).map((cover) => {
-      const s = shows.find((x) => x.show === cover.title)!;
-      return {
-        id: `show:${s.show}`,
-        href: href.show(s.show),
-        title: s.show,
-        sub: ['Show', `${s.episodeCount} episode${s.episodeCount === 1 ? '' : 's'}`],
-        item: s.cover,
-        label: s.show,
-      };
-    });
-    const itemHits = search(library.items, query, 25).map((it) => ({
+  // Movies are cards and episodes full rows: only an episode has a show, a season and a number.
+  const isEpisode = (r: LibraryRow): r is ItemSummary => r.kind === 'episode';
+
+  // A show is matched on its name (as title and show, the way its episodes read). The stand-ins are
+  // made once per episode list, so the matcher's folded text of each is kept between keystrokes.
+  let showRows: { of: readonly ItemSummary[]; rows: (Searchable & { entry: ShowEntry })[] } | undefined;
+  function searchableShows() {
+    const of = episodes.rows;
+    if (showRows?.of !== of) showRows = { of, rows: showsOf(of).map((entry) => ({ title: entry.show, show: entry.show, entry })) };
+    return showRows.rows;
+  }
+
+  function itemHit(it: LibraryRow): Hit {
+    const ep = isEpisode(it) ? it : undefined;
+    return {
       id: `item:${it.id}`,
       href: href.item(it.id),
-      title: it.kind === 'episode' ? it.episodeTitle || `Episode ${it.episode ?? ''}`.trim() : it.title,
-      sub:
-        it.kind === 'episode'
-          ? [it.show, episodeLabel(it.season, it.episode)]
-          : ['Movie', it.year, formatDuration(it.durationSec)],
+      title: ep ? ep.episodeTitle || `Episode ${ep.episode ?? ''}`.trim() : it.title,
+      sub: ep ? [ep.show, episodeLabel(ep.season, ep.episode)] : ['Movie', it.year, formatDuration(it.durationSec)],
       item: it,
-      label: it.show || it.title,
+      label: ep?.show || it.title,
+    };
+  }
+
+  // Nothing is read while the palette is closed: a closed palette must not search again each time a
+  // progress report patches the lists during playback (aria-expanded reads hits all the time).
+  const hits = $derived.by((): Hit[] => {
+    if (!palette.open || !query.trim()) return [];
+    const showHits = search(searchableShows(), query, 5).map(({ entry: s }) => ({
+      id: `show:${s.show}`,
+      href: href.show(s.show),
+      title: s.show,
+      sub: ['Show', `${s.episodeCount} episode${s.episodeCount === 1 ? '' : 's'}`],
+      item: s.cover,
+      label: s.show,
     }));
+    const itemHits = search(libraryRows(), query, 25).map(itemHit);
     const personHits = people.slice(0, 8).map((p) => ({
       id: `person:${p.id}`,
       href: href.person(p.id),
@@ -168,7 +176,10 @@
 <dialog
   bind:this={dialog}
   aria-label="Search the library"
-  onclose={() => (palette.open = false)}
+  onclose={() => {
+    palette.open = false;
+    query = ''; // it opens empty anyway; clearing now also drops a people lookup still waiting
+  }}
   onclick={(e) => {
     if (e.target === dialog) palette.open = false; // click on the backdrop
   }}
@@ -215,7 +226,7 @@
           </li>
         {:else}
           <li class="empty" role="presentation">
-            {#if !library.loaded}Loading the library…{:else if peoplePending}Searching…{:else}Nothing matches “{query.trim()}”.{/if}
+            {#if !bothLists.loaded}Loading the library…{:else if peoplePending}Searching…{:else}Nothing matches “{query.trim()}”.{/if}
           </li>
         {/each}
       </ul>

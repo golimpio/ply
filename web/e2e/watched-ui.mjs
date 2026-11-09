@@ -25,6 +25,7 @@ import { tmpdir } from 'node:os';
 import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { serveItems } from './mock-items.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = process.env.PLY_E2E_DIST ?? join(here, '..', 'dist');
@@ -180,7 +181,7 @@ async function api(req, res, u) {
   if (p === '/api/scan') return json(res, { running: false, itemCount: ITEMS.length, watching: [] });
   if (p === '/api/items') {
     if (mock.itemsHold) await mock.itemsHold;
-    return json(res, ITEMS.map(summary));
+    return serveItems(req, res, ITEMS.map(summary));
   }
   if (p === '/api/shows') return json(res, [SHOW, SOLO].map(showRow));
   if (p === '/api/continue') return json(res, mock.continueList.map((id) => summary(ITEMS.find((i) => i.id === id))));

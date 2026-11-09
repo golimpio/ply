@@ -85,6 +85,10 @@ describe('search', () => {
     expect(hit).toEqual([cards[1]]);
     expect(hit[0]).toBe(cards[1]);
     expect(search(cards, '2001')).toHaveLength(names.length);
+    // The library's row arrays are readonly: they are searched as they are, and left as they were.
+    const rowsAsStored: readonly MovieCard[] = Object.freeze([...cards]);
+    expect(search(rowsAsStored, 'carrie')).toEqual([cards[1]]);
+    expect(rowsAsStored).toEqual(cards);
   });
 });
 

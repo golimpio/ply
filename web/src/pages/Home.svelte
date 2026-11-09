@@ -1,9 +1,32 @@
 <script lang="ts">
-  import { api, type GenreCount, type ItemSummary, type Settings, type TitleCard, type UpcomingShow } from '../lib/api';
+  import {
+    api,
+    type GenreCount,
+    type ItemDetail,
+    type ItemSummary,
+    type MovieCard,
+    type Settings,
+    type TitleCard,
+    type UpcomingShow,
+  } from '../lib/api';
   import { useAmbient } from '../lib/ambient.svelte';
+  import { detail } from '../lib/details.svelte';
   import { episodeLabel, formatDuration } from '../lib/format';
   import { byName } from '../lib/az';
-  import { byAdded, ensureLibrary, findItem, library, showsOf, titleBadge, type ShowEntry } from '../lib/library.svelte';
+  import {
+    bothLists,
+    byAdded,
+    ensureLibrary,
+    episodes,
+    episodesOf,
+    findItem,
+    libraryRows,
+    movies,
+    showsOf,
+    titleBadge,
+    type LibraryRow,
+    type ShowEntry,
+  } from '../lib/library.svelte';
   import {
     airLabel,
     groupByTitle,
@@ -20,6 +43,7 @@
   import { app } from '../lib/state.svelte';
   import { artOf, progressOf } from '../lib/ui-types';
   import { countsBadge } from '../lib/watched';
+  import type { ArtItem } from '../components/Art.svelte';
   import Badges from '../components/Badges.svelte';
   import Hero from '../components/Hero.svelte';
   import HeroTitle from '../components/HeroTitle.svelte';
@@ -102,52 +126,84 @@
     !dismissed && !!settings && !settings.tmdbKeySet && settings.metadataEnabled && !settings.metadataForcedOff,
   );
 
-  const items = $derived(library.items);
+  const rows = $derived(libraryRows());
   // One card per film: its newest version in Recently added, and in Continue
   // the version played last (the server lists the most recent first).
-  const recent = $derived(onePerTitle([...items].sort(byAdded)).slice(0, 24));
+  const recent = $derived(onePerTitle([...rows].sort(byAdded)).slice(0, 24));
   // A file watched since the list came (marked, here or on another page, or played to the end): gone
   // from it at once, as the server leaves it out from then on. The file's own state, not its film's:
   // a film seen in one version and being watched again in another stays.
   const continuing = $derived(
     onePerTitle(continueItems.filter((i) => !((findItem(i.id) ?? i).progress?.watched ?? false))),
   );
-  const movies = $derived(groupByTitle(items.filter((i) => i.kind === 'movie')).sort((a, b) => byName(a.item, b.item))); // as Movies lists them
-  const shows = $derived(showsOf(items, library.shows).sort((a, b) => b.latestAddedAt - a.latestAddedAt));
-  const moviePosters = $derived(prefersPosters(movies.map((g) => g.item)));
+  const films = $derived(groupByTitle([...movies.rows]).sort((a, b) => byName(a.item, b.item))); // as Movies lists them
+  const shows = $derived(showsOf(episodes.rows).sort((a, b) => b.latestAddedAt - a.latestAddedAt));
+  const moviePosters = $derived(prefersPosters(films.map((g) => g.item)));
   const showPosters = $derived(prefersPosters(shows.map((s) => s.meta ?? {})));
   // Lead with the newest film that has a real backdrop, then any artwork, then anything.
-  const feature = $derived(
+  const lead = $derived(
     recent.find((i) => i.kind === 'movie' && i.backdrop) ??
       recent.find((i) => i.kind === 'movie' && artOf(i)) ??
       recent.find((i) => artOf(i)) ??
       recent[0],
   );
+
+  /** What the hero reads: a full row, or a film's card when its detail could not be had. */
+  type HeroItem = ArtItem &
+    Pick<ItemSummary, 'id' | 'year' | 'season' | 'episode' | 'certification' | 'logo' | 'genres' | 'durationSec' | 'width' | 'height' | 'hdr' | 'progress' | 'watched'>;
+
+  // A film's card lacks what the hero shows (its logo, its certification, the frame grab's
+  // backdrop), so the hero waits for the film's detail as a skeleton of its size; the rails don't
+  // wait. An episode's row is whole. Without the detail (an error), the card's own fields do.
+  const leadFilm = $derived(lead?.kind === 'movie' ? lead.id : undefined);
+  let full = $state<{ id: number; item: ItemDetail | null }>(); // null: the detail failed
+  $effect(() => {
+    const id = leadFilm;
+    if (id === undefined) return;
+    const ctl = new AbortController();
+    const d = detail(id, ctl.signal);
+    if (d.cached) full = { id, item: d.cached };
+    d.fresh.then(
+      (item) => {
+        if (!ctl.signal.aborted) full = { id, item };
+      },
+      () => {
+        if (!ctl.signal.aborted && full?.id !== id) full = { id, item: null }; // a cached copy stays
+      },
+    );
+    return () => ctl.abort();
+  });
+  const feature = $derived.by((): HeroItem | undefined => {
+    if (!lead || lead.kind !== 'movie') return lead;
+    if (full?.id !== lead.id) return undefined; // on its way
+    // The detail supplies the metadata; the watch state is the list's (marks and progress patch it).
+    return full.item ? { ...full.item, watched: lead.watched, progress: lead.progress } : lead;
+  });
   const featureLogo = $derived(feature?.kind === 'movie' ? logoSrc(feature) : '');
 
-  useAmbient(() => artOf(feature)?.color);
+  useAmbient(() => artOf(lead)?.color);
 
-  const isEpisode = (i: ItemSummary) => i.kind === 'episode';
-  const cardTitle = (i: ItemSummary) => (isEpisode(i) ? i.show || i.title : i.title);
-  const cardSub = (i: ItemSummary) =>
+  const isEpisode = (i: Pick<ItemSummary, 'kind'>) => i.kind === 'episode';
+  const cardTitle = (i: Pick<ItemSummary, 'kind' | 'title' | 'show'>) => (isEpisode(i) ? i.show || i.title : i.title);
+  const cardSub = (i: Pick<ItemSummary, 'kind' | 'season' | 'episode' | 'episodeTitle' | 'year' | 'durationSec'>) =>
     isEpisode(i) ? [episodeLabel(i.season, i.episode), i.episodeTitle] : [i.year, formatDuration(i.durationSec)];
-  const resumeAt = (i: ItemSummary) => (progressOf(i) > 0 ? (i.progress?.positionSec ?? 0) : 0);
+  const resumeAt = (i: Pick<ItemSummary, 'progress' | 'durationSec'>) => (progressOf(i) > 0 ? (i.progress?.positionSec ?? 0) : 0);
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 </script>
 
-{#if library.error && !library.loaded}
+{#if bothLists.error && !bothLists.loaded}
   <div class="page center">
-    <p class="error">{library.error}</p>
+    <p class="error">{bothLists.error}</p>
     <button class="btn" onclick={() => ensureLibrary()}>Try again</button>
   </div>
-{:else if !library.loaded}
+{:else if !bothLists.loaded}
   <div class="loading" aria-busy="true" aria-label="Loading the library">
     <div class="skeleton hero-sk"></div>
     <div class="row-sk">
       {#each Array(5) as _, i (i)}<div class="skeleton card-sk"></div>{/each}
     </div>
   </div>
-{:else if items.length === 0}
+{:else if rows.length === 0}
   <div class="page center empty">
     <h1>Nothing to watch yet</h1>
     <p class="muted">
@@ -177,6 +233,8 @@
         <a class="btn" href={href.item(feature.id)}><Icon name="info" />Details</a>
       </div>
     </Hero>
+  {:else if lead}
+    <div class="skeleton hero-sk"></div>
   {/if}
 
   <div class="rails">
@@ -199,18 +257,18 @@
       {/snippet}
     </Rail>
     <Rail title="Recently added" items={recent} key={(i) => i.id}>
-      {#snippet card(i: ItemSummary)}
+      {#snippet card(i: LibraryRow)}
         <MediaCard item={i} href={href.item(i.id)} title={cardTitle(i)} sub={cardSub(i)} />
       {/snippet}
     </Rail>
     <Rail
       title="Movies"
-      items={movies.slice(0, 30)}
+      items={films.slice(0, 30)}
       key={(g) => g.key}
       size={moviePosters ? 'poster' : 'wide'}
-      more={{ href: href.movies, label: `All ${movies.length}` }}
+      more={{ href: href.movies, label: `All ${films.length}` }}
     >
-      {#snippet card(g: TitleGroup)}
+      {#snippet card(g: TitleGroup<MovieCard>)}
         <MediaCard item={g.item} shape={moviePosters ? 'poster' : 'wide'} href={href.item(g.item.id)} title={g.item.title} sub={cardSub(g.item)} />
       {/snippet}
     </Rail>
@@ -229,7 +287,7 @@
     <Rail title="Coming up" items={upcoming} key={(u) => u.titleId}>
       {#snippet card(u: UpcomingShow)}
         <MediaCard
-          img={showWideImg(u, library.items.find((i) => i.show === u.show))}
+          img={showWideImg(u, episodesOf(u.show)[0])}
           href={href.show(u.show)}
           title={u.show}
           label={u.show}
@@ -306,6 +364,9 @@
   @media (max-width: 600px) {
     .rails {
       padding-bottom: 6rem;
+    }
+    .hero-sk {
+      height: 72vh; /* as the hero's own min-height there */
     }
   }
 </style>

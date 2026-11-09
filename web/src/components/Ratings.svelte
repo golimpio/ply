@@ -1,12 +1,12 @@
 <script lang="ts">
-  import type { RatingEntry } from '../lib/api';
   import { ensureRatingPrefs, ratingPrefs } from '../lib/ratingprefs.svelte';
-  import { orderShown } from '../lib/ratings';
+  import { orderShown, type RatingLike } from '../lib/ratings';
   import { app } from '../lib/state.svelte';
   import Rating from './Rating.svelte';
 
-  // The row of rating chips under a title: the sources the settings show, in their order.
-  let { ratings }: { ratings: RatingEntry[] } = $props();
+  // The row of rating chips under a title: the sources the settings show, in their order. A movie
+  // card's rating (the page's first paint) has no link, votes or age: its chip goes without them.
+  let { ratings }: { ratings: RatingLike[] } = $props();
 
   // The settings are asked for only when there is something to order (once per library version).
   $effect(() => {

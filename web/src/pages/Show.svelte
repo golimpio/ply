@@ -2,7 +2,7 @@
   import { api, ApiError, type EpisodeOrder, type ItemSummary } from '../lib/api';
   import { useAmbient } from '../lib/ambient.svelte';
   import { episodeLabel, formatDuration, seasonLabel } from '../lib/format';
-  import { ensureLibrary, episodesOf, library, markWatched, showMeta, showsOf, type WatchTarget } from '../lib/library.svelte';
+  import { ensureEpisodes, episodes as episodeList, episodesOf, markWatched, showMeta, showsOf, type WatchTarget } from '../lib/library.svelte';
   import { backdropOf, CREDIT_LINES, crewWith, logoSrc, posterImg, yearSpan } from '../lib/meta';
   import { morph } from '../lib/nav';
   import { ensureRatingPrefs, ratingPrefs } from '../lib/ratingprefs.svelte';
@@ -33,7 +33,7 @@
 
   $effect(() => {
     void app.libraryVersion;
-    void ensureLibrary();
+    void ensureEpisodes();
   });
 
   // The show's metadata and season details; the episodes come from the cached
@@ -203,9 +203,9 @@
 </script>
 
 <BackButton over />
-{#if library.error && !library.loaded}
-  <div class="page"><p class="error">{library.error}</p></div>
-{:else if !library.loaded}
+{#if episodeList.error && !episodeList.loaded}
+  <div class="page"><p class="error">{episodeList.error}</p></div>
+{:else if !episodeList.loaded}
   <div class="skeleton hero-sk" aria-busy="true"></div>
 {:else if !entry}
   <div class="page center">

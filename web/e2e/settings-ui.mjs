@@ -17,6 +17,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { routeItems } from './mock-items.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = process.env.PLY_E2E_DIST ?? join(here, '..', 'dist');
@@ -108,7 +109,7 @@ async function open(browser, opts = {}) {
     else calls.push({ method, path: p, body });
     if (p === '/api/info') return json(route, { id: 'x', name: 'e2e', version: 'dev', authRequired: false });
     if (p === '/api/scan') return json(route, { running: false, itemCount: 0, watching: [] });
-    if (p === '/api/items') return json(route, opts.items ?? []);
+    if (p === '/api/items') return routeItems(route, opts.items ?? []);
     if (['/api/continue', '/api/shows', '/api/upcoming', '/api/genres', '/api/sessions'].includes(p)) return json(route, []);
     if (p === '/api/folders') return json(route, [{ id: 1, path: '/Volumes/Media/Movies', kind: 'movies', itemCount: 12, missing: false }]);
     if (p === '/api/metadata/review') return json(route, opts.review ?? []);

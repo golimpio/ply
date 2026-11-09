@@ -36,9 +36,9 @@ export function haystack(it: Searchable): string {
   return [it.title, it.show, it.episodeTitle, it.year].filter(Boolean).join(' ');
 }
 
-// The searched fields (title, show, episode title, year) of a row object never change: a rematch or
-// a rename refetches the list. Watch state is still written in place today, but it is not searched,
-// so a row's text is folded once, the first time a search meets it.
+// Rows are never changed in place: a write (RowStore.patchAll) replaces the row object, and a
+// rematch or a rename refetches the list. So the text folded for a row object stays right, and it
+// is folded once, the first time a search meets it.
 const folded = new WeakMap<Searchable, string>();
 
 /** A row's haystack, folded: computed once per row object. */
@@ -51,7 +51,7 @@ export function foldedHaystack(it: Searchable): string {
   return t;
 }
 
-export function search<T extends Searchable>(items: T[], query: string, limit = 30): T[] {
+export function search<T extends Searchable>(items: readonly T[], query: string, limit = 30): T[] {
   const q = fold(query.trim()).replace(/\s+/g, ' ');
   if (!q) return [];
   return items

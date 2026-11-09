@@ -25,6 +25,7 @@ import { tmpdir } from 'node:os';
 import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { routeItems } from './mock-items.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = process.env.PLY_E2E_DIST ?? join(here, '..', 'dist');
@@ -306,7 +307,7 @@ async function open(browser, width, opts = {}) {
     }
     if (p === '/api/info') return json(route, { id: 'x', name: 'Living room', version: 'dev', authRequired: !!opts.auth });
     if (p === '/api/scan') return json(route, { running: false, itemCount: ITEMS.length, watching: [{ root: '/Volumes/NAS/Movies', watching: true, dirs: 263 }] });
-    if (p === '/api/items') return json(route, opts.items ?? ITEMS);
+    if (p === '/api/items') return routeItems(route, opts.items ?? ITEMS);
     if (p === '/api/shows') return json(route, opts.items ? [] : SHOWS);
     if (p === '/api/continue') return json(route, opts.items ? [] : [byId[5], ITEMS.find((i) => i.id === 12)]);
     if (p === '/api/upcoming') return json(route, opts.items ? [] : UPCOMING);
