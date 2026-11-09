@@ -415,7 +415,14 @@ func alive(pid int) bool {
 
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+	waitWithin(t, 10*time.Second, what, cond)
+}
+
+// waitWithin is waitFor with a time of its own: for what only the load of the machine can
+// delay (a process starting), not for what is being tested.
+func waitWithin(t *testing.T, d time.Duration, what string, cond func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(d); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
 		if cond() {
 			return
 		}

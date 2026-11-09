@@ -27,6 +27,10 @@ type ctl struct {
 	// the run reads from ffmpeg's output (see progressWriter). Not guarded by mu: it is set
 	// once, before the run starts.
 	progress func(at time.Duration)
+
+	// feed, if set before ffmpeg runs, is the container it reads on its standard input
+	// (openFeed). Not guarded by mu: the attempt sets it and runs ffmpeg, one after the other.
+	feed *feed
 }
 
 // started is told the pid of ffmpeg. nice is the niceness of background work.

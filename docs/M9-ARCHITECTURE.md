@@ -101,7 +101,24 @@ Target: about 1-2 s to first frame even over SMB.
      track, so a film with five languages costs one read, not five) and writes them to the subs cache. It needs the
      item's disk, steps aside through the queue's yield between its reads (each sidecar, then the container), and a
      play that starts while ffmpeg reads *suspends* it (SIGSTOP to its group, SIGCONT after) instead of killing it:
-     a read that took 40 minutes is not thrown away. A play that is only being set up counts (`Manager.Create`
+     a read that took 40 minutes is not thrown away. SIGSTOP cannot take back a read already asked of the share,
+     though: the macOS kernel keeps several MB of a sequential read in flight (seconds of a 2.5 MB/s link), and the
+     play's own first requests (a stat, an open, the Cues) queue behind them on the one SMB connection. Measured on the
+     NAS (2026-11-09): `POST /playback` took 2.1 to 19 s while the pre-extract read (10 plays of 2 films; the first
+     `os.Stat` of the file was 95 to 99.8 % of it, asked before `Create` could tell the governor); with the fix below,
+     66 to 279 ms for a replay, and for a first play what the Cues read costs (27 to 1026 ms over 10 films, the job
+     reading or not). So for Matroska/WebM, ply does the reading (`internal/subs/feed.go`): 256 KB at a time with the
+     kernel's reading ahead off (`F_RDAHEAD`), handed to ffmpeg on its stdin (`-i pipe:0`). A suspended ffmpeg stops
+     taking the pipe and the reading stops, with at most one chunk in flight (a run held from the start reads one: the
+     feed waits for the run to have started and been suspended). Which files: a pipe cannot be sought, so an MP4 (its
+     index may be at the end) and a Matroska file whose Info or Tracks come after the first Cluster (ffmpeg finds them
+     by a seek: "Stream map matches no streams"; `headersFirst` walks the top-level headers to see) are opened by ffmpeg
+     as before, and still queue a play behind them. If a run on a pipe fails all the same, it is started once more on
+     the file before any failure is recorded (so a file read twice is the price of one the walk got wrong). A file
+     that ends before the size it had when it was opened ("the file ended at X of Y bytes") is `ErrUnavailable` if it has
+     a different size when looked at again (cut, replaced, still being copied): nothing is recorded and the job asks
+     again later. If it is still that long it lies about its length, and reading it on every backoff for days would not
+     change that: `ErrConvert`, recorded once. Neither is tried again with the first track alone or on the file itself. A play that is only being set up counts (`Manager.Create`
      reserves its place at once: the keyframe scan of a first play is minutes of reading, and the governor is told
      when the place is taken and when it is given up), and so does one that is paused, for its first two minutes.
      Time spent suspended does not count against the run's limit (3 hours of running time, up from 10 minutes: a

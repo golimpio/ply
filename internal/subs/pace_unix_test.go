@@ -91,7 +91,9 @@ func hangingGen(t *testing.T, o Options) (g *Generator, pidOf func() int) {
 	t.Cleanup(g.Close)
 	return g, func() int {
 		var pid int
-		waitFor(t, "ffmpeg to start", func() bool {
+		// A minute, not ten seconds: under load (a race build, a full test run beside this one) a process can
+		// take longer than that to start. A start slow enough to matter to a caller's timing makes it skip.
+		waitWithin(t, time.Minute, "ffmpeg to start", func() bool {
 			b, err := os.ReadFile(pids)
 			if err != nil {
 				return false

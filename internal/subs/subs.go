@@ -156,6 +156,10 @@ type call struct {
 	dropped map[string]bool
 	gen     atomic.Int32
 
+	// direct is set once a run that gave ffmpeg the container on a pipe failed: the runs after it
+	// (the first track alone, say) let ffmpeg open the file. Used by the run's goroutine alone.
+	direct bool
+
 	// How far into the film ffmpeg has read (a container's run only), and who wants to know.
 	progMu   sync.Mutex
 	at       time.Duration
@@ -557,7 +561,7 @@ func (g *Generator) convert(ctx context.Context, c *call, run []Source) (map[str
 
 	for {
 		miss, err := g.attempt(ctx, c, run)
-		if err != nil && len(run) > 1 && errors.Is(err, ErrConvert) && ctx.Err() == nil {
+		if err != nil && len(run) > 1 && errors.Is(err, ErrConvert) && !cutShort(err) && ctx.Err() == nil {
 			g.log.Warn("subtitles: ffmpeg failed with several tracks; trying the first alone",
 				"file", filepath.Base(run[0].Input), "tracks", len(run), "err", err)
 			g.narrow(c, run[1:])
@@ -587,8 +591,24 @@ func (g *Generator) narrow(c *call, drop []Source) {
 	c.gen.Add(1)
 }
 
-// attempt starts ffmpeg once for run and moves what it wrote into place.
+// attempt starts ffmpeg for run and moves what it wrote into place. If ffmpeg failed
+// with the container on a pipe (openFeed), it is started once more with the file itself:
+// something a pipe cannot do is not a failure of the file, and none is remembered for it.
+// (A file that is read twice before it fails is the price; the walk of openFeed leaves few.)
 func (g *Generator) attempt(ctx context.Context, c *call, run []Source) (map[string]error, error) {
+	miss, piped, err := g.attemptOnce(ctx, c, run, !c.direct)
+	if piped && errors.Is(err, ErrConvert) && !cutShort(err) && ctx.Err() == nil {
+		g.log.Warn("subtitles: ffmpeg failed with the container on a pipe; trying it on the file",
+			"file", filepath.Base(run[0].Input), "err", err)
+		c.direct = true
+		miss, _, err = g.attemptOnce(ctx, c, run, false)
+	}
+	return miss, err
+}
+
+// attemptOnce starts ffmpeg once for run, with the container on a pipe if piped allows it
+// and the file is one that can be (reported as the second result).
+func (g *Generator) attemptOnce(ctx context.Context, c *call, run []Source, piped bool) (map[string]error, bool, error) {
 	first := run[0]
 	args := []string{"-nostdin", "-v", "error", "-y"}
 	if first.Stream >= 0 {
@@ -602,7 +622,16 @@ func (g *Generator) attempt(ctx context.Context, c *call, run []Source) (map[str
 			args = append(args, "-sub_charenc", enc)
 		}
 	}
-	args = append(args, "-i", first.Input)
+	input := first.Input
+	var fd *feed
+	if piped && first.Stream >= 0 {
+		if fd = openFeed(first.Input); fd != nil {
+			defer fd.Close()
+			c.ctl.feed, input = fd, "pipe:0"
+			defer func() { c.ctl.feed = nil }()
+		}
+	}
+	args = append(args, "-i", input)
 	tmps := make([]string, len(run))
 	for i, s := range run {
 		tmps[i] = filepath.Join(g.dir, cacheName(s)+".tmp")
@@ -616,14 +645,28 @@ func (g *Generator) attempt(ctx context.Context, c *call, run []Source) (map[str
 	}
 
 	stderr, err := g.run(ctx, args, &c.ctl)
+	if ctx.Err() != nil && err != nil {
+		return nil, fd != nil, context.Cause(ctx)
+	}
+	if fd != nil {
+		// The file ended before its size: ffmpeg took that for the end of the film, and said nothing
+		// (or failed for it). If the file has changed since it was opened (cut, replaced, still being
+		// copied) it is not readable now: the job asks again later, and nothing is remembered. If it
+		// is the size it was, it lies about its length, and reading it again (on every backoff, over
+		// a share, for days) will not change that: a failure, recorded for an hour like any other.
+		// Neither is tried again with other tracks, or on the file itself.
+		if cut := fd.short(); cut != nil {
+			if fi, serr := os.Stat(first.Input); serr == nil && fi.Size() == fd.size {
+				return nil, true, fmt.Errorf("%w: %w, and it is still that long", ErrConvert, cut)
+			}
+			return nil, true, fmt.Errorf("%w: %w", ErrUnavailable, cut)
+		}
+	}
 	if err != nil {
-		if ctx.Err() != nil {
-			return nil, context.Cause(ctx)
-		}
 		if _, serr := os.Stat(first.Input); serr != nil { // the share went to sleep, or is not mounted yet
-			return nil, fmt.Errorf("%w: %v", ErrUnavailable, serr)
+			return nil, fd != nil, fmt.Errorf("%w: %v", ErrUnavailable, serr)
 		}
-		return nil, fmt.Errorf("%w: %v: %s", ErrConvert, err, firstLine(stderr))
+		return nil, fd != nil, fmt.Errorf("%w: %v: %s", ErrConvert, err, firstLine(stderr))
 	}
 	var miss map[string]error
 	for i, s := range run {
@@ -641,7 +684,7 @@ func (g *Generator) attempt(ctx context.Context, c *call, run []Source) (map[str
 			miss[name] = err
 		}
 	}
-	return miss, nil
+	return miss, fd != nil, nil
 }
 
 // paceLoop holds the run while its pace says so, until stop is closed. It asks
@@ -701,6 +744,9 @@ func (g *Generator) exec(ctx context.Context, args []string, p *ctl) (string, er
 	cmd := exec.CommandContext(ctx, g.ffmpeg, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
+	if p.feed != nil { // not assigned when nil: a nil *feed in the interface is not a nil Stdin
+		cmd.Stdin = p.feed
+	}
 	if p.progress != nil {
 		cmd.Stdout = &progressWriter{emit: p.progress}
 	}
@@ -709,6 +755,9 @@ func (g *Generator) exec(ctx context.Context, args []string, p *ctl) (string, er
 	exited := make(chan error, 1)
 	if err := proc.Start(cmd, func(err error) { exited <- err }); err != nil {
 		return "", fmt.Errorf("start %s: %w", g.ffmpeg, err)
+	}
+	if p.feed != nil {
+		defer p.feed.release() // whatever happens next, the copy to the pipe must not wait for ever
 	}
 	// If ply is killed from here on, the group goes with it: by the kernel (Linux), or by
 	// the reaper (macOS), suspended or not.
@@ -720,6 +769,9 @@ func (g *Generator) exec(ctx context.Context, args []string, p *ctl) (string, er
 		}
 	}
 	p.started(cmd.Process.Pid, g.niceness) // best effort
+	if p.feed != nil {
+		p.feed.release() // a run held from the start has been suspended by now: the feed reads one chunk, no more
+	}
 	err := <-exited
 	p.ended()
 	proc.StopReaper(reaper)
