@@ -192,3 +192,43 @@ stop being true.
   remux into a transcode unasked). Labels use `Intl.DisplayNames`.
 - Not done: charset detection beyond "valid UTF-8 or Windows-1252", sidecars in other directories (`Subs/`), `.ssa`
   and `.sub/.idx` sidecars, remembering the viewer's subtitle language between items, PGS rendered with real PGS.
+
+## M9 NAS playback benchmark (2026-11-09, 6be2e8a)
+
+Setup: `bin/ply` 6be2e8a (`-scan-interval 0 -watch=false -metadata=false`, no token, fresh data dir per film, `-movies` on
+the one film's folder), driven over loopback by a script (Python `http.client`, `perf_counter` around each request)
+that fetches like a player that never waits: POST /playback, playlist, init, then segments back to back. The NAS is an
+SMB 3.0.2 share over Wi-Fi (en1; ping 6-168 ms, mean 100 ms). Link speed, `dd bs=4m count=50` of two other films, cold:
+2.34 and 2.49 MB/s. Load average 2.4-4.5 (desktop apps; 3.1-3.7 during the cold plays). Profile: the web player's
+(`mp4`/`webm`, h264/vp9/av1, aac/mp3/opus/flac, hls), so both films are remuxed. The keyframe index came from the Cues
+both times (2500 keyframes in 65 ms, 3100 in 39 ms), never from the scan fallback.
+- **Migration (2023)**: mkv, h264 1920x800, 5003 s, 5.82 GB, 9.30 Mbps, E-AC-3 5.1 (video copied, audio to AAC). Idle link:
+  the scan's `subs.preextract` was held by the play being set up, and cancelled afterwards.
+- **Morbius (2022)**: mkv, h264 1920x1080, 6206 s, 5.72 GB, 7.37 Mbps, AAC (copy and copy). Its `subs.preextract` had
+  been reading for 7 s when the play began (the play suspends it, as designed). Men (2022), drawn first, was dropped
+  before any play: the job starts reading the head at the scan, so it would no longer be cold.
+
+| | Migration (idle link) | Morbius (pre-extract reading) | Acceptance |
+|---|---|---|---|
+| Cold: POST /playback | 87 ms | **4494 ms** | < 300 ms |
+| Cold: playlist / init | 163 ms / 0.6 ms | 578 ms / 0.7 ms | |
+| Cold: segment 0 | 818 ms (1.5 MB) | 3.6 ms (4.0 MB, written during the POST) | < 1.5 s |
+| Cold: first frame (POST start to segment 0 read) | 1.07 s | **5.08 s** | < 2 s |
+| Warm replay (keyframes cached): POST / first frame | 10 ms / 194 ms; 7 min later 452 ms / 1.19 s | 355 ms / 558 ms (pre-extract cancelled); 5988 ms / 6.45 s (running) | |
+| Resume at 60 %: POST / init / segment / first frame | 8 ms / 4.08 s / 1.23 s / **5.31 s** | 8 ms / 1.28 s / 1.42 s / **2.71 s** | < 2 s |
+| Segments 1-30: p50 / p99 = max | 95 ms / 20.1 s | 5 ms / 17.0 s | |
+| Segments 1-30: delivery | 157 MB, 80.6 s wall for 180 s of media (1.95 MB/s, 2.2x real time) | 161 MB, 51 s waiting (3.5x) | |
+| ffmpeg (ps, and `ffmpeg stopped` in the log) | 48 % of a core, 34-41 MB; 4.85 s CPU in 123 s | 20 % of a core, 34 MB; 0.68 s CPU in 114 s | |
+
+Measured as: first frame is POST start to the end of segment 0's body (hls.js adds decode time); a segment latency is
+one GET, back to back; `lsof -nP | grep NAS-Disk3-6T` showed only the play's ffmpeg on the film (plus Morbius's suspended
+pre-extract) and Finder on the share root. "Warm" also means the file was read a minute earlier: six segments (30 MB)
+came out of ffmpeg in 0.6 s, while `dd` of the same head 6 minutes later ran at 1.4 MB/s again.
+
+Acceptance: **fail** overall; only the cold play on an idle link meets all three. POST is 355-452 ms on an idle link once
+the attribute cache is stale (the share's `statfs` alone took 166 ms), 4.5-6.0 s while the pre-extract was reading; a
+resume is 2.7-5.3 s. Reading: first frame depends on what else is on the link, then on ffmpeg's open and probe of a cold
+file (init 1.3-4.1 s at a resume; the `-probesize 1M` idea of M9-ARCHITECTURE item 6 is untried), not on the keyframe
+index (40-65 ms). After segment 0 delivery is NAS-bound and bursty: 2-3.5x real time on average, with 3-4 stalls of
+8-20 s per 30 segments; a player at real time would not have rebuffered in 3 minutes (closest: 0.8 s of lead), but the
+first minute is thin. Found on the way: `DELETE /api/sessions/{sid}` took 18 s with ffmpeg in an SMB read; stopping ply, 16-20 s.

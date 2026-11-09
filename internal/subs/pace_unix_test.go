@@ -76,10 +76,13 @@ func hangingGen(t *testing.T, o Options) (g *Generator, pidOf func() int) {
 	dir := t.TempDir()
 	pids := filepath.Join(dir, "pid")
 	ff := filepath.Join(dir, "ffmpeg")
-	body := "#!/bin/sh\necho $$ > " + pids + ".tmp\nmv " + pids + ".tmp " + pids + "\nexec sleep 300\n"
+	body := "#!/bin/sh\n[ \"$1\" = warm ] && exit 0\necho $$ > " + pids + ".tmp\nmv " + pids + ".tmp " + pids + "\nexec sleep 300\n"
 	if err := os.WriteFile(ff, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// macOS vets the first run of a new executable, which takes from tens to hundreds of
+	// milliseconds, a run's clock ticking: run it once, so that the runs under test start at once.
+	_ = exec.Command(ff, "warm").Run()
 	o.Dir, o.FFmpeg = filepath.Join(dir, "subs"), ff
 	g, err := New(o)
 	if err != nil {
@@ -133,26 +136,63 @@ func TestAnAbandonedRunIsBackgroundWorkAgain(t *testing.T) {
 	waitFor(t, "the run to go on for the viewer", func() bool { return !stopped(t, pid) })
 }
 
+// timeLeft is what the clock of the run of src has left, once the pacer is done suspending or
+// resuming it (apply holds the ctl's lock).
+func timeLeft(t *testing.T, g *Generator, src Source) time.Duration {
+	t.Helper()
+	g.mu.Lock()
+	c := g.inflight[cacheName(src)]
+	g.mu.Unlock()
+	if c == nil {
+		t.Fatal("the run is not under way")
+	}
+	c.ctl.mu.Lock()
+	defer c.ctl.mu.Unlock()
+	c.ctl.bud.mu.Lock()
+	defer c.ctl.bud.mu.Unlock()
+	return c.ctl.bud.left
+}
+
 // The time a run may take is the time it runs: a run held for a play (suspended) keeps what it has
 // left, and has it again when it goes on. (The budget alone is tested in TestBudgetStopsWhileSuspended;
 // this is the run, with a real process.)
+//
+// How much a run has used when it is suspended depends on how long ffmpeg took to start, which is the
+// machine's to say, so the test does not assume it: it reads what is left when the run is suspended
+// (at most what the test knows it ran for), and holds the run to that.
 func TestHeldTimeDoesNotCountAgainstARunsTimeout(t *testing.T) {
+	const timeout, ran = time.Second, 200 * time.Millisecond
 	var play atomic.Bool
-	g, pidOf := hangingGen(t, Options{Timeout: time.Second})
+	g, pidOf := hangingGen(t, Options{Timeout: timeout})
 	src := Source{ItemID: 1, Key: "2", Input: existingFile(t, "a.mkv"), Stream: 2, MTime: 5}
 	filled := make(chan error, 1)
+	began := time.Now()
 	go func() {
 		filled <- g.Fill(t.Context(), []Source{src}, func() (bool, string) { return play.Load(), "a play" }, nil)
 	}()
 	pid := pidOf()
-	time.Sleep(200 * time.Millisecond) // about a fifth of its time is used
+	if d := time.Since(began); d > timeout/4 {
+		t.Skipf("ffmpeg took %v to start, with a quarter of its %v gone: too little is left to tell how it is spent", d, timeout)
+	}
+	time.Sleep(ran) // the clock of the run was started before ffmpeg was: it has run for at least this long
 	play.Store(true)
-	waitFor(t, "ffmpeg to be suspended", func() bool { return stopped(t, pid) })
+	waitFor(t, "ffmpeg to be suspended", func() bool {
+		select {
+		case err := <-filled:
+			t.Fatalf("the run ended (%v) before it was suspended", err)
+		default:
+		}
+		return stopped(t, pid)
+	})
+	kept := timeLeft(t, g, src)
+	if kept > timeout-ran { // positive control: what the run ran for was taken off
+		t.Fatalf("the run was suspended with %v of its %v left after running for at least %v", kept, timeout, ran)
+	}
 
 	select {
 	case err := <-filled:
 		t.Fatalf("the run ended (%v) while it was suspended: the held time counted", err)
-	case <-time.After(2 * time.Second): // twice the whole time
+	case <-time.After(2 * timeout): // longer than it has left, twice over
 	}
 	if !alive(pid) {
 		t.Fatal("ffmpeg was killed while suspended")
@@ -165,8 +205,8 @@ func TestHeldTimeDoesNotCountAgainstARunsTimeout(t *testing.T) {
 		if !errors.Is(err, context.DeadlineExceeded) {
 			t.Errorf("Fill = %v, want the deadline", err)
 		}
-		if d := time.Since(resumed); d < 150*time.Millisecond {
-			t.Errorf("the run ended %v after it went on, with most of its second left", d)
+		if d := time.Since(resumed); d < kept {
+			t.Errorf("the run ended %v after it went on, with %v left", d, kept)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("the run never ended: its time was not counted again after it went on")
