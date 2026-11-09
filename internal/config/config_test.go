@@ -107,6 +107,105 @@ func TestDataDir(t *testing.T) {
 	}
 }
 
+func TestLogDir(t *testing.T) {
+	tmp := t.TempDir()
+	tests := []struct {
+		name                           string
+		goos, home, xdgState, override string
+		localApp                       string
+		want                           string
+		wantErr                        bool
+	}{
+		{"darwin default", "darwin", "/Users/g", "", "", "", "/Users/g/Library/Logs/ply", false},
+		{"darwin ignores xdg", "darwin", "/Users/g", "/x", "", "", "/Users/g/Library/Logs/ply", false},
+		{"linux xdg", "linux", "/home/g", "/state", "", "", "/state/ply", false},
+		{"linux relative xdg ignored", "linux", "/home/g", "rel", "", "", "/home/g/.local/state/ply", false},
+		{"linux default", "linux", "/home/g", "", "", "", "/home/g/.local/state/ply", false},
+		{"windows localappdata", "windows", "/Users/g", "", "", "C:\\LocalApp", "C:\\LocalApp/ply/logs", false},
+		{"windows home fallback", "windows", "C:\\Users\\g", "", "", "", "C:\\Users\\g/AppData/Local/ply/logs", false},
+		{"override wins", "linux", "/home/g", "/state", tmp, "", tmp, false},
+		{"darwin no home", "darwin", "", "", "", "", "", true},
+		{"linux no home", "linux", "", "", "", "", "", true},
+		{"windows no home and no localappdata", "windows", "", "", "", "", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("LOCALAPPDATA", tt.localApp)
+			got, err := logDir(tt.goos, tt.home, tt.xdgState, tt.override)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+			want := filepath.FromSlash(tt.want)
+			if got != want {
+				t.Errorf("got %q, want %q", got, want)
+			}
+		})
+	}
+
+	// Test LogDir public function
+	dir, err := LogDir(tmp)
+	if err != nil {
+		t.Fatalf("LogDir override err = %v", err)
+	}
+	if dir != tmp {
+		t.Errorf("LogDir override got %q, want %q", dir, tmp)
+	}
+}
+
+func TestParseLogDir(t *testing.T) {
+	tmp := t.TempDir()
+	dir1 := filepath.Join(tmp, "log1")
+	dir2 := filepath.Join(tmp, "log2")
+
+	// 1. Default log dir
+	t.Setenv(LogDirEnv, "")
+	c, err := Parse([]string{"-data", tmp}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaultLogDir, err := LogDir("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.LogDir != defaultLogDir {
+		t.Errorf("c.LogDir = %q, want default %q", c.LogDir, defaultLogDir)
+	}
+	if c.LogPath() != filepath.Join(defaultLogDir, "ply.log") {
+		t.Errorf("c.LogPath() = %q, want %q", c.LogPath(), filepath.Join(defaultLogDir, "ply.log"))
+	}
+
+	// 2. Flag wins
+	c, err = Parse([]string{"-data", tmp, "-log-dir", dir1}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.LogDir != dir1 {
+		t.Errorf("c.LogDir = %q, want %q", c.LogDir, dir1)
+	}
+	if c.LogPath() != filepath.Join(dir1, "ply.log") {
+		t.Errorf("c.LogPath() = %q, want %q", c.LogPath(), filepath.Join(dir1, "ply.log"))
+	}
+
+	// 3. Env sets log dir
+	t.Setenv(LogDirEnv, dir2)
+	c, err = Parse([]string{"-data", tmp}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.LogDir != dir2 {
+		t.Errorf("c.LogDir = %q, want %q", c.LogDir, dir2)
+	}
+
+	// 4. Flag wins over env
+	c, err = Parse([]string{"-data", tmp, "-log-dir", dir1}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.LogDir != dir1 {
+		t.Errorf("c.LogDir = %q, want %q", c.LogDir, dir1)
+	}
+}
+
 func TestServerID(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "new dir")
 	id, err := ServerID(dir)
@@ -253,7 +352,7 @@ func TestUsageHidesTheTestFlags(t *testing.T) {
 		t.Fatalf("-h: %v", err)
 	}
 	usage := out.String()
-	for _, want := range []string{"-media", "-tmdb-key", "-metadata", "-metadata-language", "-metadata-refresh", "-hwaccel", "-token"} {
+	for _, want := range []string{"-media", "-tmdb-key", "-metadata", "-metadata-language", "-metadata-refresh", "-hwaccel", "-token", "-log-dir"} {
 		if !strings.Contains(usage, want) {
 			t.Errorf("usage lacks %s:\n%s", want, usage)
 		}

@@ -62,7 +62,8 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	log, closeLog := setupLogger(cfg.LogDir, cfg.LogPath())
+	defer closeLog()
 
 	if err := os.MkdirAll(cfg.Data, 0o700); err != nil {
 		return fmt.Errorf("create data dir: %w", err)
@@ -381,7 +382,7 @@ func run() error {
 		log.Warn("mDNS advertisement unavailable", "err", err)
 	}
 	log.Info("ply listening", "ffmpeg", ffmpegBin, "version", version, "name", cfg.Name, "id", id, "data", cfg.Data,
-		"auth", cfg.Token != "", "media", rootPaths(roots))
+		"log", cfg.LogPath(), "auth", cfg.Token != "", "media", rootPaths(roots))
 	for _, u := range discovery.URLs(ln.Addr()) {
 		log.Info("reachable at", "url", u)
 	}

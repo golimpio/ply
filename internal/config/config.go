@@ -35,6 +35,7 @@ type Config struct {
 	Media        []string
 	Addr         string
 	Data         string // absolute data directory
+	LogDir       string // absolute log directory
 	Token        string
 	Name         string
 	ScanInterval time.Duration
@@ -86,6 +87,7 @@ type Config struct {
 
 // Environment variables that stand in for flags (the flag wins).
 const (
+	LogDirEnv            = "PLY_LOG_DIR"
 	TMDBKeyEnv           = "PLY_TMDB_KEY"
 	MetadataEnv          = "PLY_METADATA"
 	MetadataLanguageEnv  = "PLY_METADATA_LANGUAGE"
@@ -181,6 +183,9 @@ func validHWAccel(v string) bool {
 // DBPath is the SQLite database file inside the data directory.
 func (c Config) DBPath() string { return filepath.Join(c.Data, "ply.db") }
 
+// LogPath is the log file inside the log directory.
+func (c Config) LogPath() string { return filepath.Join(c.LogDir, "ply.log") }
+
 // rootList collects the values of -media, -movies or -shows into one list shared
 // by the three, which keeps the order they were given in.
 type rootList struct {
@@ -232,9 +237,10 @@ func Parse(args []string, out io.Writer) (Config, error) {
 	}
 
 	var (
-		c     Config
-		given []RootFlag
-		data  string
+		c      Config
+		given  []RootFlag
+		data   string
+		logDir string
 	)
 	fs := flag.NewFlagSet("ply", flag.ContinueOnError)
 	fs.SetOutput(out)
@@ -243,6 +249,7 @@ func Parse(args []string, out io.Writer) (Config, error) {
 	fs.Var(rootList{library.KindShows, &given}, "shows", "folder of TV shows (repeatable); its type cannot be changed in Settings")
 	fs.StringVar(&c.Addr, "addr", ":8420", "listen address (:0 picks a free port)")
 	fs.StringVar(&data, "data", "", "data directory (default: per-user application data dir)")
+	fs.StringVar(&logDir, "log-dir", "", "log directory (default: per-user application log dir)")
 	fs.StringVar(&c.Token, "token", "", "require this token for /api (Bearer header or ?token=)")
 	fs.StringVar(&c.Name, "name", hostname, "server name shown to clients")
 	fs.BoolVar(&c.Watch, "watch", true, "watch media folders and pick up changes within seconds")
@@ -335,6 +342,13 @@ func Parse(args []string, out io.Writer) (Config, error) {
 	if c.Data, err = DataDir(data); err != nil {
 		return Config{}, err
 	}
+	rawLogDir := logDir
+	if rawLogDir == "" {
+		rawLogDir = os.Getenv(LogDirEnv)
+	}
+	if c.LogDir, err = LogDir(rawLogDir); err != nil {
+		return Config{}, err
+	}
 	return c, nil
 }
 
@@ -411,6 +425,41 @@ func dataDir(goos, home, xdg, override string) (string, error) {
 		return "", errors.New("cannot determine home directory; pass -data")
 	}
 	return filepath.Join(home, ".local", "share", "ply"), nil
+}
+
+// LogDir returns the log directory: override if non-empty, else the
+// platform default. The directory is not created.
+func LogDir(override string) (string, error) {
+	home, _ := os.UserHomeDir()
+	return logDir(runtime.GOOS, home, os.Getenv("XDG_STATE_HOME"), override)
+}
+
+func logDir(goos, home, xdgState, override string) (string, error) {
+	if override != "" {
+		return filepath.Abs(override)
+	}
+	if goos == "darwin" {
+		if home == "" {
+			return "", errors.New("cannot determine home directory; pass -log-dir")
+		}
+		return filepath.Join(home, "Library", "Logs", "ply"), nil
+	}
+	if goos == "windows" {
+		if localApp := os.Getenv("LOCALAPPDATA"); localApp != "" {
+			return filepath.Join(localApp, "ply", "logs"), nil
+		}
+		if home != "" {
+			return filepath.Join(home, "AppData", "Local", "ply", "logs"), nil
+		}
+		return "", errors.New("cannot determine home directory; pass -log-dir")
+	}
+	if filepath.IsAbs(xdgState) {
+		return filepath.Join(xdgState, "ply"), nil
+	}
+	if home == "" {
+		return "", errors.New("cannot determine home directory; pass -log-dir")
+	}
+	return filepath.Join(home, ".local", "state", "ply"), nil
 }
 
 // ServerID returns the persistent server id stored in dir/server-id (16 random

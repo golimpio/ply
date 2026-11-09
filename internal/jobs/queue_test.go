@@ -1,10 +1,12 @@
 package jobs
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -876,4 +878,108 @@ func TestEventsAndResync(t *testing.T) {
 	if !resync {
 		t.Fatal("a new client must start from a snapshot")
 	}
+}
+
+type safeBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *safeBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *safeBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
+}
+
+func TestQueueLogging(t *testing.T) {
+	var buf safeBuffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+	g := newGate()
+	longStarted := make(chan struct{})
+	q, _ := start(t, Options{Logger: logger, Gate: g, Light: 2},
+		Spec{Kind: "quick", Run: func(context.Context, *Run) error { return nil }},
+		Spec{Kind: "long", Run: func(ctx context.Context, r *Run) error {
+			close(longStarted)
+			<-ctx.Done()
+			return ctx.Err()
+		}},
+		Spec{Kind: "gated", Run: func(context.Context, *Run) error { return nil }},
+	)
+
+	ctx := context.Background()
+
+	// 1. Start and finish logging
+	quickJob, err := q.Enqueue(ctx, "quick", Opt{Key: "q1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "quick job done", func() bool { return state(q, quickJob.ID) == Done })
+
+	waitFor(t, "job started and finished in log", func() bool {
+		out := buf.String()
+		return strings.Contains(out, "job started") && strings.Contains(out, "job finished")
+	})
+	logOut := buf.String()
+	if !strings.Contains(logOut, fmt.Sprintf("id=%d", quickJob.ID)) || !strings.Contains(logOut, "kind=quick") {
+		t.Errorf("log missing id/kind for quick job: %s", logOut)
+	}
+	if !strings.Contains(logOut, "took=") {
+		t.Errorf("log finished missing took duration: %s", logOut)
+	}
+
+	// 2. Cancel a queued job
+	_ = q.SetPaused(ctx, true)
+	queuedJob, err := q.Enqueue(ctx, "quick", Opt{Key: "q2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Cancel(queuedJob.ID); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "cancelled queued job in log", func() bool {
+		return strings.Contains(buf.String(), fmt.Sprintf("msg=\"job cancelled\" id=%d", queuedJob.ID))
+	})
+
+	// 3. Cancel a running job
+	_ = q.SetPaused(ctx, false)
+	longJob, err := q.Enqueue(ctx, "long", Opt{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-longStarted
+	if err := q.Cancel(longJob.ID); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "cancelled running job in log", func() bool {
+		return strings.Contains(buf.String(), fmt.Sprintf("msg=\"job cancelled\" id=%d", longJob.ID))
+	})
+
+	// 4. Job waiting (held by gate)
+	g.hold("disk busy")
+	gatedJob, err := q.Enqueue(ctx, "gated", Opt{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "job waiting in log", func() bool {
+		return strings.Contains(buf.String(), "msg=\"job waiting\"") &&
+			strings.Contains(buf.String(), fmt.Sprintf("id=%d", gatedJob.ID)) &&
+			strings.Contains(buf.String(), "reason=\"disk busy\"")
+	})
+
+	// Positive control before absence check: verify "job waiting" appeared at least once
+	waitingCount := strings.Count(buf.String(), "msg=\"job waiting\"")
+	if waitingCount < 1 {
+		t.Fatalf("positive control failed: job waiting count %d < 1", waitingCount)
+	}
+
+	// Release gate and wait for job to finish
+	g.hold("")
+	waitFor(t, "gated job done", func() bool { return state(q, gatedJob.ID) == Done })
 }

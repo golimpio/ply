@@ -489,6 +489,9 @@ func (q *Queue) next() (start *entry, due time.Duration, held bool) {
 				shown[e.heavy], reason = true, h.Reason
 			}
 			if e.Held != reason {
+				if reason != "" {
+					q.log.Info("job waiting", "id", e.ID, "kind", e.Kind, "title", e.Title, "reason", h.Reason)
+				}
 				e.Held = reason
 				changed = append(changed, e.Job)
 			}
@@ -600,6 +603,7 @@ func (q *Queue) work(parent context.Context, e *entry) {
 	ctx = context.WithValue(ctx, runKey{}, r)
 	q.save(ctx, j)
 	q.publish(Event{Type: "job.started", Job: &j})
+	q.log.Info("job started", "id", j.ID, "kind", j.Kind, "title", j.Title)
 	err := ctx.Err() // cancelled before it began
 	if err == nil {
 		err = q.call(ctx, e, r)
@@ -674,6 +678,8 @@ func (q *Queue) finish(parent, ctx context.Context, e *entry, err error) {
 		q.log.Warn("jobs: failed, will retry", "kind", j.Kind, "title", j.Title, "attempt", j.Attempts, "err", err)
 	} else if j.State == Failed {
 		q.log.Warn("jobs: failed", "kind", j.Kind, "title", j.Title, "attempts", j.Attempts, "err", err)
+	} else if j.State == Done {
+		q.log.Info("job finished", "id", j.ID, "kind", j.Kind, "title", j.Title, "took", now.Sub(e.StartedAt).Round(time.Millisecond))
 	}
 	q.publish(Event{Type: typ, Job: &j})
 	if !requeue {
@@ -700,10 +706,12 @@ func (q *Queue) Cancel(id int64) error {
 		if cancel == nil {
 			e.cancelled = true // work has not set it yet: it cancels itself
 		}
+		j := e.Job
 		q.mu.Unlock()
 		if cancel != nil {
 			cancel(ErrCancelled)
 		}
+		q.log.Info("job cancelled", "id", j.ID, "kind", j.Kind, "title", j.Title)
 		return nil
 	}
 	e.State, e.FinishedAt, e.Held = Cancelled, q.o.Now(), ""
@@ -714,6 +722,7 @@ func (q *Queue) Cancel(id int64) error {
 	q.mu.Unlock()
 	q.save(context.Background(), j)
 	q.publish(Event{Type: "job.cancelled", Job: &j})
+	q.log.Info("job cancelled", "id", j.ID, "kind", j.Kind, "title", j.Title)
 	for _, w := range waiters {
 		w <- outcome{nil, ErrCancelled}
 	}
