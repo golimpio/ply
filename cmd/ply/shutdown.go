@@ -15,11 +15,12 @@ type stopStep struct {
 // stopper runs the shutdown steps in order and says what it is waiting for, so
 // a slow stop (a probe on a slow share, a download) never looks like a hang.
 type stopper struct {
-	log      *slog.Logger
-	every    time.Duration // how often a slow step is reported
-	deadline time.Duration // after this the rest is not waited for
-	quick    <-chan os.Signal
-	onQuick  func()
+	log            *slog.Logger
+	every          time.Duration // how often a slow step is reported
+	deadline       time.Duration // after this the rest is not waited for
+	quick          <-chan os.Signal
+	onQuick        func()
+	reportProgress func(step string, waited time.Duration, left int)
 }
 
 // run reports false if it gave up waiting: the process should exit anyway.
@@ -47,8 +48,12 @@ func (s stopper) run(steps []stopStep) bool {
 				}
 				return false
 			case <-tick.C:
-				s.log.Info("still stopping", "step", st.name, "waited", time.Since(began).Round(time.Second),
+				waited := time.Since(began).Round(time.Second)
+				s.log.Info("still stopping", "step", st.name, "waited", waited,
 					"left", len(steps)-i)
+				if s.reportProgress != nil {
+					s.reportProgress(st.name, waited, len(steps)-i)
+				}
 			case <-giveUp.C:
 				s.log.Warn("not waiting any longer; exiting", "step", st.name,
 					"after", time.Since(start).Round(time.Second))

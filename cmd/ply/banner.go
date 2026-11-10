@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net"
+	"os"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -26,41 +27,94 @@ func reachableURLs(addr net.Addr) []string {
 
 // banner formats a clean terminal banner with the ply logo and connection details.
 func banner(name, ver, logPath string, urls []string) string {
+	useColor := isTerminal(os.Stderr) && os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"
+	return formatBanner(name, ver, logPath, urls, useColor)
+}
+
+type bannerLine struct {
+	plain  string
+	styled string
+}
+
+// formatBanner formats the banner with optional ANSI styling.
+func formatBanner(name, ver, logPath string, urls []string, useColor bool) string {
 	const minWidth = 51
 
-	var lines []string
-	lines = append(lines, "")
-	lines = append(lines, "   █▀█ █   █ █     local media server")
-	lines = append(lines, "   █▀▀ █▄▄ ▀█▀     v"+ver)
-	lines = append(lines, "")
-	lines = append(lines, "   Server:    "+name)
+	const (
+		ansiReset    = "\033[0m"
+		ansiBold     = "\033[1m"
+		ansiDim      = "\033[2m"
+		ansiBoldCyan = "\033[1;36m"
+	)
+
+	var lines []bannerLine
+	add := func(plain, styled string) {
+		if !useColor {
+			styled = plain
+		}
+		lines = append(lines, bannerLine{plain: plain, styled: styled})
+	}
+
+	add("", "")
+	add(
+		"   █▀█ █   █ █     local media server",
+		"   "+ansiBoldCyan+"█▀█ █   █ █"+ansiReset+"     "+ansiDim+"local media server"+ansiReset,
+	)
+	add(
+		"   █▀▀ █▄▄ ▀█▀     v"+ver,
+		"   "+ansiBoldCyan+"█▀▀ █▄▄ ▀█▀"+ansiReset+"     "+ansiDim+"v"+ver+ansiReset,
+	)
+	add("", "")
+	add(
+		"   Server:    "+name,
+		"   "+ansiBold+"Server:"+ansiReset+"    "+name,
+	)
 	if len(urls) > 0 {
-		lines = append(lines, "   Web UI:    "+urls[0])
+		add(
+			"   Web UI:    "+urls[0],
+			"   "+ansiBold+"Web UI:"+ansiReset+"    "+ansiBoldCyan+urls[0]+ansiReset,
+		)
 		for _, u := range urls[1:] {
-			lines = append(lines, "              "+u)
+			add(
+				"              "+u,
+				"              "+ansiBoldCyan+u+ansiReset,
+			)
 		}
 	}
-	lines = append(lines, "")
-	lines = append(lines, "   Log file:  "+logPath)
-	lines = append(lines, "")
-	lines = append(lines, "   Press Ctrl-C to stop (twice to quit at once)")
+	add("", "")
+	add(
+		"   Log file:  "+logPath,
+		"   "+ansiBold+"Log file:"+ansiReset+"  "+logPath,
+	)
+	add("", "")
+	add(
+		"   Press Ctrl-C to stop (twice to quit at once)",
+		"   "+ansiDim+"Press Ctrl-C to stop (twice to quit at once)"+ansiReset,
+	)
 
 	width := minWidth
 	for _, l := range lines {
-		if w := utf8.RuneCountInString(l) + 4; w > width {
+		if w := utf8.RuneCountInString(l.plain) + 4; w > width {
 			width = w
 		}
 	}
 
+	border := func(s string) string {
+		if useColor {
+			return ansiDim + s + ansiReset
+		}
+		return s
+	}
+
 	var sb strings.Builder
-	sb.WriteString("  ╭" + strings.Repeat("─", width) + "╮\n")
+	sb.WriteString("  " + border("╭"+strings.Repeat("─", width)+"╮") + "\n")
 	for _, l := range lines {
-		pad := width - utf8.RuneCountInString(l)
+		pad := width - utf8.RuneCountInString(l.plain)
 		if pad < 0 {
 			pad = 0
 		}
-		sb.WriteString("  │" + l + strings.Repeat(" ", pad) + "│\n")
+		sb.WriteString("  " + border("│") + l.styled + strings.Repeat(" ", pad) + border("│") + "\n")
 	}
-	sb.WriteString("  ╰" + strings.Repeat("─", width) + "╯\n")
+	sb.WriteString("  " + border("╰"+strings.Repeat("─", width)+"╯") + "\n")
 	return sb.String()
 }

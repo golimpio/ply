@@ -190,3 +190,52 @@ func TestShutdownQuickExitOnSecondSignal(t *testing.T) {
 		}
 	})
 }
+
+// A slow step reports its progress via reportProgress callback so the terminal is not silent.
+func TestShutdownReportProgress(t *testing.T) {
+	s, out := testStopper(10*time.Millisecond, 2*time.Second)
+	type progCall struct {
+		step   string
+		waited time.Duration
+		left   int
+	}
+	var calls []progCall
+	s.reportProgress = func(step string, waited time.Duration, left int) {
+		calls = append(calls, progCall{step: step, waited: waited, left: left})
+	}
+
+	ok := s.run([]stopStep{
+		{"slow step", func() { time.Sleep(45 * time.Millisecond) }},
+		{"fast step", func() {}},
+	})
+	if !ok {
+		t.Fatal("run gave up")
+	}
+
+	// Positive control: ensure reportProgress was actually called for the slow step
+	// before asserting that it was NOT called for the fast step.
+	hasSlow := false
+	hasFast := false
+	for _, c := range calls {
+		if c.step == "slow step" {
+			hasSlow = true
+		}
+		if c.step == "fast step" {
+			hasFast = true
+		}
+	}
+	if !hasSlow {
+		t.Fatal("positive control: expected reportProgress for slow step, but got none")
+	}
+	if hasFast {
+		t.Errorf("reportProgress was unexpectedly called for fast step: %v", calls)
+	}
+
+	if calls[0].step != "slow step" {
+		t.Fatalf("reportProgress step = %q, want 'slow step'", calls[0].step)
+	}
+	if calls[0].left != 2 {
+		t.Fatalf("reportProgress left = %d, want 2", calls[0].left)
+	}
+	_ = out
+}

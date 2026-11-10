@@ -76,7 +76,8 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	var closeStore sync.Once
+	defer closeStore.Do(func() { _ = st.Close() })
 	for _, n := range st.Notices() {
 		log.Info(n)
 	}
@@ -87,7 +88,7 @@ func run() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	sigC := make(chan os.Signal, 2)
+	sigC := make(chan os.Signal, 10)
 	signal.Notify(sigC, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigC)
 
@@ -395,9 +396,19 @@ func run() error {
 	select {
 	case <-sigC:
 		if isInteractive && !cfg.LogStderr {
-			fmt.Fprintln(os.Stderr, "Shutting down; press Ctrl-C again to quit at once...")
+			fmt.Fprintln(os.Stderr, "\nShutting down... (press Ctrl-C again to quit immediately)")
 		}
 		log.Info("shutting down; press Ctrl-C again to quit at once")
+		go func() {
+			for sig := range sigC {
+				if sig == os.Interrupt || sig == syscall.SIGTERM {
+					if isInteractive && !cfg.LogStderr {
+						fmt.Fprintln(os.Stderr, "\nForced exit.")
+					}
+					os.Exit(130)
+				}
+			}
+		}()
 		cancel()
 	case serveFailure = <-serveErr:
 		cancel()
@@ -408,11 +419,16 @@ func run() error {
 	clean := stopper{
 		log:      log,
 		every:    2 * time.Second,
-		deadline: 30 * time.Second,
+		deadline: 15 * time.Second,
 		quick:    sigC,
+		reportProgress: func(step string, waited time.Duration, left int) {
+			if isInteractive && !cfg.LogStderr {
+				fmt.Fprintf(os.Stderr, "Still waiting for %s (%s)... press Ctrl-C again to quit immediately\n", step, waited)
+			}
+		},
 		onQuick: func() {
 			if isInteractive && !cfg.LogStderr {
-				fmt.Fprintln(os.Stderr, "Quitting at once.")
+				fmt.Fprintln(os.Stderr, "\nQuitting at once.")
 			}
 			os.Exit(130)
 		},
@@ -451,15 +467,25 @@ func run() error {
 		{"metadata", worker.Close},
 		{"library scan", scanner.Wait},
 		{"image downloads", images.Close},
+		{"database", func() { closeStore.Do(func() { _ = st.Close() }) }},
 	})
 	if !clean {
 		log.Warn("shutdown timed out; forcing exit")
+		if isInteractive && !cfg.LogStderr {
+			fmt.Fprintln(os.Stderr, "\nShutdown timed out; forced exit.")
+		}
+		closeLog()
 		os.Exit(1)
 	}
 	if isInteractive && !cfg.LogStderr {
 		fmt.Fprintln(os.Stderr, "Stopped.")
 	}
-	return serveFailure
+	closeLog()
+	if serveFailure != nil {
+		return serveFailure
+	}
+	os.Exit(0)
+	return nil
 }
 
 // storedKinds are the types the saved folders have, by path: what the last run left,

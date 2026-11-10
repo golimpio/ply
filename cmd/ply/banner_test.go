@@ -105,3 +105,70 @@ func TestBannerWidePathExpandsCleanly(t *testing.T) {
 		}
 	}
 }
+
+func stripANSI(s string) string {
+	var b strings.Builder
+	inEsc := false
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\033' {
+			inEsc = true
+			continue
+		}
+		if inEsc {
+			if (s[i] >= 'a' && s[i] <= 'z') || (s[i] >= 'A' && s[i] <= 'Z') {
+				inEsc = false
+			}
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}
+
+func TestFormatBannerColor(t *testing.T) {
+	urls := []string{"http://192.168.1.100:8420"}
+
+	// Uncolored: no ANSI escape codes
+	uncolored := formatBanner("Server", "0.1.0", "/path/to/ply.log", urls, false)
+	if strings.Contains(uncolored, "\033[") {
+		t.Errorf("uncolored banner should not contain ANSI escape codes:\n%s", uncolored)
+	}
+
+	// Colored: positive control — MUST contain ANSI escape codes
+	colored := formatBanner("Server", "0.1.0", "/path/to/ply.log", urls, true)
+	if !strings.Contains(colored, "\033[") {
+		t.Fatalf("positive control: colored banner MUST contain ANSI escape codes:\n%s", colored)
+	}
+	for _, code := range []string{
+		"\033[1;36m", // bold cyan (logo, URLs)
+		"\033[1m",    // bold (labels)
+		"\033[2m",    // dim (hints, box borders)
+		"\033[0m",    // reset
+	} {
+		if !strings.Contains(colored, code) {
+			t.Errorf("colored banner missing ANSI code %q", code)
+		}
+	}
+	if !strings.Contains(colored, "Server") || !strings.Contains(colored, "http://192.168.1.100:8420") {
+		t.Errorf("colored banner missing content:\n%s", colored)
+	}
+
+	// Stripped colored banner should be identical to uncolored banner
+	stripped := stripANSI(colored)
+	if strings.Contains(stripped, "\033[") {
+		t.Error("stripANSI failed to remove all escape sequences")
+	}
+	if stripped != uncolored {
+		t.Errorf("stripped colored banner differs from uncolored banner:\nGot:\n%s\nWant:\n%s", stripped, uncolored)
+	}
+
+	// Alignment: every line in the visual display must have identical rune width
+	lines := strings.Split(strings.TrimSuffix(stripped, "\n"), "\n")
+	expectedWidth := utf8.RuneCountInString(lines[0])
+	for i, l := range lines {
+		w := utf8.RuneCountInString(l)
+		if w != expectedWidth {
+			t.Errorf("line %d visual width = %d, want %d: %q", i, w, expectedWidth, l)
+		}
+	}
+}
