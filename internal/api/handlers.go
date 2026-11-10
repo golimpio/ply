@@ -45,11 +45,32 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, `fields must be "card"`)
 		return
 	}
-	if fields == fieldsCard && kind != store.KindMovie {
-		writeError(w, http.StatusBadRequest, `fields=card is for kind=movie`)
+	if fields == fieldsCard && kind == "" {
+		writeError(w, http.StatusBadRequest, `fields=card needs kind=movie or kind=episode`)
 		return
 	}
-	etag, notModified := s.listCache(w, r, fields)
+	limit, err := parseLimit(q.Get("limit"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	shape := ""
+	if fields == fieldsCard {
+		shape = fieldsCard
+		if kind == store.KindEpisode {
+			shape = projectionEpisodeCard
+		}
+	}
+	// The limit is part of the key as well: a limited list and the whole one never share a validator.
+	key := shape
+	if limit > 0 {
+		if key == "" {
+			key = "limit" + strconv.Itoa(limit)
+		} else {
+			key += ".limit" + strconv.Itoa(limit)
+		}
+	}
+	etag, notModified := s.listCache(w, r, key)
 	if notModified {
 		return
 	}
@@ -60,11 +81,33 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 	}
 	sums, degraded := s.summariesChecked(r.Context(), entries)
 	out := applyRatingQuery(sums, rq, func(it ItemSummary) *RatingEntry { return it.Rating })
-	if fields == fieldsCard {
-		writeList(w, etag, itemCards(out), degraded)
-		return
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
 	}
-	writeList(w, etag, out, degraded)
+	switch shape {
+	case projectionEpisodeCard:
+		writeList(w, etag, episodeCards(out), degraded)
+	case fieldsCard:
+		writeList(w, etag, itemCards(out), degraded)
+	default:
+		writeList(w, etag, out, degraded)
+	}
+}
+
+// limitMax is the most rows one request of a list answers.
+const limitMax = 500
+
+// parseLimit reads limit: how many rows of the list to answer, 0 for all of them. It must be a number
+// from 1 to limitMax: no page asks for nothing, and one request never takes a whole big library.
+func parseLimit(v string) (int, error) {
+	if v == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 || n > limitMax {
+		return 0, fmt.Errorf("limit must be a number from 1 to %d", limitMax)
+	}
+	return n, nil
 }
 
 // loadEntry resolves {id}; it writes the error response and reports false if

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, type ItemDetail, type ItemSummary, type ItemWatch, type Stream } from '../lib/api';
+  import { api, type CardRating, type EpisodeCard, type ItemDetail, type ItemSummary, type ItemWatch, type Stream } from '../lib/api';
   import { useAmbient } from '../lib/ambient.svelte';
   import {
     channelLabel,
@@ -77,8 +77,14 @@
   };
   const decision = $derived({ data: fresh?.playback, error });
 
-  // What the page reads of an item: a list row (a movie card has no episode fields) or the detail.
-  type PageItem = LibraryRow & Partial<Pick<ItemSummary, 'show' | 'season' | 'episode' | 'episodeTitle' | 'overview' | 'ratings'>>;
+  // What the page reads of an item: a list row (a movie or an episode card) or the detail. A card
+  // has fewer fields than the detail, so the ones this page reads of either are optional here (and
+  // `rating` is the show's for an episode, which the card does not carry: undefined then).
+  type PageItem = (LibraryRow | ItemDetail) &
+    Partial<Pick<ItemSummary, 'show' | 'season' | 'episode' | 'episodeTitle' | 'overview' | 'titleId' | 'needsReview'>> & {
+      ratings?: CardRating[];
+      rating?: CardRating | null;
+    };
 
   // The list row paints the hero at once (and lands the card morph), with only what it has; the
   // full detail fills in the metadata and the technical section. The watch state is the row's when
@@ -222,7 +228,7 @@
     return [s.default && 'default', s.forced && 'forced'].filter(Boolean).join(', ');
   }
 
-  const epTitle = (e: ItemSummary) => e.episodeTitle || `Episode ${e.episode ?? ''}`.trim();
+  const epTitle = (e: EpisodeCard) => e.episodeTitle || `Episode ${e.episode ?? ''}`.trim();
   const sources: Record<string, string> = {
     tvdb: 'TheTVDB',
     tmdb: 'TMDB',

@@ -3,7 +3,10 @@
 // says of it. The server counts the same way: an episode is a (show, season, number), watched when
 // any of its files is, in progress when none is watched and one is started; a show's counts leave
 // the specials out, unless it has nothing else.
-import type { ItemSummary } from './api';
+import type { ItemSummary, Progress } from './api';
+
+/** What the counts read of an episode file: a card has them all, and so does a full row. */
+type EpisodeFile = Pick<ItemSummary, 'id' | 'show' | 'season' | 'episode' | 'watched'> & { progress?: Progress | null };
 
 export interface EpisodeCounts {
   /** Episodes (one that has two files is one). */
@@ -13,10 +16,10 @@ export interface EpisodeCounts {
   inProgress: number;
 }
 
-const started = (i: ItemSummary) => !!i.progress && !i.progress.watched && i.progress.positionSec > 0;
+const started = (i: EpisodeFile) => !!i.progress && !i.progress.watched && i.progress.positionSec > 0;
 
 /** The counts of a set of episode files (a season's, a show's). */
-export function countEpisodes(files: readonly ItemSummary[]): EpisodeCounts {
+export function countEpisodes(files: readonly EpisodeFile[]): EpisodeCounts {
   const byEpisode = new Map<string, { watched: boolean; started: boolean }>();
   for (const f of files) {
     // A file with no number in its name is an episode of its own.
@@ -36,7 +39,7 @@ export function countEpisodes(files: readonly ItemSummary[]): EpisodeCounts {
 }
 
 /** A show's counts: its specials (season 0) left out, unless it has nothing but specials. */
-export function showCounts(files: readonly ItemSummary[]): EpisodeCounts {
+export function showCounts(files: readonly EpisodeFile[]): EpisodeCounts {
   const regular = files.filter((f) => (f.season ?? 0) !== 0);
   return countEpisodes(regular.length ? regular : files);
 }

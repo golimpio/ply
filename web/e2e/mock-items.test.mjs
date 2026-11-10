@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { answerItems, routeItems, serveItems, toCard } from './mock-items.mjs';
+import { answerItems, routeItems, serveItems, toCard, toEpisodeCard } from './mock-items.mjs';
 
 const cardGo = readFileSync(new URL('../../internal/api/card.go', import.meta.url), 'utf8');
 
@@ -25,6 +25,17 @@ const ep = (id, show) => ({ id, kind: 'episode', title: show, show, season: 1, e
   addedAt: id, progress: null, art: null, watched: false, watchedAt: null, playCount: 0, matchState: 'matched', needsReview: false, rating: null });
 const sparse = { id: 2, kind: 'movie', title: 'Bare', durationSec: 1, width: 1, height: 1, addedAt: 2, progress: null, art: null,
   watched: true, watchedAt: 5, playCount: 1, matchState: 'unmatched', needsReview: false, rating: null };
+// An episode with every field an EpisodeCard can have, and the ones it must not.
+const fullEp = {
+  id: 40, kind: 'episode', title: 'Pilot', year: 2008, show: 'Lost', season: 1, episode: 2, episodeTitle: 'Pilot, part one',
+  addedAt: 1_700_000_100, durationSec: 2400, still: 'tmdb:/s1.jpg', overview: 'They land.', width: 1920, height: 1080, hdr: 'hdr10',
+  watched: true, watchedAt: 1_700_000_200, playCount: 2, progress: { positionSec: 10, watched: false },
+  art: { thumb: '/api/items/40/art/thumb', color: '#445566' },
+  rating: { source: 'imdb', value: 8, scale: 10, score100: 80, votes: 4, url: 'https://x', fetchedAt: '2026-01-01T00:00:00Z' },
+  ratings: [{ source: 'imdb', value: 8, scale: 10, score100: 80, url: 'https://x', fetchedAt: '2026-01-01T00:00:00Z' }],
+  container: 'mkv', videoCodec: 'hevc', audioCodec: 'eac3', backdrop: '/b.jpg', poster: '/p.jpg', logo: '/l.png', genres: ['Drama'],
+  sortTitle: 'Lost', matchState: 'matched', needsReview: false, certification: 'TV-14',
+};
 const rows = [full, sparse, ep(10, 'Lost'), ep(11, 'Lost'), ep(12, 'The Wire')];
 
 const ids = (a) => a.body.map((r) => r.id);
@@ -39,7 +50,7 @@ function jsonTags(src, struct) {
 function drift(src) {
   const card = toCard(full);
   const out = [];
-  for (const [struct, obj] of [['ItemCard', card], ['CardArt', card.art], ['CardRating', card.rating]]) {
+  for (const [struct, obj] of [['ItemCard', card], ['CardArt', card.art], ['CardRating', card.rating], ['EpisodeCard', toEpisodeCard(fullEp)]]) {
     const go = jsonTags(src, struct).sort();
     const js = Object.keys(obj).sort();
     if (go.join() !== js.join()) out.push(`${struct}: card.go [${go}] / toCard [${js}]`);
@@ -49,6 +60,7 @@ function drift(src) {
 
 test('toCard has exactly the fields of the structs in card.go', () => {
   assert.ok(jsonTags(cardGo, 'ItemCard').length >= 20, 'positive control: the ItemCard tags were read');
+  assert.ok(jsonTags(cardGo, 'EpisodeCard').length >= 20, 'positive control: the EpisodeCard tags were read');
   assert.ok(jsonTags(cardGo, 'CardArt').includes('thumb') && jsonTags(cardGo, 'CardRating').includes('score100'), 'positive control: the nested structs were read');
   assert.deepEqual(drift(cardGo), []);
 });
@@ -108,14 +120,41 @@ test("a card leaves out what Go's omitempty does, and keeps the rest", () => {
   assert.equal(toCard({ ...full, year: 0 }).year, 0, 'a *int of 0 is sent');
 });
 
+test('fields=card sends cards of the episodes, leaner than the rows', () => {
+  const a = answerItems(rows, '/api/items?kind=episode&fields=card');
+  assert.equal(a.status, 200);
+  assert.deepEqual(ids(a), [10, 11, 12]);
+  const [card] = a.body;
+  assert.ok('container' in rows[2], 'positive control: the full row has one');
+  for (const k of ['container', 'videoCodec', 'audioCodec', 'backdrop', 'poster', 'genres', 'sortTitle', 'matchState', 'needsReview', 'rating']) {
+    assert.ok(!(k in card), `${k} dropped`);
+  }
+  const fullText = JSON.stringify(rows.filter((r) => r.kind === 'episode')).length;
+  assert.ok(JSON.stringify(a.body).length < fullText, 'the card list is leaner on the wire than the rows');
+});
+
+test('limit cuts the list after the filters', () => {
+  assert.deepEqual(ids(answerItems(rows, '/api/items?kind=movie&limit=1')), [1]);
+  assert.deepEqual(ids(answerItems(rows, '/api/items?kind=movie&fields=card&limit=1')), [1]);
+  assert.deepEqual(ids(answerItems(rows, '/api/items?kind=episode&fields=card&limit=2')), [10, 11]);
+  assert.deepEqual(ids(answerItems(rows, '/api/items?kind=movie&limit=500')), [1, 2], 'a limit over the list is the whole list');
+  assert.deepEqual(ids(answerItems(rows, '/api/items?show=Lost&limit=1')), [10], 'after the show filter');
+  // The whole list is cut too: the fast path must not slip past the limit.
+  assert.deepEqual(ids(answerItems(rows, '/api/items?limit=2')), [1, 2]);
+  assert.deepEqual(ids(answerItems(rows, '/api/items?limit=500')).length, 5);
+  assert.deepEqual(ids(answerItems(rows, '/api/items?limit=%2B1')), [1], 'strconv.Atoi takes a +1');
+});
+
 test('the 400s of handlers.go', () => {
   const cases = [
     ['/api/items?kind=show', 'kind must be "movie" or "episode"'],
     ['/api/items?kind=show&fields=card', 'kind must be "movie" or "episode"'],
     ['/api/items?fields=full', 'fields must be "card"'],
     ['/api/items?kind=movie&fields=full', 'fields must be "card"'],
-    ['/api/items?fields=card', 'fields=card is for kind=movie'],
-    ['/api/items?kind=episode&fields=card', 'fields=card is for kind=movie'],
+    ['/api/items?fields=card', 'fields=card needs kind=movie or kind=episode'],
+    ['/api/items?kind=movie&limit=0', 'limit must be a number from 1 to 500'],
+    ['/api/items?kind=movie&limit=501', 'limit must be a number from 1 to 500'],
+    ['/api/items?kind=movie&limit=abc', 'limit must be a number from 1 to 500'],
   ];
   for (const [q, error] of cases) assert.deepEqual(answerItems(rows, q), { status: 400, body: { error } }, q);
 });
@@ -136,10 +175,10 @@ test('serveItems answers a node request, through the suite sender on a 200', () 
   const sent = [];
   serveItems({ url: '/api/items' }, res(), rows, (body) => sent.push(body));
   assert.equal(sent[0], rows, 'the sender gets every row');
-  const r = serveItems({ url: '/api/items?kind=episode&fields=card' }, res(), rows, (body) => sent.push(body));
+  const r = serveItems({ url: '/api/items?fields=card' }, res(), rows, (body) => sent.push(body));
   assert.equal(sent.length, 1, 'a 400 does not go through the sender');
   assert.equal(r.status, 400);
-  assert.deepEqual(JSON.parse(r.body), { error: 'fields=card is for kind=movie' });
+  assert.deepEqual(JSON.parse(r.body), { error: 'fields=card needs kind=movie or kind=episode' });
   const plain = serveItems({ url: '/api/items?kind=episode' }, res(), rows);
   assert.equal(plain.status, 200);
   assert.deepEqual(JSON.parse(plain.body).map((x) => x.id), [10, 11, 12]);

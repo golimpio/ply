@@ -239,7 +239,7 @@ func TestListPayload(t *testing.T) {
 		return rec
 	}
 
-	for _, target := range []string{"/api/items?kind=movie", "/api/items?kind=movie&fields=card", "/api/shows", "/api/titles"} {
+	for _, target := range []string{"/api/items?kind=movie", "/api/items?kind=movie&fields=card", "/api/items?kind=episode", "/api/items?kind=episode&fields=card", "/api/shows", "/api/titles"} {
 		rec := get(target, nil)
 		if rec.Code != 200 {
 			t.Fatalf("GET %s = %d %s", target, rec.Code, rec.Body.String())
@@ -278,7 +278,7 @@ func TestListPayload(t *testing.T) {
 	// With a token every picture link carries it (?token=...): the same list weighs more.
 	tok := strings.Repeat("a", 32)
 	srvTok := New(Options{Store: st, Scanner: &fakeScanner{}, Art: g, ID: "perf", Name: "perf", Version: "0", Token: tok})
-	for _, target := range []string{"/api/items?kind=movie", "/api/items?kind=movie&fields=card", "/api/shows", "/api/titles"} {
+	for _, target := range []string{"/api/items?kind=movie", "/api/items?kind=movie&fields=card", "/api/items?kind=episode", "/api/items?kind=episode&fields=card", "/api/shows", "/api/titles"} {
 		req := httptest.NewRequest(http.MethodGet, target, nil)
 		req.Header.Set("Authorization", "Bearer "+tok)
 		rec := httptest.NewRecorder()

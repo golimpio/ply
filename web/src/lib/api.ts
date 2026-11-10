@@ -124,6 +124,39 @@ export interface MovieCard
   hdr?: string;
 }
 
+/**
+ * An episode as GET /api/items?kind=episode&fields=card sends it (internal/api/card.go): what a show's
+ * list, the home page's rails and the search draw, and no more. It is the fields a page reads, so a
+ * full row (ItemSummary) fits it too, which is what the rails that mix both kinds need. `art` and
+ * `rating` are always sent, null for none; anything else an episode has is on the item's detail.
+ */
+export type EpisodeCard = Pick<
+  ItemSummary,
+  | 'id'
+  | 'kind'
+  | 'title'
+  | 'year'
+  | 'show'
+  | 'season'
+  | 'episode'
+  | 'episodeTitle'
+  | 'addedAt'
+  | 'durationSec'
+  | 'still'
+  | 'overview'
+  | 'width'
+  | 'height'
+  | 'hdr'
+  | 'watched'
+  | 'watchedAt'
+  | 'playCount'
+  | 'progress'
+> & {
+  art?: CardArt | null;
+  /** The episode's own ratings as a card carries them: without the url, the votes and the fetch time. */
+  ratings?: CardRating[];
+};
+
 /** One file a PUT .../watched covered, as it is now; progress is the file's own (null: not started). */
 export interface ItemWatch {
   id: number;
@@ -545,13 +578,11 @@ function normaliseRow<T extends { rating?: unknown; ratings?: unknown; kind?: st
   return out;
 }
 
-/**
- * A card with a rating the page can show, without copying it: only a row whose rating is of a
- * source this page does not know is copied, with the rating null.
- */
-function normaliseCard(c: MovieCard): MovieCard {
-  const r = c.rating;
-  return r && (typeof r !== 'object' || !RATING_SOURCES.includes(r.source)) ? { ...c, rating: null } : c;
+/** A card with a rating the page cannot show, without copying it: only a row whose rating is of a
+ * source this page does not know is copied, with the rating null. */
+function normaliseCard<T extends object>(c: T): T {
+  const r = 'rating' in c ? (c as { rating?: CardRating | null }).rating : null;
+  return r && (typeof r !== 'object' || !RATING_SOURCES.includes(r.source)) ? ({ ...c, rating: null } as T) : c;
 }
 
 function normaliseTitle<T extends TitleDetail>(t: T): T {
@@ -1078,6 +1109,11 @@ export const api = {
   /** The movies as the grid needs them (a third of the full rows' weight); the rest is on api.item. */
   async movieCards(): Promise<MovieCard[]> {
     return ((await request<MovieCard[] | null>('GET', '/api/items?kind=movie&fields=card')) ?? []).map(normaliseCard);
+  },
+
+  /** The episodes as a show's list and the rails need them: 358 bytes a row against the full row's 885. */
+  async episodeCards(): Promise<EpisodeCard[]> {
+    return ((await request<EpisodeCard[] | null>('GET', '/api/items?kind=episode&fields=card')) ?? []).map(normaliseCard);
   },
 
   async shows(): Promise<ShowSummary[]> {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, type GenreCount, type ItemSummary, type PersonCard } from '../lib/api';
+  import { api, type EpisodeCard, type GenreCount, type PersonCard } from '../lib/api';
   import { episodeLabel, formatDuration } from '../lib/format';
   import { search, type Searchable } from '../lib/fuzzy';
   import { bothLists, ensureLibrary, episodes, libraryRows, showsOf, type LibraryRow, type ShowEntry } from '../lib/library.svelte';
@@ -45,12 +45,12 @@
     );
   }
 
-  // Movies are cards and episodes full rows: only an episode has a show, a season and a number.
-  const isEpisode = (r: LibraryRow): r is ItemSummary => r.kind === 'episode';
+  // Movies and episodes are their own card shapes: only an episode has a show, a season and a number.
+  const isEpisode = (r: LibraryRow): r is EpisodeCard => r.kind === 'episode';
 
   // A show is matched on its name (as title and show, the way its episodes read). The stand-ins are
   // made once per episode list, so the matcher's folded text of each is kept between keystrokes.
-  let showRows: { of: readonly ItemSummary[]; rows: (Searchable & { entry: ShowEntry })[] } | undefined;
+  let showRows: { of: readonly EpisodeCard[]; rows: (Searchable & { entry: ShowEntry })[] } | undefined;
   function searchableShows() {
     const of = episodes.rows;
     if (showRows?.of !== of) showRows = { of, rows: showsOf(of).map((entry) => ({ title: entry.show, show: entry.show, entry })) };

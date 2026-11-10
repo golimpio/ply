@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, ApiError, type EpisodeOrder, type ItemSummary } from '../lib/api';
+  import { api, ApiError, type EpisodeCard, type EpisodeOrder } from '../lib/api';
   import { useAmbient } from '../lib/ambient.svelte';
   import { episodeLabel, formatDuration, seasonLabel } from '../lib/format';
   import { ensureEpisodes, episodes as episodeList, episodesOf, markWatched, showMeta, showsOf, type WatchTarget } from '../lib/library.svelte';
@@ -83,7 +83,7 @@
   const years = $derived(yearSpan(meta, summary?.year));
   const ratings = $derived(titleRatings(meta, summary));
   // An episode's own rating (IMDb), when the settings show that source.
-  const epRating = (e: ItemSummary) => orderShown(e.ratings ?? [], ratingPrefs.shown)[0];
+  const epRating = (e: EpisodeCard) => orderShown(e.ratings ?? [], ratingPrefs.shown)[0];
   $effect(() => {
     void app.libraryVersion;
     if (list.some((e) => e.ratings?.length)) void ensureRatingPrefs();
@@ -193,7 +193,7 @@
   useAmbient(() => artOf(entry?.cover)?.color);
 
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
-  const resumeAt = (e: ItemSummary) => (progressOf(e) > 0 ? (e.progress?.positionSec ?? 0) : 0);
+  const resumeAt = (e: EpisodeCard) => (progressOf(e) > 0 ? (e.progress?.positionSec ?? 0) : 0);
   const status: Record<string, string> = {
     'Returning Series': 'Still running',
     Ended: 'Ended',

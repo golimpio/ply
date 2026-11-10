@@ -226,7 +226,7 @@ export function groupByTitle<T extends GroupRow>(items: T[]): TitleGroup<T>[] {
  * the newest version when list is newest first, the one played last in
  * Continue. Episodes and unmatched files all stay.
  */
-export function onePerTitle<T extends Pick<ItemSummary, 'kind' | 'titleId'>>(list: T[]): T[] {
+export function onePerTitle<T extends { kind: string; titleId?: number }>(list: T[]): T[] {
   const seen = new Set<number>();
   return list.filter((i) => i.kind !== 'movie' || !i.titleId || (!seen.has(i.titleId) && !!seen.add(i.titleId)));
 }

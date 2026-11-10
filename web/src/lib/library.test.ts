@@ -5,6 +5,7 @@ vi.mock('./api', () => ({
   api: {
     items: vi.fn(),
     movieCards: vi.fn(),
+    episodeCards: vi.fn(),
     shows: vi.fn(),
     setItemWatched: vi.fn(),
     setTitleWatched: vi.fn(),
@@ -14,7 +15,7 @@ vi.mock('./api', () => ({
 }));
 
 type Fn = ReturnType<typeof vi.fn>;
-type Api = Record<'items' | 'movieCards' | 'shows' | 'setItemWatched' | 'setTitleWatched' | 'setShowWatched' | 'setSeasonWatched', Fn>;
+type Api = Record<'items' | 'movieCards' | 'episodeCards' | 'shows' | 'setItemWatched' | 'setTitleWatched' | 'setShowWatched' | 'setSeasonWatched', Fn>;
 // Fresh module state (the two lists, the stamps) for every test.
 let api: Api;
 let app: { libraryVersion: number };
@@ -24,7 +25,7 @@ beforeEach(async () => {
   api = (await import('./api')).api as unknown as Api;
   // The mock outlives resetModules: every test starts from empty lists and no answers queued.
   for (const f of Object.values(api)) f.mockReset();
-  api.items.mockResolvedValue([]);
+  api.episodeCards.mockResolvedValue([]);
   api.movieCards.mockResolvedValue([]);
   api.shows.mockResolvedValue([]);
   app = (await import('./state.svelte')).app;
@@ -80,7 +81,7 @@ function deferred<T>() {
 /** The lists hold these (the movies as cards, the episodes); what findItem gives back is the cached row. */
 async function cache(...rows: (MovieCard | ItemSummary)[]) {
   api.movieCards.mockResolvedValueOnce(rows.filter((r) => r.kind === 'movie'));
-  api.items.mockResolvedValueOnce(rows.filter((r) => r.kind === 'episode'));
+  api.episodeCards.mockResolvedValueOnce(rows.filter((r) => r.kind === 'episode'));
   await lib.ensureLibrary();
 }
 
@@ -453,7 +454,7 @@ describe('ensureLibrary, ensureMovies, ensureEpisodes', () => {
   /** Answer the list calls with the real client over a stubbed fetch (every answer []); returns the URLs asked for. */
   async function realClient() {
     const real = (await vi.importActual<typeof import('./api')>('./api')).api;
-    api.items.mockImplementation(real.items);
+    api.episodeCards.mockImplementation(real.episodeCards);
     api.movieCards.mockImplementation(real.movieCards);
     api.shows.mockImplementation(real.shows);
     const fetch = vi.fn((_url: string) => Promise.resolve(new Response('[]', { headers: { 'Content-Type': 'application/json' } })));
@@ -469,10 +470,10 @@ describe('ensureLibrary, ensureMovies, ensureEpisodes', () => {
     expect(lib.episodes.loaded).toBe(false);
   });
 
-  it('ensureEpisodes asks for the episodes and the show list, never the cards', async () => {
+  it('ensureEpisodes asks for the episode cards and the show list, never the movies', async () => {
     const urls = await realClient();
     await lib.ensureEpisodes();
-    expect(urls().sort()).toEqual(['/api/items?kind=episode', '/api/shows']);
+    expect(urls().sort()).toEqual(['/api/items?kind=episode&fields=card', '/api/shows']);
     expect(lib.episodes.loaded).toBe(true);
     expect(lib.movies.loaded).toBe(false);
   });
@@ -481,18 +482,18 @@ describe('ensureLibrary, ensureMovies, ensureEpisodes', () => {
     const a = card('A');
     const e = ep('Lost', 1, 1);
     api.movieCards.mockResolvedValue([a]);
-    api.items.mockResolvedValue([e]);
+    api.episodeCards.mockResolvedValue([e]);
     expect(lib.bothLists.loaded).toBe(false);
     await Promise.all([lib.ensureLibrary(), lib.ensureMovies(), lib.ensureEpisodes(), lib.ensureLibrary()]);
     expect(api.movieCards).toHaveBeenCalledTimes(1);
-    expect(api.items).toHaveBeenCalledTimes(1);
-    expect(api.items).toHaveBeenCalledWith({ kind: 'episode' });
+    expect(api.episodeCards).toHaveBeenCalledTimes(1);
+    expect(api.episodeCards).toHaveBeenCalledWith();
     expect(lib.movies.rows).toEqual([a]);
     expect(lib.episodes.rows).toEqual([e]);
     expect(lib.bothLists.loaded).toBe(true);
     await lib.ensureLibrary();
     expect(api.movieCards).toHaveBeenCalledTimes(1);
-    expect(api.items).toHaveBeenCalledTimes(1);
+    expect(api.episodeCards).toHaveBeenCalledTimes(1);
   });
 
   it('fetches both again after a scan bumps the library version', async () => {
@@ -500,7 +501,7 @@ describe('ensureLibrary, ensureMovies, ensureEpisodes', () => {
     app.libraryVersion++;
     await lib.ensureLibrary();
     expect(api.movieCards).toHaveBeenCalledTimes(2);
-    expect(api.items).toHaveBeenCalledTimes(2);
+    expect(api.episodeCards).toHaveBeenCalledTimes(2);
   });
 
   it('does not reuse a fetch from before a scan, and a late old response cannot overwrite the new one', async () => {
@@ -536,7 +537,7 @@ describe('ensureLibrary, ensureMovies, ensureEpisodes', () => {
   it('the two lists fail on their own', async () => {
     const e = ep('Lost', 1, 1);
     api.movieCards.mockRejectedValueOnce(new Error('HTTP 500'));
-    api.items.mockResolvedValueOnce([e]);
+    api.episodeCards.mockResolvedValueOnce([e]);
     await lib.ensureLibrary();
     expect(lib.movies.error).toBe('HTTP 500');
     expect(lib.movies.loaded).toBe(false);
@@ -550,7 +551,7 @@ describe('ensureLibrary, ensureMovies, ensureEpisodes', () => {
     app.libraryVersion++;
     const a = card('A');
     api.movieCards.mockResolvedValueOnce([a]);
-    api.items.mockRejectedValueOnce(new Error('Cannot reach the ply server'));
+    api.episodeCards.mockRejectedValueOnce(new Error('Cannot reach the ply server'));
     await lib.ensureLibrary();
     expect(lib.movies.error).toBe('');
     expect(lib.movies.loaded).toBe(true);
@@ -562,7 +563,7 @@ describe('ensureLibrary, ensureMovies, ensureEpisodes', () => {
   it('loads the show list with the episodes, and a failing show list costs only the metadata', async () => {
     const a = ep('A', 1, 1);
     const meta = { show: 'A', seasons: [1], episodeCount: 1, poster: '/p.jpg', matchState: 'matched', needsReview: false };
-    api.items.mockResolvedValue([a]);
+    api.episodeCards.mockResolvedValue([a]);
     api.shows.mockResolvedValueOnce([meta]).mockRejectedValueOnce(new Error('HTTP 500'));
     await lib.ensureEpisodes();
     expect(lib.episodes.extra).toEqual([meta]);
@@ -570,7 +571,7 @@ describe('ensureLibrary, ensureMovies, ensureEpisodes', () => {
     expect(lib.showsOf(lib.episodes.rows)[0].meta).toEqual(meta); // by default, with the cached show list
     app.libraryVersion++;
     await lib.ensureEpisodes();
-    expect(api.items).toHaveBeenCalledTimes(2); // positive control: the second load did run
+    expect(api.episodeCards).toHaveBeenCalledTimes(2); // positive control: the second load did run
     expect(lib.episodes.error).toBe('');
     expect(lib.episodes.loaded).toBe(true);
     expect(lib.episodes.rows).toEqual([a]);
@@ -601,7 +602,7 @@ describe('writes while a list loads', () => {
     const cards = deferred<MovieCard[]>();
     const eps = deferred<ItemSummary[]>();
     api.movieCards.mockReturnValueOnce(cards.promise);
-    api.items.mockReturnValueOnce(eps.promise);
+    api.episodeCards.mockReturnValueOnce(eps.promise);
     const loading = lib.ensureLibrary();
     expect(lib.findItem(a.id)).toBeUndefined();
     lib.applyProgress(a.id, { positionSec: 42, watched: false });
@@ -619,7 +620,7 @@ describe('writes while a list loads', () => {
   it('the answer to a mark made before the list arrives is kept', async () => {
     const e = ep('Lost', 1, 1);
     const eps = deferred<ItemSummary[]>();
-    api.items.mockReturnValueOnce(eps.promise);
+    api.episodeCards.mockReturnValueOnce(eps.promise);
     const loading = lib.ensureEpisodes();
     lib.applyWatch([{ id: e.id, watched: true, watchedAt: 5, playCount: 2, progress: seen }]);
     eps.resolve([e]);
@@ -707,7 +708,7 @@ describe('reactivity', () => {
     const cards = deferred<MovieCard[]>();
     const eps = deferred<ItemSummary[]>();
     api.movieCards.mockReturnValueOnce(cards.promise);
-    api.items.mockReturnValueOnce(eps.promise);
+    api.episodeCards.mockReturnValueOnce(eps.promise);
     const loading = lib.ensureLibrary();
     const film = await watch(() => lib.findItem(a.id));
     const episode = await watch(() => lib.findItem(e.id));

@@ -142,7 +142,7 @@
   const showPosters = $derived(prefersPosters(shows.map((s) => s.meta ?? {})));
   // Lead with the newest film that has a real backdrop, then any artwork, then anything.
   const lead = $derived(
-    recent.find((i) => i.kind === 'movie' && i.backdrop) ??
+    recent.find((i) => i.kind === 'movie' && 'backdrop' in i && i.backdrop) ??
       recent.find((i) => i.kind === 'movie' && artOf(i)) ??
       recent.find((i) => artOf(i)) ??
       recent[0],
@@ -152,13 +152,13 @@
   type HeroItem = ArtItem &
     Pick<ItemSummary, 'id' | 'year' | 'season' | 'episode' | 'certification' | 'logo' | 'genres' | 'durationSec' | 'width' | 'height' | 'hdr' | 'progress' | 'watched'>;
 
-  // A film's card lacks what the hero shows (its logo, its certification, the frame grab's
-  // backdrop), so the hero waits for the film's detail as a skeleton of its size; the rails don't
-  // wait. An episode's row is whole. Without the detail (an error), the card's own fields do.
-  const leadFilm = $derived(lead?.kind === 'movie' ? lead.id : undefined);
+  // Neither card is whole for the hero: a film's lacks its logo and its certification, an episode's
+  // the show's certification and genres and its backdrop, so the hero waits for the item's detail as a
+  // skeleton of its size; the rails don't wait. Without the detail (an error), the card's own fields do.
+  const leadId = $derived(lead?.id);
   let full = $state<{ id: number; item: ItemDetail | null }>(); // null: the detail failed
   $effect(() => {
-    const id = leadFilm;
+    const id = leadId;
     if (id === undefined) return;
     const ctl = new AbortController();
     const d = detail(id, ctl.signal);
@@ -174,7 +174,7 @@
     return () => ctl.abort();
   });
   const feature = $derived.by((): HeroItem | undefined => {
-    if (!lead || lead.kind !== 'movie') return lead;
+    if (!lead) return undefined;
     if (full?.id !== lead.id) return undefined; // on its way
     // The detail supplies the metadata; the watch state is the list's (marks and progress patch it).
     return full.item ? { ...full.item, watched: lead.watched, progress: lead.progress } : lead;

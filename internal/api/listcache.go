@@ -11,7 +11,8 @@ import (
 // read and several megabytes to send. Each carries a strong ETag made from the state of the
 // library, so that a client that has the list gets a 304 without the library being read again.
 //
-//	"<generation>.<colours>"   (and ".<projection>" for a projection of the list: ".card")
+//	"<generation>.<colours>"   (and ".<projection>" for a projection of the list: ".card",
+//	                            ".episode-card"; and ".limit<N>" after either when the list is cut)
 //
 // The generation is the store's (Store.Generation): it changes after every write a list can
 // show, and starts at a new number on every run. The colours are the artwork generator's
@@ -19,8 +20,9 @@ import (
 // is not in the database; "n" when the server has no artwork. The ETag does not depend on the
 // rest of the query: the browser keeps the validator of each URL apart.
 
-// libraryETag is the validator of a list asked for now; projection names the shape of it when
-// it is not the full one ("card"), so that the two never share a tag. It must be taken before the
+// libraryETag is the validator of a list asked for now; key names the shape of the answer when it is
+// not the full list ("card", "episode-card") and carries the limit when the list was cut ("limit20",
+// "card.limit20"), so that two different answers never share a tag. It must be taken before the
 // library is read: a write that lands in between then makes the list newer than its ETag says
 // (the next request finds a newer ETag and gets the list again), never older. Taken after, a
 // client could be told that a list from before the write is the current one.

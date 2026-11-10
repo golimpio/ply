@@ -370,15 +370,9 @@ the disk.
   and says `Cache-Control: no-store`, so that it is not kept as the current one. A browser does the rest by itself (`fetch` revalidates a `no-cache` answer with
   `If-None-Match` and uses its copy on a 304). Not covered yet: `/api/continue`, `/api/upcoming`, `/api/genres`,
   `/api/collections/{id}`, `/api/shows/{name}`, `/api/items/{id}`.
-- **`?fields=card`** on `GET /api/items?kind=movie` (movies only: any other `kind`, or none, is 400, as is any other value
-  of `fields`) answers `[ItemCard]` with exactly `{id, kind, title, sortTitle, year?, titleId?, addedAt, poster?,
-  backdrop?, art: {thumb, color?}|null, rating: {source, value, scale, score100, state?}|null, watched,
-  progress: {positionSec, watched}|null, durationSec, container, width, height, hdr?, genres?: [name], matchState,
-  needsReview}`, each with the name, the shape and the omitempty of the full row (`art.thumb` is its frame-grab link with
-  the `?v=<mtime>` stamp, `backdrop` its TMDB 16:9 link, `rating.state` Rotten Tomatoes' word): the same rows in the same
-  order, the `sort` and `minRating` filters apply, two thirds of the bytes (581 B a row for 5,000 films against 884, 430
-  before these four). Its ETag is a variant of the full list's (`"<generation>.<colours>.card"`); a change in the shape
-  needs no new key, because the generation starts anew on every run. Everything else about a film is in
+- **`?fields=card`** on `GET /api/items` answers the rows in the shape the browsing UI draws, one shape per kind: `[ItemCard]` for `kind=movie` and `[EpisodeCard]` for `kind=episode` (`internal/api/card.go`; `fields=card` with no `kind`, or any other value of `fields`, is 400). A movie card is exactly `{id, kind, title, sortTitle, year?, titleId?, addedAt, poster?, backdrop?, art: {thumb, color?}|null, rating: {source, value, scale, score100, state?}|null, watched, progress: {positionSec, watched}|null, durationSec, container, width, height, hdr?, genres?: [name], matchState, needsReview}`; an episode card is exactly `{id, kind, title, year?, show?, season?, episode?, episodeTitle?, addedAt, durationSec, still?, overview?, art: {thumb, color?}|null, ratings?: [...], watched, watchedAt, playCount, progress: ...|null, width, height, hdr?}`, each with the name, the shape and the omitempty of the full row (`art.thumb` is its frame-grab link with
+  the `?v=<mtime>` stamp, `backdrop` its TMDB 16:9 link, `rating.state` Rotten Tomatoes' word). Those are the fields a page draws: `still` because `lib/meta.ts` paints an episode from it, `overview` because the season list prints it under the episode, `width`/`height`/`hdr` because MediaCard's badge reads them, and the watch fields because the client patches them after a mark. Same rows, same order; the `sort` and `minRating` filters apply. It is a fraction of the weight: 581 against 884 bytes a row for 5,000 films, and 358 against 885 for 5,000 episodes (4.42 MB, 192 KB gzipped at the level `compress` uses, becomes 1.79 MB, 96 KB), measured by `PLY_LISTPERF=1 go test -run TestListPayload -v ./internal/api/`. Each shape has its own ETag (`"<generation>.<colours>.card"`, `...episode-card`), so two shapes never share a validator; a change in a shape needs no new key, because the generation starts anew on every run.
+- **`limit=N`** on `GET /api/items` (a number from 1 to 500; anything else is 400) answers the first N rows after `sort` and `minRating`, in either shape, so a client that draws a rail can ask for the few it shows instead of the whole library (the web UI does not use it yet). It is part of the ETag's key (`...limit20`), so a limited list never shares a validator with the whole one. Everything else about a film or an episode is in
   `GET /api/items/{id}`.
 - **`sortTitle`.** The name a title is listed under: `titles.sort_title` ("Matrix, The": `metadata.SortTitle` moves a
   leading The, A or An to the end when it is made, and a person can write their own with `PATCH /api/titles/{id}`),
@@ -551,7 +545,8 @@ Svelte 5 (runes) + Vite + TypeScript, hls.js. No UI framework; small hand-writte
   Tested by `lib/watched.test.ts`, `lib/library.test.ts` and `e2e/watched-ui.mjs`.
 - **Library cache** (`lib/library.svelte.ts` on `lib/rowstore.svelte.ts`, `lib/details.svelte.ts`): two lists, each
   loaded once per library version. `movies` holds the movie cards (`GET /api/items?kind=movie&fields=card`) and
-  `episodes` the full episode rows, with `/api/shows` alongside (a failed show list costs only the show metadata).
+  `episodes` the episode cards (`GET /api/items?kind=episode&fields=card`), with `/api/shows` alongside (a failed
+  show list costs only the show metadata).
   Movies loads only the cards, Shows and Show only the episodes; Home, Item and search load both. Rows are
   `$state.raw` and never changed in place: a write replaces the row and the list, and a write made while a list is
   loading is applied again when it lands. A page that needs a film's full item (Item, Home's hero) asks

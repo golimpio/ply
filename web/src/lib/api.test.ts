@@ -275,9 +275,15 @@ describe('movieCards', () => {
     expect(odd.rating).toMatchObject({ source: 'myanimelist' }); // the server's object is not changed
   });
 
-  it('throws the server\'s error (fields=card is only for movies)', async () => {
-    stubFetch(json({ error: 'fields=card is for kind=movie' }, 400)); // internal/api/handlers.go
-    await expect(m.api.movieCards()).rejects.toMatchObject({ name: 'ApiError', status: 400, message: 'fields=card is for kind=movie' });
+  it("throws the server's error (fields=card without a kind is a 400)", async () => {
+    stubFetch(json({ error: 'fields=card needs kind=movie or kind=episode' }, 400)); // internal/api/handlers.go
+    await expect(m.api.episodeCards()).rejects.toMatchObject({ name: 'ApiError', status: 400, message: 'fields=card needs kind=movie or kind=episode' });
+  });
+
+  it('asks for the episode cards, not the full episode rows', async () => {
+    const fetchFn = stubFetch(json([]));
+    await m.api.episodeCards();
+    expect(fetchFn.mock.calls[0][0]).toContain('/api/items?kind=episode&fields=card');
   });
 });
 

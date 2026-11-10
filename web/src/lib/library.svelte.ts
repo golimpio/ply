@@ -1,20 +1,20 @@
 // The library's two lists, each fetched whole once per library version and patched by the client's
-// own marks and progress reports instead of refetched: the movies as cards (the grids, home rails,
-// search) and the episodes as full rows with the show list (Shows, Show, home, search). Movies and
-// Shows load only their own; a page that needs both calls ensureLibrary.
+// own marks and progress reports instead of refetched: the movies as cards and the episodes as cards
+// (the grids, home rails, search), the episodes with the show list too (Shows, Show, home, search).
+// Movies and Shows load only their own; a page that needs both calls ensureLibrary.
 import { untrack } from 'svelte';
-import { api, type ItemSummary, type ItemWatch, type MovieCard, type Progress, type ShowSummary, type TitleCard, type WatchResult } from './api';
+import { api, type EpisodeCard, type ItemSummary, type ItemWatch, type MovieCard, type Progress, type ShowSummary, type TitleCard, type WatchResult } from './api';
 import { RowStore, type Fields, type Row } from './rowstore.svelte';
 import { app } from './state.svelte';
 import { countsBadge, itemBadge, showCounts, type EpisodeCounts, type WatchBadge } from './watched';
 
 /** A row of either list. Ids are unique across both. */
-export type LibraryRow = MovieCard | ItemSummary;
+export type LibraryRow = MovieCard | EpisodeCard;
 
 export interface ShowEntry {
   show: string;
   /** First episode by season/episode: its artwork stands in for the show's. */
-  cover: ItemSummary;
+  cover: EpisodeCard;
   seasons: number[];
   episodeCount: number;
   /** How far through its episodes, from the cached items (lib/watched showCounts). */
@@ -28,9 +28,9 @@ const version = () => app.libraryVersion;
 
 export const movies = new RowStore<MovieCard>({ version, fetch: () => api.movieCards() });
 
-export const episodes = new RowStore<ItemSummary, ShowSummary[]>({
+export const episodes = new RowStore<EpisodeCard, ShowSummary[]>({
   version,
-  fetch: () => api.items({ kind: 'episode' }),
+  fetch: () => api.episodeCards(),
   // The show list only adds metadata to what the episodes say: if it fails, the shows are still
   // there (from their episodes), without posters.
   extra: () => api.shows().catch(() => [] as ShowSummary[]),
@@ -60,7 +60,7 @@ export function findItem(id: number): LibraryRow | undefined {
   return movies.get(id) ?? episodes.get(id);
 }
 
-let both: { m: readonly MovieCard[]; e: readonly ItemSummary[]; rows: readonly LibraryRow[] } | undefined;
+let both: { m: readonly MovieCard[]; e: readonly EpisodeCard[]; rows: readonly LibraryRow[] } | undefined;
 /** Every row of both lists (the search source): a new array whenever either list changes. */
 export function libraryRows(): readonly LibraryRow[] {
   const m = movies.rows;
@@ -103,7 +103,7 @@ const byShow = grouped(episodes, (r) => (r.kind === 'episode' && r.show) || unde
 const byFilm = grouped(movies, (r) => r.titleId || undefined);
 
 /** The episode files of a show in the cached list. */
-export function episodesOf(show: string): ItemSummary[] {
+export function episodesOf(show: string): EpisodeCard[] {
   return byShow(show);
 }
 
@@ -154,11 +154,11 @@ const watchOf = (r: LibraryRow): WatchFields => ({
  */
 function write(changes: readonly [number, WatchFields][]): void {
   const cards: [number, Fields<MovieCard>][] = [];
-  const eps: [number, Fields<ItemSummary>][] = [];
+  const eps: [number, Fields<EpisodeCard>][] = [];
   for (const [id, f] of changes) {
     const card = movies.get(id) !== undefined;
     if (card || episodes.get(id) === undefined) cards.push([id, cardFields(f)]);
-    if (!card) eps.push([id, f]);
+    if (!card) eps.push([id, f as Fields<EpisodeCard>]);
   }
   if (cards.length) movies.patchAll(cards);
   if (eps.length) episodes.patchAll(eps);
@@ -319,9 +319,9 @@ export function showMeta(name: string): ShowSummary | undefined {
  * The shows of items, from their episodes; `shows` (from /api/shows) adds
  * each one's metadata.
  */
-export function showsOf(items: readonly ItemSummary[], shows: readonly ShowSummary[] = episodes.extra ?? []): ShowEntry[] {
+export function showsOf(items: readonly EpisodeCard[], shows: readonly ShowSummary[] = episodes.extra ?? []): ShowEntry[] {
   const meta = new Map(shows.map((s) => [s.show, s]));
-  const entries = new Map<string, Omit<ShowEntry, 'counts'> & { seasonSet: Set<number>; files: ItemSummary[] }>();
+  const entries = new Map<string, Omit<ShowEntry, 'counts'> & { seasonSet: Set<number>; files: EpisodeCard[] }>();
   for (const ep of items) {
     if (ep.kind !== 'episode' || !ep.show) continue;
     let s = entries.get(ep.show);
@@ -345,7 +345,7 @@ export function showsOf(items: readonly ItemSummary[], shows: readonly ShowSumma
     .sort((a, b) => a.show.localeCompare(b.show));
 }
 
-function episodeOrder(ep: ItemSummary): number {
+function episodeOrder(ep: EpisodeCard): number {
   // Specials (season 0) sort after the regular seasons for cover purposes.
   const season = ep.season || 1000;
   return season * 10000 + (ep.episode ?? 0);

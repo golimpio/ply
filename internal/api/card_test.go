@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"ply/internal/art"
@@ -309,15 +310,25 @@ func TestItemCardListIsTheFullListInAnotherShape(t *testing.T) {
 	}
 }
 
-func TestItemCardAsksNeedKindMovie(t *testing.T) {
+// fields=card needs to know which kind of row to cut the card from: the two shapes are not the same
+// (TestEpisodeCardHasExactlyTheFields). Both kinds are answered; neither kind, or another fields
+// value, is a 400.
+func TestCardProjectionNeedsAKind(t *testing.T) {
 	m := cardEnv(t)
-	for _, url := range []string{"/api/items?fields=card", "/api/items?kind=episode&fields=card", "/api/items?kind=movie&fields=lean", "/api/items?kind=movie&fields=Card",
+	for _, url := range []string{"/api/items?fields=card", "/api/items?kind=movie&fields=lean", "/api/items?kind=movie&fields=Card",
 		"/api/items?fields=bogus"} {
 		rec := m.get(url)
 		wantJSONError(t, rec, http.StatusBadRequest)
 		if rec.Header().Get("ETag") != "" {
 			t.Errorf("GET %s: a 400 with ETag %q", url, rec.Header().Get("ETag"))
 		}
+	}
+	// A control for the loop: both kinds are answered, so that a 400 cannot pass for every URL.
+	for _, url := range []string{"/api/items?kind=movie&fields=card", "/api/items?kind=episode&fields=card"} {
+		wantStatus(t, m.get(url), 200)
+	}
+	if n := len(decode[[]EpisodeCard](t, m.get("/api/items?kind=episode&fields=card"))); n == 0 {
+		t.Error("control: no episode cards")
 	}
 	wantStatus(t, m.get("/api/items?kind=movie&fields="), 200) // empty is the full list
 	if n := len(decode[[]ItemSummary](t, m.get("/api/items?kind=movie&fields="))); n == 0 {
@@ -349,6 +360,227 @@ func TestItemCardETagIsItsOwn(t *testing.T) {
 	wantStatus(t, m.putProgress(m.mkv, `{"positionSec": 100, "durationSec": 2400}`, nil), 200)
 	if rec := m.condGet(cardURL, card); rec.Code != 200 || rec.Header().Get("ETag") == card {
 		t.Errorf("the card list after a progress save, with the old tag: %d, ETag %q", rec.Code, rec.Header().Get("ETag"))
+	}
+}
+
+// An episode card is the full episode row cut down to what a page draws. What it leaves out is the
+// weight: the backdrop, the poster, the logo, the codecs, the container, the genres, the certification,
+// the match state, the sort title and the show's rating are in GET /api/items/{id}.
+func TestEpisodeCardHasExactlyTheFields(t *testing.T) {
+	m := cardEnv(t)
+	cardURL, fullURL := "/api/items?kind=episode&fields=card", "/api/items?kind=episode"
+
+	raw := decode[[]map[string]any](t, m.get(cardURL))
+	if len(raw) == 0 {
+		t.Fatalf("no episode in the fixture, so there is no card to check")
+	}
+	wantKeys(t, "the card of an episode", raw[0], "id", "kind", "title", "addedAt", "durationSec", "art", "watched",
+		"watchedAt", "playCount", "progress", "width", "height", "show", "season", "episode", "episodeTitle", "still", "overview", "hdr")
+
+	// The positive control: the same episode, from the full list, does carry the fields the card leaves
+	// out, so that the absence assertions below cannot pass on a fixture that has nothing in it.
+	cardBody, fullBody := m.get(cardURL).Body.String(), m.get(fullURL).Body.String()
+	for _, key := range []string{"container", "videoCodec", "audioCodec", "matchState", "needsReview", "poster", "backdrop", "genres",
+		"certification", "rating"} {
+		if !strings.Contains(fullBody, `"`+key+`"`) {
+			t.Errorf("control: the full episode list has no %q either, so its absence proves nothing", key)
+		}
+		if strings.Contains(cardBody, `"`+key+`"`) {
+			t.Errorf("the episode card carries %q, which no page draws", key)
+		}
+	}
+
+	// And its values are the full row's.
+	cards := map[int64]EpisodeCard{}
+	for _, c := range decode[[]EpisodeCard](t, m.get(cardURL)) {
+		cards[c.ID] = c
+	}
+	rows := decode[[]ItemSummary](t, m.get(fullURL))
+	if len(cards) != len(rows) {
+		t.Fatalf("%d cards for %d episodes", len(cards), len(rows))
+	}
+	for _, it := range rows {
+		c, ok := cards[it.ID]
+		if !ok {
+			t.Errorf("no card for the episode %d", it.ID)
+			continue
+		}
+		if c.Kind != it.Kind || c.Title != it.Title || c.Show != it.Show || c.AddedAt != it.AddedAt || c.DurationSec != it.DurationSec ||
+			c.Still != it.Still || c.Overview != it.Overview || c.Width != it.Width || c.Height != it.Height || c.HDR != it.HDR ||
+			c.Watched != it.WatchState.Watched || c.PlayCount != it.WatchState.PlayCount ||
+			(c.Progress == nil) != (it.Progress == nil) || (c.Progress != nil && *c.Progress != *it.Progress) ||
+			(c.Season == nil) != (it.Season == nil) || (c.Episode == nil) != (it.Episode == nil) {
+			t.Errorf("card %+v\nis not the row %+v", c, it)
+		}
+		if !slices.Equal(c.Ratings, cardRatings(it.Ratings)) {
+			t.Errorf("card %d: ratings %v, row %v", it.ID, c.Ratings, it.Ratings)
+		}
+	}
+}
+
+// cardRatings is what a row's ratings become on a card: the same, without the link and the votes.
+func cardRatings(rs []RatingEntry) []CardRating {
+	if len(rs) == 0 {
+		return nil
+	}
+	out := make([]CardRating, len(rs))
+	for i, r := range rs {
+		out[i] = CardRating{Source: r.Source, Value: r.Value, Scale: r.Scale, Score100: r.Score100, State: r.State}
+	}
+	return out
+}
+
+// The fields a page draws from, which the filler rows of the fixture do not exercise: the still, the
+// episode's own ratings, HDR, and the watch state the client patches after a mark.
+func TestEpisodeCardMapsTheRow(t *testing.T) {
+	still, watched := "tmdb:/still1.jpg", int64(1700000000)
+	season, episode, year := 1, 2, 2008
+	c := episodeCard(ItemSummary{
+		ID: 7, Kind: store.KindEpisode, Title: "Pilot", Year: &year, Show: "Cool Show", Season: &season, Episode: &episode,
+		EpisodeTitle: "Pilot, part one", DurationSec: 2400, Width: 3840, Height: 2160, HDR: "hdr10", AddedAt: 5,
+		Progress:   &Progress{PositionSec: 10},
+		Art:        &ArtURLs{Thumb: "/api/items/7/art/thumb", Color: "#112233"},
+		WatchState: WatchState{Watched: true, WatchedAt: &watched, PlayCount: 2},
+		// The show's rating goes in and is not carried: a card has an episode's own ratings only.
+		MetaFields: MetaFields{Rating: &RatingEntry{Source: "imdb", Value: 8, Scale: 10, Score100: 80}},
+		Still:      still,
+		Ratings:    []RatingEntry{{Source: "imdb", Value: 8, Scale: 10, Score100: 80}, {Source: "tomatoes", Value: 88, Scale: 100, Score100: 88}},
+	})
+	if c.ID != 7 || c.Kind != store.KindEpisode || c.Title != "Pilot" || c.Show != "Cool Show" || c.EpisodeTitle != "Pilot, part one" ||
+		c.Still != still || c.Width != 3840 || c.Height != 2160 || c.HDR != "hdr10" ||
+		c.Watched != true || c.WatchedAt == nil || *c.WatchedAt != watched || c.PlayCount != 2 ||
+		c.Progress == nil || c.Progress.PositionSec != 10 || c.Art == nil || c.Art.Color != "#112233" || c.Art.Thumb != "/api/items/7/art/thumb" ||
+		len(c.Ratings) != 2 || c.Ratings[1].Score100 != 88 ||
+		c.Season == nil || *c.Season != season || c.Episode == nil || *c.Episode != episode || c.Year == nil || *c.Year != year {
+		t.Errorf("episodeCard = %+v", c)
+	}
+}
+
+// The episode list is leaner on the wire than the full one, not merely different: that is the whole
+// point of the projection (TestListPayload measures 5,000 of them).
+func TestEpisodeCardListIsLeaner(t *testing.T) {
+	m := cardEnv(t)
+	card, full := m.get("/api/items?kind=episode&fields=card").Body.Len(), m.get("/api/items?kind=episode").Body.Len()
+	if full == 0 {
+		t.Fatal("control: the full episode list is empty")
+	}
+	if card >= full {
+		t.Errorf("the card list is %d bytes, the full one %d: not leaner", card, full)
+	}
+}
+
+// The three shapes of the episode list keep three keys: the movie cards', the episode cards' and the
+// full list's are never the same one.
+func TestEpisodeCardETagIsItsOwn(t *testing.T) {
+	m := cardEnv(t)
+	movieCards, episodeCards, episodeFull := "/api/items?kind=movie&fields=card", "/api/items?kind=episode&fields=card", "/api/items?kind=episode"
+	tags := []string{
+		m.get(movieCards).Header().Get("ETag"),
+		m.get(episodeCards).Header().Get("ETag"),
+		m.get(episodeFull).Header().Get("ETag"),
+	}
+	seen := map[string]bool{}
+	for i, tag := range tags {
+		if tag == "" {
+			t.Fatalf("list %d has no ETag", i)
+		}
+		if seen[tag] {
+			t.Errorf("two list shapes share the ETag %q; a validator must name one shape", tag)
+		}
+		seen[tag] = true
+	}
+	if !strings.HasSuffix(tags[0], `.card"`) {
+		t.Errorf("the movie card ETag %q: want it to end in .card, or every cached card list is evicted", tags[0])
+	}
+	if rec := m.condGet(episodeCards, tags[1]); rec.Code != http.StatusNotModified {
+		t.Errorf("the episode cards with their own tag = %d, want 304", rec.Code)
+	}
+	if rec := m.condGet(episodeCards, tags[0]); rec.Code != 200 {
+		t.Errorf("the episode cards with the movie cards' tag = %d, want 200", rec.Code)
+	}
+	if rec := m.condGet(episodeCards, tags[2]); rec.Code != 200 {
+		t.Errorf("the episode cards with the full episode list's tag = %d, want 200", rec.Code)
+	}
+}
+
+// limit answers the first N rows of the list, after the sort and the filters, in every shape; the
+// un-limited list is the control that there were more to cut.
+func TestItemListLimit(t *testing.T) {
+	m := cardEnv(t)
+	// A film with no rating whose file sorts before the others: minRating removes it, so a cut made
+	// before the filters would take this row and leave nothing. The controls below insist on that.
+	m.addFile("Aaa Unrated Movie.mkv", store.Item{Kind: store.KindMovie, Title: "Aaa Unrated Movie"})
+	all := decode[[]ItemSummary](t, m.get("/api/items?kind=movie"))
+	if len(all) < 2 {
+		t.Fatalf("control: %d films in the fixture, want at least 2", len(all))
+	}
+	for _, url := range []string{"/api/items?kind=movie&limit=1", "/api/items?kind=movie&fields=card&limit=1"} {
+		var ids []int64
+		if strings.Contains(url, "fields=card") {
+			for _, c := range decode[[]ItemCard](t, m.get(url)) {
+				ids = append(ids, c.ID)
+			}
+		} else {
+			for _, it := range decode[[]ItemSummary](t, m.get(url)) {
+				ids = append(ids, it.ID)
+			}
+		}
+		if !slices.Equal(ids, []int64{all[0].ID}) {
+			t.Errorf("GET %s = %v, want just the first film %d", url, ids, all[0].ID)
+		}
+	}
+	if n := len(decode[[]ItemSummary](t, m.get("/api/items?kind=movie&limit=99"))); n != len(all) {
+		t.Errorf("limit=99 answered %d of %d films: a limit over the list is the whole list", n, len(all))
+	}
+	if n := len(decode[[]EpisodeCard](t, m.get("/api/items?kind=episode&fields=card&limit=1"))); n != 1 {
+		t.Errorf("the episode cards with limit=1 answered %d", n)
+	}
+	// After the filters: minRating and show narrow the list, and the cut is of what survives. The
+	// controls matter- the fixture must have films the minimum removes and a show of its own, or the
+	// cut could be made before them and every assertion below would still pass.
+	filtered := decode[[]ItemSummary](t, m.get("/api/items?kind=movie&minRating=50"))
+	if len(filtered) == 0 || len(filtered) == len(all) {
+		t.Fatalf("control: minRating=50 left %d of %d films: it must leave some and remove some", len(filtered), len(all))
+	}
+	for _, it := range filtered {
+		if it.ID == all[0].ID {
+			t.Fatalf("control: the first film of the list survives minRating=50, so a cut before the filter cannot be told apart")
+		}
+	}
+	if got := decode[[]ItemSummary](t, m.get("/api/items?kind=movie&minRating=50&limit=1")); len(got) != 1 || got[0].ID != filtered[0].ID {
+		t.Errorf("minRating=50&limit=1 answered %v, want just %d: the cut is after the filter", got, filtered[0].ID)
+	}
+	// A show of its own whose file sorts before Cool Show's: with the cut made before the show filter,
+	// it takes that row and the filter then leaves nothing -- which is what tells the two orders apart.
+	m.addFile("Aaa Other Show S01E01.mkv", store.Item{Kind: store.KindEpisode, Show: "Other Show", Season: 1, Episode: 1})
+	allEps := decode[[]ItemSummary](t, m.get("/api/items?kind=episode"))
+	showEps := decode[[]ItemSummary](t, m.get("/api/items?kind=episode&show=Cool+Show"))
+	if len(showEps) == 0 || len(showEps) == len(allEps) {
+		t.Fatalf("control: the show filter left %d of %d episodes: it must narrow the list", len(showEps), len(allEps))
+	}
+	if got := decode[[]EpisodeCard](t, m.get("/api/items?kind=episode&show=Cool+Show&fields=card&limit=1")); len(got) != 1 || got[0].ID != showEps[0].ID {
+		t.Errorf("show=Cool+Show&fields=card&limit=1 answered %v, want just %d", got, showEps[0].ID)
+	}
+	// A limit outside 1..500 is a 400: no page can draw a rail from an empty answer it did not ask
+	// for, and one request never takes a whole big library.
+	for _, url := range []string{"/api/items?kind=movie&limit=0", "/api/items?kind=movie&limit=-1", "/api/items?kind=movie&limit=abc",
+		"/api/items?kind=movie&limit=501"} {
+		rec := m.get(url)
+		wantJSONError(t, rec, http.StatusBadRequest)
+		if rec.Header().Get("ETag") != "" {
+			t.Errorf("GET %s: a 400 with ETag %q", url, rec.Header().Get("ETag"))
+		}
+	}
+	if n := len(decode[[]ItemSummary](t, m.get("/api/items?kind=movie&limit=500"))); n == 0 {
+		t.Error("limit=500 is in range and answered nothing")
+	}
+	// The limit is in the key: a limited list is never the validator of the whole one.
+	limited, whole := m.get("/api/items?kind=movie&limit=1").Header().Get("ETag"), m.get("/api/items?kind=movie").Header().Get("ETag")
+	if limited == "" || whole == "" || limited == whole {
+		t.Errorf("ETags: limit=1 %q, the whole list %q: want two, and different", limited, whole)
+	}
+	if rec := m.condGet("/api/items?kind=movie&limit=1", limited); rec.Code != http.StatusNotModified {
+		t.Errorf("the limited list with its own tag = %d, want 304", rec.Code)
 	}
 }
 
