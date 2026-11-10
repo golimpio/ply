@@ -70,10 +70,13 @@ type FileState struct {
 }
 
 // ListFilter narrows ListItems. Empty fields match everything; Show matches
-// case-insensitively.
+// case-insensitively. Limit, when above 0, is the most rows to return: the
+// first ones of the order ListItems answers in, so a caller that would cut
+// the list itself asks for the cut here instead and saves the read.
 type ListFilter struct {
-	Kind string
-	Show string
+	Kind  string
+	Show  string
+	Limit int
 }
 
 // Show summarises the episodes of one show: its seasons, and how many of its
@@ -265,13 +268,23 @@ func listItems(ctx context.Context, q queryer, f ListFilter) ([]Entry, error) {
 		clause = " WHERE " + strings.Join(where, " AND ")
 	}
 
+	limit := ""
+	queryArgs := args
+	if f.Limit > 0 {
+		limit = " LIMIT ?"
+		// args stays the filters' alone: the streams query below reuses it.
+		queryArgs = append(append([]any{}, args...), f.Limit)
+	}
 	items, err := queryItems(ctx, q, `SELECT `+prefixed("i.", itemCols)+`
 		FROM items i`+clause+`
 		ORDER BY i.kind DESC,
 			LOWER(CASE i.kind WHEN 'movie' THEN i.title ELSE i.show END),
-			i.season, i.episode, LOWER(i.title), i.id`, args)
+			i.season, i.episode, LOWER(i.title), i.id`+limit, queryArgs)
 	if err != nil {
 		return nil, err
+	}
+	if len(items) == 0 {
+		return nil, nil // no rows to fetch streams for
 	}
 
 	byID := make(map[int64]*Entry, len(items))
@@ -281,9 +294,18 @@ func listItems(ctx context.Context, q queryer, f ListFilter) ([]Entry, error) {
 		byID[it.ID] = &entries[i]
 	}
 
+	// Only the streams of the rows that were listed: with a limit the rest of the
+	// library's streams are not read at all.
+	marks := make([]string, len(items))
+	streamArgs := make([]any, 0, len(args)+len(items)+1)
+	streamArgs = append(streamArgs, args...)
+	for i, it := range items {
+		marks[i] = "?"
+		streamArgs = append(streamArgs, it.ID)
+	}
 	rows, err := q.QueryContext(ctx, `SELECT s.item_id, `+prefixed("s.", streamCols)+`
-		FROM streams s JOIN items i ON i.id = s.item_id`+clause+`
-		ORDER BY s.item_id, s.idx`, args...)
+		FROM streams s JOIN items i ON i.id = s.item_id`+clause+` AND i.id IN (`+strings.Join(marks, ",")+`)
+		ORDER BY s.item_id, s.idx`, streamArgs...)
 	if err != nil {
 		return nil, err
 	}

@@ -333,6 +333,79 @@ func TestListItemsOrderingAndFilters(t *testing.T) {
 	}
 }
 
+// A limit answers the first rows of the order, with their streams and never the rest: the same rows
+// a caller would cut for itself, without reading them. The mutant that drops the LIMIT from the SQL
+// fails the Limit=1 case below (it answers every row).
+func TestListItemsLimit(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	items := []*Item{
+		movie("/media/b.mp4", "banana"),
+		movie("/media/a.mp4", "Apple"),
+		movie("/media/c.mp4", "Cherry"),
+		episode("/media/z-s2e1.mkv", "Zeta", 2, 1),
+		episode("/media/z-s1e10.mkv", "Zeta", 1, 10),
+		episode("/media/z-s1e2.mkv", "Zeta", 1, 2),
+		episode("/media/a-s1e1.mkv", "alpha", 1, 1),
+	}
+	for _, it := range items {
+		if _, err := s.UpsertItem(ctx, it, videoAudio[:1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ids := func(es []Entry) []int64 {
+		var out []int64
+		for _, e := range es {
+			out = append(out, e.ID)
+		}
+		return out
+	}
+
+	all, err := s.ListItems(ctx, ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) < 4 {
+		t.Fatalf("control: %d items, want at least 4", len(all))
+	}
+	for _, n := range []int{1, 3, len(all), len(all) + 5} {
+		got, err := s.ListItems(ctx, ListFilter{Limit: n})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := all
+		if n < len(all) {
+			want = all[:n]
+		}
+		if !reflect.DeepEqual(ids(got), ids(want)) {
+			t.Errorf("Limit=%d answered %v, want %v", n, ids(got), ids(want))
+		}
+		for _, e := range got {
+			if len(e.Streams) != 1 {
+				t.Errorf("Limit=%d: %s has %d streams, want its own", n, e.Path, len(e.Streams))
+			}
+		}
+	}
+
+	// The limit cuts the filtered list, not the whole library: the show filter runs first.
+	zeta, err := s.ListItems(ctx, ListFilter{Kind: KindEpisode, Show: "Zeta"})
+	if err != nil || len(zeta) < 2 {
+		t.Fatalf("control: Zeta's episodes = %v, %v", ids(zeta), err)
+	}
+	got, err := s.ListItems(ctx, ListFilter{Kind: KindEpisode, Show: "Zeta", Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(ids(got), ids(zeta[:2])) {
+		t.Errorf("a filtered limit = %v, want %v", ids(got), ids(zeta[:2]))
+	}
+
+	// Nothing matched is no rows and no error, with a limit too.
+	if none, err := s.ListItems(ctx, ListFilter{Show: "nope", Limit: 2}); err != nil || len(none) != 0 {
+		t.Errorf("unknown show = %v, %v; want empty", none, err)
+	}
+}
+
 func TestShows(t *testing.T) {
 	s, _ := openTemp(t)
 	ctx := context.Background()

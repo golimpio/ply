@@ -584,6 +584,29 @@ func TestItemListLimit(t *testing.T) {
 	}
 }
 
+// limit is the cut of what the same query answers without it, with every sort and filter: the
+// database applies it when it can and Go when the filters need the whole list, and the two must
+// answer the same rows.
+func TestItemListLimitIsTheCutOfTheWholeList(t *testing.T) {
+	m := cardEnv(t)
+	cut := 0
+	for _, q := range []string{"kind=movie", "kind=episode", "kind=movie&sort=rating", "kind=movie&minRating=50", "kind=episode&minRating=50"} {
+		all := decode[[]map[string]any](t, m.get("/api/items?"+q))
+		got := decode[[]map[string]any](t, m.get("/api/items?"+q+"&limit=1"))
+		want := all
+		if len(want) > 1 {
+			want = want[:1]
+			cut++
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: limit=1 = %v, want the first of %v", q, got, all)
+		}
+	}
+	if cut == 0 {
+		t.Fatal("control: no query had more than one row, so no cut was tested")
+	}
+}
+
 // dropTable removes a table behind the store's back, so that what reads it fails and the rest does not.
 func dropTable(t *testing.T, m *menv, table string) {
 	t.Helper()

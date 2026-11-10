@@ -239,7 +239,7 @@ func TestListPayload(t *testing.T) {
 		return rec
 	}
 
-	for _, target := range []string{"/api/items?kind=movie", "/api/items?kind=movie&fields=card", "/api/items?kind=episode", "/api/items?kind=episode&fields=card", "/api/shows", "/api/titles"} {
+	for _, target := range []string{"/api/items?kind=movie", "/api/items?kind=movie&fields=card", "/api/items?kind=movie&fields=card&limit=20", "/api/items?kind=episode", "/api/items?kind=episode&fields=card", "/api/items?kind=episode&fields=card&limit=20", "/api/shows", "/api/titles"} {
 		rec := get(target, nil)
 		if rec.Code != 200 {
 			t.Fatalf("GET %s = %d %s", target, rec.Code, rec.Body.String())

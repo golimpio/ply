@@ -74,7 +74,15 @@ func (s *Server) handleItems(w http.ResponseWriter, r *http.Request) {
 	if notModified {
 		return
 	}
-	entries, err := s.Store.ListItems(r.Context(), store.ListFilter{Kind: kind, Show: q.Get("show")})
+	// A limit the database can apply is applied there: the cut is of the same order, so the rows are
+	// the ones the Go cut would have kept, and the rest of the library is never read. With sort=rating
+	// or minRating the whole list must be read first (the filters are Go code over the summaries), so
+	// the push-down is off and the cut below does the work.
+	filter := store.ListFilter{Kind: kind, Show: q.Get("show")}
+	if limit > 0 && !rq.active() {
+		filter.Limit = limit
+	}
+	entries, err := s.Store.ListItems(r.Context(), filter)
 	if err != nil {
 		s.internalError(w, r, err)
 		return
