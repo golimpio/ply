@@ -377,6 +377,18 @@ export interface PersonCredit {
   title: TitleCard;
 }
 
+/** A trailer or teaser of a title (GET /api/titles/{id}/trailers), by its key at the site that plays it. */
+export interface Trailer {
+  site: 'youtube' | 'vimeo';
+  key: string;
+  name?: string;
+  type?: 'trailer' | 'teaser';
+  language?: string;
+  official: boolean;
+  /** YYYY-MM-DD */
+  publishedAt?: string;
+}
+
 export interface Person extends PersonCard {
   biography?: string;
   birthday?: string;
@@ -1212,6 +1224,11 @@ export const api = {
   async person(id: number): Promise<Person> {
     const p = await request<Person>('GET', `/api/people/${id}`);
     return { ...p, credits: (p.credits ?? []).map((c) => ({ ...c, title: normaliseRow(c.title) })) };
+  },
+
+  /** A title's trailers, best first; [] when it has none or online lookups are off. */
+  async trailers(titleId: number): Promise<Trailer[]> {
+    return (await request<Trailer[] | null>('GET', `/api/titles/${titleId}/trailers`)) ?? [];
   },
 
   async genres(): Promise<GenreCount[]> {

@@ -182,6 +182,7 @@ bad input → 400, TMDB unreachable → 502, lookups off (no key / `-metadata=fa
 | PUT | `/api/items/{id}/match` | `{tmdbId}` or `{imdbId}` (a movie; episodes → 400) → `manual`; returns ItemDetail |
 | DELETE | `/api/items/{id}/match` | unmatch; returns ItemDetail |
 | PATCH | `/api/titles/{id}` | `{title?, sortTitle?, year?, overview?, tagline?}` (at least one) → title `locked`; returns TitleDetail |
+| GET | `/api/titles/{id}/trailers` | `[{site: youtube\|vimeo, key, name?, type?: trailer\|teaser, language?, official, publishedAt?}]` best first; fetched the first time it is asked, kept 30 days (`docs/M6-METADATA.md`, "Trailers"); `[]` when there are none, the fetch failed or online lookups are off; unknown title → 404, no metadata subsystem → 503 |
 | GET | `/api/people?q=` | `[PersonCard]` (≥1 title in the library, max 20; blank q → `[]`) |
 | GET | `/api/people/{id}` | `Person` (details fetched from TMDB on first visit) with `credits` for library titles, newest first |
 | GET | `/api/genres` | `[{id, name, count}]` |
@@ -372,7 +373,7 @@ the disk.
   `/api/collections/{id}`, `/api/shows/{name}`, `/api/items/{id}`.
 - **`?fields=card`** on `GET /api/items` answers the rows in the shape the browsing UI draws, one shape per kind: `[ItemCard]` for `kind=movie` and `[EpisodeCard]` for `kind=episode` (`internal/api/card.go`; `fields=card` with no `kind`, or any other value of `fields`, is 400). A movie card is exactly `{id, kind, title, sortTitle, year?, titleId?, addedAt, poster?, backdrop?, art: {thumb, color?}|null, rating: {source, value, scale, score100, state?}|null, watched, progress: {positionSec, watched}|null, durationSec, container, width, height, hdr?, genres?: [name], matchState, needsReview}`; an episode card is exactly `{id, kind, title, year?, show?, season?, episode?, episodeTitle?, addedAt, durationSec, still?, overview?, art: {thumb, color?}|null, ratings?: [...], watched, watchedAt, playCount, progress: ...|null, width, height, hdr?}`, each with the name, the shape and the omitempty of the full row (`art.thumb` is its frame-grab link with
   the `?v=<mtime>` stamp, `backdrop` its TMDB 16:9 link, `rating.state` Rotten Tomatoes' word). Those are the fields a page draws: `still` because `lib/meta.ts` paints an episode from it, `overview` because the season list prints it under the episode, `width`/`height`/`hdr` because MediaCard's badge reads them, and the watch fields because the client patches them after a mark. Same rows, same order; the `sort` and `minRating` filters apply. It is a fraction of the weight: 581 against 884 bytes a row for 5,000 films, and 358 against 885 for 5,000 episodes (4.42 MB, 192 KB gzipped at the level `compress` uses, becomes 1.79 MB, 96 KB), measured by `PLY_LISTPERF=1 go test -run TestListPayload -v ./internal/api/`. Each shape has its own ETag (`"<generation>.<colours>.card"`, `...episode-card`), so two shapes never share a validator; a change in a shape needs no new key, because the generation starts anew on every run.
-- **`limit=N`** on `GET /api/items` (a number from 1 to 500; anything else is 400) answers the first N rows after `sort` and `minRating`, in either shape, so a client that draws a rail can ask for the few it shows instead of the whole library (the web UI does not use it yet). It is part of the ETag's key (`...limit20`), so a limited list never shares a validator with the whole one. Everything else about a film or an episode is in
+- **`limit=N`** on `GET /api/items` (a number from 1 to 500; anything else is 400) answers the first N rows after `sort` and `minRating`, in either shape, so a client that draws a rail can ask for the few it shows instead of the whole library (the web UI does not use it yet). It is part of the ETag's key (`...limit20`), so a limited list never shares a validator with the whole one. The cut is made in the store's query (`LIMIT`, and the streams of only the listed rows: 20 rows of a 5,000-film library cost 16 ms against 159, and 11.6 KB against 2.91 MB) unless `sort=rating` or `minRating` is given, which the server applies in Go over the whole list; then the cut is in Go too. Everything else about a film or an episode is in
   `GET /api/items/{id}`.
 - **`sortTitle`.** The name a title is listed under: `titles.sort_title` ("Matrix, The": `metadata.SortTitle` moves a
   leading The, A or An to the end when it is made, and a person can write their own with `PATCH /api/titles/{id}`),
@@ -555,6 +556,18 @@ Svelte 5 (runes) + Vite + TypeScript, hls.js. No UI framework; small hand-writte
   detail. Search runs over both lists only while the palette is open. Tested by `lib/rowstore.svelte.test.ts`,
   `lib/details.test.ts`, `lib/library.test.ts`, `lib/palette-search.test.ts` and `e2e/library-ui.mjs` (a Movies
   revisit sends only the card request, then a 304).
+- **Trailers** (`components/TrailerButton.svelte`, `lib/trailers.ts`): a film's page (not an episode's: its
+  title is the show's) and a show's have a Trailer button in the hero, after Play, once
+  `GET /api/titles/{id}/trailers` has one that can be played (none, an error, lookups off: no button). It opens
+  a `Dialog` (`video`: 16:9, as wide as the window allows) with the site's player in an `<iframe>` made on the
+  click: `youtube-nocookie.com/embed/<key>?autoplay=1&rel=0&playsinline=1` or
+  `player.vimeo.com/video/<key>?autoplay=1&dnt=1`, `referrerpolicy=strict-origin-when-cross-origin` (YouTube
+  refuses an embed with no referrer), full screen allowed. Several are chips under it (`aria-pressed`); each one
+  picked gets a new iframe (a new `src` in the same one would add a history entry that Back would spend). Closing
+  the dialog (✕, Escape, the backdrop) removes the iframe, which stops the video, and gives the focus back to the
+  button. The key is checked again before the address is built. The button is keyed by the title id: after a
+  fixed match the old title's trailers are gone at once. Tested by `lib/trailers.test.ts` and
+  `e2e/trailers-ui.mjs` (the players' sites answered by the test: nothing leaves the machine).
 - Dev: `vite` proxy `/api` → `http://localhost:8420`. `npm run build` → `web/dist`, embedded by `web/embed.go`.
   Keep `web/dist/.gitkeep` so `go build` works before the first web build (`all:dist`).
 

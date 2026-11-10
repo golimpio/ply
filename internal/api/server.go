@@ -167,6 +167,7 @@ func New(o Options) *Server {
 	mux.HandleFunc("GET /api/genres", s.handleGenres)
 	mux.HandleFunc("GET /api/titles", s.handleTitles)
 	mux.HandleFunc("PATCH /api/titles/{id}", s.handlePatchTitle)
+	mux.HandleFunc("GET /api/titles/{id}/trailers", s.handleTitleTrailers)
 	mux.HandleFunc("PUT /api/titles/{id}/watched", s.handleTitleWatched)
 	mux.HandleFunc("GET /api/collections/{id}", s.handleCollection)
 	mux.HandleFunc("GET /api/upcoming", s.handleUpcoming)

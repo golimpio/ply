@@ -722,6 +722,16 @@ func (h *healthProvider) SeriesBySlug(ctx context.Context, slug string) (int64, 
 	return id, h.note(err)
 }
 
+// Trailers passes through to a provider that has them (none, for one that has not), and notes the result.
+func (h *healthProvider) Trailers(ctx context.Context, kind string, id int64) ([]store.Video, error) {
+	l, ok := h.Provider.(trailerLister)
+	if !ok {
+		return nil, nil
+	}
+	vs, err := l.Trailers(ctx, kind, id)
+	return vs, h.note(err)
+}
+
 func (h *healthProvider) Brief(ctx context.Context, id int64) (Candidate, error) {
 	b, ok := h.Provider.(briefer)
 	if !ok {

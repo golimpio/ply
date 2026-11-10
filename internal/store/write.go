@@ -128,6 +128,18 @@ func (s *Store) acquire(ctx context.Context, p prio) (release func(), err error)
 // A bulk write calls it once per chunk (writeChunk rows), so that the writer
 // changes hands between chunks.
 func (s *Store) write(ctx context.Context, p prio, fn func(tx *sql.Tx) error) error {
+	return s.writeTx(ctx, p, fn, true)
+}
+
+// writeQuiet is write for changes no list shows (a title's trailers): it does not change
+// Generation, and leaves the watch marks alone: what it writes brings no file (and a mark it applied
+// would change a list without a new Generation).
+func (s *Store) writeQuiet(ctx context.Context, p prio, fn func(tx *sql.Tx) error) error {
+	return s.writeTx(ctx, p, fn, false)
+}
+
+// writeTx is write (listed: the change can show in a list) and writeQuiet.
+func (s *Store) writeTx(ctx context.Context, p prio, fn func(tx *sql.Tx) error, listed bool) error {
 	release, err := s.acquire(ctx, p)
 	if err != nil {
 		return err
@@ -141,13 +153,17 @@ func (s *Store) write(ctx context.Context, p prio, fn func(tx *sql.Tx) error) er
 	if err := fn(tx); err != nil {
 		return err
 	}
-	if err := s.applyWatchMarks(ctx, tx); err != nil { // a file that arrived for a mark (see markWatchedFiles)
-		return err
+	if listed {
+		if err := s.applyWatchMarks(ctx, tx); err != nil { // a file that arrived for a mark (see markWatchedFiles)
+			return err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	s.gen.Add(1)
+	if listed {
+		s.gen.Add(1)
+	}
 	s.ck.wrote(p)
 	return nil
 }

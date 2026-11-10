@@ -113,8 +113,9 @@ type Worker struct {
 	probes         map[int64]probeEntry
 	seasonTried    map[seasonKey]time.Time
 	nfoApplied     map[int64]string // title id -> stamp of the NFO last laid over it
-	personFailed   map[int64]personFailure
-	switchTried    map[int64]bool // shows TVDB was asked about for the move from TMDB (see switchToTVDB)
+	personFailed   map[int64]fetchFailure
+	trailerFailed  map[int64]fetchFailure // by title id
+	switchTried    map[int64]bool         // shows TVDB was asked about for the move from TMDB (see switchToTVDB)
 	switchRetryAt  time.Time
 	closed         bool
 
@@ -176,7 +177,8 @@ func NewWorker(o WorkerOptions) *Worker {
 	w := &Worker{
 		o: o, log: o.Logger, wake: make(chan struct{}, 1),
 		sidecars: map[int64]struct{}{}, retryRefreshAt: map[string]time.Time{}, probes: map[int64]probeEntry{}, seasonTried: map[seasonKey]time.Time{},
-		nfoApplied: map[int64]string{}, personFailed: map[int64]personFailure{}, switchTried: map[int64]bool{},
+		nfoApplied: map[int64]string{}, personFailed: map[int64]fetchFailure{}, trailerFailed: map[int64]fetchFailure{},
+		switchTried: map[int64]bool{},
 	}
 	w.bgCtx, w.bgCancel = context.WithCancel(context.Background())
 	return w
@@ -249,6 +251,7 @@ func (w *Worker) Reload() {
 	w.mu.Lock()
 	w.reload = true
 	clear(w.personFailed) // a new key may find what the old one could not
+	clear(w.trailerFailed)
 	clear(w.switchTried)
 	w.switchRetryAt = time.Time{}
 	clear(w.retryRefreshAt) // a new key may be what the refresh was waiting for

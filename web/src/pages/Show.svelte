@@ -27,6 +27,7 @@
   import Ratings from '../components/Ratings.svelte';
   import SeasonRow, { type SeasonCard } from '../components/SeasonRow.svelte';
   import SourceBadge from '../components/SourceBadge.svelte';
+  import TrailerButton from '../components/TrailerButton.svelte';
   import WatchBadge from '../components/WatchBadge.svelte';
 
   let { show, season }: { show: string; season?: number } = $props();
@@ -233,6 +234,7 @@
           {episodeLabel(next.season, next.episode)}
         </a>
       {/if}
+      {#if meta}{#key meta.id}<TrailerButton titleId={meta.id} title={meta.title || show} />{/key}{/if}
       <span class="pair">
         <button class="btn" aria-disabled={marking} onclick={() => mark({ show }, !showDone, 'show')}>
           <Icon name="check" />{showDone ? 'Mark show as unwatched' : 'Mark show as watched'}

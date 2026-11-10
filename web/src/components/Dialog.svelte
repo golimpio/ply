@@ -3,14 +3,16 @@
   import Icon from './Icon.svelte';
 
   // A modal over the page (the native <dialog>: focus is kept inside, Escape
-  // closes it). `open` is bound; closing by any means sets it false.
+  // closes it). `open` is bound; closing by any means sets it false. `video` is
+  // wider still, for a 16:9 player (a trailer).
   let {
     open = $bindable(false),
     title,
     wide = false,
+    video = false,
     children,
     footer,
-  }: { open: boolean; title: string; wide?: boolean; children: Snippet; footer?: Snippet } = $props();
+  }: { open: boolean; title: string; wide?: boolean; video?: boolean; children: Snippet; footer?: Snippet } = $props();
 
   let dialog = $state<HTMLDialogElement>();
   // A click on the backdrop closes it, but only one that also began there: a
@@ -28,6 +30,7 @@
 <dialog
   bind:this={dialog}
   class:wide
+  class:video
   aria-labelledby="dialog-title"
   onclose={() => (open = false)}
   onpointerdown={(e) => (downOnBackdrop = e.target === dialog)}
@@ -67,6 +70,11 @@
   dialog.wide {
     width: min(42rem, calc(100vw - 2rem));
   }
+  /* As wide as the window allows with the player's 16:9 and the header in its height. */
+  dialog.video {
+    width: min(64rem, calc(100vw - 2rem), calc((88dvh - 7rem) * 16 / 9));
+    max-height: 92dvh;
+  }
   dialog::backdrop {
     background: var(--scrim);
   }
@@ -102,6 +110,9 @@
       max-height: 92dvh;
       border-radius: var(--radius-lg) var(--radius-lg) 0 0;
       padding-bottom: env(safe-area-inset-bottom);
+    }
+    dialog.video {
+      width: 100vw;
     }
   }
 </style>

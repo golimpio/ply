@@ -295,6 +295,21 @@ type CollectionDetails struct {
 	Parts        []MovieResult `json:"parts"`
 }
 
+// Video is an entry of /movie/{id}/videos or /tv/{id}/videos.
+type Video struct {
+	Language    string `json:"iso_639_1"`
+	Name        string `json:"name"`
+	Key         string `json:"key"`
+	Site        string `json:"site"` // "YouTube", "Vimeo"
+	Type        string `json:"type"` // "Trailer", "Teaser", "Clip", "Featurette", ...
+	Official    bool   `json:"official"`
+	PublishedAt string `json:"published_at"` // "2021-09-09T15:00:20.000Z"
+}
+
+type videoList struct {
+	Results []Video `json:"results"`
+}
+
 // changesPage is a page of /movie/changes or /tv/changes.
 type changesPage struct {
 	Results []struct {

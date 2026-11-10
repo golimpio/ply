@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"ply/internal/store"
 )
 
 // DefaultKey is the TMDB key built into the binary, set with
@@ -571,6 +573,21 @@ func (c *Client) SeasonDetails(ctx context.Context, tvID int64, season int) (*Se
 		return nil, err
 	}
 	return &out, nil
+}
+
+// Videos fetches /movie/{id}/videos (kind store.KindMovie) or /tv/{id}/videos: the videos in our
+// language, in English and with no language.
+func (c *Client) Videos(ctx context.Context, kind string, id int64) ([]Video, error) {
+	path := "/movie/"
+	if kind == store.KindSeries {
+		path = "/tv/"
+	}
+	q := url.Values{"include_video_language": {c.langCode() + ",en,null"}}
+	var out videoList
+	if err := c.get(ctx, path+strconv.FormatInt(id, 10)+"/videos", q, &out); err != nil {
+		return nil, err
+	}
+	return out.Results, nil
 }
 
 // PersonDetails fetches /person/{id}.

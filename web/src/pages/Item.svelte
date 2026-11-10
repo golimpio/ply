@@ -31,6 +31,7 @@
   import Rail from '../components/Rail.svelte';
   import Ratings from '../components/Ratings.svelte';
   import SourceBadge from '../components/SourceBadge.svelte';
+  import TrailerButton from '../components/TrailerButton.svelte';
   import WatchBadge from '../components/WatchBadge.svelte';
 
   let { id }: { id: number } = $props();
@@ -271,6 +272,8 @@
       {:else}
         <a class="btn primary" href={href.play(item.id)}><Icon name="play" />Play</a>
       {/if}
+      <!-- A film's own; an episode's meta is its show's, whose trailer is on the show's page. -->
+      {#if !isEpisode && meta}{#key meta.id}<TrailerButton titleId={meta.id} {title} />{/key}{/if}
       <span class="pair">
         <button class="btn" aria-disabled={marking} onclick={toggleWatched}>
           <Icon name="check" />{item.watched ? 'Mark as unwatched' : 'Mark as watched'}

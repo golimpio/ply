@@ -47,6 +47,9 @@ type Fake struct {
 	// Shows for an order not here), and the show each thetvdb.com slug names.
 	ShowOrders map[ShowOrder]*store.TitleInput
 	Slugs      map[string]int64
+	// What Trailers returns by the title's id (either kind), as it is; an id that is not here
+	// is a 404.
+	TrailerLists map[int64][]store.Video
 	// What Changes returns.
 	ChangedMovies []int64
 	ChangedShows  []int64
@@ -213,6 +216,18 @@ func (f *Fake) Series(ctx context.Context, id int64, order string, seasons []int
 		}
 	}
 	return &cp, nil
+}
+
+// Trailers is the provider's list of a title's trailers.
+func (f *Fake) Trailers(ctx context.Context, kind string, id int64) ([]store.Video, error) {
+	if err := f.enter(ctx, "Trailers(%s,%d)", kind, id); err != nil {
+		return nil, err
+	}
+	vs, ok := f.TrailerLists[id]
+	if !ok {
+		return nil, notFound(fmt.Sprintf("GET /%s/%d/videos", kind, id))
+	}
+	return slices.Clone(vs), nil
 }
 
 func (f *Fake) Person(ctx context.Context, id int64) (*store.Person, error) {

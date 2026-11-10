@@ -188,9 +188,34 @@ is off or nothing matches → NFO alone (`source=nfo`). Fuzz test the parser.
 ffprobe format tags as hints and as an offline source: `title`, `date`, `description`/`synopsis`, `show`,
 `season_number`, `episode_sort`, `episode_id`, and an `attached_pic` stream (iTunes/mkv cover) as a local poster.
 
+## Trailers (`internal/metadata/trailers.go`, migration `013_title_videos.sql`)
+A film's and a show's trailers, played from their page in the site's own player (YouTube, Vimeo).
+- **Fetched when first wanted**, as a person's details: `GET /api/titles/{id}/trailers` asks for them the first
+  time a page does (`Worker.Trailers`, 8 s at most), stores them, and asks again once they are 30 days old or
+  the title's id at its provider or the language changed (`titles.videos_ref`, `'tmdb:603@en-US'`;
+  `videos_checked`, unix seconds; a title with none is checked too). Matching and the refresh ask nothing more, and a library that was there
+  before migration 013 gets them title by title as its pages are opened.
+- **Where from:** TMDB for a title it knows (`/movie/{id}/videos` or `/tv/{id}/videos`,
+  `include_video_language=<lang>,en,null`; types Trailer and Teaser only), else TVDB for a show it knows (the
+  `trailers` of `/series/{id}/extended`: addresses of video pages, read by `ParseVideoURL`; TVDB gives no
+  type, so they count as trailers). A title of an NFO alone has none.
+- **Only what can be played:** site `youtube` with an 11-character key `[A-Za-z0-9_-]`, or `vimeo` with a
+  numeric one (`store.ValidVideo`; the table's CHECKs and the client check it too: the player's address is
+  built from it). Same video twice is kept once; at most 10.
+- **Order** (`rankVideos`; `ord` 0 plays first): in our language, then English, then no language, then any
+  other; a trailer before a teaser; official first; newest first; then the provider's order.
+- **Failures** are remembered as a person's are (a 404 for a day, others 5 min doubling to an hour; a new key
+  forgets them), for that ref only, and the trailers stored for the same ref are answered meanwhile. A caller
+  that leaves during the fetch is not a failure; one that leaves after the answer still has it stored.
+- `language` is the provider's own code (`en` from TMDB, `eng` from TVDB), at most 8 characters.
+- **Privacy:** with online lookups off the list is empty, stored ones too: playing one reaches YouTube or
+  Vimeo. Nothing reaches them before a person presses Trailer (the player's iframe is made then).
+- Stored with `writeQuiet`: no list shows trailers, so `Store.Generation` (the lists' ETags) does not move.
+
 ## Later (not M6)
 NFO write-back after a manual fix (`-nfo-write`); chapters (`-show_chapters`) for skip-intro / up-next;
-nameparse: multi-episode files (S01E01-E02), date-based episodes, anime absolute numbering.
+nameparse: multi-episode files (S01E01-E02), date-based episodes, anime absolute numbering. Local trailer files
+(`<name>-trailer.mkv`, `Trailers/`), played in ply's own player: today a file named so is a version of the film.
 
 ## HTTP API additions
 All image URLs are relative and carry `?token=` like other media URLs.

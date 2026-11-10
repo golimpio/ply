@@ -10,11 +10,12 @@
     "check:tokens": "node scripts/check-tokens.mjs",
     "test": "vitest run && node --test e2e/mock-items.test.mjs",
     "test:mock": "node --test e2e/mock-items.test.mjs",
-    "e2e": "node e2e/player-wiring.mjs && node e2e/player-limits.mjs && node e2e/metadata-ui.mjs && node e2e/activity-ui.mjs && node e2e/folders-ui.mjs && node e2e/player-controls.mjs && node e2e/tvdb-ui.mjs && node e2e/ratings-ui.mjs && node e2e/navigation.mjs && node e2e/settings-ui.mjs && node e2e/library-ui.mjs && node e2e/player-ui.mjs && node e2e/watched-ui.mjs",
+    "e2e": "node e2e/player-wiring.mjs && node e2e/player-limits.mjs && node e2e/metadata-ui.mjs && node e2e/activity-ui.mjs && node e2e/folders-ui.mjs && node e2e/player-controls.mjs && node e2e/tvdb-ui.mjs && node e2e/ratings-ui.mjs && node e2e/navigation.mjs && node e2e/settings-ui.mjs && node e2e/library-ui.mjs && node e2e/player-ui.mjs && node e2e/watched-ui.mjs && node e2e/trailers-ui.mjs",
     "e2e:meta": "node e2e/metadata-ui.mjs",
     "e2e:tvdb": "node e2e/tvdb-ui.mjs",
     "e2e:ratings": "node e2e/ratings-ui.mjs",
     "e2e:activity": "node e2e/activity-ui.mjs",
+    "e2e:trailers": "node e2e/trailers-ui.mjs",
     "e2e:visual": "node e2e/visual.mjs",
     "preview": "vite preview"
   },

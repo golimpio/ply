@@ -305,6 +305,7 @@ func reads() []routed {
 		{name: "GetCollection", call: func(ctx context.Context, s *Store) error { _, err := s.GetCollection(ctx, 1); return nf(err) }},
 		{name: "MergedPerson", call: func(ctx context.Context, s *Store) error { _, err := s.MergedPerson(ctx, 1); return nf(err) }},
 		{name: "GetPerson", call: func(ctx context.Context, s *Store) error { _, err := s.GetPerson(ctx, 1); return nf(err) }},
+		{name: "GetTitleVideos", call: func(ctx context.Context, s *Store) error { _, err := s.GetTitleVideos(ctx, 1); return nf(err) }},
 		{name: "SearchPeople", call: func(ctx context.Context, s *Store) error { _, err := s.SearchPeople(ctx, "x", 10); return err }},
 		{name: "ReviewList", call: func(ctx context.Context, s *Store) error { _, err := s.ReviewList(ctx); return err }},
 		{name: "Seasons", call: func(ctx context.Context, s *Store) error { _, err := s.Seasons(ctx, 1); return err }},
@@ -381,6 +382,7 @@ func writes() []routed {
 		{name: "SetKeyframes", prio: prioHigh, call: func(ctx context.Context, s *Store) error { return e(s.SetKeyframes(ctx, 1, []float64{0})) }},
 		{name: "PatchTitle", prio: prioHigh, call: func(ctx context.Context, s *Store) error { return e(s.PatchTitle(ctx, 1, TitlePatch{})) }},
 		{name: "SetPersonDetails", prio: prioHigh, call: func(ctx context.Context, s *Store) error { return e(s.SetPersonDetails(ctx, 1, Person{}, 1)) }},
+		{name: "SetTitleVideos", prio: prioHigh, call: func(ctx context.Context, s *Store) error { return e(s.SetTitleVideos(ctx, 1, "tmdb:1", nil, 1)) }},
 		{name: "SetPersonDetailsMerged", prio: prioHigh, call: func(ctx context.Context, s *Store) error {
 			_, err := s.SetPersonDetailsMerged(ctx, 1, Person{}, 1)
 			return e(err)

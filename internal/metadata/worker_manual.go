@@ -191,26 +191,28 @@ func (w *Worker) Search(ctx context.Context, q Query) ([]Scored, error) {
 	return Search(ctx, tm, q)
 }
 
-// How long a person TMDB failed to give details for is left alone: one TMDB
-// does not know for a day; one it could not be asked about for a while that
-// doubles with each failure.
+// How long a person (or a title's trailers) TMDB failed to give details for is left
+// alone: one TMDB does not know for a day; one it could not be asked about for a
+// while that doubles with each failure.
 const (
-	personMissingTTL = 24 * time.Hour
-	personRetryBase  = 5 * time.Minute
-	personRetryMax   = time.Hour
-	maxPersonFailed  = 1024 // people remembered; the oldest entries give way
+	fetchMissingTTL = 24 * time.Hour
+	fetchRetryBase  = 5 * time.Minute
+	fetchRetryMax   = time.Hour
+	maxFetchFailed  = 1024 // entries remembered per kind; the oldest give way
 )
 
-// personFailure is why a person's details are not asked for again until.
-type personFailure struct {
+// fetchFailure is why a person's details, or a title's trailers, are not asked for
+// again until.
+type fetchFailure struct {
 	until    time.Time
 	attempts int
 	err      error
+	ref      string // what was asked for, when the id alone does not say (a title's trailers: see trailerSource)
 }
 
 // EnsurePerson fetches a person's details from TMDB the first time they are
 // wanted and stores them. A person already fetched, or one an NFO named, is left
-// alone. A failure is remembered (see personFailure) and returned again until it
+// alone. A failure is remembered (see fetchFailure) and returned again until it
 // is time to try again, so that opening the page of a person TMDB does not
 // have, or while TMDB is out of reach, asks it nothing each time.
 func (w *Worker) EnsurePerson(ctx context.Context, id int64) error {
@@ -258,7 +260,7 @@ func (w *Worker) EnsurePersonID(ctx context.Context, id int64) (int64, error) {
 		return id, ErrLookupsOff
 	}
 	if err != nil {
-		w.notePersonFailure(ctx, id, f.attempts, err, now)
+		w.noteFailure(ctx, w.personFailed, id, "", f.attempts, err, now)
 		return id, err
 	}
 	w.mu.Lock()
@@ -276,30 +278,30 @@ func (w *Worker) EnsurePersonID(ctx context.Context, id int64) (int64, error) {
 	return id, w.o.Store.SetPersonDetails(ctx, id, *info, w.now().Unix())
 }
 
-// notePersonFailure remembers a failed fetch. A refused key and a caller that
-// went away say nothing about the person and are not remembered; a timeout does
-// (TMDB did not answer).
-func (w *Worker) notePersonFailure(ctx context.Context, id int64, attempts int, err error, now time.Time) {
+// noteFailure remembers a failed fetch of id in failed (w.personFailed,
+// w.trailerFailed). A refused key and a caller that went away say nothing about
+// what was asked for and are not remembered; a timeout does (TMDB did not answer).
+func (w *Worker) noteFailure(ctx context.Context, failed map[int64]fetchFailure, id int64, ref string, attempts int, err error, now time.Time) {
 	if IsUnauthorized(err) || errors.Is(err, context.Canceled) || (ctx.Err() != nil && !errors.Is(err, context.DeadlineExceeded)) {
 		return
 	}
-	f := personFailure{attempts: attempts + 1, err: err}
+	f := fetchFailure{attempts: attempts + 1, err: err, ref: ref}
 	if IsNotFound(err) {
-		f.until = now.Add(personMissingTTL)
+		f.until = now.Add(fetchMissingTTL)
 	} else {
-		f.until = now.Add(min(personRetryBase<<min(attempts, 10), personRetryMax))
+		f.until = now.Add(min(fetchRetryBase<<min(attempts, 10), fetchRetryMax))
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if len(w.personFailed) >= maxPersonFailed {
-		for k, v := range w.personFailed {
+	if len(failed) >= maxFetchFailed {
+		for k, v := range failed {
 			if !now.Before(v.until) {
-				delete(w.personFailed, k)
+				delete(failed, k)
 			}
 		}
-		if len(w.personFailed) >= maxPersonFailed {
+		if len(failed) >= maxFetchFailed {
 			return // all of them still count: this one is asked again next time
 		}
 	}
-	w.personFailed[id] = f
+	failed[id] = f
 }

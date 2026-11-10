@@ -156,6 +156,18 @@ type Person struct {
 	Credits      []PersonCredit `json:"credits"`
 }
 
+// Trailer is an entry of GET /api/titles/{id}/trailers: a video at a site that plays it, by its
+// key there (a client builds the player's address, or opens the site's app).
+type Trailer struct {
+	Site        string `json:"site"` // youtube | vimeo
+	Key         string `json:"key"`
+	Name        string `json:"name,omitempty"`
+	Type        string `json:"type,omitempty"` // trailer | teaser
+	Language    string `json:"language,omitempty"`
+	Official    bool   `json:"official"`
+	PublishedAt string `json:"publishedAt,omitempty"`
+}
+
 // GenreCount is an entry of GET /api/genres.
 type GenreCount struct {
 	ID    int64  `json:"id"`

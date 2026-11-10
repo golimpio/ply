@@ -133,6 +133,34 @@ func (s *Server) handlePerson(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// handleTitleTrailers lists a title's trailers, best first. They are fetched the first time the
+// title's page asks; a fetch that fails only means fewer (or none). With online lookups off the list
+// is empty: playing a trailer reaches YouTube or Vimeo, which the privacy switch keeps away.
+func (s *Server) handleTitleTrailers(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r, "title")
+	if !ok || s.metadataOff(w) {
+		return
+	}
+	videos, err := s.Metadata.Trailers(r.Context(), id)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		writeError(w, http.StatusNotFound, "title not found")
+		return
+	case errors.Is(err, metadata.ErrLookupsOff):
+		videos = nil
+	case r.Context().Err() != nil:
+		return // the client went away
+	case err != nil:
+		s.Logger.Debug("metadata: trailers", "title", id, "err", err)
+	}
+	out := make([]Trailer, 0, len(videos))
+	for _, v := range videos {
+		out = append(out, Trailer{Site: v.Site, Key: v.Key, Name: v.Name, Type: v.Type, Language: v.Language,
+			Official: v.Official, PublishedAt: v.PublishedAt})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // mergedPerson is the 404 of GET /api/people/{id} for a person who was merged into another:
 // {"error": "merged", "into": <the id to ask for>}.
 type mergedPerson struct {

@@ -363,6 +363,14 @@ type TVDBSeries struct {
 	RemoteIDs       TVDBRemoteIDs       `json:"remoteIds"`
 	ContentRatings  []TVDBContentRating `json:"contentRatings"`
 	Translations    TVDBTranslations    `json:"translations"`
+	Trailers        []TVDBTrailer       `json:"trailers"`
+}
+
+// TVDBTrailer is a trailer of an extended series record: the address of a video page.
+type TVDBTrailer struct {
+	Name     string `json:"name"`
+	URL      string `json:"url"`
+	Language string `json:"language"` // a TVDB code ("eng")
 }
 
 func (s *TVDBSeries) UnmarshalJSON(b []byte) error {
