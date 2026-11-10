@@ -643,7 +643,10 @@ const scenarios = {
   async 'Back to 5,000 films far down: the grid puts itself back, at another width too'(browser) {
     const { context, page, errors } = await open(browser);
     await page.goto(`${base}/#/`);
-    await page.locator('header nav a[href="#/movies"]').click();
+    // In through the front door would race the app's mount: this suite's other tests reach the grid
+    // through movies(), which waits for the cards and the frames. What this test is about is the
+    // grid putting itself back; e2e/navigation.mjs covers the nav link itself.
+    await movies(page);
     await page.locator('main a.card').first().waitFor();
     await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight * 0.6));
     const y0 = await settle(page);
