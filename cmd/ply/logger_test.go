@@ -132,3 +132,101 @@ func TestLoggerFallbackOnUnwritableFile(t *testing.T) {
 		t.Fatalf("expected fallback message in stderr: %q", stderr.String())
 	}
 }
+
+func TestSetupLoggerMirrorStderrDisabled(t *testing.T) {
+	tmp := t.TempDir()
+	logDir := filepath.Join(tmp, "logs")
+	logPath := filepath.Join(logDir, "ply.log")
+
+	var stderr bytes.Buffer
+	logger, cleanup := setupLoggerWithOptions(logDir, logPath, 1024*1024, 3, &stderr, false)
+	defer cleanup()
+
+	msg := "quiet terminal message 456"
+	logger.Info(msg)
+
+	// Positive control: log file MUST have received the message
+	fileBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("reading log file: %v", err)
+	}
+	if !strings.Contains(string(fileBytes), msg) {
+		t.Fatalf("positive control failed: log file missing %q", msg)
+	}
+
+	// Absence assertion: stderr must remain completely clean of slog messages
+	if strings.Contains(stderr.String(), msg) {
+		t.Fatalf("stderr received log message when mirrorStderr was false: %q", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected empty stderr, got %q", stderr.String())
+	}
+}
+
+func TestSetupLoggerMirrorStderrEnabled(t *testing.T) {
+	tmp := t.TempDir()
+	logDir := filepath.Join(tmp, "logs")
+	logPath := filepath.Join(logDir, "ply.log")
+
+	var stderr bytes.Buffer
+	logger, cleanup := setupLoggerWithOptions(logDir, logPath, 1024*1024, 3, &stderr, true)
+	defer cleanup()
+
+	msg := "verbose mirrored message 789"
+	logger.Info(msg)
+
+	// Log file received message
+	fileBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("reading log file: %v", err)
+	}
+	if !strings.Contains(string(fileBytes), msg) {
+		t.Fatalf("log file missing %q", msg)
+	}
+
+	// Stderr received message
+	if !strings.Contains(stderr.String(), msg) {
+		t.Fatalf("stderr missing %q: got %q", msg, stderr.String())
+	}
+}
+
+func TestShouldMirrorStderr(t *testing.T) {
+	tests := []struct {
+		name      string
+		logStderr bool
+		isTerm    bool
+		want      bool
+	}{
+		{"interactive default is quiet", false, true, false},
+		{"piped default mirrors slog", false, false, true},
+		{"forced flag in interactive mirrors slog", true, true, true},
+		{"forced flag when piped mirrors slog", true, false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shouldMirrorStderr(tt.logStderr, tt.isTerm)
+			if got != tt.want {
+				t.Errorf("shouldMirrorStderr(%v, %v) = %v, want %v", tt.logStderr, tt.isTerm, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsTerminalOnPipe(t *testing.T) {
+	if isTerminal(nil) {
+		t.Error("isTerminal(nil) = true, want false")
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+
+	if isTerminal(r) {
+		t.Error("isTerminal(pipe reader) = true, want false")
+	}
+	if isTerminal(w) {
+		t.Error("isTerminal(pipe writer) = true, want false")
+	}
+}

@@ -8,6 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/mattn/go-isatty"
+
+	"ply/internal/config"
 )
 
 const (
@@ -111,11 +115,29 @@ func (w *rotatingWriter) Close() error {
 	return nil
 }
 
-func setupLogger(logDir, logPath string) (*slog.Logger, func()) {
-	return setupLoggerWithWriter(logDir, logPath, defaultMaxLogSize, defaultMaxBackups, os.Stderr)
+func isTerminal(f *os.File) bool {
+	if f == nil {
+		return false
+	}
+	return isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd())
+}
+
+func shouldMirrorStderr(logStderr, isTerm bool) bool {
+	return logStderr || !isTerm
+}
+
+func setupLogger(cfg config.Config) (*slog.Logger, func(), bool) {
+	interactive := isTerminal(os.Stderr)
+	mirror := shouldMirrorStderr(cfg.LogStderr, interactive)
+	log, cleanup := setupLoggerWithOptions(cfg.LogDir, cfg.LogPath(), defaultMaxLogSize, defaultMaxBackups, os.Stderr, mirror)
+	return log, cleanup, interactive
 }
 
 func setupLoggerWithWriter(logDir, logPath string, maxSize int64, maxBackups int, stderr io.Writer) (*slog.Logger, func()) {
+	return setupLoggerWithOptions(logDir, logPath, maxSize, maxBackups, stderr, true)
+}
+
+func setupLoggerWithOptions(logDir, logPath string, maxSize int64, maxBackups int, stderr io.Writer, mirrorStderr bool) (*slog.Logger, func()) {
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		log := slog.New(slog.NewTextHandler(stderr, nil))
 		log.Warn("cannot create log directory; logging to stderr only", "dir", logDir, "err", err)
@@ -129,7 +151,10 @@ func setupLoggerWithWriter(logDir, logPath string, maxSize int64, maxBackups int
 		return log, func() {}
 	}
 
-	w := io.MultiWriter(stderr, rot)
+	var w io.Writer = rot
+	if mirrorStderr && stderr != nil {
+		w = io.MultiWriter(stderr, rot)
+	}
 	log := slog.New(slog.NewTextHandler(w, nil))
 	cleanup := func() {
 		_ = rot.Close()

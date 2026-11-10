@@ -36,6 +36,7 @@ type Config struct {
 	Addr         string
 	Data         string // absolute data directory
 	LogDir       string // absolute log directory
+	LogStderr    bool   // -log-stderr: force slog logging to stderr even in an interactive terminal
 	Token        string
 	Name         string
 	ScanInterval time.Duration
@@ -88,6 +89,7 @@ type Config struct {
 // Environment variables that stand in for flags (the flag wins).
 const (
 	LogDirEnv            = "PLY_LOG_DIR"
+	LogStderrEnv         = "PLY_LOG_STDERR"
 	TMDBKeyEnv           = "PLY_TMDB_KEY"
 	MetadataEnv          = "PLY_METADATA"
 	MetadataLanguageEnv  = "PLY_METADATA_LANGUAGE"
@@ -272,10 +274,15 @@ func Parse(args []string, out io.Writer) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	envLogStderr, err := envBool(LogStderrEnv, false)
+	if err != nil {
+		return Config{}, err
+	}
 	envRefresh, err := envDuration(MetadataRefreshEnv, DefaultMetadataEvery)
 	if err != nil {
 		return Config{}, err
 	}
+	fs.BoolVar(&c.LogStderr, "log-stderr", envLogStderr, "log every message to stderr even in an interactive terminal (env "+LogStderrEnv+")")
 	fs.StringVar(&c.TMDBKey, "tmdb-key", "", "TMDB API key or read access token for posters, plots and cast (env "+TMDBKeyEnv+"; can also be set in the web UI)")
 	fs.BoolVar(&c.Metadata, "metadata", envMetadata, "look up metadata online (TMDB); false keeps everything local (env "+MetadataEnv+")")
 	fs.StringVar(&c.MetadataLanguage, "metadata-language", envString(MetadataLanguageEnv, DefaultMetadataLang), "TMDB language, such as en-US or pt-BR (env "+MetadataLanguageEnv+")")

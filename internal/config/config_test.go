@@ -19,7 +19,7 @@ func TestParseDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Addr != ":8420" || c.ScanInterval != 15*time.Minute || c.FFprobe != "ffprobe" || c.FFmpeg != "ffmpeg" {
+	if c.Addr != ":8420" || c.ScanInterval != 15*time.Minute || c.FFprobe != "ffprobe" || c.FFmpeg != "ffmpeg" || c.LogStderr {
 		t.Errorf("unexpected defaults: %+v", c)
 	}
 	if c.Name == "" {
@@ -480,5 +480,50 @@ func TestUsageListsTheFolderFlags(t *testing.T) {
 		if !strings.Contains(out.String(), f) {
 			t.Errorf("usage does not list %s:\n%s", f, out.String())
 		}
+	}
+}
+
+func TestParseLogStderr(t *testing.T) {
+	// Default is false
+	c, err := Parse([]string{"-data", t.TempDir()}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.LogStderr {
+		t.Errorf("default LogStderr = true, want false")
+	}
+
+	// Flag sets true
+	c, err = Parse([]string{"-data", t.TempDir(), "-log-stderr"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.LogStderr {
+		t.Errorf("-log-stderr: got false, want true")
+	}
+
+	// Env var sets true
+	t.Setenv(LogStderrEnv, "true")
+	c, err = Parse([]string{"-data", t.TempDir()}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.LogStderr {
+		t.Errorf("PLY_LOG_STDERR=true: got false, want true")
+	}
+
+	// Flag overrides env var
+	c, err = Parse([]string{"-data", t.TempDir(), "-log-stderr=false"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.LogStderr {
+		t.Errorf("-log-stderr=false should override PLY_LOG_STDERR: got true, want false")
+	}
+
+	// Invalid env var returns error
+	t.Setenv(LogStderrEnv, "not-a-bool")
+	if _, err := Parse([]string{"-data", t.TempDir()}, &bytes.Buffer{}); err == nil {
+		t.Errorf("invalid PLY_LOG_STDERR did not error")
 	}
 }

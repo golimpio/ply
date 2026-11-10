@@ -62,7 +62,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	log, closeLog := setupLogger(cfg.LogDir, cfg.LogPath())
+	log, closeLog, isInteractive := setupLogger(cfg)
 	defer closeLog()
 
 	if err := os.MkdirAll(cfg.Data, 0o700); err != nil {
@@ -381,15 +381,22 @@ func run() error {
 	if err != nil {
 		log.Warn("mDNS advertisement unavailable", "err", err)
 	}
+	urls := reachableURLs(ln.Addr())
+	if isInteractive && !cfg.LogStderr {
+		fmt.Fprint(os.Stderr, banner(cfg.Name, version, cfg.LogPath(), urls))
+	}
 	log.Info("ply listening", "ffmpeg", ffmpegBin, "version", version, "name", cfg.Name, "id", id, "data", cfg.Data,
 		"log", cfg.LogPath(), "auth", cfg.Token != "", "media", rootPaths(roots))
-	for _, u := range discovery.URLs(ln.Addr()) {
+	for _, u := range urls {
 		log.Info("reachable at", "url", u)
 	}
 
 	var serveFailure error
 	select {
 	case <-sigC:
+		if isInteractive && !cfg.LogStderr {
+			fmt.Fprintln(os.Stderr, "Shutting down; press Ctrl-C again to quit at once...")
+		}
 		log.Info("shutting down; press Ctrl-C again to quit at once")
 		cancel()
 	case serveFailure = <-serveErr:
@@ -398,7 +405,18 @@ func run() error {
 
 	shutCtx, cancelShut := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancelShut()
-	clean := stopper{log: log, every: 2 * time.Second, deadline: 30 * time.Second, quick: sigC}.run([]stopStep{
+	clean := stopper{
+		log:      log,
+		every:    2 * time.Second,
+		deadline: 30 * time.Second,
+		quick:    sigC,
+		onQuick: func() {
+			if isInteractive && !cfg.LogStderr {
+				fmt.Fprintln(os.Stderr, "Quitting at once.")
+			}
+			os.Exit(130)
+		},
+	}.run([]stopStep{
 		{"network announcement", adv.Shutdown},
 		// Kill every ffmpeg and drop the temp dirs first: requests waiting on
 		// segments return at once instead of holding the HTTP shutdown up. All three
@@ -437,6 +455,9 @@ func run() error {
 	if !clean {
 		log.Warn("shutdown timed out; forcing exit")
 		os.Exit(1)
+	}
+	if isInteractive && !cfg.LogStderr {
+		fmt.Fprintln(os.Stderr, "Stopped.")
 	}
 	return serveFailure
 }
