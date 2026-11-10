@@ -561,6 +561,17 @@ func TestItemListLimit(t *testing.T) {
 	if got := decode[[]EpisodeCard](t, m.get("/api/items?kind=episode&show=Cool+Show&fields=card&limit=1")); len(got) != 1 || got[0].ID != showEps[0].ID {
 		t.Errorf("show=Cool+Show&fields=card&limit=1 answered %v, want just %d", got, showEps[0].ID)
 	}
+	// sort=rating is Go's, not the store's: the best-rated film, never the first row of the store (the
+	// first film here has no rating, so sort=rating pushes it last). With the push-down wrongly on, the
+	// store would return that first row and the sort would have one row to order.
+	best := decode[[]ItemSummary](t, m.get("/api/items?kind=movie&sort=rating&limit=1"))
+	if len(best) != 1 || best[0].Rating == nil {
+		t.Fatalf("sort=rating&limit=1 = %+v, want one film with a rating", best)
+	}
+	if best[0].ID == all[0].ID {
+		t.Errorf("sort=rating&limit=1 answered the store's first film (%d): the rating sort did not come before the cut", best[0].ID)
+	}
+
 	// A limit outside 1..500 is a 400: no page can draw a rail from an empty answer it did not ask
 	// for, and one request never takes a whole big library.
 	for _, url := range []string{"/api/items?kind=movie&limit=0", "/api/items?kind=movie&limit=-1", "/api/items?kind=movie&limit=abc",

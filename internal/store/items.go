@@ -283,10 +283,6 @@ func listItems(ctx context.Context, q queryer, f ListFilter) ([]Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(items) == 0 {
-		return nil, nil // no rows to fetch streams for
-	}
-
 	byID := make(map[int64]*Entry, len(items))
 	entries := make([]Entry, len(items))
 	for i, it := range items {
@@ -294,17 +290,21 @@ func listItems(ctx context.Context, q queryer, f ListFilter) ([]Entry, error) {
 		byID[it.ID] = &entries[i]
 	}
 
-	// Only the streams of the rows that were listed: with a limit the rest of the
-	// library's streams are not read at all.
-	marks := make([]string, len(items))
-	streamArgs := make([]any, 0, len(args)+len(items)+1)
-	streamArgs = append(streamArgs, args...)
-	for i, it := range items {
-		marks[i] = "?"
-		streamArgs = append(streamArgs, it.ID)
+	// The streams of the rows that were listed. Only a limited list narrows the join: that is what
+	// the limit saves (the rest of the library's streams are not read), and it keeps the bind
+	// variables at the limit's 500 rather than one per row of the whole library. An unlimited list
+	// needs none of it: the clause already selects exactly the rows the items query returned.
+	streamClause, streamArgs := clause, args
+	if f.Limit > 0 && len(items) > 0 {
+		ids := make([]any, len(items))
+		for i, it := range items {
+			ids[i] = it.ID
+		}
+		streamClause += " AND i.id IN (" + placeholders(len(items)) + ")"
+		streamArgs = append(append([]any{}, args...), ids...)
 	}
 	rows, err := q.QueryContext(ctx, `SELECT s.item_id, `+prefixed("s.", streamCols)+`
-		FROM streams s JOIN items i ON i.id = s.item_id`+clause+` AND i.id IN (`+strings.Join(marks, ",")+`)
+		FROM streams s JOIN items i ON i.id = s.item_id`+streamClause+`
 		ORDER BY s.item_id, s.idx`, streamArgs...)
 	if err != nil {
 		return nil, err

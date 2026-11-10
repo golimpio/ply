@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -403,6 +404,82 @@ func TestListItemsLimit(t *testing.T) {
 	// Nothing matched is no rows and no error, with a limit too.
 	if none, err := s.ListItems(ctx, ListFilter{Show: "nope", Limit: 2}); err != nil || len(none) != 0 {
 		t.Errorf("unknown show = %v, %v; want empty", none, err)
+	}
+}
+
+// recordingQueryer keeps what was asked of the read side, so that a test can see the SQL the store
+// sends rather than only its results: what a query does not read leaves no trace in the rows.
+type recordingQueryer struct {
+	queryer
+	queries []string
+	args    [][]any
+}
+
+func (r *recordingQueryer) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	r.queries = append(r.queries, query)
+	r.args = append(r.args, args)
+	return r.queryer.QueryContext(ctx, query, args...)
+}
+
+// A limited list asks for the streams of the listed rows only (that is what the limit saves); an
+// unlimited list asks as it always did, with the clause alone, so its binds cannot grow with the
+// library -- one placeholder per row would hit SQLite's variable ceiling around 32,000 items.
+func TestListItemsStreamsAreNarrowedOnlyByALimit(t *testing.T) {
+	s, _ := openTemp(t)
+	ctx := context.Background()
+	for _, it := range []*Item{movie("/media/b.mp4", "banana"), movie("/media/a.mp4", "Apple"), movie("/media/c.mp4", "Cherry")} {
+		if _, err := s.UpsertItem(ctx, it, videoAudio[:1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ask := func(f ListFilter) *recordingQueryer {
+		t.Helper()
+		rec := &recordingQueryer{}
+		if err := s.snapshot(ctx, func(q queryer) error {
+			rec.queryer = q
+			_, err := listItems(ctx, rec, f)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return rec
+	}
+
+	// The streams query, by what it reads rather than by its place in the list: the store's other
+	// reads (the progress of a row) are none of this test's business.
+	streams := func(rec *recordingQueryer) (string, []any) {
+		t.Helper()
+		var query string
+		var args []any
+		for i, sql := range rec.queries {
+			if !strings.Contains(sql, "FROM streams") {
+				continue
+			}
+			if query != "" {
+				t.Fatal("two streams queries in one list")
+			}
+			query, args = sql, rec.args[i]
+		}
+		if query == "" {
+			t.Fatal("no streams query")
+		}
+		return query, args
+	}
+
+	limited, limitedArgs := streams(ask(ListFilter{Limit: 2}))
+	if !strings.Contains(limited, "i.id IN (?, ?)") {
+		t.Errorf("a limited streams query = %q, want the listed ids bound", limited)
+	}
+	if len(limitedArgs) != 2 {
+		t.Errorf("a limited streams query binds %d arguments, want the 2 listed ids", len(limitedArgs))
+	}
+
+	unlimited, unlimitedArgs := streams(ask(ListFilter{}))
+	if strings.Contains(unlimited, "i.id IN (") {
+		t.Errorf("an unlimited streams query = %q, want no id list: one bind per row would grow with the library", unlimited)
+	}
+	if len(unlimitedArgs) != 0 {
+		t.Errorf("an unlimited streams query binds %d arguments, want none", len(unlimitedArgs))
 	}
 }
 
