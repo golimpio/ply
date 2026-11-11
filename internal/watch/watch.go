@@ -30,7 +30,8 @@ type Scanner interface {
 type RootStatus struct {
 	Root     string `json:"root"`
 	Watching bool   `json:"watching"`
-	Dirs     int    `json:"dirs"` // directories watched
+	Dirs     int    `json:"dirs"`  // directories watched
+	Depth    int    `json:"depth"` // how deep below the root it watches: 0 only it, -1 everything
 	Error    string `json:"error,omitempty"`
 }
 
@@ -56,7 +57,8 @@ const setupConcurrency = 16
 var errTooManyDirs = errors.New("not watching, too many directories")
 
 type root struct {
-	path string // configured spelling: absolute and clean
+	path  string // configured spelling: absolute and clean
+	depth int    // how deep below it to watch (DepthAll for everything)
 
 	// Run's goroutine only:
 	info     os.FileInfo   // the root when it was watched; nil when it was not found
@@ -115,13 +117,41 @@ type Watcher struct {
 	ready    bool      // scan the pending set without waiting
 	deferred map[string]deferredDir
 	wake     chan struct{}
-	want     []string      // roots asked for by SetRoots, not applied yet (nil: none)
+	want     []RootSpec    // roots asked for by SetRoots, not applied yet (nil: none)
 	rootsC   chan struct{} // SetRoots was called
 }
 
+// RootSpec is a media root and how deep below it to watch. Depth 0 watches the root alone, 1 the
+// root and its own subdirectories, 2 one level further, and DepthAll the whole tree. A media library
+// is deep (a show, a season, an episode), and every watched directory is a descriptor on kqueue and
+// an inotify watch on Linux, so the depth is what keeps a large library inside the process's budget;
+// what it leaves out is left to the periodic scan (docs/M7-FOLDERS.md).
+type RootSpec struct {
+	Path  string
+	Depth int
+}
+
+// DepthAll watches every directory below a root.
+const DepthAll = -1
+
+// specsOf is the roots of New and SetRoots: watched whole, as they always were.
+func specsOf(paths []string) []RootSpec {
+	out := make([]RootSpec, len(paths))
+	for i, p := range paths {
+		out[i] = RootSpec{Path: p, Depth: DepthAll}
+	}
+	return out
+}
+
 // New returns a watcher for roots, which must be absolute and clean, as the
-// scanner has them. Nothing happens until Run.
+// scanner has them. Nothing happens until Run. Each root is watched whole; see
+// NewSpecs for a depth per root.
 func New(sc Scanner, roots []string, log *slog.Logger) *Watcher {
+	return NewSpecs(sc, specsOf(roots), log)
+}
+
+// NewSpecs is New with a depth per root: a root is watched down to its depth, not the whole tree.
+func NewSpecs(sc Scanner, roots []RootSpec, log *slog.Logger) *Watcher {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
@@ -143,9 +173,9 @@ func New(sc Scanner, roots []string, log *slog.Logger) *Watcher {
 		wake:      make(chan struct{}, 1),
 		rootsC:    make(chan struct{}, 1),
 	}
-	for _, p := range roots {
-		w.roots = append(w.roots, &root{path: p})
-		w.status = append(w.status, RootStatus{Root: p})
+	for _, s := range roots {
+		w.roots = append(w.roots, &root{path: s.Path, depth: s.Depth})
+		w.status = append(w.status, RootStatus{Root: s.Path, Depth: s.Depth})
 	}
 	return w
 }
@@ -155,11 +185,15 @@ func New(sc Scanner, roots []string, log *slog.Logger) *Watcher {
 // applies it on its own goroutine: a dropped root loses its watches and the
 // directories queued under it, a new one is watched. Scanning a new root is the
 // scanner's job, not the watcher's.
-func (w *Watcher) SetRoots(paths []string) {
-	want := []string{}
-	for _, p := range paths {
-		if !slices.Contains(want, p) {
-			want = append(want, p)
+func (w *Watcher) SetRoots(paths []string) { w.SetRootSpecs(specsOf(paths)) }
+
+// SetRootSpecs is SetRoots with a depth per root. A root whose depth changed is watched again: its
+// watches at the old depth are dropped first.
+func (w *Watcher) SetRootSpecs(specs []RootSpec) {
+	want := []RootSpec{}
+	for _, s := range specs {
+		if !slices.ContainsFunc(want, func(o RootSpec) bool { return o.Path == s.Path }) {
+			want = append(want, s)
 		}
 	}
 	w.mu.Lock()
@@ -172,7 +206,7 @@ func (w *Watcher) SetRoots(paths []string) {
 }
 
 // takeRoots returns the roots SetRoots asked for since the last call, or nil.
-func (w *Watcher) takeRoots() []string {
+func (w *Watcher) takeRoots() []RootSpec {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	r := w.want
@@ -184,11 +218,11 @@ func (w *Watcher) takeRoots() []string {
 // why nothing can be watched (the backend failed or stopped): a new root gets
 // it as its status instead of watches. Before Run has a backend only the list
 // changes.
-func (w *Watcher) reroot(ctx context.Context, paths []string, down string) {
+func (w *Watcher) reroot(ctx context.Context, specs []RootSpec, down string) {
 	old := w.roots
-	kept := map[string]int{} // path -> index in old
+	kept := map[string]int{} // path -> index in old, when its depth is unchanged
 	for i, r := range old {
-		if slices.Contains(paths, r.path) {
+		if slices.ContainsFunc(specs, func(s RootSpec) bool { return s.Path == r.path && s.Depth == r.depth }) {
 			kept[r.path] = i
 		}
 	}
@@ -226,16 +260,16 @@ func (w *Watcher) reroot(ctx context.Context, paths []string, down string) {
 		}
 	}
 
-	roots := make([]*root, len(paths))
+	roots := make([]*root, len(specs))
 	remap := map[int]int{} // old index -> new
 	var added []int
 	w.mu.Lock()
-	status := make([]RootStatus, len(paths))
-	for j, p := range paths {
-		if i, ok := kept[p]; ok {
+	status := make([]RootStatus, len(specs))
+	for j, s := range specs {
+		if i, ok := kept[s.Path]; ok {
 			roots[j], status[j], remap[i] = old[i], w.status[i], j
 		} else {
-			roots[j], status[j] = &root{path: p}, RootStatus{Root: p}
+			roots[j], status[j] = &root{path: s.Path, depth: s.Depth}, RootStatus{Root: s.Path, Depth: s.Depth}
 			added = append(added, j)
 		}
 	}
@@ -257,7 +291,7 @@ func (w *Watcher) reroot(ctx context.Context, paths []string, down string) {
 	w.mu.Unlock()
 
 	if len(added) > 0 || len(dropped) > 0 {
-		w.log.Info("media roots changed", "roots", len(paths), "added", len(added), "dropped", len(dropped))
+		w.log.Info("media roots changed", "roots", len(specs), "added", len(added), "dropped", len(dropped))
 	}
 	switch {
 	case down != "":
@@ -673,7 +707,7 @@ func describe(err error) string {
 // leaving out hidden ones and symlinks. top is of root i. A watched directory
 // is taken to have its subdirectories watched too, unless all says to look.
 func (w *Watcher) addTree(ctx context.Context, top string, i int, all bool) error {
-	dirs, err := w.listDirs(ctx, top, all)
+	dirs, err := w.listDirs(ctx, top, all, w.roots[i].depth)
 	if err != nil {
 		return err
 	}
@@ -754,7 +788,7 @@ func parallel(n, limit int, stop func() bool, f func(k int)) {
 // listDirs lists top and the unwatched directories below it, spelled under
 // top, in path order, leaving out hidden ones and symlinks. It reads the
 // symlink-resolved top, setupConcurrency directories at a time.
-func (w *Watcher) listDirs(ctx context.Context, top string, all bool) ([]string, error) {
+func (w *Watcher) listDirs(ctx context.Context, top string, all bool, maxDepth int) ([]string, error) {
 	resolved, err := filepath.EvalSymlinks(top)
 	if err == nil {
 		var fi os.FileInfo
@@ -769,11 +803,14 @@ func (w *Watcher) listDirs(ctx context.Context, top string, all bool) ([]string,
 		return nil, err
 	}
 
-	type dir struct{ path, spelled string }
+	type dir struct {
+		path, spelled string
+		level         int // how far below the root it is
+	}
 	var (
 		mu      sync.Mutex
 		more    = sync.NewCond(&mu)
-		todo    = []dir{{resolved, filepath.Clean(top)}}
+		todo    = []dir{{path: resolved, spelled: filepath.Clean(top)}}
 		reading int // directories taken from todo and not done yet
 		out     []string
 		topErr  error
@@ -790,6 +827,9 @@ func (w *Watcher) listDirs(ctx context.Context, top string, all bool) ([]string,
 			out = append(out, d.spelled)
 			mu.Unlock()
 		}
+		if maxDepth >= 0 && d.level >= maxDepth {
+			return nil // the directories below it are past the depth asked for
+		}
 		entries, err := w.readDir(d.path)
 		if err != nil {
 			if d.path == resolved {
@@ -800,7 +840,7 @@ func (w *Watcher) listDirs(ctx context.Context, top string, all bool) ([]string,
 		var sub []dir
 		for _, e := range entries {
 			if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
-				sub = append(sub, dir{filepath.Join(d.path, e.Name()), filepath.Join(d.spelled, e.Name())})
+				sub = append(sub, dir{filepath.Join(d.path, e.Name()), filepath.Join(d.spelled, e.Name()), d.level + 1})
 			}
 		}
 		return sub

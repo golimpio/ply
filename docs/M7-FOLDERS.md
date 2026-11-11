@@ -173,7 +173,10 @@ CREATE TABLE item_archive (
 - **rare-tiger:**
   - `Scanner.SetRoots([]library.Root)`: live, triggers a scan of new roots and calls `ParseNameIn`;
   - the archive call when a root is dropped, and the restore call on insert;
-  - `Watcher.SetRoots([]string)`;
+  - `Watcher.SetRoots([]string)` (watched whole); `Watcher.SetRootSpecs([]watch.RootSpec)` takes a
+    depth per root — movies 0 (the root alone), shows 1 (the root and each show) — because every
+    watched directory is a descriptor on kqueue and a watch on inotify; what the depth leaves out
+    waits for the periodic scan;
   - the Settings "Library folders" UI with the folder browser.
 - Each side's code is reviewed by the other, and every fix has a test that fails without it.
 

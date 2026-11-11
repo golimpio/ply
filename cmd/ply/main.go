@@ -302,7 +302,7 @@ func run() error {
 	// The watcher runs even with no folders, for the ones added later.
 	var watcher *watch.Watcher
 	if cfg.Watch {
-		watcher = watch.New(queuedScanner{queue}, rootPaths(roots), log)
+		watcher = watch.NewSpecs(queuedScanner{queue}, rootSpecs(roots), log)
 		bg.Add(1)
 		go func() {
 			defer bg.Done()
@@ -318,7 +318,7 @@ func run() error {
 		active.Unlock()
 		scanner.SetRoots(roots)
 		if watcher != nil {
-			watcher.SetRoots(rootPaths(roots))
+			watcher.SetRootSpecs(rootSpecs(roots))
 		}
 		log.Info("library folders changed", "folders", rootPaths(roots))
 	}
@@ -616,6 +616,24 @@ func rootPaths(roots []library.Root) []string {
 		paths[i] = r.Path
 	}
 	return paths
+}
+
+// rootSpecs is how deep the watcher looks below each folder. A film is a directory of its own under
+// a movies root, so that root is watched alone (a new film fires an event on it). A show's episodes
+// live a season below the show, so a shows root is watched with its show directories: that is 91
+// directories for a 90-show library instead of 440, which is what keeps a big library inside the
+// process's descriptor budget (internal/watch.RootSpec). What the depth leaves out -- an episode
+// added inside an existing season -- is left to the periodic scan.
+func rootSpecs(roots []library.Root) []watch.RootSpec {
+	specs := make([]watch.RootSpec, len(roots))
+	for i, r := range roots {
+		depth := 1 // shows: the root and each show directory
+		if r.Kind == library.KindMovies {
+			depth = 0 // movies: the root alone
+		}
+		specs[i] = watch.RootSpec{Path: r.Path, Depth: depth}
+	}
+	return specs
 }
 
 // afterScans queues the housekeeping each time a scan finishes, whatever started

@@ -254,8 +254,8 @@ func TestFSStatusCountsDirs(t *testing.T) {
 
 		// root, a, a/b, c: not .hidden and its children, not the symlink's target.
 		want := []RootStatus{
-			{Root: root, Watching: true, Dirs: 4},
-			{Root: missing, Watching: false, Dirs: 0, Error: "root not found"},
+			{Root: root, Watching: true, Dirs: 4, Depth: DepthAll},
+			{Root: missing, Watching: false, Dirs: 0, Depth: DepthAll, Error: "root not found"},
 		}
 		waitFor(t, 5*time.Second, "statuses", func() bool { return slices.Equal(r.w.Status(), want) })
 

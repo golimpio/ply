@@ -76,7 +76,7 @@ func TestSetRootsForgetsWhatWasQueuedUnderADroppedRoot(t *testing.T) {
 	w.queue(library.Dir{Path: filepath.Join(b, "y")})
 	w.deferDirs([]library.Dir{{Path: a, Recursive: true}, {Path: b, Recursive: true}})
 
-	w.reroot(context.Background(), []string{b}, "")
+	w.reroot(context.Background(), specsOf([]string{b}), "")
 	w.mu.Lock()
 	_, aDeferred := w.deferred[a]
 	_, bDeferred := w.deferred[b]
@@ -125,7 +125,7 @@ func TestSetRootsNested(t *testing.T) {
 			setup(t, w, fb)
 
 			keep := tc.keep(outer, inner)
-			w.reroot(context.Background(), []string{keep}, "")
+			w.reroot(context.Background(), specsOf([]string{keep}), "")
 			want := tc.wantWatched(outer, inner)
 			slices.Sort(want)
 			if got := fb.watched(); !slices.Equal(got, want) {

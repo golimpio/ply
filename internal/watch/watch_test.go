@@ -210,6 +210,50 @@ func TestGoneDirDropsItsTreeAndQueuesTheParent(t *testing.T) {
 	}
 }
 
+// A root is watched only as deep as it was asked for: a media library is deep, every watched
+// directory is a descriptor, and a shows root needs its show directories, not every season.
+func TestWatchDepthStopsTheWalk(t *testing.T) {
+	root := t.TempDir()
+	mkdirs(t, root, "Show A/Season 1", "Show B/Season 1", "Show A/Season 1/Extras")
+	log, _ := testLogger(t)
+	fb := newFakeBackend()
+	w := NewSpecs(&fakeScanner{}, []RootSpec{{Path: root, Depth: 1}}, log)
+	w.mkBackend = func() (backend, error) { return fb, nil }
+	w.maxDirs = -1
+	w.quiet, w.maxWait, w.retry, w.recheck = 100*time.Millisecond, time.Second, 200*time.Millisecond, time.Hour
+	start(t, w)
+	waitRoot(t, w, 0, "root watched", func(s RootStatus) bool { return s.Watching })
+
+	want := []string{root, filepath.Join(root, "Show A"), filepath.Join(root, "Show B")}
+	if got := fb.watched(); !slices.Equal(got, want) {
+		t.Fatalf("watched %v, want %v: depth 1 is the root and each show, not the seasons", got, want)
+	}
+	if s := w.Status()[0]; s.Depth != 1 || s.Dirs != len(want) {
+		t.Fatalf("status %+v, want depth 1 and %d directories", s, len(want))
+	}
+}
+
+// The default is the whole tree, so an existing caller sees exactly what it saw before.
+func TestNewWatchesEverything(t *testing.T) {
+	root := t.TempDir()
+	mkdirs(t, root, "Show A/Season 1")
+	log, _ := testLogger(t)
+	fb := newFakeBackend()
+	w := New(&fakeScanner{}, []string{root}, log)
+	w.mkBackend = func() (backend, error) { return fb, nil }
+	w.maxDirs = -1
+	w.quiet, w.maxWait, w.retry, w.recheck = 100*time.Millisecond, time.Second, 200*time.Millisecond, time.Hour
+	start(t, w)
+	waitRoot(t, w, 0, "root watched", func(s RootStatus) bool { return s.Watching })
+	want := []string{root, filepath.Join(root, "Show A"), filepath.Join(root, "Show A", "Season 1")}
+	if got := fb.watched(); !slices.Equal(got, want) {
+		t.Fatalf("watched %v, want %v", got, want)
+	}
+	if s := w.Status()[0]; s.Depth != DepthAll {
+		t.Fatalf("status %+v, want depth %d", s, DepthAll)
+	}
+}
+
 func TestGoneDirThatCameBackIsWatchedAgain(t *testing.T) {
 	root := t.TempDir()
 	mkdirs(t, root, "A/sub")
@@ -317,8 +361,8 @@ func TestStatusOfAMissingRoot(t *testing.T) {
 	waitRoot(t, w, 1, "missing root looked at", func(s RootStatus) bool { return s.Error != "" })
 
 	want := []RootStatus{
-		{Root: good, Watching: true, Dirs: 2},
-		{Root: missing, Watching: false, Dirs: 0, Error: "root not found"},
+		{Root: good, Watching: true, Dirs: 2, Depth: DepthAll},
+		{Root: missing, Watching: false, Dirs: 0, Depth: DepthAll, Error: "root not found"},
 	}
 	if got := w.Status(); !slices.Equal(got, want) {
 		t.Fatalf("Status() = %+v, want %+v", got, want)
@@ -1009,7 +1053,7 @@ func TestListDirsReadsTheDirectoriesTogether(t *testing.T) {
 		}
 		return os.ReadDir(d)
 	}
-	got, err := w.listDirs(context.Background(), root, false)
+	got, err := w.listDirs(context.Background(), root, false, DepthAll)
 	if err != nil {
 		t.Fatal(err)
 	}
