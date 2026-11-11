@@ -50,12 +50,14 @@ func TestReachableURLs(t *testing.T) {
 	}
 }
 
-// The banner is the logo, the name and version, the server's name and every URL,
-// one per line, then the log file and the hint, with no box and no indent.
+// The banner is a blank line (it stands apart from the command typed), the logo,
+// the name and version, the server's name and every URL, one per line, then the
+// log file and the hint, with no box and no indent.
 func TestFormatBannerLayout(t *testing.T) {
 	urls := []string{"http://192.168.1.10:8420", "http://127.0.0.1:8420"}
 	got := formatBanner("TestServer", "0.1.0", "/path/to/ply.log", urls, false)
-	want := `█▀█ █   █ █
+	want := `
+█▀█ █   █ █
 █▀▀ █▄▄ ▀█▀
 
 Local Media Server (v0.1.0)

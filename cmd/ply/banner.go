@@ -46,6 +46,7 @@ func formatBanner(name, ver, logPath string, urls []string, useColor bool) strin
 	}
 
 	lines := []string{
+		"",
 		style(ansiBoldCyan, "█▀█ █   █ █"),
 		style(ansiBoldCyan, "█▀▀ █▄▄ ▀█▀"),
 		"",
