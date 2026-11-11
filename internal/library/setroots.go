@@ -188,6 +188,9 @@ func (s *Scanner) reparseRoots(ctx context.Context, roots []string) {
 		ids = append(ids, got...)
 	}
 	s.notify(ids, nil)
+	if len(ids) > 0 {
+		s.fireChanged()
+	}
 	s.reportMatches(ctx)
 }
 
@@ -326,6 +329,9 @@ func (s *Scanner) rereadTyped(ctx context.Context, roots []string, done func(roo
 		}
 	}
 	s.notify(ids, nil)
+	if len(ids) > 0 {
+		s.fireChanged()
+	}
 	s.reportMatches(ctx)
 }
 

@@ -310,6 +310,13 @@ Design:
   travels as `?token=`).
 - Events: `snapshot`, `job.queued|started|progress|finished|failed|cancelled`, `queue.paused|resumed`,
   `session.started|ended|idle`, `tier.load`.
+- `library` (2026-11-11, `Queue.LibraryChanged`): what the library shows changed. Sent after a scan, full or
+  partial (the watcher's), that indexed, moved, removed or re-read a file (`Scanner.OnChanged`), after folders were
+  read again for a new type, and after a metadata pass that matched or fetched something (`WorkerOptions.OnChanged`);
+  never for a scan or pass that found nothing. Every open page follows the stream (the app shell opens it), so a
+  film that lands on the NAS shows up in every browser without a reload: the page bumps `app.libraryVersion` once a
+  burst has been quiet for 1 s (`LIBRARY_SETTLE_MS`), and what it shows is fetched again. A hidden tab has no
+  stream: it fetches again when it is seen (a list that did not change answers 304).
 - Header icon: hidden when idle, a spinner with a count while running, amber when paused or on a recent failure.
   Click → `#/activity`.
 - Activity page: Running (progress, elapsed, cancel), Queued (grouped, bump/cancel), Playing now (with stop), History

@@ -348,6 +348,23 @@ describe('openActivity', () => {
     expect(es.readyState).toBe(FakeEventSource.CLOSED);
   });
 
+  it('makes the pages fetch the library again once a burst of library events has settled', async () => {
+    const { app } = await import('./state.svelte');
+    const before = app.libraryVersion;
+    const close = mod.openActivity();
+    const es = FakeEventSource.all[0];
+    es.open();
+    es.emit('library', { seq: 3, type: 'library' });
+    await vi.advanceTimersByTimeAsync(mod.LIBRARY_SETTLE_MS / 2);
+    es.emit('library', { seq: 4, type: 'library' }); // the matching after the scan
+    await vi.advanceTimersByTimeAsync(mod.LIBRARY_SETTLE_MS - 1);
+    expect(app.libraryVersion).toBe(before); // still settling
+    await vi.advanceTimersByTimeAsync(1);
+    expect(app.libraryVersion).toBe(before + 1); // once, for both
+    expect(mod.activity.loaded).toBe(false); // the queue's copy is not touched by it
+    close();
+  });
+
   it('polls GET /api/jobs every 3 s when there is no EventSource', async () => {
     vi.stubGlobal('EventSource', undefined);
     const close = mod.openActivity();
@@ -411,6 +428,17 @@ describe('openActivity', () => {
     setVisible('hidden');
     setVisible('visible');
     expect(FakeEventSource.all).toHaveLength(2); // closed for good
+  });
+
+  it('fetches the library again when a hidden page is seen: it heard of no change meanwhile', async () => {
+    const { app } = await import('./state.svelte');
+    const close = mod.openActivity();
+    const before = app.libraryVersion;
+    setVisible('hidden');
+    expect(app.libraryVersion).toBe(before);
+    setVisible('visible');
+    expect(app.libraryVersion).toBe(before + 1);
+    close();
   });
 
   it('markSeen clears the failure light and remembers it', () => {

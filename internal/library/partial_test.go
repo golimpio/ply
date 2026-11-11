@@ -586,3 +586,29 @@ func TestOrphansUnderAFailedRootAreKept(t *testing.T) {
 		t.Error("control: the orphan row of a vanished file was not pruned")
 	}
 }
+
+// OnChanged (the open pages fetch the library again) hears of every scan that
+// changed the library, full or partial, and of no other: a scan every 15 minutes
+// that finds nothing new must not make every page reload.
+func TestOnChangedSaysWhenAScanChangedTheLibrary(t *testing.T) {
+	root := t.TempDir()
+	b := filepath.Join(root, "B (2002).mkv")
+	write(t, filepath.Join(root, "A (2001).mkv"), "1")
+	s, _, _ := newScanner(t, root)
+	n := 0
+	s.OnChanged(func() { n++ })
+	step := func(what string, scan func(), want int) {
+		t.Helper()
+		scan()
+		if n != want {
+			t.Fatalf("%s: told %d times, want %d", what, n, want)
+		}
+	}
+	step("a full scan that indexed a file", func() { mustScan(t, s) }, 1)
+	step("a full scan that found nothing new", func() { mustScan(t, s) }, 1)
+	write(t, b, "2")
+	step("a partial scan that indexed a file", func() { scanDirs(t, s, Dir{Path: root}) }, 2)
+	step("a partial scan that found nothing new", func() { scanDirs(t, s, Dir{Path: root}) }, 2)
+	mustRemove(t, b)
+	step("a partial scan that removed a file", func() { scanDirs(t, s, Dir{Path: root}) }, 3)
+}

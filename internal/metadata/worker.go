@@ -73,6 +73,10 @@ type WorkerOptions struct {
 	// item it was called for is untouched, and what is left (the notifications and
 	// refreshes too) is for the next pass. A nil Pace means no pacing.
 	Pace func(ctx context.Context) error
+	// OnChanged, when set, is called at the end of a pass that may have changed what
+	// the library shows: files matched, sidecars read, a refresh somebody asked for,
+	// seasons fetched. It must not block.
+	OnChanged func()
 }
 
 // Status is what GET /api/metadata/status reports.
@@ -420,6 +424,9 @@ func (w *Worker) pass(ctx context.Context) {
 		if _, err := w.o.Store.PruneMetadata(ctx); err != nil && ctx.Err() == nil {
 			w.noteError(err)
 		}
+	}
+	if did && w.o.OnChanged != nil {
+		w.o.OnChanged()
 	}
 }
 

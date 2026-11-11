@@ -106,6 +106,7 @@ type Scanner struct {
 	onAdded    func(ids []int64)
 	onSidecars func(ids []int64)
 	onRestore  func(itemID, tmdbID int64, kind string)
+	onChanged  func()
 	matchGate  func() bool                                      // nil, or says whether archived matches can be applied now
 	gated      atomic.Bool                                      // a report was held back because the gate was closed
 	pace       func(ctx context.Context, done, total int) error // see SetPace
@@ -201,6 +202,32 @@ func (s *Scanner) OnRestoreMatch(fn func(itemID, tmdbID int64, kind string)) {
 	s.hookMu.Lock()
 	s.onRestore = fn
 	s.hookMu.Unlock()
+}
+
+// OnChanged registers fn to be called after each scan, full or partial, that
+// indexed, moved, removed or read again any file, and after items were read
+// again because their folder got a type: what the library shows has changed.
+// Same rules as OnAdded.
+func (s *Scanner) OnChanged(fn func()) {
+	s.hookMu.Lock()
+	s.onChanged = fn
+	s.hookMu.Unlock()
+}
+
+// changed calls the OnChanged hook if p changed anything.
+func (s *Scanner) changed(p *pass) {
+	if p.sum.indexed.Load() > 0 || p.sum.moved > 0 || p.sum.removed.Load() > 0 || len(p.reparsed) > 0 {
+		s.fireChanged()
+	}
+}
+
+func (s *Scanner) fireChanged() {
+	s.hookMu.Lock()
+	fn := s.onChanged
+	s.hookMu.Unlock()
+	if fn != nil {
+		fn()
+	}
 }
 
 func (s *Scanner) notify(added, sidecars []int64) {
@@ -468,6 +495,7 @@ func (s *Scanner) run(ctx context.Context) (err error) {
 		// A moved item's sidecar artwork is somewhere else now. Re-read items are
 		// pending again, like new ones.
 		s.notify(slices.Concat(p.added, p.reparsed), p.moved)
+		s.changed(p)
 		s.reportMatches(ctx)
 	}
 	return err

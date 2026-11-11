@@ -12,7 +12,8 @@ import (
 // Types: snapshot (reload everything), job.queued, job.updated (merged, bumped),
 // job.held (waiting for playback or browsing, or no longer), job.started,
 // job.progress, job.retrying, job.done, job.failed, job.cancelled, queue.paused,
-// queue.resumed, tier (the state of playback and browsing changed).
+// queue.resumed, tier (the state of playback and browsing changed), and library
+// (what the library shows changed: see LibraryChanged).
 type Event struct {
 	Seq  int64       `json:"seq"`
 	Type string      `json:"type"`
@@ -95,6 +96,11 @@ func (h *hub) last() int64 {
 }
 
 func (q *Queue) publish(e Event) { q.hub.publish(e) }
+
+// LibraryChanged tells the followers of the queue (the open pages) that what the
+// library shows has changed: files came, went or moved, or titles were matched.
+// The stream is the queue's because every page follows it already.
+func (q *Queue) LibraryChanged() { q.publish(Event{Type: "library"}) }
 
 // Subscribe follows the queue. With after > 0 (the Last-Event-ID a client saw)
 // it returns the events since then, if they are still kept; otherwise resync is

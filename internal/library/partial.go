@@ -116,6 +116,7 @@ func (s *Scanner) ScanDirs(ctx context.Context, dirs []Dir) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		// What was indexed before the end is not lost: the worker is told.
 		s.notify(slices.Concat(p.added, p.reparsed), nil)
+		s.changed(p)
 		return Result{}, errors.Join(append(errs, err)...)
 	}
 	for _, d := range clean {
@@ -146,6 +147,7 @@ func (s *Scanner) ScanDirs(ctx context.Context, dirs []Dir) (Result, error) {
 			"duration", time.Since(start).Round(time.Millisecond))
 	}
 	s.notify(slices.Concat(res.Added, p.reparsed), sidecarIDs)
+	s.changed(p)
 	s.reportMatches(ctx)
 	return res, errors.Join(errs...)
 }

@@ -220,7 +220,10 @@ func run() error {
 				}
 			}()
 		},
+		// The open pages fetch the library again (GET /api/events, "library").
+		OnChanged: func() { queue.LibraryChanged() },
 	})
+	scanner.OnChanged(func() { queue.LibraryChanged() })
 	scanner.OnAdded(func(ids []int64) {
 		worker.Notify()
 		if subsFeed != nil {

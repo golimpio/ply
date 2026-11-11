@@ -1,7 +1,10 @@
 // The background queue, live: one EventSource (GET /api/events) opened by the app shell, applied to a
 // local copy of GET /api/jobs. The Header's indicator and the Activity page read it. The queue is the
-// lowest tier (after playback and browsing); this page only makes that visible.
+// lowest tier (after playback and browsing); this page only makes that visible. The same stream says
+// when the library changed ("library": files came, went or moved, titles were matched): every open
+// page then fetches what it shows again.
 import { api, ApiError, mediaUrl, normaliseSnapshot, normaliseTier, type Job, type JobEvent, type JobsSnapshot, type JobState, type TierState } from './api';
+import { app } from './state.svelte';
 
 export const HISTORY_MAX = 200;
 /** A failure this recent lights the indicator, until the Activity page has been seen. */
@@ -9,6 +12,8 @@ export const FAILURE_WINDOW_MS = 10 * 60_000;
 export const POLL_MS = 3000;
 /** EventSource errors in a row (without a successful open) before polling instead. */
 export const SSE_MAX_FAILURES = 3;
+/** Library events less than this apart make one refetch, after the last. */
+export const LIBRARY_SETTLE_MS = 1000;
 
 export const EVENT_TYPES = [
   'snapshot',
@@ -291,6 +296,7 @@ export const activity = new Activity();
 let source: EventSource | null = null;
 let pollTimer: ReturnType<typeof setTimeout> | undefined;
 let clockTimer: ReturnType<typeof setInterval> | undefined;
+let libraryTimer: ReturnType<typeof setTimeout> | undefined;
 // Bumped by every connect and disconnect: callbacks of an older connection do nothing.
 let generation = 0;
 
@@ -333,6 +339,11 @@ function connect() {
       }
     });
   }
+  es.addEventListener('library', () => {
+    if (gen !== generation) return;
+    clearTimeout(libraryTimer);
+    libraryTimer = setTimeout(() => app.libraryVersion++, LIBRARY_SETTLE_MS);
+  });
   es.onopen = () => {
     if (gen !== generation) return;
     failures = 0;
@@ -352,10 +363,15 @@ function connect() {
 
 /**
  * Follow the queue until the returned function is called. Hidden pages stop following; they start
- * again from a fresh snapshot when they are seen.
+ * again from a fresh snapshot when they are seen, and fetch the library again: a library event may have
+ * come meanwhile (a list that did not change answers 304).
  */
 export function openActivity(): () => void {
-  const onVisibility = () => (document.visibilityState === 'hidden' ? disconnect() : connect());
+  const onVisibility = () => {
+    if (document.visibilityState === 'hidden') return disconnect();
+    connect();
+    app.libraryVersion++;
+  };
   document.addEventListener('visibilitychange', onVisibility);
   if (document.visibilityState !== 'hidden') connect();
   return () => {

@@ -269,6 +269,30 @@ func TestWorkerMatchesANewMovieAndPrefetchesItsImages(t *testing.T) {
 	}
 }
 
+// OnChanged (the open pages fetch the library again) hears of a pass that matched
+// something, and not of the pass every minute that finds nothing to do.
+func TestWorkerOnChangedSaysWhenAPassChangedTheLibrary(t *testing.T) {
+	n := 0
+	e := newWEnv(t, func(o *metadata.WorkerOptions) { o.OnChanged = func() { n++ } })
+	e.withMatrix()
+	e.once()
+	if n != 0 {
+		t.Fatalf("a pass over an empty library: told %d times, want 0", n)
+	}
+	id := e.addMovie("Movies/The Matrix (1999).mkv", "The Matrix", 1999)
+	e.once()
+	if got := e.entry(id); got.MatchState != store.MatchMatched {
+		t.Fatalf("control: not matched: %+v", got.Item)
+	}
+	if n != 1 {
+		t.Fatalf("a pass that matched a film: told %d times, want 1", n)
+	}
+	e.once()
+	if n != 1 {
+		t.Fatalf("a pass with nothing to do: told %d times in all, want 1", n)
+	}
+}
+
 func TestWorkerFlagsDoubtfulMatchesAndUnmatchesTheRest(t *testing.T) {
 	e := newWEnv(t)
 	e.fake.MovieSearch = map[string][]metadata.Candidate{
