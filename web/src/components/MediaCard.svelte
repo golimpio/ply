@@ -98,10 +98,10 @@
     display: block;
     min-width: 0;
     content-visibility: auto;
-    contain-intrinsic-size: auto 260px;
+    contain-intrinsic-size: auto 280px;
   }
   .card.poster {
-    contain-intrinsic-size: auto 340px;
+    contain-intrinsic-size: auto 390px;
   }
   .frame {
     position: relative;
@@ -163,21 +163,23 @@
     background: var(--accent);
   }
   .title {
-    margin-top: 0.55rem;
+    margin-top: 0.65rem;
     font-family: var(--font-display);
-    font-size: var(--fs-lg);
+    font-size: var(--fs-xl);
     font-weight: var(--fw-regular);
     line-height: var(--lh-tight);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    color: var(--text);
   }
   /* One line tall: a rating glyph (1.3em) no longer makes it taller, its text where it was. */
   .sub {
     display: flex;
+    align-items: center;
     height: 1lh;
-    gap: 0.65rem;
-    margin-top: 0.1rem;
+    gap: 0.55rem;
+    margin-top: 0.15rem;
     color: var(--text-muted);
     font-family: var(--font-mono);
     font-size: var(--fs-xs);
@@ -190,13 +192,28 @@
   .sub span {
     flex: none;
   }
-  .rating {
-    color: var(--text);
-  }
   .sub span:last-child {
     flex: 0 1 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .rating {
+    display: inline-flex;
+    align-items: center;
+    color: var(--text);
+  }
+  .rating :global(.score-chip) {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    border: none;
+    background: transparent;
+    padding: 0;
+    line-height: 1;
+  }
+  .rating :global(.glyph) {
+    width: 0.9em;
+    height: 0.9em;
   }
 </style>

@@ -41,7 +41,6 @@
   import { app, rescan, scan } from '../lib/state.svelte';
   import { artOf, progressOf } from '../lib/ui-types';
   import Art, { type ArtItem } from '../components/Art.svelte';
-  import Badges from '../components/Badges.svelte';
   import HeroTitle from '../components/HeroTitle.svelte';
   import Icon from '../components/Icon.svelte';
   import MediaCard from '../components/MediaCard.svelte';
@@ -57,7 +56,6 @@
   type MoodLens = 'weeknight' | 'double' | 'noir' | 'epic' | 'unwatched' | 'series';
   let moodLens = $state<MoodLens>('weeknight');
   let heroOffset = $state(0);
-  let focusFilter = $state('All');
 
   const LENSES: [MoodLens, string, string][] = [
     ['weeknight', 'Tonight (≤100m)', 'Tonight’s Weeknight Pick · Under 100m'],
@@ -275,7 +273,7 @@
   const featureDirector = $derived.by(() => {
     if (feature?.kind === 'episode') return '';
     const dirs = crewWith(featureDetail?.meta, ['Director']);
-    return dirs.length ? dirs.slice(0, 2).map((d) => d.name).join(', ') : '';
+    return dirs.length ? dirs[0].name : '';
   });
   const featureTagline = $derived(featureDetail?.meta?.tagline || '');
   const featureScores = $derived.by(() => {
@@ -333,28 +331,10 @@
     return shared ? `Paired ${shared.toLowerCase()} study from your archive` : 'Complementary screening from your archive';
   });
 
-  // Curated Chapter 01: Auteur & Critics Focus with interactive genre/theme pivot pills
-  const focusOptions = $derived.by((): string[] => {
-    const counts = new Map<string, number>();
-    for (const g of films) {
-      for (const name of g.item.genres ?? []) {
-        counts.set(name, (counts.get(name) ?? 0) + 1);
-      }
-    }
-    const top = [...counts.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([name]) => name);
-    return ['All', ...top];
-  });
-
+  // Curated Chapter 01: Auteur & Critics Focus
   const acclaimedFilms = $derived.by(() => {
     const base = films.map((g) => g.item);
-    const filtered =
-      focusFilter === 'All'
-        ? base
-        : [...base.filter((m) => m.genres?.includes(focusFilter))].sort((a, b) => ratingScore(b) - ratingScore(a) || byName(a, b));
-    return (filtered.length ? filtered : base).slice(0, 30);
+    return [...base].sort((a, b) => ratingScore(b) - ratingScore(a) || byName(a, b)).slice(0, 30);
   });
 
   // Curated Chapter 02: Acclaimed & Under 100 Minutes (Weeknight Duration)
@@ -433,40 +413,48 @@
       <div class="spread-feature">
         {#if feature}
           <div class="kicker tabular">
-            <span class="kicker-accent">● {lensKicker}</span>
+            <span class="kicker-accent">● {lensKicker.toUpperCase()}</span>
             {#if featureEndsAt}
               <span>·</span>
-              <span>Starts Now · {featureEndsAt}</span>
+              <span>STARTS NOW · {featureEndsAt.toUpperCase()}</span>
             {/if}
           </div>
 
           <div class="feature-grid">
             <a class="feature-art" href={href.item(feature.id)} onclick={morph}>
-              <Art item={feature} kind="backdrop" ratio="16 / 10" label={cardTitle(feature)} eager />
+              <Art item={feature} kind="backdrop" ratio="16 / 9" label={cardTitle(feature)} eager />
             </a>
 
             <div class="feature-copy">
-              <HeroTitle title={cardTitle(feature)} logo={featureLogo} />
-
-              <div class="meta">
-                {#if isEpisode(feature)}<span>{episodeLabel(feature.season, feature.episode)}{#if 'episodeTitle' in feature && feature.episodeTitle} · {feature.episodeTitle}{/if}</span>{/if}
-                {#if feature.year}<span>{feature.year}</span>{/if}
-                {#if featureDirector}<span>{featureDirector}</span>{/if}
-                {#if feature.certification}<span class="cert">{feature.certification}</span>{/if}
-                {#if feature.durationSec}<span>{formatDuration(feature.durationSec)}</span>{/if}
-                <span class="badges"><Badges item={feature} /></span>
+              <div class="hero-meta">
+                {#if isEpisode(feature)}
+                  <span>{feature.year || ''}</span>
+                  {#if feature.year}<span>·</span>{/if}
+                  <span>{episodeLabel(feature.season, feature.episode)}{#if 'episodeTitle' in feature && feature.episodeTitle} — {feature.episodeTitle}{/if}</span>
+                  {#if feature.durationSec}<span>·</span><span>{formatDuration(feature.durationSec)}</span>{/if}
+                {:else}
+                  {#if feature.year}<span>{feature.year}</span>{/if}
+                  {#if feature.year && (featureDirector || feature.durationSec)}<span>·</span>{/if}
+                  {#if featureDirector}<span>{featureDirector}</span>{/if}
+                  {#if featureDirector && feature.durationSec}<span>·</span>{/if}
+                  {#if feature.durationSec}<span>{formatDuration(feature.durationSec)}</span>{/if}
+                {/if}
               </div>
 
-              {#if featureTagline}
-                <p class="feature-tagline">{featureTagline}</p>
+              <HeroTitle title={cardTitle(feature)} logo={featureLogo} />
+
+              {#if featureDetail?.meta?.originalTitle && featureDetail.meta.originalTitle !== cardTitle(feature)}
+                <div class="hero-orig">{featureDetail.meta.originalTitle}</div>
+              {:else if featureTagline}
+                <p class="hero-orig">{featureTagline}</p>
               {:else if feature.genres?.length}
-                <p class="feature-tagline">{feature.genres.slice(0, 3).join(' · ')}</p>
+                <p class="hero-orig">{feature.genres.slice(0, 3).join(' · ')}</p>
               {/if}
 
               {#if featureScores.length}
-                <div class="feature-scores tabular">
+                <div class="hero-scores tabular">
                   {#each featureScores as s (s.source)}
-                    <span class="feature-score-item">
+                    <span class="hero-score-item">
                       <RatingGlyph entry={s.entry} />
                       <strong class="score-num">{s.val}</strong>
                     </span>
@@ -475,10 +463,12 @@
               {/if}
 
               <div class="hero-actions">
-                <a class="btn primary" href={href.play(feature.id, resumeAt(feature))}>
-                  <Icon name="play" />{resumeAt(feature) ? 'Resume' : 'Play'}{#if featureEndsAt} · {featureEndsAt}{/if}
+                <a class="btn-play-minimal" href={href.play(feature.id, resumeAt(feature))}>
+                  <Icon name="play" /><span>{resumeAt(feature) ? 'Resume' : 'Play'}{#if featureEndsAt} · {featureEndsAt}{/if}</span>
                 </a>
-                <a class="btn" href={href.item(feature.id)}><Icon name="info" />Details</a>
+                <a class="btn-details-minimal" href={href.item(feature.id)}>
+                  <Icon name="info" /><span>Details</span>
+                </a>
               </div>
             </div>
           </div>
@@ -573,29 +563,14 @@
 
       {#if acclaimedFilms.length >= 2}
         <Rail
-          index="01 / AUTEUR FOCUS"
+          index="01 / CURATED MONOGRAPHS"
           title="World & Auteur Cinema"
+          subtitle="Godard, Wong Kar-wai, Wenders, Song, Kaurismäki"
           items={acclaimedFilms}
           key={(m) => m.id}
           size={moviePosters ? 'poster' : 'wide'}
           more={{ href: href.movies, label: `All ${films.length}` }}
         >
-          {#snippet subhead()}
-            {#if focusOptions.length > 2}
-              <div class="focus-pills">
-                {#each focusOptions as opt (opt)}
-                  <button
-                    type="button"
-                    class="focus-pill"
-                    class:active={focusFilter === opt}
-                    onclick={() => (focusFilter = opt)}
-                  >
-                    {opt === 'All' ? 'All Curated Works' : opt}
-                  </button>
-                {/each}
-              </div>
-            {/if}
-          {/snippet}
           {#snippet card(m: MovieCard)}
             <MediaCard
               item={m}
@@ -746,10 +721,10 @@
   /* Top Asymmetric Spread */
   .spread {
     display: grid;
-    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
-    gap: 2.5rem;
+    grid-template-columns: minmax(0, 1.48fr) minmax(0, 1fr);
+    gap: clamp(28px, 4vw, 56px);
     align-items: start;
-    padding: 2rem var(--gutter);
+    padding: clamp(24px, 3.5vw, 44px) var(--gutter);
   }
   .spread-feature {
     min-width: 0;
@@ -759,7 +734,7 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 0.65rem;
-    margin-bottom: 1rem;
+    margin-bottom: 1.15rem;
     font-family: var(--font-mono);
     font-size: var(--fs-2xs-2);
     text-transform: uppercase;
@@ -771,9 +746,9 @@
   }
   .feature-grid {
     display: grid;
-    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
-    gap: 1.5rem;
-    align-items: start;
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+    gap: clamp(20px, 2.5vw, 32px);
+    align-items: center;
   }
   .feature-art {
     display: block;
@@ -790,12 +765,30 @@
   }
   .feature-copy {
     min-width: 0;
-    display: grid;
-    gap: 0.65rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .hero-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.45rem;
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs-2);
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    margin-bottom: 0.45rem;
   }
   .feature-copy :global(h1) {
-    font-size: var(--fs-display);
-    line-height: var(--lh-display);
+    font-family: var(--font-display);
+    font-size: var(--fs-h1);
+    font-weight: var(--fw-regular);
+    line-height: 1.05;
+    letter-spacing: -0.015em;
+    color: var(--text);
+    margin: 0 0 0.5rem 0;
   }
   .feature-copy :global(.logo) {
     display: block;
@@ -805,46 +798,97 @@
     height: auto;
     object-fit: contain;
     object-position: left bottom;
+    margin-bottom: 0.5rem;
   }
-  .feature-tagline {
-    margin: 0;
+  .hero-orig {
+    margin: 0 0 0.85rem 0;
     font-family: var(--font-display);
     font-style: italic;
-    font-size: var(--fs-xl);
+    font-size: var(--fs-lede);
     color: var(--text-muted);
-    line-height: var(--lh-snug);
+    line-height: 1.25;
   }
-  .feature-scores {
+  .hero-scores {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 1.25rem;
-    padding-top: 0.15rem;
+    gap: 1.35rem;
+    margin-bottom: 1.35rem;
     font-family: var(--font-mono);
     font-size: var(--fs-xs);
     color: var(--text-muted);
   }
-  .feature-score-item {
+  .hero-score-item {
     display: inline-flex;
     align-items: center;
     gap: 0.45rem;
   }
-  .feature-score-item :global(.glyph) {
-    width: 1.35em;
-    height: 1.35em;
+  .hero-score-item :global(.glyph) {
+    width: 1.2em;
+    height: 1.2em;
     color: var(--text-muted);
   }
   .score-num {
     font-family: var(--font-display);
-    font-size: var(--fs-3xl);
+    font-size: var(--fs-2xl);
     font-weight: var(--fw-regular);
     color: var(--text);
-    margin-right: 0.2rem;
+    margin-right: 0.15rem;
   }
-  .meta {
+  .hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .btn-play-minimal {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    background: var(--text);
+    color: var(--bg);
+    border: none;
+    border-radius: var(--radius-pill);
+    padding: 0.65rem 1.35rem;
+    font-family: var(--font-sans);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+    cursor: pointer;
+    text-decoration: none;
+    transition: transform var(--motion-hover), opacity var(--motion-hover);
+  }
+  .btn-play-minimal:hover {
+    transform: translateY(-1px);
+    opacity: 0.92;
+  }
+  .btn-play-minimal :global(.icon) {
+    width: 1rem;
+    height: 1rem;
+    fill: currentColor;
+  }
+  .btn-details-minimal {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    background: var(--fill-subtle);
     color: var(--text-muted);
-    font-family: var(--font-mono);
-    font-size: var(--fs-xs);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill);
+    padding: 0.65rem 1.15rem;
+    font-family: var(--font-sans);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+    cursor: pointer;
+    text-decoration: none;
+    transition: color var(--motion-hover), border-color var(--motion-hover);
+  }
+  .btn-details-minimal:hover {
+    color: var(--text);
+    border-color: var(--text-muted);
+  }
+  .btn-details-minimal :global(.icon) {
+    width: 0.95rem;
+    height: 0.95rem;
   }
 
   /* Borderless Double Bill Pairing footnote */
@@ -1006,34 +1050,6 @@
     white-space: nowrap;
   }
 
-  /* Focus pills inside Chapter 01 */
-  .focus-pills {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.5rem;
-  }
-  .focus-pill {
-    padding: 0.25rem 0.9rem;
-    font-family: var(--font-display);
-    font-style: italic;
-    font-size: var(--fs-base);
-    color: var(--text-muted);
-    background: var(--fill-subtle);
-    border: 1px solid transparent;
-    border-radius: var(--radius-pill);
-    cursor: pointer;
-    transition:
-      color var(--motion-hover),
-      border-color var(--motion-hover);
-  }
-  .focus-pill:hover {
-    color: var(--text);
-  }
-  .focus-pill.active {
-    color: var(--text);
-    border-color: var(--text);
-  }
 
   .rails {
     padding-bottom: 4rem;

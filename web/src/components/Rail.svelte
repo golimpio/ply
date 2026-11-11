@@ -163,7 +163,8 @@
     scrollbar-width: none;
   }
   ul.poster {
-    grid-auto-columns: clamp(148px, 14vw, 205px);
+    grid-auto-columns: clamp(190px, 18.5vw, 275px);
+    gap: clamp(16px, 2vw, 26px);
   }
   ul.person {
     grid-auto-columns: clamp(110px, 10vw, 150px);
