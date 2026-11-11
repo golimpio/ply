@@ -46,6 +46,7 @@
   import Icon from '../components/Icon.svelte';
   import MediaCard from '../components/MediaCard.svelte';
   import Rail from '../components/Rail.svelte';
+  import RatingGlyph from '../components/RatingGlyph.svelte';
 
   let continueItems = $state<ItemSummary[]>([]);
   let upcoming = $state<UpcomingShow[]>([]);
@@ -280,18 +281,18 @@
   const featureScores = $derived.by(() => {
     const fallback = lead && 'rating' in lead ? lead : null;
     const list = titleRatings(featureDetail?.meta, fallback);
-    const labels: Record<string, string> = {
-      imdb: 'IMDb',
-      rt_critics: 'RT',
-      rt_audience: 'Audience',
-      metacritic: 'MC',
-      letterboxd: 'LB',
-      tmdb: 'TMDB',
-      trakt: 'Trakt',
-    };
-    return list.slice(0, 3).map((r) => ({
+    if (!list.length) return [];
+    // Prioritize Rotten Tomatoes critics/audience when available, then IMDb, then others
+    const priority = ['rt_critics', 'rt_audience', 'imdb', 'letterboxd', 'metacritic', 'tmdb', 'trakt'];
+    const sorted = [...list].sort((a, b) => {
+      const ia = priority.indexOf(a.source);
+      const ib = priority.indexOf(b.source);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    });
+    return sorted.slice(0, 3).map((r) => ({
       val: ratingValue(r),
-      label: labels[r.source] ?? r.source.toUpperCase(),
+      source: r.source,
+      entry: r,
     }));
   });
 
@@ -464,8 +465,11 @@
 
               {#if featureScores.length}
                 <div class="feature-scores tabular">
-                  {#each featureScores as s (s.label)}
-                    <span><strong class="score-num">{s.val}</strong> {s.label}</span>
+                  {#each featureScores as s (s.source)}
+                    <span class="feature-score-item">
+                      <RatingGlyph entry={s.entry} />
+                      <strong class="score-num">{s.val}</strong>
+                    </span>
                   {/each}
                 </div>
               {/if}
@@ -813,11 +817,21 @@
   .feature-scores {
     display: flex;
     flex-wrap: wrap;
-    align-items: baseline;
-    gap: 1.15rem;
+    align-items: center;
+    gap: 1.25rem;
     padding-top: 0.15rem;
     font-family: var(--font-mono);
     font-size: var(--fs-xs);
+    color: var(--text-muted);
+  }
+  .feature-score-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+  }
+  .feature-score-item :global(.glyph) {
+    width: 1.35em;
+    height: 1.35em;
     color: var(--text-muted);
   }
   .score-num {

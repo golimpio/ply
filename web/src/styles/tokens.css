@@ -299,6 +299,7 @@
   --rating-bucket: var(--tomato-600); /* the popcorn's bucket */
   --rating-kernel: var(--kernel-100);
   --rating-star: var(--accent);
+  --rating-imdb: var(--accent);
 
   /* Scrims and shades: what darkens a picture under text. */
   --scrim: var(--soot-a60); /* behind a dialog */

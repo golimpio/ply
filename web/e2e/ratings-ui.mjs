@@ -302,7 +302,8 @@ const scenarios = {
     await page.locator('.grid .card').nth(4).waitFor();
     const heat = page.locator('.grid .card', { hasText: 'Heat' });
     const r = heat.locator('.sub [data-source]');
-    check('Heat shows its IMDb rating', (await face(r)) === 'IMDb 8.7', await face(r));
+    check('Heat shows its IMDb rating', (await face(r)) === '8.7', await face(r));
+    check('Heat has an IMDb glyph', (await r.locator('svg.glyph[data-glyph="imdb"]').count()) === 1);
     check('quiet: no frame, no link inside the card', (await r.evaluate((e) => e.tagName)) === 'SPAN' && (await r.evaluate((e) => e.classList.contains('compact'))));
     const alien = await face(page.locator('.grid .card', { hasText: 'Alien' }).locator('.sub [data-source]'));
     check('Alien shows its Tomatometer', alien === '65%', alien);
@@ -362,7 +363,8 @@ const scenarios = {
     const eps = page.locator('ol.episodes li');
     await eps.nth(1).waitFor();
     const first = eps.nth(0).locator('[data-source="imdb"]');
-    check('episode 1 shows IMDb 8.9', (await face(first)) === 'IMDb 8.9', await face(first));
+    check('episode 1 shows IMDb 8.9', (await face(first)) === '8.9', await face(first));
+    check('episode 1 has an IMDb glyph', (await first.locator('svg.glyph[data-glyph="imdb"]').count()) === 1);
     check('episode 2, with none, shows none', (await eps.nth(1).locator('[data-source]').count()) === 0);
     check("the show's chips are on the page too", (await face(page.locator('ul.ratings [data-source="imdb"]'))) === 'IMDb 9.0 600K');
     await context.close();

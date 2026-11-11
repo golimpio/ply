@@ -807,3 +807,55 @@ func TestRatingLinksAreWhatWasStored(t *testing.T) {
 		}
 	}
 }
+
+func TestPrimaryRatingPrefersRottenTomatoesWhenAvailable(t *testing.T) {
+	// 1. RT critics preferred when primary is rt_critics and present
+	both := []store.Rating{
+		{Source: store.RatingIMDb, Value: 8.5, Scale: 10, Votes: 1000},
+		{Source: store.RatingRTCritics, Value: 92, Scale: 100, Votes: 200},
+		{Source: store.RatingRTAudience, Value: 88, Scale: 100, Votes: 500},
+	}
+	got := primaryRating(both, store.RatingRTCritics)
+	if got == nil || got.Source != store.RatingRTCritics {
+		t.Fatalf("expected RT critics, got %+v", got)
+	}
+
+	// 2. Audience preferred when primary is rt_critics but critics absent
+	audienceOnly := []store.Rating{
+		{Source: store.RatingIMDb, Value: 8.5, Scale: 10, Votes: 1000},
+		{Source: store.RatingRTAudience, Value: 88, Scale: 100, Votes: 500},
+	}
+	gotAudience := primaryRating(audienceOnly, store.RatingRTCritics)
+	if gotAudience == nil || gotAudience.Source != store.RatingRTAudience {
+		t.Fatalf("expected RT audience, got %+v", gotAudience)
+	}
+
+	// 3. Fallback to IMDb when primary is rt_critics and RT absent
+	imdbOnly := []store.Rating{
+		{Source: store.RatingIMDb, Value: 8.5, Scale: 10, Votes: 1000},
+	}
+	gotIMDb := primaryRating(imdbOnly, store.RatingRTCritics)
+	if gotIMDb == nil || gotIMDb.Source != store.RatingIMDb {
+		t.Fatalf("expected IMDb, got %+v", gotIMDb)
+	}
+
+	// 4. Positive control for absence: non-empty returns non-nil, empty returns nil
+	if primaryRating(imdbOnly, "") == nil {
+		t.Fatal("imdbOnly must return a rating (positive control)")
+	}
+	if primaryRating(nil, "") != nil {
+		t.Fatalf("expected nil for empty ratings")
+	}
+
+	// 5. Explicit primary honored
+	other := []store.Rating{
+		{Source: store.RatingIMDb, Value: 8.5, Scale: 10, Votes: 1000},
+		{Source: store.RatingRTCritics, Value: 92, Scale: 100, Votes: 200},
+		{Source: "letterboxd", Value: 4.2, Scale: 5, Votes: 50},
+	}
+	gotOther := primaryRating(other, "letterboxd")
+	if gotOther == nil || gotOther.Source != "letterboxd" {
+		t.Fatalf("expected letterboxd, got %+v", gotOther)
+	}
+}
+

@@ -96,15 +96,22 @@ func episodeRatings(ep store.Episode) []RatingEntry {
 	return []RatingEntry{ratingEntry(*ep.IMDbRating)}
 }
 
-// primaryRating is the rating a card shows: the primary source's, else the first there is in the
-// fixed order (the ratings come in it); nil for a title with none.
+// primaryRating is the rating a card shows: the primary source (or Rotten Tomatoes audience
+// if critics was chosen but missing), else the first available in RatingSources.
 func primaryRating(rs []store.Rating, primary string) *RatingEntry {
 	if len(rs) == 0 {
 		return nil
 	}
 	pick := rs[0]
-	if i := slices.IndexFunc(rs, func(r store.Rating) bool { return r.Source == primary }); i >= 0 {
-		pick = rs[i]
+	if primary != "" {
+		if i := slices.IndexFunc(rs, func(r store.Rating) bool { return r.Source == primary }); i >= 0 {
+			pick = rs[i]
+		} else if primary == store.RatingRTCritics {
+			// When primary is Rotten Tomatoes critics and missing, fall back to audience before other sources.
+			if i := slices.IndexFunc(rs, func(r store.Rating) bool { return r.Source == store.RatingRTAudience }); i >= 0 {
+				pick = rs[i]
+			}
+		}
 	}
 	e := ratingEntry(pick)
 	return &e
