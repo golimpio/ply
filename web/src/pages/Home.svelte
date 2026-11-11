@@ -207,13 +207,21 @@
     return [...pool].sort((a, b) => scorePreference(b) - scorePreference(a) || b.addedAt - a.addedAt);
   });
 
-  const lead = $derived(
-    lensPool[heroOffset % Math.max(lensPool.length, 1)] ??
-      films.map((g) => g.item).find((i) => 'backdrop' in i && i.backdrop) ??
-      films.map((g) => g.item)[0] ??
-      recent.find((i) => i.kind === 'movie') ??
-      recent[0],
-  );
+  const lead = $derived.by((): LibraryRow | undefined => {
+    if (lensPool.length > 0) {
+      return lensPool[heroOffset % lensPool.length];
+    }
+    if (moodLens === 'series') {
+      const allEpisodeRows = rows.filter((i) => i.kind === 'episode');
+      return allEpisodeRows[0] ?? recent.find((i) => i.kind === 'episode');
+    }
+    const allMovieRows: LibraryRow[] = movies.rows.length ? [...movies.rows] : rows.filter((i) => i.kind === 'movie');
+    return (
+      allMovieRows.find((i) => 'backdrop' in i && i.backdrop) ??
+      allMovieRows[0] ??
+      recent.find((i) => i.kind === 'movie')
+    );
+  });
 
   /** What the hero reads: a full row, or a film's card when its detail could not be had. */
   type HeroItem = ArtItem &
@@ -264,8 +272,9 @@
   const featureDetail = $derived(full?.id === lead?.id ? full?.item : null);
   const featureLogo = $derived(feature?.kind === 'movie' ? logoSrc(feature) : '');
   const featureDirector = $derived.by(() => {
+    if (feature?.kind === 'episode') return '';
     const dirs = crewWith(featureDetail?.meta, ['Director']);
-    return dirs.length ? dirs.map((d) => d.name).join(', ') : '';
+    return dirs.length ? dirs.slice(0, 2).map((d) => d.name).join(', ') : '';
   });
   const featureTagline = $derived(featureDetail?.meta?.tagline || '');
   const featureScores = $derived.by(() => {
@@ -436,16 +445,16 @@
             </a>
 
             <div class="feature-copy">
+              <HeroTitle title={cardTitle(feature)} logo={featureLogo} />
+
               <div class="meta">
-                {#if isEpisode(feature)}<span>{episodeLabel(feature.season, feature.episode)}</span>{/if}
+                {#if isEpisode(feature)}<span>{episodeLabel(feature.season, feature.episode)}{#if 'episodeTitle' in feature && feature.episodeTitle} · {feature.episodeTitle}{/if}</span>{/if}
                 {#if feature.year}<span>{feature.year}</span>{/if}
                 {#if featureDirector}<span>{featureDirector}</span>{/if}
                 {#if feature.certification}<span class="cert">{feature.certification}</span>{/if}
                 {#if feature.durationSec}<span>{formatDuration(feature.durationSec)}</span>{/if}
                 <span class="badges"><Badges item={feature} /></span>
               </div>
-
-              <HeroTitle title={cardTitle(feature)} logo={featureLogo} />
 
               {#if featureTagline}
                 <p class="feature-tagline">{featureTagline}</p>
@@ -760,7 +769,7 @@
     display: grid;
     grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
     gap: 1.5rem;
-    align-items: center;
+    align-items: start;
   }
   .feature-art {
     display: block;
