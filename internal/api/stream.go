@@ -20,7 +20,7 @@ import (
 // attachSession starts an HLS session for a remux or transcode decision and
 // fills in pb. It reports false after writing an error response.
 func (s *Server) attachSession(w http.ResponseWriter, r *http.Request, e store.Entry, d playback.Decision,
-	profile playback.Profile, startSec float64, pb *Playback) bool {
+	profile playback.Profile, startSec float64, subtitleKey string, pb *Playback) bool {
 	if s.Streams == nil {
 		pb.Reasons = append(pb.Reasons, "HLS streaming is not enabled on this server")
 		return true
@@ -50,6 +50,8 @@ func (s *Server) attachSession(w http.ResponseWriter, r *http.Request, e store.E
 		StartSec:    startSec,
 		Title:       playTitle(e),
 		Client:      clientLabel(r),
+		Wireless:    profile.Name == "airplay",
+		SubtitleKey: subtitleKey,
 	}
 	if a, ok := playback.AudioStream(e.Streams, d.AudioIndex); ok && d.AudioIndex >= 0 {
 		req.AudioCodec = a.Codec
@@ -72,7 +74,11 @@ func (s *Server) attachSession(w http.ResponseWriter, r *http.Request, e store.E
 		s.internalError(w, r, err)
 		return false
 	}
-	pb.URL = s.withToken("/api/sessions/" + sess.ID + "/index.m3u8")
+	playlist := "index.m3u8"
+	if subtitleKey != "" {
+		playlist = "master.m3u8"
+	}
+	pb.URL = s.withToken("/api/sessions/" + sess.ID + "/" + playlist)
 	pb.SessionID = sess.ID
 	pb.StartSec = startSec
 	return true

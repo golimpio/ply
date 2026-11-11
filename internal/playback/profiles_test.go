@@ -9,7 +9,7 @@ import (
 func TestBuiltinProfiles(t *testing.T) {
 	for _, name := range BuiltinNames {
 		p, ok := Builtin(strings.ToUpper(name))
-		if !ok || p.Name != name || !p.HLS || len(p.Containers) == 0 || len(p.VideoCodecs) == 0 || len(p.AudioCodecs) == 0 {
+		if !ok || p.Name != name || !p.HLS || (len(p.Containers) == 0 && name != "airplay") || len(p.VideoCodecs) == 0 || len(p.AudioCodecs) == 0 {
 			t.Errorf("Builtin(%q) = %+v, %v", name, p, ok)
 		}
 	}
@@ -49,17 +49,17 @@ func TestBuiltinMatrix(t *testing.T) {
 		"mp4 h264 10-bit":   {"mp4", func() Stream { v := vid("h264", "avc1", 1080); v.PixFmt = "yuv420p10le"; return v }(), aud(1, "aac", true)},
 	}
 	want := map[string]map[string]string{ // file -> profile -> method[/audio action]
-		"mp4 h264 aac":      {"avplayer": "direct", "browser": "direct", "chromecast": "direct"},
-		"mp4 h264 ac3":      {"avplayer": "direct", "browser": "remux/transcode", "chromecast": "remux/transcode"},
-		"mp4 h264 4k":       {"avplayer": "direct", "browser": "direct", "chromecast": "transcode"},
-		"mp4 hevc hvc1 aac": {"avplayer": "direct", "browser": "transcode", "chromecast": "transcode"},
-		"mkv h264 aac":      {"avplayer": "remux", "browser": "remux", "chromecast": "remux"},
-		"mkv h264 eac3":     {"avplayer": "remux", "browser": "remux/transcode", "chromecast": "remux/transcode"},
-		"mkv hevc eac3":     {"avplayer": "remux", "browser": "transcode", "chromecast": "transcode"},
-		"webm vp9 opus":     {"avplayer": "transcode", "browser": "direct", "chromecast": "transcode"},
-		"webm av1 opus":     {"avplayer": "transcode", "browser": "direct", "chromecast": "transcode"},
-		"avi mpeg4 mp3":     {"avplayer": "transcode", "browser": "transcode", "chromecast": "transcode"},
-		"mp4 h264 10-bit":   {"avplayer": "transcode", "browser": "transcode", "chromecast": "transcode"},
+		"mp4 h264 aac":      {"avplayer": "direct", "browser": "direct", "chromecast": "direct", "airplay": "remux"},
+		"mp4 h264 ac3":      {"avplayer": "direct", "browser": "remux/transcode", "chromecast": "remux/transcode", "airplay": "remux/transcode"},
+		"mp4 h264 4k":       {"avplayer": "direct", "browser": "direct", "chromecast": "transcode", "airplay": "transcode"},
+		"mp4 hevc hvc1 aac": {"avplayer": "direct", "browser": "transcode", "chromecast": "transcode", "airplay": "transcode"},
+		"mkv h264 aac":      {"avplayer": "remux", "browser": "remux", "chromecast": "remux", "airplay": "remux"},
+		"mkv h264 eac3":     {"avplayer": "remux", "browser": "remux/transcode", "chromecast": "remux/transcode", "airplay": "remux/transcode"},
+		"mkv hevc eac3":     {"avplayer": "remux", "browser": "transcode", "chromecast": "transcode", "airplay": "transcode"},
+		"webm vp9 opus":     {"avplayer": "transcode", "browser": "direct", "chromecast": "transcode", "airplay": "transcode"},
+		"webm av1 opus":     {"avplayer": "transcode", "browser": "direct", "chromecast": "transcode", "airplay": "transcode"},
+		"avi mpeg4 mp3":     {"avplayer": "transcode", "browser": "transcode", "chromecast": "transcode", "airplay": "transcode"},
+		"mp4 h264 10-bit":   {"avplayer": "transcode", "browser": "transcode", "chromecast": "transcode", "airplay": "transcode"},
 	}
 	for name, f := range files {
 		for _, pn := range BuiltinNames {
@@ -137,7 +137,11 @@ func TestBurnInForcesTranscodeOnEveryProfile(t *testing.T) {
 	for _, pn := range BuiltinNames {
 		p, _ := Builtin(pn)
 		st := streams(vid("h264", "avc1", 720), aud(1, "aac", true), sub(2, "hdmv_pgs_subtitle"), sub(3, "subrip"))
-		if d := Decide(Item{Container: "mp4"}, st, p, NoOptions); d.Method != MethodDirect {
+		control := MethodDirect
+		if pn == "airplay" {
+			control = MethodRemux
+		}
+		if d := Decide(Item{Container: "mp4"}, st, p, NoOptions); d.Method != control {
 			t.Fatalf("%s: control: %+v", pn, d) // positive control
 		}
 		d := Decide(Item{Container: "mp4"}, st, p, Options{AudioIndex: -1, SubtitleIndex: 2})
@@ -145,7 +149,7 @@ func TestBurnInForcesTranscodeOnEveryProfile(t *testing.T) {
 			t.Errorf("%s: %+v", pn, d)
 		}
 		// A text subtitle is delivered as a sidecar, not burned.
-		if d := Decide(Item{Container: "mp4"}, st, p, Options{AudioIndex: -1, SubtitleIndex: 3}); d.Method != MethodDirect || d.BurnSubtitle != -1 {
+		if d := Decide(Item{Container: "mp4"}, st, p, Options{AudioIndex: -1, SubtitleIndex: 3}); d.Method != control || d.BurnSubtitle != -1 {
 			t.Errorf("%s: text subtitle: %+v", pn, d)
 		}
 	}

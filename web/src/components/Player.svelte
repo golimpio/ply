@@ -3,6 +3,7 @@
   import type HlsType from 'hls.js';
   import { api, mediaUrl, type ItemDetail, type Playback, type Subtitle } from '../lib/api';
   import { channelLabel, codecLabel, episodeLabel, languageLabel, methodLabel } from '../lib/format';
+  import { observeAirPlay, showAirPlay, supportsAirPlay } from '../lib/airplay';
   import { Heartbeat } from '../lib/heartbeat';
   import { applyProgress } from '../lib/library.svelte';
   import { AUTO_RETRIES, limitOf, probeMedia, type PlayLimit as Limit } from '../lib/playlimit';
@@ -14,7 +15,17 @@
   import PlayerControls, { type Track } from './PlayerControls.svelte';
   import PlayLimit from './PlayLimit.svelte';
 
-  let { item, startSec = 0 }: { item: ItemDetail; startSec?: number } = $props();
+  let { item, startSec = 0, active = true, wireless = $bindable(false), onStop }: {
+    item: ItemDetail;
+    startSec?: number;
+    active?: boolean;
+    wireless?: boolean;
+    onStop?: () => void;
+  } = $props();
+
+  let airplayAvailable = $state(false);
+  let airplayError = $state('');
+  let nativeAirPlay = false;
 
   let video = $state<HTMLVideoElement>();
   /** 'stopped': someone stopped this play on purpose (410), from another device or the Activity page. */
@@ -64,7 +75,7 @@
    * means the server lost it (sessionLost); a 410 that someone stopped it (stoppedElsewhere).
    */
   const heartbeat = new Heartbeat({
-    send: (sid, pos, paused) => api.heartbeat(sid, pos, paused),
+    send: (sid, pos, paused) => api.heartbeat(sid, pos, paused, nativeAirPlay ? wireless : undefined),
     position: () => progress.position(),
     paused: () => el?.paused ?? true,
     onGone: (sid, pos) => {
@@ -131,6 +142,10 @@
   $effect(() => {
     const v = video;
     const sub = textSub;
+    if (nativeAirPlay) {
+      showNativeSubtitle(); // the selected rendition travels in HLS, not a DOM <track>
+      return;
+    }
     if (!v || !sub?.url) return;
     const t = document.createElement('track');
     t.kind = 'subtitles';
@@ -186,10 +201,21 @@
     };
   });
 
+  function showNativeSubtitle() {
+    if (!nativeAirPlay || !el) return;
+    const tracks = Array.from(el.textTracks);
+    const selected = textSub ? tracks.find((track) => track.kind === 'subtitles') : undefined;
+    for (const track of tracks) {
+      if (track.kind === 'subtitles' || track.kind === 'captions') track.mode = track === selected ? 'showing' : 'disabled';
+    }
+  }
+
   function selectSubtitle(id: Track['id'] | null) {
+    const next = id === null ? null : String(id);
+    if (next === subKey) return;
     const wasBurning = burnIndex !== undefined;
-    subKey = id === null ? null : String(id);
-    if (wasBurning || burnIndex !== undefined) restart(); // a burned-in track is part of the stream
+    subKey = next;
+    if (nativeAirPlay || wasBurning || burnIndex !== undefined) restart(); // a burned-in track is part of the stream
   }
 
   function selectAudio(id: Track['id']) {
@@ -240,6 +266,11 @@
   function onEnded() {
     stopTicker();
     progress.report();
+    if (wireless) {
+      release();
+      wireless = false;
+      onStop?.();
+    }
   }
 
   // ---- playback ------------------------------------------------------------------
@@ -270,6 +301,7 @@
     limit = undefined;
     progress.report(); // where it got to, while the element still knows
     release();
+    wireless = false;
   }
 
   /**
@@ -294,6 +326,7 @@
     release();
     limit = undefined;
     phase = 'stopped';
+    wireless = false;
   }
 
   let frame = $state<HTMLDivElement>();
@@ -340,10 +373,11 @@
     let pb: Playback;
     try {
       pb = await api.playback(item.id, {
-        custom: browserProfile(),
+        ...(nativeAirPlay ? { profile: 'airplay' } : { custom: browserProfile() }),
         startSec: at > 0 ? at : undefined,
         audioIndex,
         subtitleIndex: burnIndex,
+        subtitleKey: nativeAirPlay ? textSub?.key : undefined,
       });
     } catch (e) {
       if (destroyed || run !== attempt) return;
@@ -431,6 +465,7 @@
   // Resume: stream time 0 is file time 0, so a resume is a plain seek once metadata is known. The
   // target is what we asked for, not what the server echoed (it did not, for direct play).
   function onLoadedMetadata() {
+    showNativeSubtitle();
     const at = progress.target;
     if (!resumed && el && at > 0 && Math.abs(el.currentTime - at) > 1) el.currentTime = at;
     resumed = true;
@@ -472,6 +507,10 @@
   function leave() {
     leftPlaying = wantsToPlay();
     progress.report(true);
+    if (wireless && !destroyed) {
+      heartbeat.beat(); // let Safari keep the native route; never pause/unload it on pagehide
+      return;
+    }
     release();
   }
 
@@ -480,7 +519,9 @@
    * it was. A first load also fires pageshow, but not with `persisted`.
    */
   function restore(e: PageTransitionEvent) {
-    if (e.persisted && !destroyed) void start(progress.position(), leftPlaying);
+    if (!e.persisted || destroyed) return;
+    if (wireless) heartbeat.beat();
+    else void start(progress.position(), leftPlaying);
   }
 
   function retry() {
@@ -496,17 +537,35 @@
   onMount(() => {
     const v = video!;
     el = v;
+    nativeAirPlay = supportsAirPlay(v);
+    v.setAttribute('x-webkit-airplay', 'allow');
+    const unwatch = observeAirPlay(v, (state) => {
+      const changed = wireless !== state.wireless;
+      airplayAvailable = state.available;
+      wireless = state.wireless;
+      if (changed) {
+        airplayError = '';
+        heartbeat.beat();
+      }
+    });
     // A plain listener: it fires several times a second, and Svelte's handlers each set a timer.
     const onTimeUpdate = () => progress.update();
     v.addEventListener('timeupdate', onTimeUpdate);
+    v.textTracks.addEventListener('addtrack', showNativeSubtitle);
     subKey = defaultSubtitle(item.subtitles);
     void start(startSec);
     return () => {
       destroyed = true;
       leave();
+      unwatch();
       v.removeEventListener('timeupdate', onTimeUpdate);
+      v.textTracks.removeEventListener('addtrack', showNativeSubtitle);
     };
   });
+
+  function pickAirPlay() {
+    airplayError = el && showAirPlay(el) ? '' : 'AirPlay could not open. Try choosing a device again.';
+  }
 
   const title = $derived(item.kind === 'episode' ? item.episodeTitle || item.title : item.title);
   const subtitle = $derived(
@@ -521,6 +580,8 @@
 
 <!-- How this is being played, in the top bar: the badge, and why on demand. -->
 {#snippet how()}
+  {#if wireless}<span class="airplay-status" role="status">Playing on AirPlay</span>{/if}
+  {#if airplayError}<span role="alert">{airplayError}</span>{/if}
   {#if playback}
     <details class="why">
       <summary title="Playback details" aria-label="Playback details">
@@ -540,7 +601,7 @@
   {/if}
 {/snippet}
 
-<div class="player">
+<div class="player" class:background={!active} inert={!active}>
   <div class="frame" bind:this={frame}>
     <!-- svelte-ignore a11y_media_has_caption -->
     <video
@@ -563,6 +624,10 @@
         {video}
         {title}
         {subtitle}
+        {active}
+        {airplayAvailable}
+        {wireless}
+        onAirPlay={pickAirPlay}
         year={item.kind === 'episode' ? undefined : item.year || undefined}
         artwork={artSrc(item, 'backdrop')}
         duration={item.durationSec}
@@ -598,12 +663,60 @@
   </div>
 </div>
 
+{#if !active && wireless}
+  <div class="remote" aria-label="AirPlay playback">
+    <span>AirPlay · {title}</span>
+    <!-- Like other back links, this fixed controller is not a library scroll anchor. -->
+    <a class="btn back" href={href.play(item.id)}>Controls</a>
+    <button class="btn" onclick={onStop}>Stop AirPlay</button>
+  </div>
+{/if}
+
 <style>
   /* The whole of the host (Play: the window); the picture letterboxed on black. */
   .player,
   .frame {
     position: absolute;
     inset: 0;
+  }
+  .player.background {
+    position: fixed;
+    inset: auto;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .remote {
+    position: fixed;
+    z-index: var(--z-player);
+    bottom: calc(var(--tabbar-h) + var(--chip-gap) + env(safe-area-inset-bottom));
+    left: var(--gutter);
+    right: var(--gutter);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--chip-gap);
+    padding: var(--gutter-player);
+  }
+  .remote,
+  .why-body {
+    background: var(--surface-popover);
+    border: 1px solid var(--line-overlay);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-popover);
+  }
+  .remote span {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .airplay-status {
+    font-size: var(--fs-sm);
+    color: var(--text-dim);
   }
   .frame {
     background: var(--surface-video);
@@ -682,11 +795,7 @@
     right: max(var(--gutter-player), env(safe-area-inset-right));
     max-width: min(26rem, calc(100vw - 2rem));
     padding: 0.6rem 0.8rem;
-    background: var(--surface-popover);
     backdrop-filter: var(--blur-popover);
-    border: 1px solid var(--line-overlay);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow-popover);
   }
   .why p,
   .why ul {

@@ -65,7 +65,7 @@ type Decision struct {
 }
 
 // BuiltinNames lists the built-in profiles.
-var BuiltinNames = []string{"avplayer", "browser", "chromecast"}
+var BuiltinNames = []string{"avplayer", "browser", "chromecast", "airplay"}
 
 // Builtin returns a built-in profile by name.
 func Builtin(name string) (Profile, bool) {
@@ -76,6 +76,8 @@ func Builtin(name string) (Profile, bool) {
 		return Browser(), true
 	case "chromecast":
 		return Chromecast(), true
+	case "airplay":
+		return AirPlay(), true
 	}
 	return Profile{}, false
 }
@@ -105,6 +107,15 @@ func Chromecast() Profile {
 		MaxHeight:   1080,
 		HLS:         true,
 		TextSubs:    []string{"vtt"},
+	}
+}
+
+// AirPlay uses a receiver-independent HLS session even for an MP4. The browser
+// and TV have different addresses, and subtitles must travel in the HLS manifest.
+func AirPlay() Profile {
+	return Profile{
+		Name: "airplay", VideoCodecs: []string{"h264"}, AudioCodecs: []string{"aac"},
+		MaxHeight: 1080, HLS: true, TextSubs: []string{"vtt"},
 	}
 }
 

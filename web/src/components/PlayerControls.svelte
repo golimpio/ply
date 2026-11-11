@@ -50,6 +50,10 @@
     onSelectSubtitle,
     onSeek,
     onClose,
+    active = true,
+    airplayAvailable = false,
+    wireless = false,
+    onAirPlay,
     info,
   }: {
     video: HTMLVideoElement;
@@ -67,6 +71,10 @@
     onSelectSubtitle?: (id: Track['id'] | null) => void;
     onSeek?: (absSec: number) => boolean | void;
     onClose?: () => void;
+    active?: boolean;
+    airplayAvailable?: boolean;
+    wireless?: boolean;
+    onAirPlay?: () => void;
     info?: Snippet;
   } = $props();
 
@@ -79,7 +87,6 @@
   let waiting = $state(false);
   let menu = $state<'audio' | 'subs' | null>(null);
   let fullscreen = $state(false);
-  let airplay = $state(false);
   let scrub = $state<number | null>(null); // value while dragging the scrubber
   let hover = $state<{ x: number; t: number } | null>(null);
 
@@ -111,8 +118,6 @@
     const tick = () => visible && sync();
     const onWaiting = () => (waiting = true);
     const onPlaying = () => (waiting = false);
-    const onTarget = (e: Event) =>
-      (airplay = (e as Event & { availability?: string }).availability === 'available');
     const ticks = ['timeupdate', 'progress'];
     const events = ['durationchange', 'play', 'pause', 'volumechange', 'loadedmetadata', 'seeked'];
     // The lock screen extrapolates the position itself: it is told only when that would go wrong.
@@ -122,7 +127,6 @@
     for (const ev of turns) v.addEventListener(ev, positionState);
     v.addEventListener('waiting', onWaiting);
     v.addEventListener('playing', onPlaying);
-    v.addEventListener('webkitplaybacktargetavailabilitychanged', onTarget);
     void offset; // a new offset re-syncs; sync's own reads (buffered) must not re-run this
     untrack(sync);
     return () => {
@@ -131,7 +135,6 @@
       for (const ev of turns) v.removeEventListener(ev, positionState);
       v.removeEventListener('waiting', onWaiting);
       v.removeEventListener('playing', onPlaying);
-      v.removeEventListener('webkitplaybacktargetavailabilitychanged', onTarget);
     };
   });
 
@@ -237,10 +240,6 @@
     if (document.pictureInPictureElement) await document.exitPictureInPicture();
     else if (v.requestPictureInPicture && document.pictureInPictureEnabled) await v.requestPictureInPicture();
     else v.webkitSetPresentationMode?.('picture-in-picture');
-  }
-
-  function showAirPlay() {
-    (video as HTMLVideoElement & { webkitShowPlaybackTargetPicker?: () => void }).webkitShowPlaybackTargetPicker?.();
   }
 
   function cycleSubtitles() {
@@ -409,6 +408,7 @@
   let seekInput = $state<HTMLInputElement>();
 
   function onKey(e: KeyboardEvent) {
+    if (!active) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return; // browser and system shortcuts (Find, address bar, ...)
     const t = e.target as HTMLElement;
     const range = t instanceof HTMLInputElement && t.type === 'range';
@@ -643,8 +643,8 @@
           {/if}
         </div>
       {/if}
-      {#if airplay}
-        <button class="ctl" onclick={showAirPlay} aria-label="AirPlay"><Icon name="airplay" /></button>
+      {#if airplayAvailable && onAirPlay}
+        <button class="ctl" class:on={wireless} onclick={onAirPlay} aria-label="AirPlay" aria-pressed={wireless} title={wireless ? 'Playing on AirPlay' : 'Choose an AirPlay device'}><Icon name="airplay" /></button>
       {/if}
       {#if pipSupported}
         <button class="ctl pip" onclick={togglePip} aria-label="Picture in picture"><Icon name="pip" /></button>

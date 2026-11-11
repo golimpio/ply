@@ -208,6 +208,10 @@ type Request struct {
 	AudioCodec  string
 	AudioCopy   bool
 	StartSec    float64
+	// Wireless starts with a bounded receiver grace period; a heartbeat can change it.
+	Wireless bool
+	// SubtitleKey is the text rendition exposed by the API for this session.
+	SubtitleKey string
 	// Title and Client are for the listing of what is playing (Playing): what to
 	// call the item and who asked for it. They have no other use here.
 	Title  string

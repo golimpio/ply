@@ -126,6 +126,11 @@ e2e: e2e-web e2e-player ## All browser checks (needs Google Chrome)
 e2e-web: web ## Browser checks against a mocked API (player, metadata, TVDB, ratings, folders, activity, navigation, settings, library grid, watched)
 	cd web && node e2e/player-wiring.mjs && node e2e/metadata-ui.mjs && node e2e/folders-ui.mjs && node e2e/activity-ui.mjs && node e2e/player-limits.mjs && node e2e/tvdb-ui.mjs && node e2e/ratings-ui.mjs && node e2e/navigation.mjs && node e2e/settings-ui.mjs && node e2e/library-ui.mjs && node e2e/player-ui.mjs && node e2e/watched-ui.mjs
 
+AIRPLAY_CASE ?= AirPlay
+.PHONY: e2e-airplay
+e2e-airplay: web ## AirPlay browser wiring checks (emulated WebKit events, needs Google Chrome)
+	cd web && PLY_E2E_ONLY="$(AIRPLAY_CASE)" node e2e/player-wiring.mjs
+
 .PHONY: e2e-player
 e2e-player: build ## Browser checks of the player against a real ply (throwaway library)
 	PLY_BIN=$(CURDIR)/$(BIN) sh scripts/e2e-player.sh

@@ -93,6 +93,7 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 type heartbeatRequest struct {
 	PositionSec *float64 `json:"positionSec"`
 	Paused      *bool    `json:"paused"`
+	Wireless    *bool    `json:"wireless"`
 }
 
 // writeStopped answers 410 Gone, {"error": "stopped", "stoppedBy": "another
@@ -132,7 +133,7 @@ func (s *Server) handleSessionHeartbeat(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "positionSec must be a non-negative number")
 		return
 	}
-	if s.Streams == nil || !s.Streams.Heartbeat(r.PathValue("sid"), stream.Beat{Position: req.PositionSec, Paused: req.Paused}) {
+	if s.Streams == nil || !s.Streams.Heartbeat(r.PathValue("sid"), stream.Beat{Position: req.PositionSec, Paused: req.Paused, Wireless: req.Wireless}) {
 		if s.stoppedOnPurpose(w, r.PathValue("sid")) {
 			return
 		}

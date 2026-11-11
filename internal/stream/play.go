@@ -322,6 +322,7 @@ func (m *Manager) DirectFile(k DirectKey, title, client, path string, pos float6
 type Beat struct {
 	Position *float64 // seconds
 	Paused   *bool
+	Wireless *bool
 }
 
 // Heartbeat records that the player of session id is alive, and where it is and

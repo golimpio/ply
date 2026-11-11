@@ -652,6 +652,7 @@ export interface PlaybackRequest {
   startSec?: number;
   audioIndex?: number;
   subtitleIndex?: number;
+  subtitleKey?: string;
 }
 
 export interface ScanStatus {
@@ -1182,8 +1183,8 @@ export const api = {
    * Keep an HLS session alive: every 10 s while it is open, paused or not, and at once on pause and
    * play (lib/heartbeat.ts). ApiError 404: the session is gone, start another.
    */
-  async heartbeat(sid: string, positionSec: number, paused: boolean): Promise<void> {
-    await request<void>('POST', `/api/sessions/${encodeURIComponent(sid)}/heartbeat`, { positionSec, paused });
+  async heartbeat(sid: string, positionSec: number, paused: boolean, wireless?: boolean): Promise<void> {
+    await request<void>('POST', `/api/sessions/${encodeURIComponent(sid)}/heartbeat`, { positionSec, paused, wireless });
   },
 
   /**

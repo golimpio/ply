@@ -109,7 +109,7 @@ async function open(browser, opts = {}) {
   const held = new Promise((r) => (releaseHold = r));
 
   await context.exposeFunction('__rec', (e) => log.push(e));
-  await context.addInitScript(({ hls, fast }) => {
+  await context.addInitScript(({ hls, fast, airplay, pickerError, nativeHls }) => {
     const rec = (method, url, body, keepalive) => window.__rec({ method, url: new URL(url, location.href).pathname, body, keepalive: !!keepalive });
     const realFetch = window.fetch.bind(window);
     window.fetch = (input, init = {}) => {
@@ -124,15 +124,47 @@ async function open(browser, opts = {}) {
         return /mpegurl/i.test(type) ? '' : can.call(this, type);
       };
     }
+    if (airplay) {
+      const can = HTMLMediaElement.prototype.canPlayType;
+      window.__realNativeHls = can.call(document.createElement('video'), 'application/vnd.apple.mpegurl') !== '';
+      HTMLMediaElement.prototype.canPlayType = function (type) {
+        return /mpegurl/i.test(type) && !nativeHls ? 'probably' : can.call(this, type);
+      };
+      HTMLVideoElement.prototype.webkitShowPlaybackTargetPicker = function () {
+        window.__pickerCalls = (window.__pickerCalls ?? 0) + 1;
+        if (pickerError) throw new Error('picker unavailable');
+      };
+      window.__wireless = (wireless) => {
+        const v = document.querySelector('video');
+        v.webkitCurrentPlaybackTargetIsWireless = wireless;
+        v.dispatchEvent(new Event('webkitcurrentplaybacktargetiswirelesschanged'));
+      };
+      window.__availability = (availability) => {
+        const e = new Event('webkitplaybacktargetavailabilitychanged');
+        Object.assign(e, { availability });
+        document.querySelector('video').dispatchEvent(e);
+      };
+    }
     window.__intervals = [];
     const realSetInterval = window.setInterval.bind(window);
     window.setInterval = (fn, ms, ...args) => {
       window.__intervals.push(ms);
       return realSetInterval(fn, fast && ms >= 1000 ? 250 : ms, ...args);
     };
-  }, { hls: !!opts.hls, fast: !!opts.fast });
+  }, { hls: !!opts.hls, fast: !!opts.fast, airplay: !!opts.airplay, pickerError: !!opts.pickerError, nativeHls: !!opts.nativeHls });
 
   const json = (route, body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body), headers: { 'cache-control': 'no-store' } });
+  const mp4 = (route) => {
+    const req = route.request();
+    const range = /bytes=(\d*)-(\d*)/.exec(req.headers().range ?? '');
+    const start = range?.[1] ? Number(range[1]) : 0;
+    const end = range?.[2] ? Math.min(Number(range[2]), directBytes.length - 1) : directBytes.length - 1;
+    return route.fulfill({
+      status: range ? 206 : 200,
+      headers: { 'content-type': 'video/mp4', 'accept-ranges': 'bytes', 'content-range': `bytes ${start}-${end}/${directBytes.length}` },
+      body: directBytes.subarray(start, end + 1),
+    });
+  };
   await context.route((u) => u.pathname.startsWith('/api/'), async (route) => {
     const req = route.request();
     const { pathname: p } = new URL(req.url());
@@ -159,10 +191,12 @@ async function open(browser, opts = {}) {
       const id = `s${n}`;
       const mode = opts.sessions?.(n, body)?.mode ?? 'ok';
       // The echoed startSec is deliberately useless (0): the client must go by what it asked for.
-      const pb = opts.hls
-        ? { method: 'remux', videoAction: 'copy', audioAction: 'transcode', audioIndex: body.audioIndex ?? 1, reasons: [], url: `/api/sessions/${id}/index.m3u8`, sessionId: id, startSec: 0 }
+      const pb = opts.airplay && !opts.nativeHls
+        ? { method: 'remux', videoAction: 'copy', audioAction: 'copy', audioIndex: body.audioIndex ?? 1, reasons: [], url: `/api/sessions/${id}/media.mp4`, sessionId: id, startSec: 0 }
+        : opts.hls || opts.nativeHls
+        ? { method: 'remux', videoAction: 'copy', audioAction: 'transcode', audioIndex: body.audioIndex ?? 1, reasons: [], url: `/api/sessions/${id}/${opts.nativeHls && body.subtitleKey ? 'master' : 'index'}.m3u8`, sessionId: id, startSec: 0 }
         : { method: 'direct', videoAction: 'copy', audioAction: 'copy', audioIndex: body.audioIndex ?? 1, reasons: [], url: `/api/items/${ITEM}/file`, startSec: 0 };
-      if (opts.hls) sessions.set(id, { mode, deleted: false });
+      if (opts.hls || opts.airplay) sessions.set(id, { mode, deleted: false });
       return json(route, pb);
     }
     const sid = /^\/api\/sessions\/([^/]+)(?:\/(.+))?$/.exec(p);
@@ -174,12 +208,26 @@ async function open(browser, opts = {}) {
     // The player's heartbeat (M9; e2e/player-limits.mjs tests it): alive while not deleted.
     if (sid && m === 'POST' && sid[2] === 'heartbeat') {
       const s = sessions.get(sid[1]);
+      if (s?.stopped) return json(route, { error: 'stopped', stoppedBy: 'another device' }, 410);
       return s && !s.deleted ? route.fulfill({ status: 204 }) : json(route, { error: 'session not found' }, 404);
     }
     if (sid && m === 'GET' && sid[2]) {
       const s = sessions.get(sid[1]);
       const playlist = sid[2] === 'index.m3u8';
       if (!s || s.deleted || s.mode === 'all404' || (s.mode === 'segments404' && !playlist)) return json(route, { error: 'no such session' }, 404);
+      if (sid[2] === 'master.m3u8') return route.fulfill({
+        contentType: 'application/vnd.apple.mpegurl',
+        body: '#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English",DEFAULT=YES,AUTOSELECT=YES,LANGUAGE="en",URI="subtitles.m3u8"\n#EXT-X-STREAM-INF:BANDWIDTH=2000000,SUBTITLES="subs"\nindex.m3u8\n',
+      });
+      if (sid[2] === 'subtitles.m3u8') return route.fulfill({
+        contentType: 'application/vnd.apple.mpegurl',
+        body: '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:60\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXTINF:60,\nsubtitles.vtt\n#EXT-X-ENDLIST\n',
+      });
+      if (sid[2] === 'subtitles.vtt') {
+        s.subtitleFetched = true;
+        return route.fulfill({ contentType: 'text/vtt', body: 'WEBVTT\nX-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:126000\n\n00:00:10.000 --> 00:00:25.000\nNative HLS subtitle\n\n' });
+      }
+      if (sid[2] === 'media.mp4') return mp4(route);
       return route.fulfill({
         status: 200,
         contentType: playlist ? 'application/vnd.apple.mpegurl' : 'video/mp2t',
@@ -187,16 +235,7 @@ async function open(browser, opts = {}) {
         body: readFileSync(join(hlsDir, sid[2])),
       });
     }
-    if (m === 'GET' && p === `/api/items/${ITEM}/file`) {
-      const range = /bytes=(\d*)-(\d*)/.exec(req.headers().range ?? '');
-      const start = range?.[1] ? Number(range[1]) : 0;
-      const end = range?.[2] ? Math.min(Number(range[2]), directBytes.length - 1) : directBytes.length - 1;
-      return route.fulfill({
-        status: range ? 206 : 200,
-        headers: { 'content-type': 'video/mp4', 'accept-ranges': 'bytes', 'content-range': `bytes ${start}-${end}/${directBytes.length}` },
-        body: directBytes.subarray(start, end + 1),
-      });
-    }
+    if (m === 'GET' && p === `/api/items/${ITEM}/file`) return mp4(route);
     unmocked.push(`${m} ${p}`);
     return json(route, { error: `unmocked ${m} ${p}` }, 404);
   });
@@ -248,6 +287,160 @@ async function scenario(name, opts, body) {
 }
 
 try {
+  // AirPlay events are emulated; Chrome still decodes real server-provided media. These pin our
+  // wiring and native-URL ownership, not Apple's device discovery or TV firmware.
+  await scenario('AirPlay actual native HLS URL', { airplay: true, nativeHls: true, item: { subtitles: [{ key: 'ext0', format: 'srt', language: 'eng', image: false, default: true, url: '/api/items/1/subtitles/ext0.vtt' }] } }, async (s) => {
+    await s.go('#/play/1?t=10');
+    if (!await s.page.evaluate(() => window.__realNativeHls)) {
+      results.push('SKIP  AirPlay native HLS decode: installed browser has no native HLS decoder; validate in Safari');
+      return;
+    }
+    const v = await s.playingAt('actual native HLS to resume', 10, 20);
+    check('AirPlay native HLS plays a server playlist without MediaSource', v.src.endsWith('/master.m3u8') && !v.src.startsWith('blob:'));
+    check('AirPlay native HLS uses receiver profile', s.posts()[0].profile === 'airplay');
+    const nativeTracks = await s.page.evaluate(() => document.querySelector('video').textTracks.length);
+    if (nativeTracks === 0) results.push('SKIP  Native HLS WebVTT rendering coverage: this fixture exposed no native subtitle track; Safari/Apple TV hardware validation required');
+    else {
+      await until('native player to fetch the HLS WebVTT rendition', () => s.sessions.get('s1')?.subtitleFetched);
+      check('AirPlay native player fetches subtitles through the HLS master', s.sessions.get('s1').subtitleFetched && s.posts()[0].subtitleKey === 'ext0');
+    }
+    await s.seek(35);
+    await s.playingAt('native HLS to seek', 35, 45);
+    await s.page.evaluate(() => document.querySelector('video').pause());
+    await until('native HLS pause report', () => s.puts().some((p) => p.pos >= 35));
+    check('AirPlay native HLS pause/seek preserves progress', s.puts().at(-1).pos >= 35);
+  });
+
+  await scenario('AirPlay browse, return and explicit stop', { airplay: true }, async (s) => {
+    await s.go('#/play/1?t=10');
+    await s.playingAt('native source to resume', 10, 20);
+    check('AirPlay requests its receiver profile from the first load', s.posts()[0]?.profile === 'airplay');
+    check('AirPlay does not send measured browser codecs', !s.all('POST', '/api/items/1/playback')[0].body.custom);
+    check('AirPlay holds a native URL rather than a MediaSource blob', (await s.video()).src.includes('/api/sessions/s1/media.mp4'));
+    check('AirPlay player stays inside the main landmark', await s.page.evaluate(() => document.querySelector('main').contains(document.querySelector('video'))));
+    check('AirPlay session exists before browsing', s.sessions.has('s1') && !s.sessions.get('s1').deleted);
+    await s.page.evaluate(() => {
+      window.__originalVideo = document.querySelector('video');
+      window.__availability('available');
+    });
+    await until('the AirPlay button', async () => await s.page.getByRole('button', { name: 'AirPlay', exact: true }).count() === 1);
+    await s.click('button[aria-label="AirPlay"]');
+    check('AirPlay picker runs during its click', await s.page.evaluate(() => window.__pickerCalls === 1));
+    await s.page.evaluate(() => window.__wireless(true));
+    await until('wireless state', async () => await s.page.locator('button[aria-label="AirPlay"]').getAttribute('aria-pressed') === 'true');
+    await until('wireless heartbeat', () => s.all('POST', '/api/sessions/s1/heartbeat').some((b) => b.body.wireless === true));
+    await s.seek(30);
+    await s.playingAt('wireless seek', 30, 40);
+    await s.click(CLOSE);
+    await until('minimized AirPlay controller', async () => await s.page.getByRole('button', { name: 'Stop AirPlay' }).count() === 1);
+    check('AirPlay browsing retains the exact media element', await s.page.evaluate(() => document.querySelector('video') === window.__originalVideo));
+    check('AirPlay browsing neither starts nor deletes a stream', s.posts().length === 1 && s.deletes().length === 0, JSON.stringify(s.deletes()));
+    await s.page.keyboard.press('k');
+    check('AirPlay hidden controls do not steal library keyboard actions', !(await s.video()).paused);
+    await s.page.getByRole('link', { name: 'Controls', exact: true }).click();
+    await until('full controls return', async () => !(await s.page.getByRole('button', { name: 'Stop AirPlay' }).count()));
+    check('AirPlay returning reuses video and session', await s.page.evaluate(() => document.querySelector('video') === window.__originalVideo) && s.posts().length === 1);
+    check('AirPlay returning retains the seek position', (await s.video()).t >= 30);
+    await s.click(CLOSE);
+    await s.page.getByRole('button', { name: 'Stop AirPlay' }).click();
+    await until('explicit stop releases the session', () => s.deletes().some((d) => d.id === 's1'));
+    await until('explicit stop removes the player', async () => await s.page.locator('video').count() === 0);
+    check('AirPlay stop sends one DELETE and starts no new stream', s.deletes().length === 1 && s.posts().length === 1);
+  });
+
+  await scenario('AirPlay pagehide and route disconnect', { airplay: true, fast: true }, async (s) => {
+    await s.go('#/play/1?t=15');
+    await s.playingAt('native media', 15, 25);
+    await s.page.evaluate(() => window.__wireless(true));
+    await until('wireless beat', () => s.all('POST', '/api/sessions/s1/heartbeat').some((b) => b.body.wireless));
+    await s.page.evaluate(() => {
+      window.__originalVideo = document.querySelector('video');
+      window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+      window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    });
+    await sleep(350);
+    check('AirPlay pagehide does not stop TV media or recreate its stream', s.deletes().length === 0 && s.posts().length === 1 && !(await s.video()).paused);
+    await s.click(CLOSE);
+    await until('mini controller', async () => await s.page.getByRole('button', { name: 'Stop AirPlay' }).count() === 1);
+    await s.page.evaluate(() => window.__wireless(false));
+    await until('ending AirPlay while browsing tears down the hidden local player', async () => await s.page.locator('video').count() === 0);
+    await until('disconnect releases the stream', () => s.deletes().some((d) => d.id === 's1'));
+    check('AirPlay disconnect does not start a ghost local stream', s.posts().length === 1);
+  });
+
+  await scenario('AirPlay track changes and availability', {
+    airplay: true,
+    item: { subtitles: [
+      { key: 'ext0', format: 'srt', language: 'eng', default: true, image: false, url: '/api/items/1/subtitles/ext0.vtt' },
+      { key: '3', format: 'pgs', language: 'fra', image: true },
+    ] },
+  }, async (s) => {
+    await s.go('#/play/1?t=10');
+    await s.playingAt('native media with text subtitles', 10, 20);
+    check('AirPlay default text subtitle is sent to the receiver stream', s.posts()[0].subtitleKey === 'ext0');
+    check('AirPlay does not rely on a browser-only track element', await s.page.locator('video track').count() === 0);
+    // Simulate the native engine discovering its HLS rendition; DEFAULT=YES alone can be
+    // overridden by system caption preferences, so an explicit selection must enable the track.
+    await s.page.evaluate(() => {
+      const v = document.querySelector('video');
+      window.__nativeTextTrack = v.addTextTrack('subtitles', 'English', 'en');
+      window.__ceaTrack = v.addTextTrack('captions', 'In-band CC', 'en');
+      window.__ceaTrack.mode = 'showing';
+      window.__metadataTrack = v.addTextTrack('metadata', 'Events');
+      window.__metadataTrack.mode = 'hidden';
+    });
+    await until('selected native subtitle enabled', async () => await s.page.evaluate(() => window.__nativeTextTrack.mode === 'showing'));
+    check('AirPlay explicitly enables only the selected native subtitle', await s.page.evaluate(() => window.__nativeTextTrack.mode === 'showing' && window.__ceaTrack.mode === 'disabled'));
+    check('AirPlay leaves native metadata tracks alone', await s.page.evaluate(() => window.__metadataTrack.mode === 'hidden'));
+    await s.click('button[aria-label="Subtitles"]');
+    await s.pick('Subtitles', 0);
+    await until('turning subtitles off restarts the native stream', () => s.posts().length === 2);
+    await s.playingAt('subtitle-free stream', 10, 25);
+    check('AirPlay subtitle Off disables the native text track', await s.page.evaluate(() => window.__nativeTextTrack.mode === 'disabled'));
+    check('AirPlay subtitle Off omits both subtitle selectors', s.posts()[1].subtitleKey === undefined && s.posts()[1].subtitleIndex === undefined);
+    await s.click('button[aria-label="Subtitles"]');
+    await s.pick('Subtitles', 2);
+    await until('bitmap subtitle restart', () => s.posts().length === 3);
+    await s.playingAt('burned-in subtitle stream', 10, 30);
+    check('AirPlay bitmap subtitles use burn-in, with no text rendition', s.posts()[2].subtitleIndex === 3 && s.posts()[2].subtitleKey === undefined);
+    await s.click('button[aria-label="Audio track"]');
+    await s.pick('Audio track', 1);
+    await until('alternate audio restart', () => s.posts().length === 4);
+    check('AirPlay audio change retains receiver profile, subtitle and resume', s.posts()[3].profile === 'airplay' && s.posts()[3].audioIndex === 2 && s.posts()[3].subtitleIndex === 3 && s.posts()[3].startSec >= 10);
+    await s.page.evaluate(() => window.__availability('available'));
+    await until('available button', async () => await s.page.locator('button[aria-label="AirPlay"]').count() === 1);
+    await s.page.evaluate(() => window.__availability('not-available'));
+    await until('unavailable button hidden', async () => await s.page.locator('button[aria-label="AirPlay"]').count() === 0);
+  });
+
+  await scenario('AirPlay picker failure is recoverable', { airplay: true, pickerError: true }, async (s) => {
+    await s.go('#/play/1');
+    await s.playingAt('native media', 0, 10);
+    await s.page.evaluate(() => window.__availability('available'));
+    await until('available button', async () => await s.page.locator('button[aria-label="AirPlay"]').count() === 1);
+    await s.click('button[aria-label="AirPlay"]');
+    await until('picker error', async () => (await s.alert()).includes('AirPlay could not open'));
+    check('AirPlay picker failure preserves local playback', s.posts().length === 1 && !(await s.video()).paused);
+    await s.click(CLOSE);
+    await until('nonwireless close releases the session', () => s.deletes().some((d) => d.id === 's1'));
+  });
+
+  for (const terminal of ['remote stop', 'media error', 'ended']) {
+    await scenario(`AirPlay clears minimized ownership after ${terminal}`, { airplay: true, fast: true }, async (s) => {
+      await s.go('#/play/1?t=10');
+      await s.playingAt('native media', 10, 20);
+      await s.page.evaluate(() => window.__wireless(true));
+      await until('wireless session', () => s.all('POST', '/api/sessions/s1/heartbeat').some((b) => b.body.wireless));
+      await s.click(CLOSE);
+      await until('mini controller before terminal event', async () => await s.page.getByRole('button', { name: 'Stop AirPlay' }).count() === 1);
+      if (terminal === 'remote stop') s.sessions.get('s1').stopped = true;
+      else await s.page.evaluate((terminal) => document.querySelector('video').dispatchEvent(new Event(terminal === 'ended' ? 'ended' : 'error')), terminal);
+      await until('terminal event releases the retained player', async () => await s.page.locator('video').count() === 0);
+      check(`AirPlay ${terminal} clears the mini controller`, await s.page.getByRole('button', { name: 'Stop AirPlay' }).count() === 0);
+      check(`AirPlay ${terminal} starts no replacement play`, s.posts().length === 1);
+    });
+  }
+
   // W1: direct play. The server echoes startSec 0 (as it used to), and the clip starts at 0 whatever
   // the client says: the client has to seek to the position it asked for, and must not report
   // anything (the server forgets progress below 30 s) before it gets there.

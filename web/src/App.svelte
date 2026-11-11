@@ -3,7 +3,7 @@
   import { openActivity } from './lib/activity.svelte';
   import { api, ApiError, getToken, onUnauthorized, setToken } from './lib/api';
   import { ambient } from './lib/ambient.svelte';
-  import { router } from './lib/router.svelte';
+  import { goBack, router } from './lib/router.svelte';
   import { app, attachToRunningScan } from './lib/state.svelte';
   import Header from './components/Header.svelte';
   import SearchPalette from './components/SearchPalette.svelte';
@@ -29,6 +29,24 @@
 
   const route = $derived(router.route);
   const playing = $derived(route.name === 'play');
+  let activePlay = $state<{ id: number; startSec: number }>();
+  let wireless = $state(false);
+
+  // Keep the actual Safari media element mounted while browsing on an AirPlay route.
+  $effect(() => {
+    if (route.name === 'play') {
+      if (untrack(() => activePlay?.id) !== route.id) {
+        wireless = false;
+        activePlay = { id: route.id, startSec: route.startSec };
+      }
+    } else if (!wireless) activePlay = undefined;
+  });
+
+  function stopAirPlay() {
+    wireless = false;
+    activePlay = undefined;
+    if (playing) goBack();
+  }
 
   // Projection light: the current film's colour, eased in and out by CSS.
   $effect(() => {
@@ -113,7 +131,7 @@
       {:else if route.name === 'item'}
         {#key route.id}<Item id={route.id} />{/key}
       {:else if route.name === 'play'}
-        {#key route.id}<Play id={route.id} startSec={route.startSec} />{/key}
+        <!-- Playback is mounted outside the page switch so AirPlay survives SPA navigation. -->
       {:else if route.name === 'person'}
         {#key route.id}<Person id={route.id} />{/key}
       {:else if route.name === 'genre'}
@@ -129,6 +147,13 @@
           <h1>This page doesn’t exist</h1>
           <p><a href="#/">Go to the library</a></p>
         </div>
+      {/if}
+    {/key}
+    {#key epoch}
+      {#if activePlay}
+        {#key activePlay.id}
+          <Play id={activePlay.id} startSec={activePlay.startSec} minimized={!playing} bind:wireless onStop={stopAirPlay} />
+        {/key}
       {/if}
     {/key}
   </main>

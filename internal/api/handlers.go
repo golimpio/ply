@@ -181,6 +181,7 @@ type playbackRequest struct {
 	StartSec      float64           `json:"startSec"`
 	AudioIndex    *int              `json:"audioIndex"`
 	SubtitleIndex *int              `json:"subtitleIndex"`
+	SubtitleKey   string            `json:"subtitleKey"`
 }
 
 func (s *Server) handlePlayback(w http.ResponseWriter, r *http.Request) {
@@ -204,6 +205,10 @@ func (s *Server) handlePlayback(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case req.Custom != nil:
 		profile = *req.Custom
+		if strings.EqualFold(profile.Name, "airplay") {
+			writeError(w, http.StatusBadRequest, "airplay is a reserved built-in profile")
+			return
+		}
 		if profile.Name == "" {
 			profile.Name = "custom"
 		}
@@ -233,6 +238,16 @@ func (s *Server) handlePlayback(w http.ResponseWriter, r *http.Request) {
 		}
 		opts.SubtitleIndex = *req.SubtitleIndex
 	}
+	if req.SubtitleKey != "" {
+		if profile.Name != "airplay" || req.SubtitleIndex != nil || s.Subs == nil {
+			writeError(w, http.StatusBadRequest, "subtitleKey requires AirPlay and no subtitleIndex")
+			return
+		}
+		if _, ok := subtitleSource(e, req.SubtitleKey); !ok || e.DurationSec <= 0 {
+			writeError(w, http.StatusBadRequest, "text subtitle not found or item has no known duration")
+			return
+		}
+	}
 	// From here until the first seconds of the play are over, no frame is grabbed from this file:
 	// the grab would read it at the same time as the play.
 	endPlay := s.beginPlay(e.ID)
@@ -246,7 +261,7 @@ func (s *Server) handlePlayback(w http.ResponseWriter, r *http.Request) {
 		if !s.checkDirect(w, r, e) {
 			return
 		}
-	} else if !s.attachSession(w, r, e, d, profile, req.StartSec, &pb) {
+	} else if !s.attachSession(w, r, e, d, profile, req.StartSec, req.SubtitleKey, &pb) {
 		return
 	}
 	started = true

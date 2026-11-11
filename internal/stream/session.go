@@ -57,6 +57,7 @@ type Session struct {
 	// next request or heartbeat that says it is not: Options.PausedBeatTimeout applies
 	// while it is set (see idle).
 	pausedBeat atomic.Bool
+	wireless   atomic.Bool // receiver requests may be buffered while its browser sleeps
 	// busy counts the requests that are waiting for the session (for the plan, for
 	// the init segment): while there is one, the session is not idle, whatever the
 	// clock says.
@@ -154,6 +155,7 @@ func newSession(m *Manager, id, dir string, r Request, plan Plan) *Session {
 		s.kind = KindTranscode
 		s.soft.Store(softwareEncoder(r.Video))
 	}
+	s.wireless.Store(r.Wireless)
 	s.estPos.Store(math.Float64bits(finitePos(r.StartSec)))
 	s.touch()
 	return s
@@ -182,12 +184,35 @@ func (s *Session) heartbeat(b Beat) {
 		s.hbPaused = *b.Paused
 	}
 	s.hbMu.Unlock()
+	if b.Wireless != nil {
+		s.wireless.Store(*b.Wireless)
+	}
 	s.beaten.Store(true)
 	if b.Paused != nil {
 		s.pausedBeat.Store(*b.Paused)
 	}
 	s.stamp()
 }
+
+// Done closes when this session is stopped, before its background cleanup finishes.
+func (s *Session) Done() <-chan struct{} { return s.stopCh }
+
+// Hold keeps a request for related media (such as subtitles) from idling the
+// video session while the response is being produced. The caller must release it.
+func (s *Session) Hold() func() {
+	s.busy.Add(1)
+	s.stamp()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.stamp()
+			s.busy.Add(-1)
+		})
+	}
+}
+
+// Subtitle identifies the selected text rendition and the item it belongs to.
+func (s *Session) Subtitle() (int64, string) { return s.req.ItemID, s.req.SubtitleKey }
 
 // Plan returns the segment layout (read-only).
 func (s *Session) Plan() Plan {
@@ -537,6 +562,9 @@ func (s *Session) idle() bool {
 		if s.pausedBeat.Load() {
 			limit = max(limit, s.m.o.PausedBeatTimeout)
 		}
+	}
+	if s.wireless.Load() {
+		limit = max(limit, s.m.o.PausedBeatTimeout)
 	}
 	if s.m.clock().Sub(time.Unix(0, s.lastUsed.Load())) <= limit {
 		return false

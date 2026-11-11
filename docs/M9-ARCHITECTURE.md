@@ -242,7 +242,11 @@ Design:
   `-max-transcodes N` (default 1 with a software encoder, 3 with VideoToolbox). Settings → Playback, precedence
   flag > settings > default, applied live (`Manager.SetLimits`).
 - Direct plays count too: tracked as `(item, client IP, User-Agent)`, refreshed by `/file` range requests, expired
-  30 s after the last.
+  30 s after the last. Browser AirPlay uses an HLS-only `airplay` profile instead: browser and receiver IP/UA
+  can differ without creating two plays or losing selected audio. Its explicit wireless heartbeat allows
+  receiver buffering/background grace independently of pause and media requests; it remains bounded by
+  the existing inactivity policy or `PausedBeatTimeout` (default 3 min). Native WebVTT is session-scoped,
+  carries the fMP4 timestamp map and streams cues during extraction. See [AIRPLAY.md](AIRPLAY.md).
 - At the cap: 503 + `Retry-After: 5` + `{"error": "4 of 4 plays in use", "playing": [...]}`. The player shows the
   list with a Stop per entry. No automatic pre-emption, except optionally of idle, paused sessions.
 - `stopping` sessions must not count (`manager.go:329`), or `Create` waits up to `WaitDelay` for them: the player's
