@@ -81,16 +81,18 @@
     align-items: center;
     gap: 1.15rem;
     padding: env(safe-area-inset-top) var(--gutter) 0;
-    background: var(--surface-bar);
-    border-bottom: 1px solid var(--line);
+    background: transparent;
+    border-bottom: 1px solid transparent;
     transition:
       background var(--motion-bar),
+      border-color var(--motion-bar),
       box-shadow var(--motion-bar);
   }
   .bar.scrolled {
     background: var(--surface-bar);
     /* Unprefixed only: the build adds -webkit- itself, and drops this one when both are written. */
     backdrop-filter: var(--blur-bar);
+    border-bottom-color: var(--line);
     box-shadow: var(--shadow-bar);
   }
   .brand {

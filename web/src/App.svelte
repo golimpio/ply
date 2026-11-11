@@ -141,11 +141,10 @@
      from the top of the room, fading out before the content. */
   .light {
     position: fixed;
-    inset: 0 0 auto;
-    height: 90vh;
+    inset: 0;
     z-index: var(--z-under);
     pointer-events: none;
-    background: radial-gradient(120% 70% at 30% 0%, var(--tint), transparent 70%);
+    background: radial-gradient(130% 90% at 30% 0%, var(--tint), transparent 80%);
     opacity: var(--light-dim);
     transition: opacity var(--motion-light) var(--ease);
   }
