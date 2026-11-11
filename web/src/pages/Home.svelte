@@ -53,7 +53,7 @@
   let settings = $state<Settings>();
 
   // Interactive Evening Lens & Curated Focus state (Variation II: Living Repertory & Moods)
-  type MoodLens = 'weeknight' | 'double' | 'noir' | 'epic' | 'unwatched';
+  type MoodLens = 'weeknight' | 'double' | 'noir' | 'epic' | 'unwatched' | 'series';
   let moodLens = $state<MoodLens>('weeknight');
   let heroOffset = $state(0);
   let focusFilter = $state('All');
@@ -64,6 +64,7 @@
     ['noir', 'Late Night Noir & Sci-Fi', 'Late Night Lens · Nocturnal & Sci-Fi'],
     ['epic', 'Sunday Epics (2h 20m+)', 'Sunday Matinee · Wide-Canvas Feature'],
     ['unwatched', 'Unwatched Gems', 'Unwatched Archive Gem · Critics’ Choice'],
+    ['series', 'Series Spotlight (≥30m)', 'Films & Series · Serial Spotlight (≥30m)'],
   ];
 
   $effect(() => {
@@ -148,31 +149,69 @@
   const films = $derived(groupByTitle([...movies.rows]).sort((a, b) => byName(a.item, b.item)));
   const moviePosters = $derived(prefersPosters(films.map((g) => g.item)));
 
+  // Cultural & Language preference scoring (European languages & Australian English)
+  const AUS_EURO_GEO =
+    /australi|melbourne|sydney|brisbane|outback|queensland|perth|italy|italia|chiara|france|french|germany|deutschland|spain|españa|europe|nordic|scandi/i;
+
+  function scorePreference(item: LibraryRow): number {
+    let score = 0;
+    // In-progress items from continue watching
+    if (item.progress && !item.progress.watched && item.progress.positionSec > 60) score += 50;
+    // Unwatched items preferred over fully watched
+    if (!item.watched) score += 20;
+    // Ratings quality boost
+    if ('rating' in item && item.rating?.score100) score += item.rating.score100 / 10;
+    else if ('ratings' in item && item.ratings?.[0]?.score100) score += item.ratings[0].score100 / 10;
+    // European & Australian preference
+    const text = `${item.title} ${'show' in item ? item.show : ''} ${'episodeTitle' in item ? item.episodeTitle : ''} ${'overview' in item ? item.overview : ''}`;
+    if (AUS_EURO_GEO.test(text)) score += 35;
+    if ('genres' in item && item.genres?.some((g: string) => /world|foreign|european|drama|independent/i.test(g))) score += 25;
+    return score;
+  }
+
   // Candidate pool for the Evening Lens hero rotation.
   const lensPool = $derived.by((): LibraryRow[] => {
-    const base = recent.filter((i) => i.kind === 'movie' && 'backdrop' in i && i.backdrop);
-    const pool = base.length ? base : recent;
-    if (!pool.length) return [];
+    const allMovieRows: LibraryRow[] = movies.rows.length ? [...movies.rows] : rows.filter((i) => i.kind === 'movie');
+    const movieCandidates = allMovieRows.filter((i) => i.durationSec >= 3600);
+    const moviePool = movieCandidates.length ? movieCandidates : allMovieRows;
+
+    const allEpisodeRows = rows.filter((i) => i.kind === 'episode');
+    const episodeCandidates = allEpisodeRows.filter((i) => i.durationSec >= 1800);
+
+    if (moodLens === 'series') {
+      const candidates = episodeCandidates.length ? episodeCandidates : allEpisodeRows;
+      if (!candidates.length) return [];
+      return [...candidates].sort((a, b) => scorePreference(b) - scorePreference(a) || b.addedAt - a.addedAt);
+    }
+
+    if (!moviePool.length) return recent.filter((i) => i.kind === 'movie');
+
     let filtered: LibraryRow[] = [];
     if (moodLens === 'weeknight') {
-      filtered = pool.filter((i) => i.durationSec > 0 && i.durationSec <= 6100);
+      // Feature films under 100 minutes (>= 60m and <= 100m)
+      filtered = moviePool.filter((i) => i.durationSec >= 3600 && i.durationSec <= 6000);
+      if (!filtered.length) filtered = moviePool.filter((i) => i.durationSec > 0 && i.durationSec <= 6100);
     } else if (moodLens === 'noir') {
-      filtered = pool.filter(
+      filtered = moviePool.filter(
         (i) => 'genres' in i && i.genres?.some((g: string) => /sci-fi|science fiction|thriller|crime|mystery|noir/i.test(g)),
       );
     } else if (moodLens === 'epic') {
-      filtered = pool.filter((i) => i.durationSec >= 7800);
+      filtered = moviePool.filter((i) => i.durationSec >= 7800);
     } else if (moodLens === 'unwatched') {
-      filtered = pool.filter((i) => !i.watched);
+      filtered = moviePool.filter((i) => !i.watched);
+    } else if (moodLens === 'double') {
+      filtered = moviePool;
     }
-    return filtered.length ? filtered : pool;
+
+    const pool = filtered.length ? filtered : moviePool;
+    return [...pool].sort((a, b) => scorePreference(b) - scorePreference(a) || b.addedAt - a.addedAt);
   });
 
   const lead = $derived(
     lensPool[heroOffset % Math.max(lensPool.length, 1)] ??
-      recent.find((i) => i.kind === 'movie' && 'backdrop' in i && i.backdrop) ??
-      recent.find((i) => i.kind === 'movie' && artOf(i)) ??
-      recent.find((i) => artOf(i)) ??
+      films.map((g) => g.item).find((i) => 'backdrop' in i && i.backdrop) ??
+      films.map((g) => g.item)[0] ??
+      recent.find((i) => i.kind === 'movie') ??
       recent[0],
   );
 
@@ -358,7 +397,7 @@
     <!-- Interactive Evening Programming Lens Ribbon -->
     <div class="lens-bar" role="region" aria-label="Evening programming lens">
       <div class="lens-pills">
-        <span class="lens-label">Evening Lens:</span>
+        <span class="lens-label">Films & Series:</span>
         {#each LENSES as [id, label] (id)}
           <button
             type="button"
