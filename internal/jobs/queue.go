@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"ply/internal/events"
 	"ply/internal/tier"
 )
 
@@ -35,6 +36,9 @@ type Options struct {
 	// running in the queue. Its jobs have negative ids and can't be acted on. It is
 	// called without the queue's lock, about once a second.
 	Extra func(running []Job) []Job
+	// Events is the live feed the queue publishes to (topics jobs and tier); nil: a
+	// hub of its own.
+	Events *events.Hub
 }
 
 // Queue runs jobs by priority, below playback and browsing. Safe for concurrent use.
@@ -47,7 +51,6 @@ type Queue struct {
 	o     Options
 	log   *slog.Logger
 	specs map[string]*Spec
-	hub   *hub
 	enqMu sync.Mutex // one enqueue at a time: the merge check and the insert are one step
 	// closed is set (under enqMu) once Run has returned: an enqueue then fails with
 	// ErrClosed instead of writing to a store that is being closed.
@@ -122,11 +125,14 @@ func New(o Options) *Queue {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
+	if o.Events == nil {
+		o.Events = events.New(512, o.Now())
+	}
 	log := o.Logger
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Queue{o: o, log: log, specs: map[string]*Spec{}, hub: newHub(512, o.Now()), live: map[int64]*entry{},
+	return &Queue{o: o, log: log, specs: map[string]*Spec{}, live: map[int64]*entry{},
 		running: map[bool]int{}, wake: make(chan struct{}, 1), ready: make(chan struct{})}
 }
 
@@ -219,7 +225,7 @@ func (q *Queue) enqueue(ctx context.Context, kind string, o Opt, waiter chan out
 			j := e.Job
 			q.mu.Unlock()
 			q.save(ctx, j)
-			q.publish(Event{Type: "job.updated", Job: &j})
+			q.publish("job.updated", &j)
 			q.poke()
 			return j, nil
 		}
@@ -246,7 +252,7 @@ func (q *Queue) enqueue(ctx context.Context, kind string, o Opt, waiter chan out
 	q.live[id] = e
 	j := e.Job
 	q.mu.Unlock()
-	q.publish(Event{Type: "job.queued", Job: &j})
+	q.publish("job.queued", &j)
 	q.poke()
 	return j, nil
 }
@@ -383,7 +389,7 @@ func (q *Queue) timerC() <-chan time.Time {
 }
 
 func (q *Queue) load(ctx context.Context) {
-	defer q.publish(Event{Type: "snapshot"})
+	defer q.publish("snapshot", nil)
 	if q.o.Persist == nil {
 		return
 	}
@@ -463,7 +469,7 @@ func (q *Queue) next() (start *entry, due time.Duration, held bool) {
 	shown := map[bool]bool{} // a lane's first held job has been given its reason
 	defer func() {
 		for i := range changed {
-			q.publish(Event{Type: "job.held", Job: &changed[i]})
+			q.publish("job.held", &changed[i])
 		}
 	}()
 	for _, c := range cands {
@@ -602,7 +608,7 @@ func (q *Queue) work(parent context.Context, e *entry) {
 	r := &Run{q: q, e: e, need: yield}
 	ctx = context.WithValue(ctx, runKey{}, r)
 	q.save(ctx, j)
-	q.publish(Event{Type: "job.started", Job: &j})
+	q.publish("job.started", &j)
 	q.log.Info("job started", "id", j.ID, "kind", j.Kind, "title", j.Title)
 	err := ctx.Err() // cancelled before it began
 	if err == nil {
@@ -681,7 +687,7 @@ func (q *Queue) finish(parent, ctx context.Context, e *entry, err error) {
 	} else if j.State == Done {
 		q.log.Info("job finished", "id", j.ID, "kind", j.Kind, "title", j.Title, "took", now.Sub(e.StartedAt).Round(time.Millisecond))
 	}
-	q.publish(Event{Type: typ, Job: &j})
+	q.publish(typ, &j)
 	if !requeue {
 		for _, w := range waiters {
 			w <- outcome{result, werr}
@@ -721,7 +727,7 @@ func (q *Queue) Cancel(id int64) error {
 	waiters := e.waiters
 	q.mu.Unlock()
 	q.save(context.Background(), j)
-	q.publish(Event{Type: "job.cancelled", Job: &j})
+	q.publish("job.cancelled", &j)
 	q.log.Info("job cancelled", "id", j.ID, "kind", j.Kind, "title", j.Title)
 	for _, w := range waiters {
 		w <- outcome{nil, ErrCancelled}
@@ -745,7 +751,7 @@ func (q *Queue) Bump(id int64) error {
 	j := e.Job
 	q.mu.Unlock()
 	q.save(context.Background(), j)
-	q.publish(Event{Type: "job.updated", Job: &j})
+	q.publish("job.updated", &j)
 	q.poke()
 	return nil
 }
@@ -798,7 +804,7 @@ func (q *Queue) SetPaused(ctx context.Context, paused bool) error {
 	if paused {
 		typ = "queue.paused"
 	}
-	q.publish(Event{Type: typ})
+	q.publish(typ, nil)
 	q.poke()
 	return nil
 }
@@ -898,7 +904,7 @@ func (q *Queue) publishTier() {
 		q.lastExtra = sig
 		q.mu.Unlock()
 		if changed {
-			q.publish(Event{Type: "snapshot"})
+			q.publish("snapshot", nil)
 		}
 	}
 	if q.o.Gate == nil {
@@ -910,7 +916,7 @@ func (q *Queue) publishTier() {
 	q.lastTier = t
 	q.mu.Unlock()
 	if !same {
-		q.publish(Event{Type: "tier", Tier: &t})
+		q.o.Events.Publish(events.Tier, "tier", TierData{Tier: &t})
 	}
 }
 
@@ -952,7 +958,7 @@ func (r *Run) Progress(done, total int, note string) {
 	r.e.lastPub = now
 	j := r.e.Job
 	q.mu.Unlock()
-	q.publish(Event{Type: "job.progress", Job: &j})
+	q.publish("job.progress", &j)
 }
 
 // Yield waits while playback or browsing needs the machine (for what the job's
@@ -977,5 +983,5 @@ func (r *Run) held(reason string) {
 	r.e.Held = reason
 	j := r.e.Job
 	q.mu.Unlock()
-	q.publish(Event{Type: "job.held", Job: &j})
+	q.publish("job.held", &j)
 }

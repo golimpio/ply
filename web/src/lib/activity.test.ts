@@ -35,11 +35,15 @@ const ids = (list: Job[]) => list.map((j) => j.id);
 describe('applyEvent', () => {
   it('replaces everything with a snapshot, Go nulls as empty lists', () => {
     const s = applyEvent(snap({ queued: [job(1)] }), 'snapshot', {
-      paused: true,
-      running: null,
-      queued: [job(2)],
-      history: null,
-      tier: { playback: { Sessions: 1, Active: 1, Transcodes: 0, Software: 0, Waiting: 0, Paths: null }, browsing: false, hold: { held: false } },
+      api: 1,
+      jobs: {
+        paused: true,
+        running: null,
+        queued: [job(2)],
+        history: null,
+        tier: { playback: { Sessions: 1, Active: 1, Transcodes: 0, Software: 0, Waiting: 0, Paths: null }, browsing: false, hold: { held: false } },
+      },
+      sessions: [],
     });
     expect(s.paused).toBe(true);
     expect(s.running).toEqual([]);
@@ -47,6 +51,14 @@ describe('applyEvent', () => {
     expect(s.history).toEqual([]);
     expect(s.tier.playback.Paths).toEqual([]);
     expect(s.tier.playback.Sessions).toBe(1);
+  });
+
+  it('keeps the queue for a snapshot without its section (other topics, or {})', () => {
+    const s0 = snap({ queued: [job(1)], paused: true });
+    expect(applyEvent(s0, 'snapshot', { api: 1, sessions: [] })).toBe(s0);
+    expect(applyEvent(s0, 'snapshot', {})).toBe(s0);
+    // Positive control: with the section, it is replaced.
+    expect(ids(applyEvent(s0, 'snapshot', { api: 1, jobs: { queued: [job(2)] } }).queued)).toEqual([2]);
   });
 
   it('queues a new job in start order: priority, then age, then id', () => {
@@ -338,8 +350,8 @@ describe('openActivity', () => {
     expect(new URL(es.url).pathname).toBe('/api/events');
     es.open();
     expect(mod.activity.mode).toBe('live');
-    es.emit('snapshot', snap({ running: [job(1, { state: 'running' })] }));
-    es.emit('job.queued', { seq: 2, type: 'job.queued', job: job(2) });
+    es.emit('snapshot', { api: 1, jobs: snap({ running: [job(1, { state: 'running' })] }) });
+    es.emit('job.queued', { job: job(2) });
     expect(mod.activity.loaded).toBe(true);
     expect(mod.activity.summary.running).toBe(1);
     expect(mod.activity.summary.queued).toBe(1);
@@ -422,7 +434,7 @@ describe('openActivity', () => {
     // Events of the old stream are not applied any more.
     first.emit('job.queued', { seq: 9, type: 'job.queued', job: job(5) });
     expect(mod.activity.summary.queued).toBe(0);
-    FakeEventSource.all[1].emit('snapshot', snap({ queued: [job(1), job(2)] }));
+    FakeEventSource.all[1].emit('snapshot', { api: 1, jobs: snap({ queued: [job(1), job(2)] }) });
     expect(mod.activity.summary.queued).toBe(2);
     close();
     setVisible('hidden');
@@ -442,7 +454,7 @@ describe('openActivity', () => {
   });
 
   it('markSeen clears the failure light and remembers it', () => {
-    mod.activity.apply('snapshot', snap({ history: [job(7, { state: 'failed', finishedAt: iso(Date.now() - 1000) })] }));
+    mod.activity.apply('snapshot', { api: 1, jobs: snap({ history: [job(7, { state: 'failed', finishedAt: iso(Date.now() - 1000) })] }) });
     expect(mod.activity.summary.recentFailure?.id).toBe(7);
     mod.activity.markSeen();
     expect(mod.activity.summary.recentFailure).toBeNull();

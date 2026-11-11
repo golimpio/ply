@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"ply/internal/events"
 	"ply/internal/jobs"
 	"ply/internal/tier"
 )
@@ -185,8 +186,14 @@ func readEvent(t *testing.T, r *bufio.Reader) (id int64, typ, data string) {
 
 func openEvents(t *testing.T, url string, lastID int64) (*bufio.Reader, func()) {
 	t.Helper()
+	return openFeed(t, url+"/api/events", lastID)
+}
+
+// openFeed opens the feed at url (with its query).
+func openFeed(t *testing.T, url string, lastID int64) (*bufio.Reader, func()) {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	req, _ := http.NewRequestWithContext(ctx, "GET", url+"/api/events", nil)
+	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if lastID > 0 {
 		req.Header.Set("Last-Event-ID", strconv.FormatInt(lastID, 10))
 	}
@@ -210,8 +217,11 @@ func TestEventsStreamSnapshotThenChangesAndReplays(t *testing.T) {
 	if typ != "snapshot" {
 		t.Fatalf("first event %q, want a snapshot", typ)
 	}
-	var snap jobs.Snapshot
-	if err := json.Unmarshal([]byte(data), &snap); err != nil || !snap.Paused {
+	var snap struct {
+		API  int
+		Jobs *jobs.Snapshot
+	}
+	if err := json.Unmarshal([]byte(data), &snap); err != nil || snap.API != Version || snap.Jobs == nil || !snap.Jobs.Paused {
 		t.Fatalf("snapshot %s: %v", data, err)
 	}
 
@@ -220,7 +230,7 @@ func TestEventsStreamSnapshotThenChangesAndReplays(t *testing.T) {
 	for {
 		eid, typ, data := readEvent(t, r)
 		if typ == "job.queued" {
-			var ev jobs.Event
+			var ev jobs.EventData
 			_ = json.Unmarshal([]byte(data), &ev)
 			if ev.Job == nil || ev.Job.ID != j.ID {
 				t.Fatalf("job.queued for %s", data)
@@ -239,6 +249,73 @@ func TestEventsStreamSnapshotThenChangesAndReplays(t *testing.T) {
 	defer closeB()
 	if _, typ, _ := readEvent(t, r2); typ != "job.queued" {
 		t.Fatalf("replay began with %q, want job.queued", typ)
+	}
+}
+
+// ?topics= picks what the feed carries: a client of the library alone gets no job
+// events, and its snapshot has only the version.
+func TestEventsFollowTheTopics(t *testing.T) {
+	e, q := newActivityEnv(t, nil)
+	ts := httptest.NewServer(e.srv)
+	defer ts.Close()
+	sections := func(data string) map[string]json.RawMessage {
+		t.Helper()
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(data), &m); err != nil {
+			t.Fatalf("snapshot %s: %v", data, err)
+		}
+		return m
+	}
+
+	// Positive control: every topic, every section (no player: no sessions, but the
+	// section is there, empty).
+	all, closeAll := openEvents(t, ts.URL, 0)
+	_, typ, data := readEvent(t, all)
+	closeAll()
+	if s := sections(data); typ != "snapshot" || s["jobs"] == nil || string(s["sessions"]) != "[]" || string(s["api"]) != "1" {
+		t.Fatalf("all topics: %s %s", typ, data)
+	}
+
+	r, closeLib := openFeed(t, ts.URL+"/api/events?topics=library", 0)
+	defer closeLib()
+	_, typ, data = readEvent(t, r)
+	if s := sections(data); typ != "snapshot" || len(s) != 1 || string(s["api"]) != "1" {
+		t.Fatalf("library only: snapshot %s %s, want the version alone", typ, data)
+	}
+	if _, err := q.Enqueue(context.Background(), "work", jobs.Opt{}); err != nil {
+		t.Fatal(err)
+	}
+	q.Events().Publish(events.Library, "library", nil)
+	if _, typ, data = readEvent(t, r); typ != "library" || data != "{}" {
+		t.Fatalf("library only: got %s %s, want the library event and not the job's", typ, data)
+	}
+}
+
+// A snapshot event of the queue (it changed in a way its events do not say)
+// replays as the whole snapshot, as it is sent live: it carries nothing of its own.
+func TestAReplayedSnapshotIsWhole(t *testing.T) {
+	e, q := newActivityEnv(t, nil)
+	ts := httptest.NewServer(e.srv)
+	defer ts.Close()
+	since := q.Events().Last()
+	if _, err := q.Enqueue(context.Background(), "work", jobs.Opt{}); err != nil {
+		t.Fatal(err)
+	}
+	q.Events().Publish(events.Jobs, "snapshot", nil)
+
+	r, closeR := openEvents(t, ts.URL, since)
+	defer closeR()
+	// Positive control: this is a replay, not a fresh start.
+	if _, typ, _ := readEvent(t, r); typ != "job.queued" {
+		t.Fatalf("replay began with %q, want job.queued", typ)
+	}
+	_, typ, data := readEvent(t, r)
+	var snap struct {
+		API  int
+		Jobs *jobs.Snapshot
+	}
+	if err := json.Unmarshal([]byte(data), &snap); err != nil || typ != "snapshot" || snap.API != Version || snap.Jobs == nil || len(snap.Jobs.Queued) != 1 {
+		t.Fatalf("replayed snapshot: %s %s, want the whole snapshot", typ, data)
 	}
 }
 

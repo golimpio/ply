@@ -22,6 +22,7 @@ import (
 	"ply/internal/art"
 	"ply/internal/config"
 	"ply/internal/discovery"
+	"ply/internal/events"
 	"ply/internal/hwaccel"
 	"ply/internal/jobs"
 	"ply/internal/library"
@@ -132,6 +133,9 @@ func run() error {
 	// holds queued work while a viewer or a person browsing needs the machine.
 	gov := tier.New(tier.Options{Playback: playbackLoad{streams}})
 	streams.OnLoadChange(gov.Notify)
+	// The live feed (GET /api/events, docs/M11-CLIENTS.md): the queue, the library,
+	// the plays and the tiers publish to it.
+	feed := events.New(512, time.Now())
 
 	// The ffmpeg of subtitles and artwork are guarded as the playback ones are: by the kernel
 	// (Linux), or by a reaper each (macOS), the same link the stream manager makes.
@@ -221,9 +225,9 @@ func run() error {
 			}()
 		},
 		// The open pages fetch the library again (GET /api/events, "library").
-		OnChanged: func() { queue.LibraryChanged() },
+		OnChanged: func() { feed.Publish(events.Library, "library", nil) },
 	})
-	scanner.OnChanged(func() { queue.LibraryChanged() })
+	scanner.OnChanged(func() { feed.Publish(events.Library, "library", nil) })
 	scanner.OnAdded(func(ids []int64) {
 		worker.Notify()
 		if subsFeed != nil {
@@ -248,7 +252,7 @@ func run() error {
 	}
 	active.roots = rootPaths(roots)
 	queue = newQueue(queueDeps{store: st, gov: gov, scanner: scanner, worker: worker, art: artGen, subs: subGen, ratings: ratings,
-		roots: func() []string { active.Lock(); defer active.Unlock(); return slices.Clone(active.roots) }, log: log})
+		roots: func() []string { active.Lock(); defer active.Unlock(); return slices.Clone(active.roots) }, log: log, events: feed})
 	if subGen != nil {
 		subsFeed = newSubsFeeder(st, queue, subGen, log)
 	}
@@ -386,7 +390,7 @@ func run() error {
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.Serve(ln) }()
 
-	adv, err := discovery.Advertise(cfg.Name, id, port)
+	adv, err := discovery.Advertise(cfg.Name, id, port, api.Version, api.VersionMin)
 	if err != nil {
 		log.Warn("mDNS advertisement unavailable", "err", err)
 	}

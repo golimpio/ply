@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"ply/internal/api"
+	"ply/internal/events"
 	"ply/internal/jobs"
 	"ply/internal/store"
 	"ply/internal/subs"
@@ -291,17 +292,19 @@ func (f *subsFeeder) Run(ctx context.Context) {
 	}
 }
 
-func (f *subsFeeder) subscribe() (<-chan jobs.Event, func()) {
-	_, _, ch, cancel := f.q.Subscribe(f.q.LastSeq())
+func (f *subsFeeder) subscribe() (<-chan events.Event, func()) {
+	hub := f.q.Events()
+	_, _, ch, cancel := hub.Subscribe(hub.Last(), events.Topics{events.Jobs: true})
 	return ch, cancel
 }
 
 // note learns from the queue's events which of our jobs a person cancelled.
-func (f *subsFeeder) note(ev jobs.Event) {
-	if ev.Type != "job.cancelled" || ev.Job == nil || ev.Job.Kind != kindSubsPreextract {
+func (f *subsFeeder) note(ev events.Event) {
+	d, ok := ev.Data.(jobs.EventData)
+	if ev.Type != "job.cancelled" || !ok || d.Job == nil || d.Job.Kind != kindSubsPreextract {
 		return
 	}
-	if id, err := strconv.ParseInt(strings.TrimPrefix(ev.Job.Key, "subs:"), 10, 64); err == nil {
+	if id, err := strconv.ParseInt(strings.TrimPrefix(d.Job.Key, "subs:"), 10, 64); err == nil {
 		f.mu.Lock()
 		f.cancelled[id] = true
 		f.mu.Unlock()

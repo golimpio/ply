@@ -56,12 +56,17 @@ function startOrder(a: Job, b: Job): number {
 
 /**
  * The snapshot after one event of GET /api/events: `data` is the event's data, parsed (for a
- * snapshot, the whole queue). Jobs are upserted by id and land in running, queued or history by
+ * snapshot, `{api, jobs, sessions, tier}`, of which this keeps the queue: docs/M11-CLIENTS.md).
+ * Types it does not know change nothing. Jobs are upserted by id and land in running, queued or history by
  * their state. A job a worker has taken but the governor still holds stays "queued" with `held`
  * set, and belongs in running. Pure: the snapshot given is not changed.
  */
 export function applyEvent(s: JobsSnapshot, type: string, data: unknown): JobsSnapshot {
-  if (type === 'snapshot') return normaliseSnapshot(data as JobsSnapshot);
+  if (type === 'snapshot') {
+    // A section replaces its state; a snapshot without one leaves the queue as it is.
+    const jobs = (data as { jobs?: JobsSnapshot } | null)?.jobs;
+    return jobs ? normaliseSnapshot(jobs) : s;
+  }
   const e = (data ?? {}) as Partial<JobEvent>;
   if (type === 'queue.paused' || type === 'queue.resumed') return { ...s, paused: type === 'queue.paused' };
   if (type === 'tier') return e.tier ? { ...s, tier: normaliseTier(e.tier) } : s;

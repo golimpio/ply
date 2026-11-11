@@ -90,7 +90,7 @@ async function open(browser, opts = {}, viewport = { width: 1280, height: 800 })
     if (p === '/api/events') {
       if (opts.events === false) return json(route, { error: 'the background queue is not running' }, 503);
       // One snapshot, then the stream ends: EventSource reconnects after `retry` ms and gets the next.
-      const body = `retry: 300\n\nid: 1\nevent: snapshot\ndata: ${JSON.stringify(st.snapshot)}\n\n`;
+      const body = `retry: 300\n\nid: 1\nevent: snapshot\ndata: ${JSON.stringify({ api: 1, jobs: st.snapshot, sessions: st.sessions, tier: st.snapshot.tier })}\n\n`;
       return route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store' }, body });
     }
     if (p === '/api/sessions') return json(route, st.sessions);

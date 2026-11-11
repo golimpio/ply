@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"ply/internal/events"
 	"ply/internal/tier"
 )
 
@@ -528,34 +529,6 @@ func TestConcurrentEnqueuesOfAKeyMakeOneJob(t *testing.T) {
 	}
 }
 
-// Review finding 7: event ids go on growing across a restart, so a browser that
-// reconnects with an id of the old process gets a snapshot, not a replay of
-// unrelated events.
-func TestAnIdFromAnotherProcessResyncs(t *testing.T) {
-	old := newHub(16, time.Unix(1_800_000_000, 0))
-	old.publish(Event{Type: "job.queued"})
-	stale := old.last()
-	now := newHub(16, time.Unix(1_800_000_060, 0)) // ply restarted a minute later
-	if _, ok, _, cancel := now.subscribe(stale); ok {
-		cancel()
-		t.Fatal("an id from the old process, before any new event: no snapshot")
-	}
-	for range 3 {
-		now.publish(Event{Type: "job.progress"})
-	}
-	if _, ok, _, cancel := now.subscribe(stale); ok {
-		cancel()
-		t.Fatal("an id from the old process replayed the new one's events")
-	}
-	// Positive control: an id of this process replays.
-	mine := now.last() - 1
-	missed, ok, _, cancel := now.subscribe(mine)
-	cancel()
-	if !ok || len(missed) != 1 {
-		t.Fatalf("own id: ok=%v missed=%d", ok, len(missed))
-	}
-}
-
 func TestTheGateHoldsJobsAndSaysWhy(t *testing.T) {
 	g := newGate()
 	g.hold("a viewer is waiting for video")
@@ -845,8 +818,9 @@ func TestEventsAndResync(t *testing.T) {
 		r.Progress(1, 1, "")
 		return nil
 	}})
-	since := q.LastSeq()
-	missed, resync, ch, cancel := q.Subscribe(since)
+	hub := q.Events()
+	since := hub.Last()
+	missed, resync, ch, cancel := hub.Subscribe(since, events.Topics{events.Jobs: true})
 	defer cancel()
 	if resync || len(missed) != 0 {
 		t.Fatalf("subscribe at the newest: resync=%v missed=%d", resync, len(missed))
@@ -857,7 +831,7 @@ func TestEventsAndResync(t *testing.T) {
 	for !slices.Contains(types, "job.done") {
 		select {
 		case e := <-ch:
-			if e.Job != nil && e.Job.ID == j.ID {
+			if d, ok := e.Data.(EventData); ok && d.Job != nil && d.Job.ID == j.ID {
 				types = append(types, e.Type)
 			}
 		case <-timeout:
@@ -868,12 +842,12 @@ func TestEventsAndResync(t *testing.T) {
 		t.Fatalf("events = %v", types)
 	}
 	// A client that reconnects gets what it missed; one too far behind resyncs.
-	missed, resync, _, cancel2 := q.Subscribe(since)
+	missed, resync, _, cancel2 := hub.Subscribe(since, nil)
 	defer cancel2()
 	if resync || len(missed) < 3 {
 		t.Fatalf("replay: resync=%v missed=%d", resync, len(missed))
 	}
-	_, resync, _, cancel3 := q.Subscribe(0)
+	_, resync, _, cancel3 := hub.Subscribe(0, nil)
 	defer cancel3()
 	if !resync {
 		t.Fatal("a new client must start from a snapshot")

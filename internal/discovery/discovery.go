@@ -19,17 +19,25 @@ type Advertiser struct {
 	srv *zeroconf.Server
 }
 
-// Advertise registers a _ply._tcp service on port with TXT records id, v=1
-// and name.
-func Advertise(name, id string, port int) (*Advertiser, error) {
+// Advertise registers a _ply._tcp service on port with the TXT records of
+// txtRecords. api and apiMin are the versions of the API the server serves
+// (docs/M11-CLIENTS.md, "Versioning").
+func Advertise(name, id string, port, api, apiMin int) (*Advertiser, error) {
 	// A dot would split the instance name into extra labels.
 	instance := strings.ReplaceAll(name, ".", "-")
-	txt := []string{"id=" + id, "v=1", "name=" + name}
-	srv, err := zeroconf.Register(instance, ServiceType, "local.", port, txt, nil)
+	srv, err := zeroconf.Register(instance, ServiceType, "local.", port, txtRecords(name, id, api, apiMin), nil)
 	if err != nil {
 		return nil, fmt.Errorf("mdns register: %w", err)
 	}
 	return &Advertiser{srv: srv}, nil
+}
+
+// txtRecords are what a client learns before it connects: the server's id and
+// name, the API versions it serves, and v, the version of this list's own layout.
+// Keys may be added (tls and host are reserved for HTTPS); a client ignores what
+// it does not know.
+func txtRecords(name, id string, api, apiMin int) []string {
+	return []string{"id=" + id, "v=1", "name=" + name, fmt.Sprintf("api=%d", api), fmt.Sprintf("apiMin=%d", apiMin)}
 }
 
 // Shutdown un-registers the service. It is safe on a nil Advertiser.

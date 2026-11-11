@@ -10,7 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"ply/internal/events"
 	"ply/internal/jobs"
+	"ply/internal/tier"
 )
 
 // The Activity page's endpoints (docs/M9-ARCHITECTURE.md, "Live activity feed"):
@@ -18,7 +20,7 @@ import (
 //	GET  /api/jobs                       the queue: running, queued, history, paused, the tiers
 //	POST /api/jobs/{id}/cancel|retry|bump
 //	POST /api/queue/pause|resume
-//	GET  /api/events                     the same, live (Server-Sent Events)
+//	GET  /api/events                     the live feed (Server-Sent Events, docs/M11-CLIENTS.md)
 //
 // They are private (see private): job titles name the library's folders.
 
@@ -85,15 +87,46 @@ func (s *Server) handleQueuePause(w http.ResponseWriter, r *http.Request) {
 // dead server.
 const sseHeartbeat = 15 * time.Second
 
-// handleEvents streams the queue's events. The first event is a snapshot (the
-// whole queue), unless the client reconnects with a Last-Event-ID that is still
-// in the replay buffer: then it gets what it missed. The token, for a server that
-// needs one, comes as ?token= (EventSource cannot send headers).
+// feedSnapshot is the first event of a feed that cannot replay, and comes again
+// whenever the queue changed in a way its events do not say. Each section is the
+// whole of that state, there when its topic was asked for.
+type feedSnapshot struct {
+	API      int            `json:"api"`
+	Jobs     *jobs.Snapshot `json:"jobs,omitempty"`
+	Sessions []PlayingEntry `json:"sessions,omitzero"`
+	Tier     *tier.State    `json:"tier,omitempty"`
+}
+
+func (s *Server) feedSnapshot(topics events.Topics) feedSnapshot {
+	snap := feedSnapshot{API: Version}
+	if topics.Has(events.Jobs) && s.Jobs != nil {
+		j := s.Jobs.Snapshot()
+		snap.Jobs = &j
+	}
+	if topics.Has(events.Sessions) {
+		snap.Sessions = []PlayingEntry{}
+		if s.Streams != nil {
+			snap.Sessions = playingEntries(s.Streams.Playing())
+		}
+	}
+	if topics.Has(events.Tier) && s.Governor != nil {
+		t := s.Governor.State()
+		snap.Tier = &t
+	}
+	return snap
+}
+
+// handleEvents streams the live feed, the topics of ?topics= (all without it). The
+// first event is a snapshot, unless the client reconnects with a Last-Event-ID
+// that is still in the replay buffer: then it gets what it missed. The token, for
+// a server that needs one, comes as ?token= from a browser (EventSource cannot
+// send headers) and as a Bearer header from everything else.
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if s.Jobs == nil {
-		writeError(w, http.StatusServiceUnavailable, "the background queue is not running")
+		writeError(w, http.StatusServiceUnavailable, "the live feed is not running")
 		return
 	}
+	hub := s.Jobs.Events()
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeError(w, http.StatusInternalServerError, "streaming unsupported")
@@ -103,7 +136,8 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if v := r.Header.Get("Last-Event-ID"); v != "" {
 		after, _ = strconv.ParseInt(v, 10, 64)
 	}
-	missed, resync, ch, cancel := s.Jobs.Subscribe(after)
+	topics := events.ParseTopics(r.URL.Query().Get("topics"))
+	missed, resync, ch, cancel := hub.Subscribe(after, topics)
 	defer cancel()
 
 	h := w.Header()
@@ -113,9 +147,12 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 
 	send := func(id int64, typ string, v any) error {
-		b, err := json.Marshal(v)
-		if err != nil {
-			return err
+		b := []byte("{}")
+		if v != nil {
+			var err error
+			if b, err = json.Marshal(v); err != nil {
+				return err
+			}
 		}
 		if _, err := fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", id, typ, b); err != nil {
 			return err
@@ -123,16 +160,26 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 		return nil
 	}
+	// A snapshot event of the queue carries nothing: what is sent for it, live or
+	// replayed, is the snapshot of now.
+	sendEvent := func(e events.Event) error {
+		if e.Type == "snapshot" {
+			return send(e.Seq, "snapshot", s.feedSnapshot(topics))
+		}
+		return send(e.Seq, e.Type, e.Data)
+	}
 	// Tell the browser how long to wait before reconnecting.
 	fmt.Fprint(w, "retry: 3000\n\n")
 	if resync {
 		// The snapshot carries the id of the newest event it includes: replay after it.
-		if err := send(s.Jobs.LastSeq(), "snapshot", s.Jobs.Snapshot()); err != nil {
+		// The id is taken first, so the snapshot holds at least what it names.
+		last := hub.Last()
+		if err := send(last, "snapshot", s.feedSnapshot(topics)); err != nil {
 			return
 		}
 	} else {
 		for _, e := range missed {
-			if err := send(e.Seq, e.Type, e); err != nil {
+			if err := sendEvent(e); err != nil {
 				return
 			}
 		}
@@ -147,13 +194,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			if !open {
 				return // too slow to keep up: the browser reconnects and gets a snapshot
 			}
-			if e.Type == "snapshot" {
-				if send(e.Seq, "snapshot", s.Jobs.Snapshot()) != nil {
-					return
-				}
-				continue
-			}
-			if send(e.Seq, e.Type, e) != nil {
+			if sendEvent(e) != nil {
 				return
 			}
 		case <-beat.C:

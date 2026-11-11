@@ -15,7 +15,8 @@ import (
 // TestAdvertiseAnnouncesTheService registers the service the way the server
 // does and browses for it with the zeroconf client: the instance (dots turned
 // to dashes, they would split it into labels), the port and the TXT records
-// (id, v=1 and the name as typed) are what a client such as the iOS app sees.
+// (id, v=1, the name as typed and the API versions) are what a client such as
+// the iOS app sees.
 //
 // mDNS is multicast on the local network, and nothing here can fake that. A
 // reference service registered straight through zeroconf tells the two ways of
@@ -40,7 +41,7 @@ func TestAdvertiseAnnouncesTheService(t *testing.T) {
 	defer ln.Close()
 	port := ln.Addr().(*net.TCPAddr).Port
 
-	adv, err := Advertise(name, id, port)
+	adv, err := Advertise(name, id, port, 3, 2)
 	if err != nil {
 		t.Skipf("mDNS is not available here: %v", err)
 	}
@@ -94,11 +95,21 @@ func TestAdvertiseAnnouncesTheService(t *testing.T) {
 	if e.Service != "_ply._tcp" { // the name clients browse for: part of the protocol
 		t.Errorf("service = %q, want _ply._tcp", e.Service)
 	}
-	want := []string{"id=" + id, "name=" + name, "v=1"}
+	want := []string{"api=3", "apiMin=2", "id=" + id, "name=" + name, "v=1"}
 	got := slices.Clone(e.Text)
 	slices.Sort(got)
 	if !slices.Equal(got, want) {
 		t.Errorf("TXT records = %q, want %q", got, want)
+	}
+}
+
+// The TXT records, without the network: the multicast test above skips where
+// there is no multicast.
+func TestTXTRecords(t *testing.T) {
+	got := txtRecords("Living room", "abc", 1, 1)
+	want := []string{"id=abc", "v=1", "name=Living room", "api=1", "apiMin=1"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("TXT records = %q, want %q", got, want)
 	}
 }
 

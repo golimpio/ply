@@ -333,7 +333,7 @@ async function open(browser, width, opts = {}) {
     }
     if (p === '/api/jobs') return json(route, SNAPSHOT);
     // One snapshot, and no reconnection while the shot is taken.
-    if (p === '/api/events') return route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store' }, body: `retry: 600000\n\nid: 1\nevent: snapshot\ndata: ${JSON.stringify(SNAPSHOT)}\n\n` });
+    if (p === '/api/events') return route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store' }, body: `retry: 600000\n\nid: 1\nevent: snapshot\ndata: ${JSON.stringify({ api: 1, jobs: SNAPSHOT, sessions: [PLAY], tier: SNAPSHOT.tier })}\n\n` });
     if (p === '/api/sessions') return json(route, [PLAY]);
     if (p === '/api/shows/Lost') return json(route, LOST_DETAIL);
     if (p === '/api/items/1') return json(route, opts.player ? PLAYER_DETAIL : HEAT_DETAIL);

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"ply/internal/art"
+	"ply/internal/events"
 	"ply/internal/jobs"
 	"ply/internal/library"
 	"ply/internal/metadata"
@@ -45,6 +46,7 @@ type queueDeps struct {
 	ratings *metadata.Ratings // may be nil (M10)
 	roots   func() []string   // the library folders now
 	log     *slog.Logger
+	events  *events.Hub // the live feed; nil: the queue's own
 }
 
 // newQueue builds the queue with ply's kinds of job, and makes the scanner's
@@ -56,6 +58,7 @@ func newQueue(d queueDeps) *jobs.Queue {
 		Logger:  d.log,
 		Extra:   scannerActivity(d.scanner),
 		Light:   3, // a subtitle extraction or picture can read for minutes, and must not take the lane from the lookups and ratings beside it
+		Events:  d.events,
 	})
 
 	// The scanner asks before every file it reads. Under a job it reports the
