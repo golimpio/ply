@@ -479,9 +479,8 @@
 {#snippet how()}
   {#if playback}
     <details class="why">
-      <summary>
+      <summary title="Playback details" aria-label="Playback details">
         <span class="badge">{methodLabel(playback.method)}</span>
-        <span class="muted">how this is being played</span>
       </summary>
       <div class="why-body">
         <p class="muted">
@@ -646,9 +645,5 @@
     padding-left: 1.2rem;
     color: var(--text-muted);
   }
-  @media (max-width: 600px) {
-    .why summary .muted {
-      display: none;
-    }
-  }
+
 </style>
