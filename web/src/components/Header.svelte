@@ -40,16 +40,6 @@
     <span class="hint">Search title, director, year…</span>
     <kbd>{mac ? '⌘' : 'Ctrl'} K</kbd>
   </button>
-  <button
-    class="theme-pill"
-    type="button"
-    onclick={toggleTheme}
-    aria-label={theme.current === 'dark' ? 'Switch to paper light theme' : 'Switch to cinema dark theme'}
-    title={theme.current === 'dark' ? 'Switch to Paper Light' : 'Switch to Cinema Dark'}
-  >
-    <span aria-hidden="true">{theme.current === 'dark' ? '☀' : '☾'}</span>
-    <span class="theme-label">{theme.current === 'dark' ? 'Paper Light' : 'Cinema Dark'}</span>
-  </button>
   <ActivityIndicator current={section === 'activity'} />
   <button
     class="btn icon"
@@ -59,6 +49,15 @@
     title={app.serverName ? `Rescan ${app.serverName}` : 'Rescan'}
   >
     <span class="spin" class:on={scan.running}><Icon name="rescan" /></span>
+  </button>
+  <button
+    class="btn icon"
+    type="button"
+    onclick={toggleTheme}
+    aria-label={theme.current === 'dark' ? 'Switch to paper light theme' : 'Switch to cinema dark theme'}
+    title={theme.current === 'dark' ? 'Switch to Paper Light' : 'Switch to Cinema Dark'}
+  >
+    <Icon name={theme.current === 'dark' ? 'sun' : 'moon'} />
   </button>
   <a
     class="btn icon"
@@ -178,27 +177,6 @@
     border: 1px solid var(--line-quiet);
     border-radius: var(--radius-kbd);
   }
-  .theme-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    min-height: 2.15rem;
-    padding: 0 0.75rem;
-    font: inherit;
-    font-size: var(--fs-xs);
-    color: var(--text-muted);
-    background: var(--fill-subtle);
-    border: 1px solid var(--line-overlay);
-    border-radius: var(--radius-pill);
-    cursor: pointer;
-    transition:
-      color var(--motion-hover),
-      background var(--motion-hover);
-  }
-  .theme-pill:hover {
-    color: var(--text);
-    background: var(--fill-hover);
-  }
   .spin {
     display: inline-flex;
   }
@@ -211,16 +189,14 @@
     }
   }
   @media (max-width: 900px) {
-    .hint,
-    .theme-label {
+    .hint {
       display: none;
     }
   }
   @media (max-width: 600px) {
     nav,
     .search,
-    .status,
-    .theme-pill {
+    .status {
       display: none; /* the tab bar carries navigation and search on phones */
     }
   }
