@@ -63,7 +63,7 @@
       id: `item:${it.id}`,
       href: href.item(it.id),
       title: ep ? ep.episodeTitle || `Episode ${ep.episode ?? ''}`.trim() : it.title,
-      sub: ep ? [ep.show, episodeLabel(ep.season, ep.episode)] : ['Movie', it.year, formatDuration(it.durationSec)],
+      sub: ep ? [ep.show, episodeLabel(ep.season, ep.episode)] : ['Film', it.year, formatDuration(it.durationSec)],
       item: it,
       label: ep?.show || it.title,
     };
@@ -77,7 +77,7 @@
       id: `show:${s.show}`,
       href: href.show(s.show),
       title: s.show,
-      sub: ['Show', `${s.episodeCount} episode${s.episodeCount === 1 ? '' : 's'}`],
+      sub: ['Series', `${s.episodeCount} episode${s.episodeCount === 1 ? '' : 's'}`],
       item: s.cover,
       label: s.show,
     }));

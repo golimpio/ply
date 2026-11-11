@@ -7,9 +7,9 @@
 </script>
 
 <nav class="tabs" aria-label="Library">
-  <a href={href.home} aria-current={section === 'home' ? 'page' : undefined}><Icon name="home" />Home</a>
-  <a href={href.movies} aria-current={section === 'movies' ? 'page' : undefined}><Icon name="film" />Movies</a>
-  <a href={href.shows} aria-current={section === 'shows' ? 'page' : undefined}><Icon name="tv" />Shows</a>
+  <a href={href.home} aria-current={section === 'home' ? 'page' : undefined}><Icon name="home" />Programme</a>
+  <a href={href.movies} aria-current={section === 'movies' ? 'page' : undefined}><Icon name="film" />Films</a>
+  <a href={href.shows} aria-current={section === 'shows' ? 'page' : undefined}><Icon name="tv" />Series</a>
   <button onclick={openSearch}><Icon name="search" />Search</button>
   <a href={href.settings} aria-current={section === 'settings' ? 'page' : undefined}><Icon name="settings" />Settings</a>
 </nav>

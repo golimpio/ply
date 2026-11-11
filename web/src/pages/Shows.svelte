@@ -44,7 +44,7 @@
 </script>
 
 <div class="page">
-  <h1>Shows{#if episodes.loaded}<span class="count">{all.length}</span>{/if}</h1>
+  <h1>Series{#if episodes.loaded}<span class="count">{all.length}</span>{/if}</h1>
 
   <LibraryControls
     {view}
@@ -64,7 +64,7 @@
       {#each Array(8) as _, i (i)}<div class="skeleton sk"></div>{/each}
     </div>
   {:else if all.length === 0}
-    <p class="muted">No shows yet. Episodes named like <code>Show S01E02</code> appear here after a scan.</p>
+    <p class="muted">No series yet. Episodes named like <code>Show S01E02</code> appear here after a scan.</p>
   {:else if shown.length === 0}
     <p class="muted">No shows match these filters. <a href={href.showsWith({ sort: view.sort })}>Clear filters</a></p>
   {:else}

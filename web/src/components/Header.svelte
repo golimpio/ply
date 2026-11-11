@@ -27,10 +27,10 @@
       Programme{#if totalCount}<span class="nav-count tabular">{totalCount}</span>{/if}
     </a>
     <a href={href.movies} aria-current={section === 'movies' ? 'page' : undefined}>
-      Movies{#if movieCount}<span class="nav-count tabular">{movieCount}</span>{/if}
+      Films{#if movieCount}<span class="nav-count tabular">{movieCount}</span>{/if}
     </a>
     <a href={href.shows} aria-current={section === 'shows' ? 'page' : undefined}>
-      Shows{#if showCount}<span class="nav-count tabular">{showCount}</span>{/if}
+      Series{#if showCount}<span class="nav-count tabular">{showCount}</span>{/if}
     </a>
   </nav>
   <div class="grow"></div>

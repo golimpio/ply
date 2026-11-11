@@ -50,7 +50,7 @@
 </script>
 
 <div class="page">
-  <h1>Movies{#if movies.loaded}<span class="count">{all.length}</span>{/if}</h1>
+  <h1>Films{#if movies.loaded}<span class="count">{all.length}</span>{/if}</h1>
 
   <LibraryControls
     {view}

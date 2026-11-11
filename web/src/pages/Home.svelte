@@ -45,7 +45,6 @@
   import Icon from '../components/Icon.svelte';
   import MediaCard from '../components/MediaCard.svelte';
   import Rail from '../components/Rail.svelte';
-  import Rating from '../components/Rating.svelte';
   import RatingGlyph from '../components/RatingGlyph.svelte';
 
   let continueItems = $state<ItemSummary[]>([]);
@@ -305,6 +304,42 @@
     return byGenre ?? allFilms[0];
   });
 
+  const companionId = $derived(companion?.id);
+  let companionFull = $state<{ id: number; item: ItemDetail | null }>();
+  $effect(() => {
+    const id = companionId;
+    if (id === undefined) return;
+    const ctl = new AbortController();
+    const d = detail(id, ctl.signal);
+    if (d.cached) companionFull = { id, item: d.cached };
+    d.fresh.then(
+      (item) => {
+        if (!ctl.signal.aborted) companionFull = { id, item };
+      },
+      () => {
+        if (!ctl.signal.aborted && companionFull?.id !== id) companionFull = { id, item: null };
+      },
+    );
+    return () => ctl.abort();
+  });
+  const companionDetail = $derived(companionFull?.id === companion?.id ? companionFull?.item : null);
+  const companionScores = $derived.by(() => {
+    const fallback = companion && 'rating' in companion ? companion : null;
+    const list = titleRatings(companionDetail?.meta, fallback);
+    if (!list.length) return [];
+    const priority = ['rt_critics', 'rt_audience', 'imdb', 'letterboxd', 'metacritic', 'tmdb', 'trakt'];
+    const sorted = [...list].sort((a, b) => {
+      const ia = priority.indexOf(a.source);
+      const ib = priority.indexOf(b.source);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    });
+    return sorted.slice(0, 3).map((r) => ({
+      val: ratingValue(r),
+      source: r.source,
+      entry: r,
+    }));
+  });
+
   const lensKicker = $derived(LENSES.find(([k]) => k === moodLens)?.[2] ?? LENSES[0][2]);
 
   function endsAtLabel(sec: number): string {
@@ -409,7 +444,7 @@
       </button>
     </div>
 
-    <!-- Top Asymmetric Editorial Spread: Featured Screening + Editorial Resume Desk -->
+    <!-- Top 50/50 Equal Editorial Spread: Feature I + Feature II -->
     <section class="spread hero" class:has-companion={Boolean(companion)}>
       <div class="spread-feature">
         {#if feature}
@@ -421,56 +456,54 @@
             {/if}
           </div>
 
-          <div class="feature-grid">
-            <a class="feature-art" href={href.item(feature.id)} onclick={morph}>
-              <Art item={feature} kind="backdrop" ratio="16 / 9" label={cardTitle(feature)} eager />
-            </a>
+          <a class="feature-art" href={href.item(feature.id)} onclick={morph}>
+            <Art item={feature} kind="backdrop" ratio="16 / 9" label={cardTitle(feature)} eager />
+          </a>
 
-            <div class="feature-copy">
-              <div class="hero-meta">
-                {#if isEpisode(feature)}
-                  <span>{feature.year || ''}</span>
-                  {#if feature.year}<span>·</span>{/if}
-                  <span>{episodeLabel(feature.season, feature.episode)}{#if 'episodeTitle' in feature && feature.episodeTitle} — {feature.episodeTitle}{/if}</span>
-                  {#if feature.durationSec}<span>·</span><span>{formatDuration(feature.durationSec)}</span>{/if}
-                {:else}
-                  {#if feature.year}<span>{feature.year}</span>{/if}
-                  {#if feature.year && (featureDirector || feature.durationSec)}<span>·</span>{/if}
-                  {#if featureDirector}<span>{featureDirector}</span>{/if}
-                  {#if featureDirector && feature.durationSec}<span>·</span>{/if}
-                  {#if feature.durationSec}<span>{formatDuration(feature.durationSec)}</span>{/if}
-                {/if}
-              </div>
-
-              <HeroTitle title={cardTitle(feature)} logo={featureLogo} />
-
-              {#if featureDetail?.meta?.originalTitle && featureDetail.meta.originalTitle !== cardTitle(feature)}
-                <div class="hero-orig">{featureDetail.meta.originalTitle}</div>
-              {:else if featureTagline}
-                <p class="hero-orig">{featureTagline}</p>
-              {:else if feature.genres?.length}
-                <p class="hero-orig">{feature.genres.slice(0, 3).join(' · ')}</p>
+          <div class="feature-copy">
+            <div class="hero-meta tabular">
+              {#if isEpisode(feature)}
+                <span>{feature.year || ''}</span>
+                {#if feature.year}<span>·</span>{/if}
+                <span>{episodeLabel(feature.season, feature.episode)}{#if 'episodeTitle' in feature && feature.episodeTitle} — {feature.episodeTitle}{/if}</span>
+                {#if feature.durationSec}<span>·</span><span>{formatDuration(feature.durationSec)}</span>{/if}
+              {:else}
+                {#if feature.year}<span>{feature.year}</span>{/if}
+                {#if feature.year && (featureDirector || feature.durationSec)}<span>·</span>{/if}
+                {#if featureDirector}<span>{featureDirector}</span>{/if}
+                {#if featureDirector && feature.durationSec}<span>·</span>{/if}
+                {#if feature.durationSec}<span>{formatDuration(feature.durationSec)}</span>{/if}
               {/if}
+            </div>
 
-              {#if featureScores.length}
-                <div class="hero-scores tabular">
-                  {#each featureScores as s (s.source)}
-                    <span class="hero-score-item">
-                      <RatingGlyph entry={s.entry} />
-                      <strong class="score-num">{s.val}</strong>
-                    </span>
-                  {/each}
-                </div>
-              {/if}
+            <HeroTitle title={cardTitle(feature)} logo={featureLogo} />
 
-              <div class="hero-actions">
-                <a class="btn-play-minimal" href={href.play(feature.id, resumeAt(feature))}>
-                  <Icon name="play" /><span>{resumeAt(feature) ? 'Resume' : 'Play'}{#if featureEndsAt} · {featureEndsAt}{/if}</span>
-                </a>
-                <a class="btn-details-minimal" href={href.item(feature.id)}>
-                  <Icon name="info" /><span>Details</span>
-                </a>
+            {#if featureDetail?.meta?.originalTitle && featureDetail.meta.originalTitle !== cardTitle(feature)}
+              <div class="hero-orig">{featureDetail.meta.originalTitle}</div>
+            {:else if featureTagline}
+              <p class="hero-orig">{featureTagline}</p>
+            {:else if feature.genres?.length}
+              <p class="hero-orig">{feature.genres.slice(0, 3).join(' · ')}</p>
+            {/if}
+
+            {#if featureScores.length}
+              <div class="hero-scores tabular">
+                {#each featureScores as s (s.source)}
+                  <span class="hero-score-item">
+                    <RatingGlyph entry={s.entry} />
+                    <strong class="score-num">{s.val}</strong>
+                  </span>
+                {/each}
               </div>
+            {/if}
+
+            <div class="hero-actions">
+              <a class="btn-play-minimal" href={href.play(feature.id, resumeAt(feature))}>
+                <Icon name="play" /><span>{resumeAt(feature) ? 'Resume' : 'Play'}{#if featureEndsAt} · {featureEndsAt}{/if}</span>
+              </a>
+              <a class="btn-details-minimal" href={href.item(feature.id)}>
+                <Icon name="info" /><span>Details</span>
+              </a>
             </div>
           </div>
         {:else if lead}
@@ -478,7 +511,7 @@
         {/if}
       </div>
 
-      <!-- Right Column: Double Bill Companion Desk -->
+      <!-- Right Column: Feature II Double Bill Pairing -->
       {#if companion}
         <aside class="double-bill-desk">
           <div class="desk-head tabular">
@@ -491,46 +524,53 @@
             {/if}
           </div>
 
-          <div class="companion-card">
-            <a class="companion-art" href={href.item(companion.id)} onclick={morph}>
-              <Art item={companion} kind="backdrop" ratio="16 / 9" label={companion.title} />
-              {#if companion.rating}
-                <div class="companion-badge">
-                  <Rating entry={companion.rating} compact />
-                </div>
+          <a class="companion-art" href={href.item(companion.id)} onclick={morph}>
+            <Art item={companion} kind="backdrop" ratio="16 / 9" label={companion.title} />
+          </a>
+
+          <div class="companion-body">
+            <div class="companion-subhead tabular">
+              <span class="companion-tag">FEATURE II</span>
+              {#if companion.year}<span>·</span><span>{companion.year}</span>{/if}
+              {#if companion.durationSec}<span>·</span><span>{formatDuration(companion.durationSec)}</span>{/if}
+              {#if companion.genres?.length}
+                <span>·</span><span>{companion.genres.slice(0, 2).join(' · ')}</span>
               {/if}
+            </div>
+
+            <a class="companion-title-wrap" href={href.item(companion.id)} onclick={morph}>
+              <h3 class="companion-title">{companion.title}</h3>
             </a>
 
-            <div class="companion-body">
-              <div class="companion-subhead">
-                <span class="companion-tag">FEATURE II</span>
-                {#if companionNote}
-                  <span class="companion-rationale">— {companionNote}</span>
-                {/if}
-              </div>
+            {#if companionNote}
+              <p class="hero-orig">— {companionNote}</p>
+            {/if}
 
-              <a class="companion-title-wrap" href={href.item(companion.id)} onclick={morph}>
-                <h3 class="companion-title">{companion.title}</h3>
+            {#if companionScores.length}
+              <div class="hero-scores tabular">
+                {#each companionScores as s (s.source)}
+                  <span class="hero-score-item">
+                    <RatingGlyph entry={s.entry} />
+                    <strong class="score-num">{s.val}</strong>
+                  </span>
+                {/each}
+              </div>
+            {:else if companion.rating}
+              <div class="hero-scores tabular">
+                <span class="hero-score-item">
+                  <RatingGlyph entry={companion.rating} />
+                  <strong class="score-num">{ratingValue(companion.rating)}</strong>
+                </span>
+              </div>
+            {/if}
+
+            <div class="companion-actions">
+              <a class="btn-companion-play" href={href.play(companion.id, resumeAt(companion))}>
+                <Icon name="play" /><span>Play Feature II</span>
               </a>
-
-              <div class="companion-meta tabular">
-                {#if companion.year}<span>{companion.year}</span>{/if}
-                {#if companion.year && companion.durationSec}<span>·</span>{/if}
-                {#if companion.durationSec}<span>{formatDuration(companion.durationSec)}</span>{/if}
-                {#if companion.genres?.length}
-                  <span>·</span>
-                  <span>{companion.genres.slice(0, 2).join(' · ')}</span>
-                {/if}
-              </div>
-
-              <div class="companion-actions">
-                <a class="btn-companion-play" href={href.play(companion.id, resumeAt(companion))}>
-                  <Icon name="play" /><span>Play Feature II</span>
-                </a>
-                <a class="btn-companion-details" href={href.item(companion.id)} onclick={morph}>
-                  <Icon name="info" /><span>Details</span>
-                </a>
-              </div>
+              <a class="btn-companion-details" href={href.item(companion.id)} onclick={morph}>
+                <Icon name="info" /><span>Details</span>
+              </a>
             </div>
           </div>
         </aside>
@@ -730,26 +770,30 @@
     color: var(--text);
   }
 
-  /* Top Asymmetric Spread */
+  /* Top 50/50 Equal Editorial Spread */
   .spread {
     display: grid;
     grid-template-columns: 1fr;
-    gap: clamp(1.75rem, 4vw, 3.5rem);
+    gap: clamp(1.75rem, 3.5vw, 3rem);
     align-items: start;
-    padding: clamp(1.5rem, 3.5vw, 2.75rem) var(--gutter);
+    padding: clamp(1.75rem, 3.5vw, 2.75rem) var(--gutter) 2.5rem;
   }
   .spread.hero.has-companion {
-    grid-template-columns: minmax(0, 1.48fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: clamp(2rem, 3.5vw, 3.5rem);
   }
   .spread-feature {
     min-width: 0;
+    display: flex;
+    flex-direction: column;
   }
   .kicker {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 0.65rem;
-    margin-bottom: 1.15rem;
+    min-height: 1.5rem;
+    margin-bottom: 0.85rem;
     font-family: var(--font-mono);
     font-size: var(--fs-2xs-2);
     text-transform: uppercase;
@@ -759,32 +803,43 @@
   .kicker-accent {
     color: var(--accent);
   }
-  .feature-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
-    gap: clamp(20px, 2.5vw, 32px);
-    align-items: center;
-  }
-  .feature-art {
+  .feature-art,
+  .companion-art {
+    position: relative;
     display: block;
+    height: clamp(220px, 20vw, 260px);
+    width: 100%;
     overflow: hidden;
     border-radius: var(--radius);
     background: var(--surface-control);
     box-shadow: var(--ring-hairline);
+    margin-bottom: 1.15rem;
   }
-  .feature-art :global(img) {
+  .feature-art :global(.picture),
+  .companion-art :global(.picture) {
+    height: 100% !important;
+    width: 100% !important;
+    aspect-ratio: unset !important;
+  }
+  .feature-art :global(img),
+  .companion-art :global(img) {
+    height: 100% !important;
+    width: 100% !important;
+    object-fit: cover !important;
     transition: transform var(--motion-progress) var(--ease);
   }
-  .feature-art:hover :global(img) {
+  .feature-art:hover :global(img),
+  .companion-art:hover :global(img) {
     transform: scale(1.03);
   }
-  .feature-copy {
+  .feature-copy,
+  .companion-body {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    justify-content: center;
   }
-  .hero-meta {
+  .hero-meta,
+  .companion-subhead {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
@@ -796,14 +851,29 @@
     text-transform: uppercase;
     margin-bottom: 0.45rem;
   }
-  .feature-copy :global(h1) {
+  .companion-tag {
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs-2);
+    letter-spacing: var(--tracking-widest);
+    color: var(--accent);
+    text-transform: uppercase;
+  }
+  .feature-copy :global(h1),
+  .companion-title {
     font-family: var(--font-display);
-    font-size: var(--fs-h1);
+    font-size: var(--fs-3xl);
     font-weight: var(--fw-regular);
-    line-height: 1.05;
+    line-height: var(--lh-tight);
     letter-spacing: -0.015em;
     color: var(--text);
-    margin: 0 0 0.5rem 0;
+    margin: 0 0 0.45rem 0;
+  }
+  .companion-title-wrap {
+    text-decoration: none;
+    color: inherit;
+  }
+  .companion-title-wrap:hover .companion-title {
+    color: var(--accent);
   }
   .feature-copy :global(.logo) {
     display: block;
@@ -828,7 +898,7 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 1.35rem;
-    margin-bottom: 1.35rem;
+    margin-bottom: 1.25rem;
     font-family: var(--font-mono);
     font-size: var(--fs-xs);
     color: var(--text-muted);
@@ -839,9 +909,8 @@
     gap: 0.45rem;
   }
   .hero-score-item :global(.glyph) {
-    width: 1.2em;
-    height: 1.2em;
-    color: var(--text-muted);
+    width: 1.25em;
+    height: 1.25em;
   }
   .score-num {
     font-family: var(--font-display);
@@ -850,13 +919,15 @@
     color: var(--text);
     margin-right: 0.15rem;
   }
-  .hero-actions {
+  .hero-actions,
+  .companion-actions {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 0.75rem;
   }
-  .btn-play-minimal {
+  .btn-play-minimal,
+  .btn-companion-play {
     display: inline-flex;
     align-items: center;
     gap: 0.55rem;
@@ -873,16 +944,19 @@
     text-decoration: none;
     transition: transform var(--motion-hover), opacity var(--motion-hover);
   }
-  .btn-play-minimal:hover {
+  .btn-play-minimal:hover,
+  .btn-companion-play:hover {
     transform: translateY(-1px);
     opacity: 0.92;
   }
-  .btn-play-minimal :global(.icon) {
+  .btn-play-minimal :global(.icon),
+  .btn-companion-play :global(.icon) {
     width: 1rem;
     height: 1rem;
     fill: currentColor;
   }
-  .btn-details-minimal {
+  .btn-details-minimal,
+  .btn-companion-details {
     display: inline-flex;
     align-items: center;
     gap: 0.45rem;
@@ -899,27 +973,32 @@
     text-decoration: none;
     transition: color var(--motion-hover), border-color var(--motion-hover);
   }
-  .btn-details-minimal:hover {
+  .btn-details-minimal:hover,
+  .btn-companion-details:hover {
     color: var(--text);
     border-color: var(--text-muted);
   }
-  .btn-details-minimal :global(.icon) {
+  .btn-details-minimal :global(.icon),
+  .btn-companion-details :global(.icon) {
     width: 0.95rem;
     height: 0.95rem;
   }
 
   /* Right Column: Double Bill Companion Desk */
   .double-bill-desk {
-    padding-left: clamp(1.5rem, 2.5vw, 2.5rem);
+    padding-left: clamp(1.75rem, 3vw, 3rem);
     border-left: 1px solid var(--line);
     min-width: 0;
+    display: flex;
+    flex-direction: column;
   }
   .desk-head {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     justify-content: space-between;
     gap: 1rem;
-    margin-bottom: 1rem;
+    min-height: 1.5rem;
+    margin-bottom: 0.85rem;
     font-family: var(--font-mono);
     font-size: var(--fs-2xs-2);
     text-transform: uppercase;
@@ -951,148 +1030,6 @@
     font-size: var(--fs-2xs-2);
     white-space: nowrap;
   }
-  .companion-card {
-    display: flex;
-    flex-direction: column;
-    gap: 0.85rem;
-  }
-  .companion-art {
-    position: relative;
-    display: block;
-    overflow: hidden;
-    border-radius: var(--radius);
-    background: var(--surface-control);
-    box-shadow: var(--ring-hairline);
-  }
-  .companion-art :global(img) {
-    transition: transform var(--motion-progress) var(--ease);
-  }
-  .companion-art:hover :global(img) {
-    transform: scale(1.03);
-  }
-  .companion-badge {
-    position: absolute;
-    top: 0.5rem;
-    right: 0.5rem;
-    background: var(--glass);
-    backdrop-filter: var(--glass-blur);
-    padding: 0.2rem 0.55rem;
-    border-radius: var(--radius-sm);
-    box-shadow: var(--ring-hairline);
-    font-family: var(--font-mono);
-    font-size: var(--fs-xs);
-  }
-  .companion-body {
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-  }
-  .companion-subhead {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 0.45rem;
-    font-size: var(--fs-xs);
-  }
-  .companion-tag {
-    font-family: var(--font-mono);
-    font-size: var(--fs-2xs-2);
-    letter-spacing: var(--tracking-widest);
-    color: var(--accent);
-    text-transform: uppercase;
-  }
-  .companion-rationale {
-    font-family: var(--font-display);
-    font-style: italic;
-    color: var(--text-muted);
-    font-size: var(--fs-sm);
-    line-height: var(--lh-snug);
-  }
-  .companion-title-wrap {
-    text-decoration: none;
-    color: inherit;
-  }
-  .companion-title {
-    margin: 0.1rem 0;
-    font-family: var(--font-display);
-    font-size: var(--fs-2xl);
-    font-weight: var(--fw-regular);
-    line-height: var(--lh-tight);
-    color: var(--text);
-    transition: color var(--motion-hover);
-  }
-  .companion-title-wrap:hover .companion-title {
-    color: var(--accent);
-  }
-  .companion-meta {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 0.45rem;
-    font-family: var(--font-mono);
-    font-size: var(--fs-2xs-2);
-    letter-spacing: 0.04em;
-    color: var(--text-muted);
-    text-transform: uppercase;
-  }
-  .companion-actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.6rem;
-    margin-top: 0.35rem;
-  }
-  .btn-companion-play {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.45rem;
-    background: var(--text);
-    color: var(--surface-room);
-    border: none;
-    border-radius: var(--radius-pill);
-    padding: 0.45rem 1rem;
-    font-family: var(--font-text);
-    font-size: var(--fs-xs);
-    font-weight: var(--fw-medium);
-    white-space: nowrap;
-    cursor: pointer;
-    text-decoration: none;
-    transition: transform var(--motion-hover), opacity var(--motion-hover);
-  }
-  .btn-companion-play:hover {
-    transform: translateY(-1px);
-    opacity: 0.92;
-  }
-  .btn-companion-play :global(.icon) {
-    width: 0.85rem;
-    height: 0.85rem;
-    fill: currentColor;
-  }
-  .btn-companion-details {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    background: var(--fill-subtle);
-    color: var(--text-muted);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-pill);
-    padding: 0.45rem 0.85rem;
-    font-family: var(--font-text);
-    font-size: var(--fs-xs);
-    font-weight: var(--fw-medium);
-    white-space: nowrap;
-    cursor: pointer;
-    text-decoration: none;
-    transition: color var(--motion-hover), border-color var(--motion-hover);
-  }
-  .btn-companion-details:hover {
-    color: var(--text);
-    border-color: var(--text-muted);
-  }
-  .btn-companion-details :global(.icon) {
-    width: 0.8rem;
-    height: 0.8rem;
-  }
 
 
   .rails {
@@ -1105,7 +1042,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 1rem 2rem;
-    margin: 1.5rem var(--gutter) 0;
+    margin: 1.5rem var(--gutter) 2.25rem;
     padding: 1.1rem 1.25rem;
     background:
       radial-gradient(120% 140% at 0% 0%, color-mix(in oklab, var(--accent) 16%, transparent), transparent 60%),
@@ -1156,9 +1093,6 @@
     }
   }
   @media (max-width: 600px) {
-    .feature-grid {
-      grid-template-columns: 1fr;
-    }
     .rails {
       padding-bottom: 6rem;
     }

@@ -105,8 +105,9 @@
 
 <style>
   .rail {
-    margin-top: 2rem;
-    padding-top: 1.75rem;
+    margin: 0;
+    padding-top: 2.25rem;
+    padding-bottom: 2.25rem;
     border-top: 1px solid var(--line);
   }
   header {
@@ -151,7 +152,7 @@
   ul {
     list-style: none;
     margin: 0;
-    padding: 0.25rem var(--gutter) 0.5rem;
+    padding: 0 var(--gutter);
     display: grid;
     grid-auto-flow: column;
     grid-auto-columns: clamp(230px, 22vw, 320px);
