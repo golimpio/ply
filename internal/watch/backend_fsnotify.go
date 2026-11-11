@@ -2,9 +2,7 @@ package watch
 
 import (
 	"errors"
-	"maps"
 	"path/filepath"
-	"slices"
 	"sync"
 
 	"github.com/fsnotify/fsnotify"
@@ -71,15 +69,6 @@ func (b *fsBackend) close() error {
 		return nil
 	default:
 		close(b.done)
-	}
-	// fsnotify's kqueue backend (darwin, the BSDs) forgets to close the
-	// descriptors of its watches when it is closed.
-	b.mu.Lock()
-	dirs := slices.Collect(maps.Keys(b.watched))
-	clear(b.watched)
-	b.mu.Unlock()
-	for _, d := range dirs {
-		b.w.Remove(d)
 	}
 	err := b.w.Close()
 	b.wg.Wait()
