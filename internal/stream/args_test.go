@@ -26,10 +26,27 @@ func has(args []string, words ...string) bool {
 	return false
 }
 
+// A resume must not read the file ahead to learn what ply's own probe already knows: the window is
+// small, and both options are input options (before -i) or ffmpeg ignores them.
+func TestBuildArgsProbesBriefly(t *testing.T) {
+	a := BuildArgs(RunSpec{Input: "/media/Movie (2020).mkv", SeekSec: 180})
+	ad, ps, i := slices.Index(a, "-analyzeduration"), slices.Index(a, "-probesize"), slices.Index(a, "-i")
+	if ad < 0 || ps < 0 {
+		t.Fatalf("no probe options in %v", a)
+	}
+	if ad > i || ps > i {
+		t.Errorf("a probe option comes after the input, where ffmpeg ignores it: %v", a)
+	}
+	if a[ad+1] != "0" || a[ps+1] != "1M" {
+		t.Errorf("probe options = %q %q, want \"0\" and \"1M\"", a[ad+1], a[ps+1])
+	}
+}
+
 func TestBuildArgsHEVCCopy(t *testing.T) {
 	a := BuildArgs(baseSpec())
 	for _, want := range [][]string{
-		{"-ss", "180.140", "-i", "/media/Movie (2020).mkv"},
+		// -ss and -i are no longer adjacent: the probe window goes between them (and must).
+		{"-ss", "180.140"}, {"-i", "/media/Movie (2020).mkv"},
 		{"-map", "0:0"}, {"-map", "0:1"},
 		{"-c:v", "copy"}, {"-tag:v", "hvc1"}, {"-c:a", "copy"},
 		{"-copyts"}, {"-start_at_zero"}, {"-avoid_negative_ts", "disabled"}, {"-output_ts_offset", "2.000"},

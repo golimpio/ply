@@ -65,6 +65,10 @@ func BuildArgs(r RunSpec) []string {
 	if r.SeekSec > 0 {
 		a = append(a, "-ss", seconds(r.SeekSec))
 	}
+	// Opening a file is where a resume pays on a cold NAS region: ffmpeg reads ahead to learn the
+	// stream parameters. ply's own probe already knows them and the -map below names them, so give
+	// ffmpeg a small window instead of a long analysis (M9, time to first frame).
+	a = append(a, "-analyzeduration", "0", "-probesize", "1M")
 	a = append(a, "-i", r.Input)
 	if r.Video.Complex != "" && !r.Video.copy() {
 		a = append(a, "-filter_complex", r.Video.Complex, "-map", "[v]")
