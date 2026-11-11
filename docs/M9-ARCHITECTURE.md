@@ -282,7 +282,7 @@ Design:
 - Order: demanded segments of every session > init/playlist > prefetch.
 - With ≥ 2 software transcodes: `ThrottleHigh` 20 → 8, and SIGSTOP the session furthest ahead while another has
   waited > 500 ms for a demanded segment.
-- Publish `tier.load`.
+- Publish `tier`.
 
 ### Unified persistent queue (`internal/jobs`)
 - Hand-rolled on SQLite. River is Postgres-only; goqite is FIFO without priorities or dedupe; backlite cannot yield
@@ -306,10 +306,11 @@ Design:
   In-request image misses enqueue at priority 0 and return 404 + `Retry-After: 2`.
 
 ### Live activity feed: SSE, stdlib only
-- `GET /api/events` (`text/event-stream`, 15 s heartbeat, replay from `job_events` on `Last-Event-ID`; the token
-  travels as `?token=`).
-- Events: `snapshot`, `job.queued|started|progress|finished|failed|cancelled`, `queue.paused|resumed`,
-  `session.started|ended|idle`, `tier.load`.
+- `GET /api/events` (`text/event-stream`, 15 s heartbeat, replay on `Last-Event-ID` from the queue's in-memory ring of
+  512 events, not from `job_events`; the token travels as `?token=`).
+- Events (`jobs.Event`, `EVENT_TYPES` in `web/src/lib/activity.svelte.ts`): `snapshot`,
+  `job.queued|updated|held|started|progress|retrying|done|failed|cancelled`, `queue.paused|resumed`, `tier`.
+  `session.started|ended|idle` were planned but are not published yet (see "Now playing across devices" below).
 - `library` (2026-11-11, `Queue.LibraryChanged`): what the library shows changed. Sent after a scan, full or
   partial (the watcher's), that indexed, moved, removed or re-read a file (`Scanner.OnChanged`), after folders were
   read again for a new type, and after a metadata pass that matched or fetched something (`WorkerOptions.OnChanged`);
@@ -323,6 +324,45 @@ Design:
   (last 200, filter failed, retry), a pause toggle, and a tier strip ("queue held: transcode running").
 - Endpoints: `GET /api/jobs`, `POST /api/jobs/{id}/cancel|retry|bump`, `POST /api/queue/pause|resume`,
   `GET /api/sessions`. `/api/scan` and `/api/metadata/status` stay as thin views.
+
+### Now playing across devices, and why not WebSocket (2026-11-12)
+The aim is a "now playing" that is always right, including a cast to Apple TV or Chromecast; Plex's is not.
+- **Why it goes wrong elsewhere:** the client is trusted to say "stopped". A cast plays on a device that is not
+  the one that started it, and a client that sleeps or is killed never says it. A socket does not help: a
+  sleeping device does not close its TCP connection either.
+- **What ply has:** the server owns the truth. A play is a lease (`internal/api/plays.go`, `internal/stream`):
+  a 10 s heartbeat with position and paused, and expiry 30 s after the last heartbeat or request (3 min while
+  paused). An HLS session stopped on purpose answers 410, an expired one 404; an expired direct play is simply
+  admitted again.
+- **What is missing, in order:**
+  1. Move the event hub out of `internal/jobs` into its own package. Sessions become its third publisher, after
+     jobs and the library.
+  2. Publish `session.started|updated|ended` from `stream.Manager`, with position updates at the heartbeat's
+     pace.
+  3. A stable device id and name, made by the client and sent with the session and its heartbeats.
+  4. A heartbeat for direct plays, which today are known only by item, IP and User-Agent (`directKey`).
+  5. Tests on `testing/synctest`: stop the heartbeats and see `session.ended` after 30 s, having first seen
+     `session.started`.
+- **Devices:** an AirPlay'd Apple TV fetches the HLS itself, so its segment requests keep the lease alive. A
+  Chromecast custom Web Receiver is a page served from a registered HTTPS URL, not by ply: whether it may call
+  `http://` ply on the LAN must be tried before anything is designed on it, and plain POSTs are the likeliest to
+  pass. If a phone sleeps while the Apple TV is paused, no requests come, so the paused lease (3 min) applies
+  only if the last heartbeat said paused.
+- **WebSocket: not now.** It was weighed, and these four points decided it:
+  - the feed is one-way notifications;
+  - client actions are REST calls whose status codes mean something (409, 404 vs 410);
+  - progress needs `fetch(keepalive)` when the page goes away, which a socket cannot do;
+  - its one real gain, freeing one of the browser's 6 HTTP/1.1 connections per host (plain HTTP, so no
+    HTTP/2), is small: a hidden tab already drops its stream.
+
+  WebTransport needs HTTPS and HTTP/3, so it is out. What would change this is remote control (stop, seek or
+  "play this" sent to one player) or a native tvOS app. Then the shape would be:
+  - `github.com/coder/websocket`, not a hand-rolled RFC 6455;
+  - `GET /api/devices/{id}/socket` for player devices only, beside SSE, which the dashboards keep;
+  - JSON `{seq, type, data}` on the hub's sequence, with replay by `?after=` and commands acked by id;
+  - `?token=` auth;
+  - a ping every 10 s with a 20 s deadline, and client backoff from 0.5 to 10 s with jitter;
+  - the POST heartbeat and the lease stay the fallback and the truth.
 
 ### As built (2026-11-05)
 - `internal/tier`:
@@ -419,7 +459,20 @@ Design:
   few boxes needed.
 - **Hand-roll** the MKV Cues reader (~300 lines of EBML).
 - **Stdlib** for SSE, the queue, the registry and the reaper.
-- **Skip** `x/time/rate` (reuse the existing bucket), WebSocket libraries, River, goqite and backlite.
+- **Skip** `x/time/rate` (reuse the existing bucket), WebSocket libraries (until remote control, see "Now playing
+  across devices"), River, goqite and backlite.
+- **Refreshed 2026-11-12** (all at their latest):
+  - Go: toolchain go1.27.4 (pinned in `go.mod`), fsnotify 1.10.1, x/sys 0.50.0, x/text 0.44.0,
+    modernc.org/sqlite 1.62.0. fsnotify 1.10 closes its kqueue watches on Close (#740), so ply's own workaround
+    is gone; `TestFSRunReturnsAndLeavesNothingBehind` fails on 1.9.0 without it.
+  - Web: vite 8.3.8, vitest 5.1.0, jsdom 31, playwright-core 1.65, svelte-check 4.7.8.
+  - TypeScript 7 (`@typescript/native`, aliased) does the checking through `svelte-check --tsgo`. TypeScript 6
+    stays installed because svelte2tsx needs its JS API; `npm run check:ts6` is the old check, for comparison.
+    The alias owns the `tsc` link: `npx tsc` is TypeScript 7, and `tsserver` (editors) is still 6.
+  - Kept: modernc.org/sqlite (pure Go; ncruces/go-sqlite3 runs SQLite as wasm), mattn/go-isatty.
+  - grandcat/zeroconf (no release since 2020) stays until it is replaced by an advertise-only responder on
+    `x/net/dns/dnsmessage` or by `brutella/dnssd`. Not hashicorp/mdns: it has no probing, conflict handling or
+    goodbye packets.
 
 ## What to keep
 - The HLS fragment design (`docs/NOTES.md` M3/M4).
