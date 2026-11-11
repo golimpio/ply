@@ -48,6 +48,11 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--reap" {
 		os.Exit(stream.ReapMain(os.Args[2:]))
 	}
+	// ply --watch: the process that holds the folder watches, on macOS (see
+	// internal/watch/helper.go). It talks to the ply that started it on stdin and stdout.
+	if len(os.Args) > 1 && os.Args[1] == watch.HelperArg {
+		os.Exit(watch.HelperMain(os.Stdin, os.Stdout))
+	}
 	if err := run(); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return

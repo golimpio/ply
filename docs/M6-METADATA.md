@@ -189,6 +189,15 @@ is off or nothing matches → NFO alone (`source=nfo`). Fuzz test the parser.
   for the server to drop its change notification (SMB NAS, 2026-11-11: 200 folders took 13 s one by one, 0.6 s
   together): one by one, a library of 700 folders outlasted the shutdown deadline, and the kernel then closed the
   rest the same way while the terminal waited for ply to exit.
+- **On macOS the watches live in a helper process**, `ply --watch` (`internal/watch/helper.go`), started in a
+  session of its own and spoken to in JSON lines on its stdin and stdout (requests `add`/`remove` with an id;
+  replies with the errno kept, events, backend errors). When a process ends, the kernel lets go of its kqueue
+  watches one at a time, and on a network share each waits for the server (2026-11-11: 200 SMB folders, 21 s;
+  handing only the descriptors to another process still left 5.5 s), with the terminal waiting for it: a ply that
+  quit at once (a second Ctrl-C, a crash, kill -9) blocked the terminal for minutes. ply holds none: it exits at
+  once however it ends, the helper sees its stdin close, stops talking first (ply's close never waits) and lets
+  go of the watches in the background. A helper that dies closes the backend: the watcher falls back to the
+  periodic scans, as for any broken backend. Linux keeps inotify in process (it lets go at once).
 - `-watch=true` flag (default on). `-scan-interval` stays as the safety net (default 15m).
 - Scan status gains `watching` and per-root info.
 
