@@ -137,9 +137,53 @@
     t.label = subtitleTracks.find((x) => x.id === sub.key)?.label ?? sub.key;
     if (sub.language) t.srclang = sub.language.slice(0, 2);
     t.src = mediaUrl(sub.url);
+
+    // Sanitize cues: deduplicate overlapping identical cues and cap runaway durations.
+    // Broken subtitle authoring (e.g. calculated end = start * 2 lasting 20-70 mins) otherwise stays on screen forever.
+    const sanitizeCues = () => {
+      const cues = t.track?.cues;
+      if (!cues || cues.length === 0) return;
+      const toRemove: TextTrackCue[] = [];
+      for (let i = 0; i < cues.length; i++) {
+        const cue = cues[i] as VTTCue;
+        if (!cue || typeof cue.startTime !== 'number' || typeof cue.endTime !== 'number') continue;
+        if (i + 1 < cues.length) {
+          const next = cues[i + 1] as VTTCue;
+          if (
+            next &&
+            typeof next.startTime === 'number' &&
+            cue.text &&
+            next.text &&
+            cue.text.trim().toLowerCase() === next.text.trim().toLowerCase() &&
+            Math.abs(cue.startTime - next.startTime) < 2
+          ) {
+            if (cue.endTime > next.endTime) {
+              toRemove.push(cue);
+              continue;
+            }
+          }
+        }
+        // Dialogue cues in film/TV never legitimately run for more than 12 seconds
+        if (cue.endTime - cue.startTime > 12) {
+          cue.endTime = cue.startTime + 12;
+        }
+      }
+      for (const r of toRemove) {
+        try {
+          t.track?.removeCue(r);
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    t.addEventListener('load', sanitizeCues);
     v.appendChild(t);
     t.track.mode = 'showing';
-    return () => t.remove();
+    return () => {
+      t.removeEventListener('load', sanitizeCues);
+      t.remove();
+    };
   });
 
   function selectSubtitle(id: Track['id'] | null) {
@@ -571,6 +615,14 @@
     display: block;
     background: var(--surface-video);
     object-fit: contain;
+  }
+  video::cue {
+    font-family: var(--font-sans);
+    font-size: var(--fs-subtitle);
+    font-weight: var(--fw-medium-2);
+    color: var(--text-cue);
+    background-color: var(--scrim-player-strong);
+    line-height: var(--lh-compact);
   }
   .overlay {
     position: absolute;

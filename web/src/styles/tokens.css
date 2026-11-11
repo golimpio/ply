@@ -270,6 +270,7 @@
   --text-hero-meta: var(--paper-100-a82);
   --text-lede: var(--paper-100-a86);
   --text-on-art: var(--white-a82); /* initials on a generated tile */
+  --text-cue: var(--paper-100); /* video subtitles */
   /* The generated tile (no artwork): saturation and lightness of its two ends, around the title's hue. */
   --tile-from: 24% 22%;
   --tile-to: 20% 11%;
@@ -433,6 +434,7 @@
   /* Fluid sizes. */
   --fs-lede: clamp(1.05rem, 1.7vw, 1.3rem);
   --fs-lede-2: clamp(1rem, 1.6vw, 1.15rem);
+  --fs-subtitle: clamp(0.95rem, 1.6vw, 1.25rem);
   --fs-tile: clamp(1.5rem, 5vw, 2.5rem);
   --fs-h1: clamp(2.1rem, 4.2vw, 3.25rem);
   --fs-display: clamp(2.5rem, 5vw, 4.25rem);
