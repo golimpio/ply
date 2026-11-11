@@ -183,29 +183,37 @@ marked FUTURE is designed here and built later; everything else is the groundwor
 - **AirPlay** (docs/AIRPLAY.md): the Apple TV fetches the HLS itself over plain HTTP. No HTTPS is needed.
 - **Chromecast:** the receiver is a web page the Chromecast loads from a registered HTTPS URL (Google's Default
   Media Receiver, or a custom one). ply cannot serve it.
-  - An HTTPS page that fetches `http://` HLS playlists and segments is making mixed-content requests, which Chrome
-    blocks.
-  - A progressive file in a `<video>` element is treated differently (catt plays local files over plain HTTP), so
-    the file may well play.
-  - So HTTP casting is expected to play files at best, and HLS (anything that needs a transcode) to need HTTPS.
-    This is to be confirmed by the test below.
+  - **Plain HTTP works, measured on 2026-11-12** (results below). The receiver page, served from
+    `https://www.gstatic.com`, fetched ply's `http://` playlist and segments: the mixed-content block that was
+    expected did not happen on this device and firmware. So HTTPS is not needed for casting today.
+  - **What fails is 1080p over HLS.** The same film plays as a 1080p file and as 720p HLS, but not as 1080p HLS: the
+    receiver fetches the playlist, the init segment and the first segment, then answers `LOAD_FAILED` (no detailed
+    code).
+  - **So, on this device, a play for a Chromecast is a direct file, or HLS at 720p at most.** ply's `chromecast`
+    profile copies 1080p video into HLS today (a remux), which is the case that fails. This is to be fixed in the
+    profile.
+  - Newer Chromecasts (Google TV) and newer firmware may block mixed content where this one did not, so the HTTPS
+    listener stays the plan for the day one does.
 
-### The Chromecast plain-HTTP test (the owner, about 10 minutes)
-1. **The file.**
-   1. `pipx install catt`, then `catt scan`.
-   2. `catt -d "<name>" cast 'http://<lan-ip>:<port>/api/items/<id>/file?token=<token>'`, with an item that plays
-      directly (H.264/AAC MP4).
-2. **HLS.**
-   - ply's segments are fMP4. The Default Media Receiver reads HLS segments as MPEG-TS unless the sender says
-     `hlsSegmentFormat: FMP4`, and catt cannot say it, so catt's HLS failing would prove nothing.
-   - Use a short `pychromecast` script instead: start a play with `POST /api/items/<id>/playback`, then load its
-     `index.m3u8` URL with content type `application/x-mpegURL` and the media info's `hlsSegmentFormat` set to
-     `fmp4`.
-3. **For each:** record the date, the Chromecast model and firmware, whether ply logged its requests (User-Agent
-   `CrKey`), whether it played, and, when it did not, what the receiver said. A failure with no requests at all is
-   mixed content; requests followed by a failure is something else.
+### The Chromecast plain-HTTP test
+The test is automated: `pychromecast` finds the Chromecast and casts. A logging proxy in front of ply, or a small
+file server with CORS open, records every request it makes. The test reads the receiver's own player state, and
+stops the play and closes the app when it is done. catt cannot test ply's HLS: ply's segments are fMP4, and the
+Default Media Receiver reads HLS segments as MPEG-TS unless the sender sets `hlsSegmentFormat: fmp4`.
 
-Result: *not run yet.* If HLS fails for mixed content, the next milestone is the HTTPS listener.
+**Result, 2026-11-12.** A Chromecast ("Chromecast", CrKey 1.56.467165, stable channel), the Default Media
+Receiver, ply on `http://192.168.4.196:8420`:
+
+| What was cast | Played | What the Chromecast did |
+|---|---|---|
+| ply, direct file, H.264/AAC MP4, 1280 wide | yes | Range requests on the file over plain HTTP, no Origin |
+| ply, direct file, H.264/AAC MP4, 1920×1080 | yes | |
+| ply, HLS (`chromecast` profile: 1080p video copied, E-AC-3 to AAC), media playlist | no | fetched the playlist, `init.mp4` and `seg00000.m4s` (200, CORS `*`, Origin `https://www.gstatic.com`), then `LOAD_FAILED` |
+| the same, behind a master playlist with `CODECS` | no | the same |
+| Apple's fMP4 HLS sample, HTTPS | yes | |
+| ffmpeg fMP4 HLS of a test pattern, 720p, over HTTP | yes | segment after segment |
+| ffmpeg fMP4 HLS of the film (copied, muxed or separate audio, re-encoded, 44.1 kHz, 25 fps), 1080p, over HTTP | no | the playlist, the init segment, the first segment, `LOAD_FAILED` |
+| the film re-encoded at 720p, ffmpeg fMP4 HLS over HTTP | yes | |
 
 ## Groundwork in this milestone (in commit order)
 1. This contract.
