@@ -4,7 +4,6 @@ import (
 	"net"
 	"strings"
 	"testing"
-	"unicode/utf8"
 )
 
 func TestReachableURLs(t *testing.T) {
@@ -51,58 +50,26 @@ func TestReachableURLs(t *testing.T) {
 	}
 }
 
-func TestBannerFormattingAndAlignment(t *testing.T) {
-	urls := []string{
-		"http://192.168.1.10:8420",
-		"http://127.0.0.1:8420",
-	}
-	b := banner("TestServer", "0.1.0", "/path/to/ply.log", urls)
+// The banner is the logo, the name and version, the server's name and every URL,
+// one per line, then the log file and the hint, with no box and no indent.
+func TestFormatBannerLayout(t *testing.T) {
+	urls := []string{"http://192.168.1.10:8420", "http://127.0.0.1:8420"}
+	got := formatBanner("TestServer", "0.1.0", "/path/to/ply.log", urls, false)
+	want := `█▀█ █   █ █
+█▀▀ █▄▄ ▀█▀
 
-	// Verify required content
-	for _, want := range []string{
-		"╭", "╮", "╰", "╯", "│", "─",
-		"█▀█ █   █ █     local media server",
-		"█▀▀ █▄▄ ▀█▀     v0.1.0",
-		"Server:    TestServer",
-		"Web UI:    http://192.168.1.10:8420",
-		"http://127.0.0.1:8420",
-		"Log file:  /path/to/ply.log",
-		"Press Ctrl-C to stop (twice to quit at once)",
-	} {
-		if !strings.Contains(b, want) {
-			t.Errorf("banner missing %q:\n%s", want, b)
-		}
-	}
+Local Media Server (v0.1.0)
 
-	// Verify every line has the exact same visual rune width
-	lines := strings.Split(strings.TrimSuffix(b, "\n"), "\n")
-	if len(lines) < 3 {
-		t.Fatalf("banner has too few lines: %d", len(lines))
-	}
-	expectedWidth := utf8.RuneCountInString(lines[0])
-	for i, l := range lines {
-		w := utf8.RuneCountInString(l)
-		if w != expectedWidth {
-			t.Errorf("line %d width = %d, want %d: %q", i, w, expectedWidth, l)
-		}
-	}
-}
+TestServer
+http://192.168.1.10:8420
+http://127.0.0.1:8420
 
-func TestBannerWidePathExpandsCleanly(t *testing.T) {
-	longPath := "/Users/someone/Very/Deep/Path/To/A/Super/Long/Directory/Structure/That/Exceeds/Normal/Width/ply.log"
-	urls := []string{"http://127.0.0.1:8420"}
-	b := banner("Server", "0.1.0", longPath, urls)
+Log file: /path/to/ply.log
+Press Ctrl-C to stop (twice to quit at once)
 
-	lines := strings.Split(strings.TrimSuffix(b, "\n"), "\n")
-	expectedWidth := utf8.RuneCountInString(lines[0])
-	if expectedWidth <= 51 {
-		t.Errorf("expected banner width > 51 for long path, got %d", expectedWidth)
-	}
-	for i, l := range lines {
-		w := utf8.RuneCountInString(l)
-		if w != expectedWidth {
-			t.Errorf("line %d width = %d, want %d: %q", i, w, expectedWidth, l)
-		}
+`
+	if got != want {
+		t.Fatalf("banner:\n%s\nwant:\n%s", got, want)
 	}
 }
 
@@ -142,7 +109,7 @@ func TestFormatBannerColor(t *testing.T) {
 	for _, code := range []string{
 		"\033[1;36m", // bold cyan (logo, URLs)
 		"\033[1m",    // bold (labels)
-		"\033[2m",    // dim (hints, box borders)
+		"\033[2m",    // dim (version, hint)
 		"\033[0m",    // reset
 	} {
 		if !strings.Contains(colored, code) {
@@ -160,15 +127,5 @@ func TestFormatBannerColor(t *testing.T) {
 	}
 	if stripped != uncolored {
 		t.Errorf("stripped colored banner differs from uncolored banner:\nGot:\n%s\nWant:\n%s", stripped, uncolored)
-	}
-
-	// Alignment: every line in the visual display must have identical rune width
-	lines := strings.Split(strings.TrimSuffix(stripped, "\n"), "\n")
-	expectedWidth := utf8.RuneCountInString(lines[0])
-	for i, l := range lines {
-		w := utf8.RuneCountInString(l)
-		if w != expectedWidth {
-			t.Errorf("line %d visual width = %d, want %d: %q", i, w, expectedWidth, l)
-		}
 	}
 }
