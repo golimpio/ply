@@ -388,6 +388,7 @@
   --gutter: clamp(1rem, 4vw, 3rem);
   --gutter-player: clamp(0.75rem, 2.5vw, 1.5rem); /* the player's bars, from the window's edges */
   --bar-h: 3.5rem;
+  --shelf-pad-y: 2.25rem; /* vertical padding between a shelf and its divider line */
   --volume-w: 5.5rem; /* the player's volume slider, open */
   --chip-h: 2rem; /* a rating chip */
   --chip-pad: 0.2rem 0.7rem;

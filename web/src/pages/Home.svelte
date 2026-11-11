@@ -491,12 +491,12 @@
               {/if}
             </div>
 
-            <a class="hero-title-wrap" href={href.item(feature.id)} onclick={morph}>
-              <h1 class="hero-title">{cardTitle(feature)}</h1>
+            <a class="editorial-title-wrap" href={href.item(feature.id)} onclick={morph}>
+              <h1 class="editorial-title">{cardTitle(feature)}</h1>
             </a>
 
             {#if featureBrief}
-              <p class="hero-brief">{featureBrief}</p>
+              <p class="editorial-brief">{featureBrief}</p>
             {/if}
 
             {#if featureScores.length}
@@ -511,10 +511,10 @@
             {/if}
 
             <div class="hero-actions">
-              <a class="btn-play-minimal" href={href.play(feature.id, resumeAt(feature))}>
+              <a class="btn primary pill" href={href.play(feature.id, resumeAt(feature))}>
                 <Icon name="play" /><span>{resumeAt(feature) ? 'Resume' : 'Play'}{#if featureEndsAt} · {featureEndsAt}{/if}</span>
               </a>
-              <a class="btn-details-minimal" href={href.item(feature.id)}>
+              <a class="btn pill subtle" href={href.item(feature.id)}>
                 <Icon name="info" /><span>Details</span>
               </a>
             </div>
@@ -551,12 +551,12 @@
               {/if}
             </div>
 
-            <a class="companion-title-wrap" href={href.item(companion.id)} onclick={morph}>
-              <h3 class="companion-title">{companion.title}</h3>
+            <a class="editorial-title-wrap" href={href.item(companion.id)} onclick={morph}>
+              <h3 class="editorial-title">{companion.title}</h3>
             </a>
 
             {#if companionBrief}
-              <p class="hero-brief">{companionBrief}</p>
+              <p class="editorial-brief">{companionBrief}</p>
             {/if}
 
             {#if companionScores.length}
@@ -577,11 +577,11 @@
               </div>
             {/if}
 
-            <div class="companion-actions">
-              <a class="btn-companion-play" href={href.play(companion.id, resumeAt(companion))}>
+            <div class="hero-actions">
+              <a class="btn primary pill" href={href.play(companion.id, resumeAt(companion))}>
                 <Icon name="play" /><span>Play Feature II</span>
               </a>
-              <a class="btn-companion-details" href={href.item(companion.id)} onclick={morph}>
+              <a class="btn pill subtle" href={href.item(companion.id)} onclick={morph}>
                 <Icon name="info" /><span>Details</span>
               </a>
             </div>
@@ -789,7 +789,7 @@
     grid-template-columns: 1fr;
     gap: clamp(1.75rem, 3.5vw, 3rem);
     align-items: start;
-    padding: clamp(1.75rem, 3.5vw, 2.75rem) var(--gutter) 2.25rem;
+    padding: clamp(1.75rem, 3.5vw, 2.75rem) var(--gutter) var(--shelf-pad-y);
   }
   .spread.hero.has-companion {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -871,39 +871,6 @@
     color: var(--accent);
     text-transform: uppercase;
   }
-  .hero-title,
-  .companion-title {
-    font-family: var(--font-display);
-    font-size: var(--fs-3xl);
-    font-weight: var(--fw-regular);
-    line-height: var(--lh-tight);
-    letter-spacing: -0.015em;
-    color: var(--text);
-    margin: 0 0 0.45rem 0;
-  }
-  .hero-title-wrap,
-  .companion-title-wrap {
-    text-decoration: none;
-    color: inherit;
-    display: inline-block;
-  }
-  .hero-title-wrap:hover .hero-title,
-  .companion-title-wrap:hover .companion-title {
-    color: var(--accent);
-  }
-  .hero-brief {
-    margin: 0 0 0.85rem 0;
-    font-family: var(--font-text);
-    font-size: var(--fs-sm);
-    color: var(--text-muted);
-    line-height: var(--lh-body-2);
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
   .hero-scores {
     display: flex;
     flex-wrap: wrap;
@@ -930,67 +897,13 @@
     color: var(--text);
     margin-right: 0.15rem;
   }
-  .hero-actions,
-  .companion-actions {
+  .hero-actions {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 0.75rem;
   }
-  .btn-play-minimal,
-  .btn-companion-play {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.55rem;
-    background: var(--text);
-    color: var(--surface-room);
-    border: none;
-    border-radius: var(--radius-pill);
-    padding: 0.65rem 1.35rem;
-    font-family: var(--font-text);
-    font-size: var(--fs-sm);
-    font-weight: var(--fw-medium);
-    white-space: nowrap;
-    cursor: pointer;
-    text-decoration: none;
-    transition: transform var(--motion-hover), opacity var(--motion-hover);
-  }
-  .btn-play-minimal:hover,
-  .btn-companion-play:hover {
-    transform: translateY(-1px);
-    opacity: 0.92;
-  }
-  .btn-play-minimal :global(.icon),
-  .btn-companion-play :global(.icon) {
-    width: 1rem;
-    height: 1rem;
-    fill: currentColor;
-  }
-  .btn-details-minimal,
-  .btn-companion-details {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.45rem;
-    background: var(--fill-subtle);
-    color: var(--text-muted);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-pill);
-    padding: 0.65rem 1.15rem;
-    font-family: var(--font-text);
-    font-size: var(--fs-sm);
-    font-weight: var(--fw-medium);
-    white-space: nowrap;
-    cursor: pointer;
-    text-decoration: none;
-    transition: color var(--motion-hover), border-color var(--motion-hover);
-  }
-  .btn-details-minimal:hover,
-  .btn-companion-details:hover {
-    color: var(--text);
-    border-color: var(--text-muted);
-  }
-  .btn-details-minimal :global(.icon),
-  .btn-companion-details :global(.icon) {
+  .hero-actions :global(.icon) {
     width: 0.95rem;
     height: 0.95rem;
   }

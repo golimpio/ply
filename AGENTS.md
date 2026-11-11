@@ -33,6 +33,9 @@ targets that have no plumb command yet, and Xcode/`xcodebuild`.
   restore it.
 - **An absence assertion needs a positive control.** For example, before asserting that an item was deleted, assert that it existed.
 - **Leave no background processes running.** Temporary fixtures go in `t.TempDir()` or the session scratchpad.
+- **Strictly DRY (Don't Repeat Yourself):** Reusing everything possible is mandatory across the entire codebase.
+  - **Frontend:** Never define one-off magic numbers for margins, paddings, gaps, font sizes, line heights, or colors. Reuse tokens from `web/src/styles/tokens.css` (e.g. `--shelf-pad-y`, `--gutter`, `--bar-h`) and shared CSS classes in `web/src/app.css` (e.g. `.btn`, `.btn.pill`, `.chip`, `.badge`, `.editorial-kicker`, `.editorial-title`, `.editorial-brief`). Never duplicate CSS declarations across twin elements or parallel sections—factor shared styling into single reusable classes or CSS variables.
+  - **Backend:** Reuse shared helper functions, constants, and types rather than duplicating logic across handlers, stream managers, scanners, or probes.
 - **Code style:** idiomatic, small packages, the standard library first, and comments only where the code isn't obvious. Match the surrounding code.
 - **Specs** live in `docs/`: `DESIGN.md`, then one file per milestone (`M6-METADATA.md`, `M7-FOLDERS.md`, `M8-TVDB.md`, ...).
   Read the relevant one before changing that area, and keep it up to date.

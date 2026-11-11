@@ -106,8 +106,8 @@
 <style>
   .rail {
     margin: 0;
-    padding-top: 2.25rem;
-    padding-bottom: 2.25rem;
+    padding-top: var(--shelf-pad-y);
+    padding-bottom: var(--shelf-pad-y);
     border-top: 1px solid var(--line);
   }
   header {

@@ -132,10 +132,14 @@ func Decide(item Item, streams []Stream, p Profile, opts Options) Decision // Op
 Rules: direct iff container ∈ profile, video codec ok (+hvc1 rule), chosen audio ok, height ≤ MaxHeight, no burn-in.
 Otherwise remux (copy video, copy or transcode audio→aac) iff video ok; otherwise transcode (h264, aac).
 Selecting an image subtitle (pgs/dvd_subtitle/dvb_subtitle) forces transcode with burn-in.
-Built-ins (M1: avplayer; M4: browser, chromecast):
+Built-ins (M1: avplayer; M4: browser, chromecast; browser AirPlay: airplay):
 - `avplayer`: containers mp4 mov m4v; video h264 hevc(hvc1); audio aac ac3 eac3 alac mp3.
 - `chromecast`: containers mp4 webm; video h264 (vp9 omitted — conservative); audio aac mp3 opus flac; MaxHeight 1080.
 - `browser`: mp4 webm; h264 vp9 av1; aac mp3 opus flac. Web client normally POSTs its own measured profile.
+- `airplay`: native HLS only, h264/aac, MaxHeight 1080. Always remux or transcode, including an MP4: the
+  session identity survives a receiver with a different IP/User-Agent, and text subtitles can travel in HLS.
+  Safari with both a native HLS decoder and the AirPlay picker uses this profile from its first load,
+  before choosing a TV. See [AIRPLAY.md](AIRPLAY.md) for the browser lifecycle and device checks.
 Table-test heavily.
 
 ## HTTP API (Go 1.22 mux, JSON camelCase, errors `{"error": "..."}`)
@@ -155,14 +159,14 @@ no `Origin`. Reads keep CORS `*` (media, Cast); a preflight is answered as above
 | GET | `/api/items?kind=movie\|episode&show=<name>` | `[ItemSummary]` (movies by title; episodes by season, episode); a movie row has `sortTitle`, the key to sort movies by (below); `ETag`/`304` and gzip: see "Compression and list caching" |
 | GET | `/api/shows` | `[ShowSummary]`: `{show, seasons:[int], episodeCount, watchedEpisodes, inProgress}` + (M6) `year?, overview?, titleId?, poster?, backdrop?, logo?, rating?, certification?, genres?, matchState, needsReview` + `sortTitle` (the key to sort shows by); `ETag`/`304` |
 | GET | `/api/items/{id}?target=<profile>` | `ItemDetail` incl. `playback` (Decision + `url`) for built-in profile (default avplayer) |
-| POST | `/api/items/{id}/playback` | body `{profile?: name, custom?: Profile, startSec?, audioIndex?, subtitleIndex?}` → `Playback` |
+| POST | `/api/items/{id}/playback` | body `{profile?: name, custom?: Profile, startSec?, audioIndex?, subtitleIndex?, subtitleKey?}` → `Playback` |
 | GET | `/api/items/{id}/file` | direct play, `http.ServeContent` (Range/ETag), explicit Content-Type: mp4 `video/mp4`, mov `video/quicktime`, m4v `video/x-m4v`, mkv `video/x-matroska`, webm `video/webm`, ts `video/mp2t`, avi `video/x-msvideo` |
 | POST | `/api/scan` | 202 `{started:true}` or 409 if running |
 | GET | `/api/scan` | `{running, lastStarted, lastFinished, lastError, itemCount, watching:[{root, watching, dirs, error?}]}` (`watching` is `[]` when `-watch=false`) |
-| GET | `/api/sessions/{sid}/index.m3u8`, `/api/sessions/{sid}/{file}` | (M3) HLS playlist / init.mp4 / segments |
+| GET | `/api/sessions/{sid}/index.m3u8`, `/api/sessions/{sid}/{file}` | (M3) HLS playlist / init.mp4 / segments; AirPlay text selection also exposes `master.m3u8`, `subtitles.m3u8`, `subtitles.vtt`, scoped to that session and token, and stopped with it |
 | DELETE | `/api/sessions/{sid}` | (M3) stop session; 204 or 404. A session stopped this way is remembered for 2 min as *stopped on purpose*: its heartbeat, playlist, init and segments answer **410** `{"error":"stopped","stoppedBy":"another device"}` (404 stays for an unknown id, or one ply ended for its silence; a player restarts on a 404, and stops on a 410). For a *direct play* id (below) it drops the play from the count and, for 2 min, the client's `/file` requests and the id's heartbeat get the same 410 (ply cannot interrupt a client that is reading the file); a `POST /playback` from that client allows it again |
 | GET | `/api/sessions` | (M9) **private** (like `/api/folders`, `/api/fs`; so are DELETE and the heartbeat below: no CORS headers, a cross-site `Origin` or `Sec-Fetch-Site` is refused with 403; the playlist and segments stay open for Cast) everything playing, oldest first: `[{id, sessionId, itemId, title, kind: transcode\|remux\|direct, client, startedAt, lastSeenAt, positionSec, paused}]` (`id` = `sessionId`; a direct play's is `d-…`; `client` = `"<ip> · <browser>"`; `positionSec` is the player's last heartbeat, else the start of the last segment it asked for) |
-| POST | `/api/sessions/{sid}/heartbeat` | (M9) `{positionSec?, paused?}` (empty body ok) → 204; 404 if the session is unknown or ply ended it; 410 (above) if it was stopped on purpose. From its first heartbeat a session is stopped 30 s after its last beat or segment request (never later than `-stream-idle`); if the last beat said `paused: true` it has 3 min instead (a hidden tab's timers run about once a minute), until a segment request or a beat that does not say `paused: true` brings the 30 s back. The player beats every 10 s. A session that never beat keeps the old rule: `-stream-idle` (60 s) without a request. A direct play id can be beaten too |
+| POST | `/api/sessions/{sid}/heartbeat` | (M9) `{positionSec?, paused?, wireless?}` (empty body ok) → 204; 404 if the session is unknown or ply ended it; 410 (above) if it was stopped on purpose. From its first heartbeat a session is stopped 30 s after its last beat or segment request (never later than `-stream-idle`); if the last beat said `paused: true` it has 3 min instead (a hidden tab's timers run about once a minute), until a segment request or a beat that does not say `paused: true` brings the 30 s back. The player beats every 10 s. A session that never beat keeps the old rule: `-stream-idle` (60 s) without a request. A direct play id can be beaten too. AirPlay sessions initially have receiver grace; `wireless: true` keeps the larger of the existing inactivity timeout and `PausedBeatTimeout` (default 3 min, capped at 5 min), independently of pause and receiver segment reads; `wireless: false` restores local policy. Active subtitle responses count as in-flight media requests |
 | GET | `/api/items/{id}/subtitles/{key}.vtt` | (M5) key = stream idx or `ext<N>` for sidecar; WebVTT. (M9) A cached track is a plain file (`Content-Length`, ranges). An embedded track that is not cached yet is extracted from the container (reading all of it), and the answer does not wait for that: `422` if it fails within a second of the request, `503` + `Retry-After` if the file cannot be read (a share not mounted yet) or the extraction is stopped by someone else (a job cancelled, ply stopping), the finished file if it ends within that second, otherwise `200` chunked (`Cache-Control: no-store`, no ranges) with each cue as ffmpeg writes it, ending at the last cue; the same read extracts the item's other text tracks. A `HEAD` of a track that is not cached answers `200` with no body and starts nothing. The queue extracts them ahead of time for what is being watched and for new files (`subs.preextract`, `docs/M9-ARCHITECTURE.md`) |
 | PUT | `/api/items/{id}/progress` | (M5) `{positionSec, durationSec}`; watched when ≥ 90%; answers `{positionSec, watched}` or `null` |
 | PUT | `/api/items/{id}/watched` | (M11) `{watched: true\|false}` (required, else 400) → `WatchResult`; a film that has a title is marked in all its versions (as `/api/titles/{id}/watched`); same token and cross-site rules as `progress` |
@@ -414,10 +418,13 @@ Svelte 5 (runes) + Vite + TypeScript, hls.js. No UI framework; small hand-writte
 - Token: if `/api/info.authRequired`, prompt once, store in localStorage, send Bearer; append `?token=` to media URLs.
 - Library grid (Movies; Shows → seasons → episodes), item detail (codecs, streams, duration, playback decision &
   reasons for this browser), player.
-- Player: computes a browser profile (MediaSource.isTypeSupported / canPlayType for containers & codecs, incl.
+- Player: outside AirPlay-capable Safari, computes a browser profile (MediaSource.isTypeSupported / canPlayType for containers & codecs, incl.
   `video/mp4; codecs="hvc1"`, `audio/mp4; codecs="ac-3"`/`"ec-3"`), POSTs `/playback`, then: direct → `<video src>`;
   HLS → native if `canPlayType('application/vnd.apple.mpegurl')` (Safari) else hls.js. Seek past encoded range →
-  new playback with `startSec` (display time = startSec + currentTime). DELETE session on leave.
+  new playback with `startSec` (display time = startSec + currentTime). DELETE session on local leave.
+  AirPlay-capable Safari requests the `airplay` profile and gives its native video element a server URL,
+  never an MSE blob. Text `subtitleKey` selects an HLS subtitle rendition; `subtitleIndex` still burns a
+  bitmap track. The picker opens synchronously in the click; availability and wireless state are distinct.
 - **Player chrome** (`pages/Play.svelte`, `components/Player.svelte`, `components/PlayerControls.svelte`): Play fills
   the browser window (a fixed layer, not the Fullscreen API; App leaves the header and tab bar out), the picture
   letterboxed on black; the full screen button still uses the Fullscreen API on the frame. An overlay over it: the
@@ -428,7 +435,13 @@ Svelte 5 (runes) + Vite + TypeScript, hls.js. No UI framework; small hand-writte
   scrubbing, with the mouse on a control (not on a bar's empty space: a mouse parked at the edge lets it go), or
   with keyboard focus that came in by keyboard. Touch: a tap on the picture shows or hides it (never plays or
   pauses), a double tap on a side skips 10 s. Close and Escape call `goBack()` (to the item page from a deep link);
-  the unmount ends the session as any leaving does (report with keepalive, heartbeat stopped, DELETE). Escape takes
+  a local unmount ends the session (report with keepalive, heartbeat stopped, DELETE). During AirPlay,
+  App retains the same Play/Player/video subtree across SPA navigation: Close browses while a compact
+  AirPlay controller offers Controls and Stop AirPlay. Ending the route while browsing, explicitly
+  stopping, replacing the item, or playback ending releases the retained player. Its hidden keyboard
+  shortcuts are disabled while browsing; Media Session controls still work. A wireless `pagehide`
+  reports progress and keeps the media/session; a cached `pageshow` reuses it rather than restarting.
+  Closing Safari, reloading the document, or OS termination has no promised continuation. Escape takes
   one layer at a time: a menu or the popover, then full screen, then the player (an Escape within 500 ms of leaving
   full screen is taken as the one that left it). While the item loads or fails, Play shows the same ✕ and takes
   Escape. The scrubber seeks to the fraction of the bar under the pointer (pointerdown captures, a drag previews,
@@ -591,10 +604,15 @@ Svelte 5 (runes) + Vite + TypeScript, hls.js. No UI framework; small hand-writte
 - **Swapping the theme or the fonts** is an edit of tokens.css alone: change the primitives, or point the semantic
   tokens at others; change `--font-*`. `index.html` and `public/manifest.json` repeat the room colour (`#0c0c0b`, Cinema Dark) as
   `theme-color` (switched dynamically to `#f6f4ef`, Warm Paper, when the light theme is toggled): they can't read CSS, so change them with it.
-- **Shared classes** in `app.css`, for what repeats: `.btn`, `.chip`/`.chips`, `.badge`, `.score-chip`,
+- **Shared classes** in `app.css`, for what repeats: `.btn` (including `.btn.pill` and `.btn.pill.subtle`), `.chip`/`.chips`, `.badge`, `.score-chip`,
   `.settings-panel` (every card of Settings), `.text-field` and `.settings-input` (text fields and selects), `.switch`
   (recoloured with `--switch-on`), `.grid`/`.poster-grid`, and for a title's page `.cert`, `.badges`, `.hero-actions`,
-  `.review-note`, `.title-overview`, `.genres`, `.credits`, `.hero-sk`.
+  `.review-note`, `.title-overview`, `.genres`, `.credits`, `.hero-sk`, as well as editorial primitives: `.editorial-kicker`,
+  `.editorial-title`, and `.editorial-brief`.
+- **Strictly DRY (Don't Repeat Yourself)**:
+  - Layout spacing must use shared semantic tokens (`--shelf-pad-y`, `--gutter`, `--bar-h`) rather than duplicated rem values.
+  - Symmetrical or parallel columns/cards must share identical CSS classes (e.g. Feature I and Feature II share `.editorial-title`, `.editorial-brief`, `.btn.pill`). Never create duplicate class names with identical or near-identical declarations.
+  - Ad-hoc margins and paddings are forbidden: reuse shared spacing tokens and shared utility classes.
 - **The checker**, `npm run check:tokens` (also run by `npm run check`): `web/scripts/check-tokens.mjs` reads the
   `<style>` blocks and `.css` files under `web/src` (not tokens.css) and fails, with file:line, on a raw colour (hex,
   `rgb()`/`hsl()`/..., a named or system colour), a raw `font-family`/`font` or `font-size`, a raw `border-radius`
