@@ -181,6 +181,10 @@ is off or nothing matches → NFO alone (`source=nfo`). Fuzz test the parser.
   size + `fingerprint` (computed at index time).
 - If a watch cannot be added (fd/inotify limits, network filesystems that don't deliver events), log once and
   rely on the periodic scan for that root; status reports `watching: true|false` per root.
+- Setting up a tree reads its directories 16 at a time: the walk that finds them, then each one's watch and, for
+  kqueue, its snapshot (a stat per file). On a network share each waits for the server (SMB NAS, 2026-11-11, 440
+  show folders: the walk 65 s, a watch and snapshot 0.9 s a folder): one by one, with a scan beside it, a library
+  of 700 folders took 26 minutes to be watched.
 - Stopping closes the directory watches 32 at a time (macOS kqueue backend). On a network share each close waits
   for the server to drop its change notification (SMB NAS, 2026-11-11: 200 folders took 13 s one by one, 0.6 s
   together): one by one, a library of 700 folders outlasted the shutdown deadline, and the kernel then closed the

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -940,4 +941,82 @@ func TestCancelDuringAScan(t *testing.T) {
 		t.Fatalf("Run took %v to return with a scan in flight", d)
 	}
 	settles(t, base)
+}
+
+// gatedBackend is a fakeBackend whose add waits at a gate first.
+type gatedBackend struct {
+	*fakeBackend
+	gate *together
+}
+
+func (b gatedBackend) add(dir string) error {
+	b.gate.wait()
+	return b.fakeBackend.add(dir)
+}
+
+// On a network share each watch and snapshot waits for the server: a tree's are
+// taken together, not one after another (one by one, the 700 folders of a NAS
+// library took 26 minutes to be watched).
+func TestSetupWatchesTheDirectoriesTogether(t *testing.T) {
+	root := t.TempDir()
+	const n = 8 // the root and 7 folders, under setupConcurrency
+	var dirs []string
+	for k := range n - 1 {
+		d := filepath.Join(root, strconv.Itoa(k))
+		mkdirs(t, root, strconv.Itoa(k))
+		touch(t, filepath.Join(d, "a.mkv"), 1)
+		dirs = append(dirs, d)
+	}
+	w, fb, _, _ := newUnit(t, root)
+	fb.unnamed = true
+	g := newTogether(n)
+	w.use(gatedBackend{fb, g})
+	if !w.setupRoot(context.Background(), 0) {
+		t.Fatalf("root not watched: %+v", w.Status()[0])
+	}
+	if got := fb.watched(); len(got) != n {
+		t.Fatalf("watched %v, want the root and %d folders", got, n-1)
+	}
+	if most := g.most(); most != n {
+		t.Fatalf("at most %d directories were being watched at once, want all %d", most, n)
+	}
+	for _, d := range dirs { // the snapshots, taken beside the watches, are kept
+		if _, ok := w.snaps[d]["a.mkv"]; !ok {
+			t.Fatalf("snapshot of %s: %v, want a.mkv", d, w.snaps[d])
+		}
+	}
+}
+
+// The walk that finds what to watch reads the directories together too (one by
+// one it took a minute on the NAS's 440 show folders).
+func TestListDirsReadsTheDirectoriesTogether(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const n = 8 // under setupConcurrency
+	want := []string{root}
+	for k := range n {
+		mkdirs(t, root, filepath.Join(strconv.Itoa(k), "season"), filepath.Join(strconv.Itoa(k), ".hidden"))
+		want = append(want, filepath.Join(root, strconv.Itoa(k)), filepath.Join(root, strconv.Itoa(k), "season"))
+	}
+	slices.Sort(want)
+	w, _, _, _ := newUnit(t, root)
+	g := newTogether(n)
+	w.readDir = func(d string) ([]os.DirEntry, error) {
+		if filepath.Dir(d) == root {
+			g.wait()
+		}
+		return os.ReadDir(d)
+	}
+	got, err := w.listDirs(context.Background(), root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("listed %v, want %v", got, want)
+	}
+	if most := g.most(); most != n {
+		t.Fatalf("at most %d folders were being read at once, want all %d", most, n)
+	}
 }

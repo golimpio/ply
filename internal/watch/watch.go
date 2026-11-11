@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -41,6 +42,14 @@ var (
 )
 
 const rootNotFound = "root not found"
+
+// setupConcurrency is how many directories the setup of a tree lists, and
+// watches and snapshots, at once. On a network share each of those waits for the
+// server: on an SMB NAS (measured 2026-11-11, 440 show folders) the walk took 65 s,
+// and the watch and the snapshot (a stat per file) 0.9 s a folder, one at a time:
+// with a scan beside it, a library of 700 folders took 26 minutes to be watched.
+// 16 at a time made the watches 18 times faster and the snapshots 11.
+const setupConcurrency = 16
 
 // errTooManyDirs is why a root is not even tried: it has more directories than
 // there are descriptors to watch them with.
@@ -88,6 +97,7 @@ type Watcher struct {
 	maxDirs int           // directories the process may watch; <0 is no limit
 
 	mkBackend func() (backend, error)
+	readDir   func(dir string) ([]os.DirEntry, error) // os.ReadDir, for the setup's walks and snapshots
 
 	// Run's goroutine only.
 	be   backend
@@ -124,6 +134,7 @@ func New(sc Scanner, roots []string, log *slog.Logger) *Watcher {
 		recheck:   time.Minute,
 		maxDirs:   dirLimit(),
 		mkBackend: newBackend,
+		readDir:   os.ReadDir,
 		now:       time.Now,
 		dirs:      map[string]int{},
 		snaps:     map[string]map[string]stamp{},
@@ -475,14 +486,17 @@ func listing(entries []os.DirEntry) map[string]stamp {
 	return files
 }
 
-// snapshot records the files of d, for a backend without names.
-func (w *Watcher) snapshot(d string) {
+// snapshot lists the files of d, for a backend without names; nil with names,
+// or if d cannot be read. It is safe to call from any goroutine.
+func (w *Watcher) snapshot(d string) map[string]stamp {
 	if !w.unnamed {
-		return
+		return nil
 	}
-	if entries, err := os.ReadDir(d); err == nil {
-		w.snaps[d] = listing(entries)
+	entries, err := w.readDir(d)
+	if err != nil {
+		return nil
 	}
+	return listing(entries)
 }
 
 // newDir watches the tree at p, which has appeared, and queues it. The queue
@@ -667,70 +681,164 @@ func (w *Watcher) addTree(ctx context.Context, top string, i int, all bool) erro
 		return fmt.Errorf("%w: %d directories to watch, more than the %d this process can",
 			errTooManyDirs, len(w.dirs)+len(dirs), w.maxDirs)
 	}
-	for _, d := range dirs {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err := w.be.add(d); err != nil {
-			if d != w.roots[i].path && (errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission)) {
-				w.log.Debug("directory not watched", "dir", d, "err", err) // gone, or private
-				continue
-			}
-			return err
-		}
-		w.dirs[d] = i
-		w.snapshot(d)
-		w.adjust(i, 1)
+	// Each directory is watched, then snapshotted (a change after the watch is
+	// not missed), setupConcurrency at a time; the results are recorded here, on
+	// Run's goroutine, every watch that was added included, so that a failure
+	// drops them all (failRoot).
+	rootPath := w.roots[i].path
+	skippable := func(d string, err error) bool { // gone, or private
+		return d != rootPath && (errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission))
 	}
-	return nil
+	type added struct {
+		tried bool
+		err   error
+		files map[string]stamp
+	}
+	res := make([]added, len(dirs))
+	var failed atomic.Bool
+	parallel(len(dirs), setupConcurrency, func() bool { return failed.Load() || ctx.Err() != nil }, func(k int) {
+		r := &res[k]
+		r.tried = true
+		if r.err = w.be.add(dirs[k]); r.err != nil {
+			if !skippable(dirs[k], r.err) {
+				failed.Store(true)
+			}
+			return
+		}
+		r.files = w.snapshot(dirs[k])
+	})
+	var first error
+	for k, d := range dirs {
+		switch r := res[k]; {
+		case !r.tried:
+		case r.err == nil:
+			w.dirs[d] = i
+			if r.files != nil {
+				w.snaps[d] = r.files
+			}
+			w.adjust(i, 1)
+		case skippable(d, r.err):
+			w.log.Debug("directory not watched", "dir", d, "err", r.err)
+		case first == nil:
+			first = r.err
+		}
+	}
+	if first != nil {
+		return first
+	}
+	return ctx.Err()
+}
+
+// parallel calls f(k) for every k in [0, n), limit calls at a time, and returns
+// once they are done. When stop (if not nil) reports true, no more calls start.
+func parallel(n, limit int, stop func() bool, f func(k int)) {
+	work := make(chan int)
+	var wg sync.WaitGroup
+	for range min(limit, n) {
+		wg.Go(func() {
+			for k := range work {
+				f(k)
+			}
+		})
+	}
+	for k := range n {
+		if stop != nil && stop() {
+			break
+		}
+		work <- k
+	}
+	close(work)
+	wg.Wait()
 }
 
 // listDirs lists top and the unwatched directories below it, spelled under
-// top. It walks the symlink-resolved top: WalkDir does not follow a symlink
-// at its root.
+// top, in path order, leaving out hidden ones and symlinks. It reads the
+// symlink-resolved top, setupConcurrency directories at a time.
 func (w *Watcher) listDirs(ctx context.Context, top string, all bool) ([]string, error) {
 	resolved, err := filepath.EvalSymlinks(top)
+	if err == nil {
+		var fi os.FileInfo
+		if fi, err = os.Lstat(resolved); err == nil && !fi.IsDir() {
+			return nil, nil
+		}
+	}
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil // vanished
 		}
 		return nil, err
 	}
-	var out []string
-	err = filepath.WalkDir(resolved, func(path string, d fs.DirEntry, err error) error {
+
+	type dir struct{ path, spelled string }
+	var (
+		mu      sync.Mutex
+		more    = sync.NewCond(&mu)
+		todo    = []dir{{resolved, filepath.Clean(top)}}
+		reading int // directories taken from todo and not done yet
+		out     []string
+		topErr  error
+	)
+	// visit lists d and returns its subdirectories to visit. w.dirs is only read:
+	// its writer, Run's goroutine, is waiting for listDirs.
+	visit := func(d dir) []dir {
+		_, watched := w.dirs[d.spelled]
+		if watched && !all {
+			return nil // its own events cover what is below
+		}
+		if !watched {
+			mu.Lock()
+			out = append(out, d.spelled)
+			mu.Unlock()
+		}
+		entries, err := w.readDir(d.path)
 		if err != nil {
-			if path == resolved {
-				return err
+			if d.path == resolved {
+				topErr = err // read after the walk
 			}
-			return nil // unreadable or gone: its directory is listed, its children are not
+			return nil // unreadable or gone: the directory is listed, its children are not
 		}
-		if !d.IsDir() {
-			return nil
-		}
-		if path != resolved && strings.HasPrefix(d.Name(), ".") {
-			return filepath.SkipDir
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(resolved, path)
-		if err != nil {
-			return err
-		}
-		spelled := filepath.Join(top, rel)
-		if _, watched := w.dirs[spelled]; watched {
-			if all {
-				return nil
+		var sub []dir
+		for _, e := range entries {
+			if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+				sub = append(sub, dir{filepath.Join(d.path, e.Name()), filepath.Join(d.spelled, e.Name())})
 			}
-			return filepath.SkipDir // its own events cover what is below
 		}
-		out = append(out, spelled)
-		return nil
-	})
-	if errors.Is(err, fs.ErrNotExist) {
-		return out, nil
+		return sub
 	}
-	return out, err
+	var wg sync.WaitGroup
+	for range setupConcurrency {
+		wg.Go(func() {
+			mu.Lock()
+			defer mu.Unlock()
+			for {
+				for len(todo) == 0 && reading > 0 {
+					more.Wait()
+				}
+				if len(todo) == 0 || ctx.Err() != nil {
+					more.Broadcast() // done: wake the others to see it
+					return
+				}
+				d := todo[len(todo)-1]
+				todo = todo[:len(todo)-1]
+				reading++
+				mu.Unlock()
+				sub := visit(d)
+				mu.Lock()
+				reading--
+				todo = append(todo, sub...)
+				more.Broadcast()
+			}
+		})
+	}
+	wg.Wait()
+	slices.Sort(out)
+	if err := ctx.Err(); err != nil {
+		return out, err
+	}
+	if topErr != nil && !errors.Is(topErr, fs.ErrNotExist) {
+		return out, topErr
+	}
+	return out, nil
 }
 
 // dropTree stops watching p and everything below it.

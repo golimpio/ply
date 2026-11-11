@@ -16,6 +16,43 @@ import (
 	"ply/internal/library"
 )
 
+// together gates calls that are to run n at a time: each call waits until n are
+// in, or a second. One at a time, none ever sees another.
+type together struct {
+	n        int
+	mu       sync.Mutex
+	in, peak int
+	opened   bool // all is closed
+	all      chan struct{}
+}
+
+func newTogether(n int) *together { return &together{n: n, all: make(chan struct{})} }
+
+func (g *together) wait() {
+	g.mu.Lock()
+	g.in++
+	g.peak = max(g.peak, g.in)
+	if g.in == g.n && !g.opened {
+		g.opened = true
+		close(g.all)
+	}
+	g.mu.Unlock()
+	select {
+	case <-g.all:
+	case <-time.After(time.Second):
+	}
+	g.mu.Lock()
+	g.in--
+	g.mu.Unlock()
+}
+
+// most is how many calls were in at once, at most.
+func (g *together) most() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.peak
+}
+
 // waitFor polls cond until it holds or timeout passes.
 func waitFor(t *testing.T, timeout time.Duration, what string, cond func() bool) {
 	t.Helper()

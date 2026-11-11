@@ -203,20 +203,7 @@ func (b *kqueueBackend) close() error {
 	clear(b.byPath)
 	b.mu.Unlock()
 
-	work := make(chan int)
-	var wg sync.WaitGroup
-	for range min(closeConcurrency, len(fds)) {
-		wg.Go(func() {
-			for fd := range work {
-				b.closeFd(fd)
-			}
-		})
-	}
-	for _, fd := range fds {
-		work <- fd
-	}
-	close(work)
-	wg.Wait()
+	parallel(len(fds), closeConcurrency, nil, func(k int) { b.closeFd(fds[k]) })
 	b.closeFds()
 	return nil
 }

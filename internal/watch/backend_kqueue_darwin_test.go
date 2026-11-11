@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -240,31 +239,14 @@ func TestKqueueCloseClosesTheDirectoriesTogether(t *testing.T) {
 		t.Fatalf("%d watches, want %d", got, n)
 	}
 
-	// Each close waits until all n are in flight, or a second: one by one, none
-	// ever sees the others.
-	var mu sync.Mutex
-	inFlight, most := 0, 0
-	all := make(chan struct{})
+	g := newTogether(n)
 	b.closeFd = func(fd int) error {
-		mu.Lock()
-		inFlight++
-		most = max(most, inFlight)
-		if inFlight == n {
-			close(all)
-		}
-		mu.Unlock()
-		select {
-		case <-all:
-		case <-time.After(time.Second):
-		}
-		mu.Lock()
-		inFlight--
-		mu.Unlock()
+		g.wait()
 		return syscall.Close(fd)
 	}
 	before := openFDs(t)
 	b.close()
-	if most != n {
+	if most := g.most(); most != n {
 		t.Fatalf("at most %d directories were closing at once, want all %d", most, n)
 	}
 	if got, want := openFDs(t), before-n-3; got != want { // the directories, the kqueue and its pipe
