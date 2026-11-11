@@ -789,7 +789,7 @@
     grid-template-columns: 1fr;
     gap: clamp(1.75rem, 3.5vw, 3rem);
     align-items: start;
-    padding: clamp(1.75rem, 3.5vw, 2.75rem) var(--gutter) 2.5rem;
+    padding: clamp(1.75rem, 3.5vw, 2.75rem) var(--gutter) 2.25rem;
   }
   .spread.hero.has-companion {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
