@@ -45,6 +45,7 @@
   import Icon from '../components/Icon.svelte';
   import MediaCard from '../components/MediaCard.svelte';
   import Rail from '../components/Rail.svelte';
+  import Rating from '../components/Rating.svelte';
   import RatingGlyph from '../components/RatingGlyph.svelte';
 
   let continueItems = $state<ItemSummary[]>([]);
@@ -409,7 +410,7 @@
     </div>
 
     <!-- Top Asymmetric Editorial Spread: Featured Screening + Editorial Resume Desk -->
-    <section class="spread hero">
+    <section class="spread hero" class:has-companion={Boolean(companion)}>
       <div class="spread-feature">
         {#if feature}
           <div class="kicker tabular">
@@ -472,79 +473,68 @@
               </div>
             </div>
           </div>
-
-          {#if companion}
-            <a class="double-bill" href={href.item(companion.id)} onclick={morph}>
-              <div class="db-main">
-                <span class="db-kicker">Double Bill Pairing</span>
-                <span class="muted">Paired with</span>
-                <strong class="db-title">{companion.title}</strong>
-                {#if companion.year}<span class="db-year tabular">({companion.year})</span>{/if}
-                {#if companionNote}
-                  <span class="muted">—</span>
-                  <span class="db-note">{companionNote}</span>
-                {/if}
-              </div>
-              {#if companionEndsAt}
-                <span class="db-ends tabular">{companionEndsAt} →</span>
-              {/if}
-            </a>
-          {/if}
         {:else if lead}
           <div class="skeleton hero-sk"></div>
         {/if}
       </div>
 
-      <!-- Right 5 Cols: Editorial Resume Desk -->
-      <section class="rail resume-desk">
-        <div class="desk-head tabular">
-          <h2>Continue watching</h2>
-          <span>{continuing.length ? 'In Progress' : 'Evening Queue'}</span>
-        </div>
+      <!-- Right Column: Double Bill Companion Desk -->
+      {#if companion}
+        <aside class="double-bill-desk">
+          <div class="desk-head tabular">
+            <div class="desk-kicker">
+              <span class="dot"></span>
+              <h2>Double Bill Pairing</h2>
+            </div>
+            {#if companionEndsAt}
+              <span class="desk-ends">{companionEndsAt} →</span>
+            {/if}
+          </div>
 
-        {#if continuing.length}
-          <ul class="resume-list" aria-label="Continue watching">
-            {#each continuing.slice(0, 4) as i (i.id)}
-              <li>
-                <a class="card resume-row" href={href.play(i.id, i.progress?.positionSec ?? 0)} onclick={morph}>
-                  <div class="resume-thumb">
-                    <Art item={i} kind="backdrop" ratio="16 / 9" label={cardTitle(i)} />
-                    <div class="resume-progress">
-                      <span style:width="{Math.round(progressOf(i) * 100)}%"></span>
-                    </div>
-                  </div>
-                  <div class="resume-body">
-                    <div class="resume-top">
-                      <span class="title">{cardTitle(i)}</span>
-                      <span class="resume-left tabular">{leftLabel(i)}</span>
-                    </div>
-                    <div class="resume-sub">{cardSub(i).filter(Boolean).join(' · ')}</div>
-                  </div>
+          <div class="companion-card">
+            <a class="companion-art" href={href.item(companion.id)} onclick={morph}>
+              <Art item={companion} kind="backdrop" ratio="16 / 9" label={companion.title} />
+              {#if companion.rating}
+                <div class="companion-badge">
+                  <Rating entry={companion.rating} compact />
+                </div>
+              {/if}
+            </a>
+
+            <div class="companion-body">
+              <div class="companion-subhead">
+                <span class="companion-tag">FEATURE II</span>
+                {#if companionNote}
+                  <span class="companion-rationale">— {companionNote}</span>
+                {/if}
+              </div>
+
+              <a class="companion-title-wrap" href={href.item(companion.id)} onclick={morph}>
+                <h3 class="companion-title">{companion.title}</h3>
+              </a>
+
+              <div class="companion-meta tabular">
+                {#if companion.year}<span>{companion.year}</span>{/if}
+                {#if companion.year && companion.durationSec}<span>·</span>{/if}
+                {#if companion.durationSec}<span>{formatDuration(companion.durationSec)}</span>{/if}
+                {#if companion.genres?.length}
+                  <span>·</span>
+                  <span>{companion.genres.slice(0, 2).join(' · ')}</span>
+                {/if}
+              </div>
+
+              <div class="companion-actions">
+                <a class="btn-companion-play" href={href.play(companion.id, resumeAt(companion))}>
+                  <Icon name="play" /><span>Play Feature II</span>
                 </a>
-              </li>
-            {/each}
-          </ul>
-        {:else}
-          <ul class="resume-list" aria-label="Suggested screenings">
-            {#each recent.slice(0, 3) as i (i.id)}
-              <li>
-                <a class="card resume-row" href={href.item(i.id)} onclick={morph}>
-                  <div class="resume-thumb">
-                    <Art item={i} kind="backdrop" ratio="16 / 9" label={cardTitle(i)} />
-                  </div>
-                  <div class="resume-body">
-                    <div class="resume-top">
-                      <span class="title">{cardTitle(i)}</span>
-                      {#if i.durationSec}<span class="resume-left tabular">{endsAtLabel(i.durationSec)}</span>{/if}
-                    </div>
-                    <div class="resume-sub">{cardSub(i).filter(Boolean).join(' · ')}</div>
-                  </div>
+                <a class="btn-companion-details" href={href.item(companion.id)} onclick={morph}>
+                  <Icon name="info" /><span>Details</span>
                 </a>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      </section>
+              </div>
+            </div>
+          </div>
+        </aside>
+      {/if}
     </section>
 
     <div class="rails">
@@ -559,6 +549,28 @@
             <button class="btn" onclick={dismiss}>Not now</button>
           </div>
         </aside>
+      {/if}
+
+      {#if continuing.length}
+        <Rail
+          index="00 / IN PROGRESS"
+          title="Continue watching"
+          subtitle="Pick up where you left off"
+          items={continuing}
+          key={(i) => i.id}
+          size="wide"
+        >
+          {#snippet card(i: ItemSummary)}
+            <MediaCard
+              item={i}
+              shape="wide"
+              href={href.play(i.id, i.progress?.positionSec ?? 0)}
+              title={cardTitle(i)}
+              note={leftLabel(i)}
+              sub={cardSub(i)}
+            />
+          {/snippet}
+        </Rail>
       {/if}
 
       {#if acclaimedFilms.length >= 2}
@@ -721,10 +733,13 @@
   /* Top Asymmetric Spread */
   .spread {
     display: grid;
-    grid-template-columns: minmax(0, 1.48fr) minmax(0, 1fr);
-    gap: clamp(28px, 4vw, 56px);
+    grid-template-columns: 1fr;
+    gap: clamp(1.75rem, 4vw, 3.5rem);
     align-items: start;
-    padding: clamp(24px, 3.5vw, 44px) var(--gutter);
+    padding: clamp(1.5rem, 3.5vw, 2.75rem) var(--gutter);
+  }
+  .spread.hero.has-companion {
+    grid-template-columns: minmax(0, 1.48fr) minmax(0, 1fr);
   }
   .spread-feature {
     min-width: 0;
@@ -846,13 +861,14 @@
     align-items: center;
     gap: 0.55rem;
     background: var(--text);
-    color: var(--bg);
+    color: var(--surface-room);
     border: none;
     border-radius: var(--radius-pill);
     padding: 0.65rem 1.35rem;
-    font-family: var(--font-sans);
+    font-family: var(--font-text);
     font-size: var(--fs-sm);
     font-weight: var(--fw-medium);
+    white-space: nowrap;
     cursor: pointer;
     text-decoration: none;
     transition: transform var(--motion-hover), opacity var(--motion-hover);
@@ -875,9 +891,10 @@
     border: 1px solid var(--line);
     border-radius: var(--radius-pill);
     padding: 0.65rem 1.15rem;
-    font-family: var(--font-sans);
+    font-family: var(--font-text);
     font-size: var(--fs-sm);
     font-weight: var(--fw-medium);
+    white-space: nowrap;
     cursor: pointer;
     text-decoration: none;
     transition: color var(--motion-hover), border-color var(--motion-hover);
@@ -891,65 +908,9 @@
     height: 0.95rem;
   }
 
-  /* Borderless Double Bill Pairing footnote */
-  .double-bill {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 0.5rem 1rem;
-    margin-top: 1.35rem;
-    padding-top: 1rem;
-    border-top: 1px solid var(--line);
-    font-size: var(--fs-xs);
-    transition: opacity var(--motion-hover);
-  }
-  .double-bill:hover {
-    opacity: 0.82;
-  }
-  .db-main {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 0.35rem;
-  }
-  .db-kicker {
-    font-family: var(--font-mono);
-    font-size: var(--fs-2xs);
-    text-transform: uppercase;
-    letter-spacing: var(--tracking-widest);
-    color: var(--accent);
-    margin-right: 0.35rem;
-  }
-  .db-title {
-    font-family: var(--font-display);
-    font-size: var(--fs-xl-2);
-    font-weight: var(--fw-regular);
-    color: var(--text);
-  }
-  .db-year {
-    font-family: var(--font-mono);
-    color: var(--text-muted);
-  }
-  .db-note {
-    font-family: var(--font-display);
-    font-style: italic;
-    font-size: var(--fs-base);
-    color: var(--text-muted);
-  }
-  .db-ends {
-    font-family: var(--font-mono);
-    font-size: var(--fs-2xs);
-    color: var(--accent);
-    white-space: nowrap;
-  }
-
-  /* Right Column: Editorial Resume Desk */
-  .resume-desk {
-    margin-top: 0;
-    padding-top: 0;
-    border-top: 0;
-    padding-left: 2.5rem;
+  /* Right Column: Double Bill Companion Desk */
+  .double-bill-desk {
+    padding-left: clamp(1.5rem, 2.5vw, 2.5rem);
     border-left: 1px solid var(--line);
     min-width: 0;
   }
@@ -958,12 +919,23 @@
     align-items: baseline;
     justify-content: space-between;
     gap: 1rem;
-    margin-bottom: 0.75rem;
+    margin-bottom: 1rem;
     font-family: var(--font-mono);
     font-size: var(--fs-2xs-2);
     text-transform: uppercase;
     letter-spacing: var(--tracking-widest);
     color: var(--text-muted);
+  }
+  .desk-kicker {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .desk-kicker .dot {
+    width: 0.4rem;
+    height: 0.4rem;
+    border-radius: var(--radius-round);
+    background: var(--accent);
   }
   .desk-head h2 {
     font-family: var(--font-mono);
@@ -971,83 +943,155 @@
     font-weight: var(--fw-regular);
     letter-spacing: var(--tracking-widest);
     text-transform: uppercase;
-    color: var(--text-muted);
-  }
-  .resume-list {
-    list-style: none;
+    color: var(--accent);
     margin: 0;
-    padding: 0;
   }
-  .resume-list li + li {
-    border-top: 1px solid var(--line);
+  .desk-ends {
+    color: var(--accent);
+    font-size: var(--fs-2xs-2);
+    white-space: nowrap;
   }
-  .resume-row {
+  .companion-card {
     display: flex;
-    align-items: center;
-    gap: 1rem;
-    padding: 0.85rem 0;
-    content-visibility: visible;
-    contain-intrinsic-size: none;
+    flex-direction: column;
+    gap: 0.85rem;
   }
-  .resume-list li:first-child .resume-row {
-    padding-top: 0.25rem;
-  }
-  .resume-list li:last-child .resume-row {
-    padding-bottom: 0;
-  }
-  .resume-thumb {
+  .companion-art {
     position: relative;
-    width: 6.25rem;
-    flex: none;
+    display: block;
     overflow: hidden;
     border-radius: var(--radius);
     background: var(--surface-control);
+    box-shadow: var(--ring-hairline);
   }
-  .resume-progress {
+  .companion-art :global(img) {
+    transition: transform var(--motion-progress) var(--ease);
+  }
+  .companion-art:hover :global(img) {
+    transform: scale(1.03);
+  }
+  .companion-badge {
     position: absolute;
-    inset: auto 0 0;
-    height: 3px;
-    background: var(--progress-track);
-  }
-  .resume-progress span {
-    display: block;
-    height: 100%;
-    background: var(--accent);
-  }
-  .resume-body {
-    flex: 1;
-    min-width: 0;
-  }
-  .resume-top {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 0.5rem;
-  }
-  .resume-top .title {
-    margin: 0;
-    font-family: var(--font-display);
-    font-size: var(--fs-3xl);
-    font-weight: var(--fw-regular);
-    line-height: var(--lh-none);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .resume-left {
-    font-family: var(--font-mono);
-    font-size: var(--fs-2xs);
-    color: var(--accent);
-    flex: none;
-  }
-  .resume-sub {
-    margin-top: 0.25rem;
+    top: 0.5rem;
+    right: 0.5rem;
+    background: var(--glass);
+    backdrop-filter: var(--glass-blur);
+    padding: 0.2rem 0.55rem;
+    border-radius: var(--radius-sm);
+    box-shadow: var(--ring-hairline);
     font-family: var(--font-mono);
     font-size: var(--fs-xs);
+  }
+  .companion-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  .companion-subhead {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.45rem;
+    font-size: var(--fs-xs);
+  }
+  .companion-tag {
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs-2);
+    letter-spacing: var(--tracking-widest);
+    color: var(--accent);
+    text-transform: uppercase;
+  }
+  .companion-rationale {
+    font-family: var(--font-display);
+    font-style: italic;
     color: var(--text-muted);
-    overflow: hidden;
-    text-overflow: ellipsis;
+    font-size: var(--fs-sm);
+    line-height: var(--lh-snug);
+  }
+  .companion-title-wrap {
+    text-decoration: none;
+    color: inherit;
+  }
+  .companion-title {
+    margin: 0.1rem 0;
+    font-family: var(--font-display);
+    font-size: var(--fs-2xl);
+    font-weight: var(--fw-regular);
+    line-height: var(--lh-tight);
+    color: var(--text);
+    transition: color var(--motion-hover);
+  }
+  .companion-title-wrap:hover .companion-title {
+    color: var(--accent);
+  }
+  .companion-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.45rem;
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs-2);
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    text-transform: uppercase;
+  }
+  .companion-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: 0.35rem;
+  }
+  .btn-companion-play {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    background: var(--text);
+    color: var(--surface-room);
+    border: none;
+    border-radius: var(--radius-pill);
+    padding: 0.45rem 1rem;
+    font-family: var(--font-text);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-medium);
     white-space: nowrap;
+    cursor: pointer;
+    text-decoration: none;
+    transition: transform var(--motion-hover), opacity var(--motion-hover);
+  }
+  .btn-companion-play:hover {
+    transform: translateY(-1px);
+    opacity: 0.92;
+  }
+  .btn-companion-play :global(.icon) {
+    width: 0.85rem;
+    height: 0.85rem;
+    fill: currentColor;
+  }
+  .btn-companion-details {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: var(--fill-subtle);
+    color: var(--text-muted);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill);
+    padding: 0.45rem 0.85rem;
+    font-family: var(--font-text);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-medium);
+    white-space: nowrap;
+    cursor: pointer;
+    text-decoration: none;
+    transition: color var(--motion-hover), border-color var(--motion-hover);
+  }
+  .btn-companion-details:hover {
+    color: var(--text);
+    border-color: var(--text-muted);
+  }
+  .btn-companion-details :global(.icon) {
+    width: 0.8rem;
+    height: 0.8rem;
   }
 
 
@@ -1101,10 +1145,10 @@
     aspect-ratio: 16 / 9;
   }
   @media (max-width: 960px) {
-    .spread {
+    .spread.hero.has-companion {
       grid-template-columns: 1fr;
     }
-    .resume-desk {
+    .double-bill-desk {
       padding-left: 0;
       border-left: 0;
       padding-top: 1.5rem;
