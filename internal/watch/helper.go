@@ -245,21 +245,32 @@ func (b *helperBackend) read(dec *json.Decoder) {
 			if ch != nil {
 				ch <- err
 			}
+		// Nothing below waits for the watcher: the replies come after the events on
+		// the same stream, and a watcher setting up a tree waits for its replies
+		// before it reads an event again. An event it has no room for is dropped and
+		// the loss reported (it looks at its roots again), as the kernel does.
 		case m.Event != nil:
 			select {
 			case b.ev <- event{dir: m.Event.Dir, name: m.Event.Name, op: m.Event.Op}:
-			case <-b.done:
+			default:
+				b.report(errOverflow)
 			}
 		case m.Broken != "":
 			err := error(&remoteError{msg: m.Broken})
 			if m.Overflow {
 				err = errOverflow
 			}
-			select {
-			case b.errc <- err:
-			case <-b.done:
-			}
+			b.report(err)
 		}
+	}
+}
+
+// report passes err on, unless errors are waiting already: the watcher has
+// something to act on, and the reader must not wait.
+func (b *helperBackend) report(err error) {
+	select {
+	case b.errc <- err:
+	default:
 	}
 }
 
