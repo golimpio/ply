@@ -181,6 +181,10 @@ is off or nothing matches → NFO alone (`source=nfo`). Fuzz test the parser.
   size + `fingerprint` (computed at index time).
 - If a watch cannot be added (fd/inotify limits, network filesystems that don't deliver events), log once and
   rely on the periodic scan for that root; status reports `watching: true|false` per root.
+- Stopping closes the directory watches 32 at a time (macOS kqueue backend). On a network share each close waits
+  for the server to drop its change notification (SMB NAS, 2026-11-11: 200 folders took 13 s one by one, 0.6 s
+  together): one by one, a library of 700 folders outlasted the shutdown deadline, and the kernel then closed the
+  rest the same way while the terminal waited for ply to exit.
 - `-watch=true` flag (default on). `-scan-interval` stays as the safety net (default 15m).
 - Scan status gains `watching` and per-root info.
 

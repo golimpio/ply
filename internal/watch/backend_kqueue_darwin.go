@@ -25,6 +25,8 @@ type kqueueBackend struct {
 	closed bool
 	byPath map[string]*kdir
 	byFd   map[int]*kdir
+
+	closeFd func(fd int) error // syscall.Close, for the watched directories in close
 }
 
 type kdir struct {
@@ -40,6 +42,14 @@ const (
 	openFlags = syscall.O_RDONLY | syscall.O_EVTONLY | syscall.O_CLOEXEC | syscall.O_DIRECTORY
 	noteAny   = syscall.NOTE_WRITE | syscall.NOTE_DELETE | syscall.NOTE_RENAME | syscall.NOTE_REVOKE | syscall.NOTE_EXTEND
 	noteGone  = syscall.NOTE_DELETE | syscall.NOTE_RENAME | syscall.NOTE_REVOKE
+
+	// closeConcurrency is how many watched directories close closes at once.
+	// Closing one on a network share waits for the server to drop its change
+	// notification: on an SMB NAS (measured 2026-11-11) 200 took 13 s one by one
+	// and 0.6 s 32 at a time. One by one, a library of 700 folders held up
+	// ply's shutdown past its deadline, and then its exit: the kernel closes what
+	// is left the same way, with the terminal waiting.
+	closeConcurrency = 32
 )
 
 var errBackendClosed = errors.New("watch backend closed")
@@ -81,6 +91,7 @@ func openKqueue() (*kqueueBackend, error) {
 		loopDone: make(chan struct{}),
 		byPath:   map[string]*kdir{},
 		byFd:     map[int]*kdir{},
+		closeFd:  syscall.Close,
 	}
 	reg := syscall.Kevent_t{Ident: uint64(p[0]), Filter: syscall.EVFILT_READ, Flags: syscall.EV_ADD}
 	err = errors.Join(syscall.SetNonblock(p[0], true), syscall.SetNonblock(p[1], true))
@@ -184,12 +195,28 @@ func (b *kqueueBackend) close() error {
 	<-b.loopDone
 
 	b.mu.Lock()
-	for _, d := range b.byFd {
-		syscall.Close(d.fd)
+	fds := make([]int, 0, len(b.byFd))
+	for fd := range b.byFd {
+		fds = append(fds, fd)
 	}
 	clear(b.byFd)
 	clear(b.byPath)
 	b.mu.Unlock()
+
+	work := make(chan int)
+	var wg sync.WaitGroup
+	for range min(closeConcurrency, len(fds)) {
+		wg.Go(func() {
+			for fd := range work {
+				b.closeFd(fd)
+			}
+		})
+	}
+	for _, fd := range fds {
+		work <- fd
+	}
+	close(work)
+	wg.Wait()
 	b.closeFds()
 	return nil
 }

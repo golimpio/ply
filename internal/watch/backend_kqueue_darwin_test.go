@@ -3,6 +3,9 @@ package watch
 import (
 	"os"
 	"path/filepath"
+	"strconv"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -212,6 +215,60 @@ func TestKqueueAddReplacesAWatchWhoseDirectoryChanged(t *testing.T) {
 	}
 	if n := len(b.byFd); n != 1 {
 		t.Fatalf("%d watches, want 1", n)
+	}
+}
+
+// Closing a watched directory on a network share waits for the server: close
+// closes the directories together, not one after another (one by one, the 700
+// folders of a NAS library held ply's exit, and the terminal, for minutes).
+func TestKqueueCloseClosesTheDirectoriesTogether(t *testing.T) {
+	const n = 8 // under closeConcurrency
+	root := t.TempDir()
+	b, err := openKqueue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	go b.loop()
+	t.Cleanup(func() { b.close() })
+	for i := range n {
+		mkdirs(t, root, strconv.Itoa(i))
+		if err := b.add(filepath.Join(root, strconv.Itoa(i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := len(b.byFd); got != n {
+		t.Fatalf("%d watches, want %d", got, n)
+	}
+
+	// Each close waits until all n are in flight, or a second: one by one, none
+	// ever sees the others.
+	var mu sync.Mutex
+	inFlight, most := 0, 0
+	all := make(chan struct{})
+	b.closeFd = func(fd int) error {
+		mu.Lock()
+		inFlight++
+		most = max(most, inFlight)
+		if inFlight == n {
+			close(all)
+		}
+		mu.Unlock()
+		select {
+		case <-all:
+		case <-time.After(time.Second):
+		}
+		mu.Lock()
+		inFlight--
+		mu.Unlock()
+		return syscall.Close(fd)
+	}
+	before := openFDs(t)
+	b.close()
+	if most != n {
+		t.Fatalf("at most %d directories were closing at once, want all %d", most, n)
+	}
+	if got, want := openFDs(t), before-n-3; got != want { // the directories, the kqueue and its pipe
+		t.Fatalf("%d descriptors open after close, want %d", got, want)
 	}
 }
 
