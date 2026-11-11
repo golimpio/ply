@@ -306,6 +306,7 @@ func reads() []routed {
 		{name: "MergedPerson", call: func(ctx context.Context, s *Store) error { _, err := s.MergedPerson(ctx, 1); return nf(err) }},
 		{name: "GetPerson", call: func(ctx context.Context, s *Store) error { _, err := s.GetPerson(ctx, 1); return nf(err) }},
 		{name: "GetTitleVideos", call: func(ctx context.Context, s *Store) error { _, err := s.GetTitleVideos(ctx, 1); return nf(err) }},
+		{name: "Devices", call: func(ctx context.Context, s *Store) error { _, err := s.Devices(ctx); return err }},
 		{name: "SearchPeople", call: func(ctx context.Context, s *Store) error { _, err := s.SearchPeople(ctx, "x", 10); return err }},
 		{name: "ReviewList", call: func(ctx context.Context, s *Store) error { _, err := s.ReviewList(ctx); return err }},
 		{name: "Seasons", call: func(ctx context.Context, s *Store) error { _, err := s.Seasons(ctx, 1); return err }},
@@ -383,6 +384,8 @@ func writes() []routed {
 		{name: "PatchTitle", prio: prioHigh, call: func(ctx context.Context, s *Store) error { return e(s.PatchTitle(ctx, 1, TitlePatch{})) }},
 		{name: "SetPersonDetails", prio: prioHigh, call: func(ctx context.Context, s *Store) error { return e(s.SetPersonDetails(ctx, 1, Person{}, 1)) }},
 		{name: "SetTitleVideos", prio: prioHigh, call: func(ctx context.Context, s *Store) error { return e(s.SetTitleVideos(ctx, 1, "tmdb:1", nil, 1)) }},
+		{name: "PutDevice", prio: prioHigh, call: func(ctx context.Context, s *Store) error { return s.PutDevice(ctx, Device{ID: "device-01"}, 1) }},
+		{name: "TouchDevice", prio: prioLow, call: func(ctx context.Context, s *Store) error { return s.TouchDevice(ctx, "device-01", 2) }},
 		{name: "SetPersonDetailsMerged", prio: prioHigh, call: func(ctx context.Context, s *Store) error {
 			_, err := s.SetPersonDetailsMerged(ctx, 1, Person{}, 1)
 			return e(err)
