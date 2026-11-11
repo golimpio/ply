@@ -325,12 +325,12 @@
   --ring-hairline: 0 0 0 1px var(--line-hairline);
   --ring-hover: 0 0 0 2px var(--line-hover);
   --ring-hover-inset: inset 0 0 0 2px var(--line-hover);
-  --ring-focus: 0 0 0 3px var(--text);
-  --ring-focus-inset: inset 0 0 0 3px var(--text);
+  --ring-focus: none;
+  --ring-focus-inset: none;
   --text-shadow-hero: 0 2px 30px var(--black-a35);
   --drop-shadow-logo: drop-shadow(0 2px 24px var(--black-a45));
   --focus-ring-w: 2px;
-  --focus-ring: var(--focus-ring-w) solid var(--accent);
+  --focus-ring: none;
   --focus-offset: 3px;
 
   /* Radii: sharp gallery framing for artwork (2px), pill for interactive controls. */
@@ -533,6 +533,12 @@
   --scrim-hero-narrow-mid: var(--paper-sheet-fade);
   --tile-from: 24% 84%;
   --tile-to: 20% 74%;
+}
+
+:root[data-focus-ring='true'] {
+  --ring-focus: 0 0 0 3px var(--text);
+  --ring-focus-inset: inset 0 0 0 3px var(--text);
+  --focus-ring: var(--focus-ring-w) solid var(--accent);
 }
 
 @media (max-width: 600px) {

@@ -120,6 +120,13 @@
     border-bottom: 2px solid transparent;
     transition: color var(--motion-hover);
   }
+  nav a:focus {
+    outline: none;
+  }
+  nav a:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: var(--focus-offset);
+  }
   nav a:hover {
     color: var(--text);
   }

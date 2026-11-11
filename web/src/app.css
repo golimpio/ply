@@ -202,6 +202,10 @@ code {
   flex: none;
 }
 
+:focus {
+  outline: none;
+}
+
 :focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-offset);

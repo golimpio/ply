@@ -4,6 +4,7 @@
   import { href } from '../../lib/router.svelte';
   import { resource } from '../../lib/resource.svelte';
   import { app } from '../../lib/state.svelte';
+  import { focusRing, toggleFocusRing } from '../../lib/focusring.svelte';
   import TmdbNotice from '../../components/TmdbNotice.svelte';
 
   // Settings → Details: online lookups, their language, how matching is going, and a refresh. The
@@ -164,6 +165,28 @@
   {/if}
   <!-- Whatever loaded: the lookups it is about are switched here. -->
   <TmdbNotice />
+</section>
+
+<section aria-labelledby="a11y-h">
+  <h2 id="a11y-h">Accessibility</h2>
+  <p class="muted lead">Options for visibility, contrast, and navigation preferences.</p>
+  <div class="settings-panel card">
+    <div class="row">
+      <div>
+        <h3 id="focus-ring-h">Focus borders</h3>
+        <p class="muted">
+          Show a prominent outline around the currently focused item for keyboard navigation.
+        </p>
+      </div>
+      <button
+        class="switch"
+        role="switch"
+        aria-checked={focusRing.enabled}
+        aria-labelledby="focus-ring-h"
+        onclick={toggleFocusRing}
+      ><span></span></button>
+    </div>
+  </div>
 </section>
 
 <style>
