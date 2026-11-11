@@ -6,16 +6,24 @@
   // between shelves (up/down), so the page works with a TV remote's D-pad.
   let {
     title,
+    index = '',
+    subtitle = '',
     items,
     key,
     card,
+    subhead,
     more,
     size = 'wide',
   }: {
     title: string;
+    /** Optional numbered chapter prefix (e.g. "01 / NEW ARRIVALS"). */
+    index?: string;
+    /** Optional editorial note beside the heading. */
+    subtitle?: string;
     items: T[];
     key: (item: T) => string | number;
     card: Snippet<[T]>;
+    subhead?: Snippet;
     more?: { href: string; label: string };
     /** Card width: wide 16:9 cards, 2:3 posters, or the smaller portraits of a cast. */
     size?: 'wide' | 'poster' | 'person';
@@ -69,7 +77,9 @@
 {#if items.length}
   <section class="rail">
     <header>
+      {#if index}<span class="chapter-idx tabular">{index}</span>{/if}
       <h2>{title}</h2>
+      {#if subtitle}<span class="chapter-sub">{subtitle}</span>{/if}
       {#if more}<a class="more link" href={more.href}>{more.label}</a>{/if}
       <div class="arrows">
         <button class="btn icon" aria-label="Scroll {title} back" disabled={atStart} onclick={() => page(-1)}>
@@ -80,6 +90,9 @@
         </button>
       </div>
     </header>
+    {#if subhead}
+      <div class="subhead">{@render subhead()}</div>
+    {/if}
     <!-- Delegated arrow-key navigation between the focusable card links inside. -->
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <ul class={size} bind:this={scroller} data-rail onscroll={updateEdges} {onkeydown} aria-label={title}>
@@ -92,17 +105,37 @@
 
 <style>
   .rail {
-    margin-top: 2.25rem;
+    margin-top: 2rem;
+    padding-top: 1.75rem;
+    border-top: 1px solid var(--line);
   }
   header {
     display: flex;
+    flex-wrap: wrap;
     align-items: baseline;
-    gap: 1rem;
+    gap: 0.5rem 1rem;
     padding: 0 var(--gutter);
-    margin-bottom: 0.75rem;
+    margin-bottom: 1rem;
+  }
+  .chapter-idx {
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs-2);
+    letter-spacing: var(--tracking-widest);
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+  .chapter-sub {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-size: var(--fs-lg-2);
+    color: var(--text-muted);
+  }
+  .subhead {
+    padding: 0 var(--gutter) 1rem;
   }
   .more {
-    font-size: var(--fs-sm-3);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
     color: var(--text-muted);
   }
   .arrows {
@@ -121,8 +154,8 @@
     padding: 0.25rem var(--gutter) 0.5rem;
     display: grid;
     grid-auto-flow: column;
-    grid-auto-columns: clamp(220px, 22vw, 320px);
-    gap: 1.1rem;
+    grid-auto-columns: clamp(230px, 22vw, 320px);
+    gap: 1.35rem;
     overflow-x: auto;
     overscroll-behavior-x: contain;
     scroll-snap-type: x mandatory;
@@ -130,7 +163,7 @@
     scrollbar-width: none;
   }
   ul.poster {
-    grid-auto-columns: clamp(140px, 13vw, 200px);
+    grid-auto-columns: clamp(148px, 14vw, 205px);
   }
   ul.person {
     grid-auto-columns: clamp(110px, 10vw, 150px);
@@ -138,23 +171,9 @@
   ul::-webkit-scrollbar {
     display: none;
   }
-  li {
-    scroll-snap-align: start;
-    min-width: 0;
-  }
-  @media (hover: none), (max-width: 600px) {
-    .arrows {
+  @media (max-width: 600px) {
+    .chapter-sub {
       display: none;
-    }
-    ul {
-      grid-auto-columns: min(68vw, 260px);
-      gap: 0.8rem;
-    }
-    ul.poster {
-      grid-auto-columns: min(38vw, 160px);
-    }
-    ul.person {
-      grid-auto-columns: min(30vw, 120px);
     }
   }
 </style>

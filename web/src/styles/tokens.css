@@ -1,34 +1,61 @@
 /*
  * ply's design tokens: the one file to edit to re-theme the UI or change its fonts.
  *
- * ply — "projection light". A warm, dark room; the only strong colour is the light thrown by
- * whatever film is on screen (--tint, taken from its artwork).
+ * Lumière — an art-house cinematheque room: warm carbon black (#0c0c0b) or archival warm paper
+ * (#f6f4ef), set in Instrument Serif, Plus Jakarta Sans and JetBrains Mono.
  *
  * Two layers:
  * - Primitives: raw values, named for what they are (--velvet-900, --white-a08, --dur-150).
  *   Nothing outside this file uses them.
  * - Semantic tokens: named for what they do (--surface-raised, --line-control, --motion-hover),
  *   each pointing at a primitive. Components use these only (scripts/check-tokens.mjs enforces it).
- *
- * A new theme changes the primitives, or points the semantic tokens at other ones. New fonts
- * change --font-text, --font-display and --font-mono.
- *
- * Some values sit very close to each other (0.85rem and 0.875rem, 5px and 4px radii). They are
- * kept apart so that this layer changes nothing on screen; docs/DESIGN.md ("Styles") lists the
- * candidates for merging.
  */
+
+@font-face {
+  font-family: 'Instrument Serif';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/InstrumentSerif-Regular.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Instrument Serif';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/InstrumentSerif-Italic.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/PlusJakartaSans-Variable.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('/fonts/JetBrainsMono-Variable.woff2') format('woff2');
+}
+
 :root {
   /* ======== Primitives ======== */
 
-  /* Palette: the room, the paper of the text, the lamp, and the signal colours. */
-  --velvet-950: #100e0c;
-  --velvet-900: #1a1714;
-  --velvet-800: #26211d;
-  --velvet-700: #352e28;
-  --paper-100: #f4efe6;
-  --paper-500: #a89d90;
-  --tungsten-400: #f0b64e;
-  --tungsten-950: #1a1206;
+  /* Palette: Cinema Dark room, Warm Paper light room, ink, and signal colours. */
+  --velvet-950: #0c0c0b;
+  --velvet-900: #141312;
+  --velvet-800: #161514;
+  --velvet-700: rgb(242 239 233 / 0.085);
+  --paper-100: #f2efe9;
+  --paper-500: #a09a90;
+  --paper-600: #666159;
+  --tungsten-400: #e26347;
+  --tungsten-950: #141312;
   --coral-300: #ff8a7a;
   --coral-950: #2a0c08;
   --mint-300: #7fd19b;
@@ -42,22 +69,44 @@
   --white: #fff;
   --black: #000;
 
+  /* Warm Paper Light primitives. */
+  --paper-bg: #f6f4ef;
+  --paper-elev: #efece5;
+  --paper-subtle: #eae6dd;
+  --paper-sheet: rgb(246 244 239 / 0.9);
+  --paper-sheet-fade: rgb(246 244 239 / 0.82);
+  --paper-dialog: rgb(239 236 229 / 0.96);
+  --ink-900: #141312;
+  --ink-500: #5c5852;
+  --ink-400: #8e8880;
+  --ink-a04: rgb(20 19 18 / 0.04);
+  --ink-a06: rgb(20 19 18 / 0.055);
+  --ink-a09: rgb(20 19 18 / 0.09);
+  --ink-a12: rgb(20 19 18 / 0.12);
+  --ink-a16: rgb(20 19 18 / 0.16);
+  --ink-a22: rgb(20 19 18 / 0.22);
+  --ink-a45: rgb(20 19 18 / 0.45);
+  --ink-a75: rgb(20 19 18 / 0.75);
+  --ink-a86: rgb(20 19 18 / 0.86);
+  --terracotta-600: #c84b31;
+  --terracotta-600-a12: rgb(200 75 49 / 0.12);
+
   /* Translucent steps: white light on the room, black shade, the room and its raised surface. */
-  --white-a04: rgb(255 255 255 / 0.04);
-  --white-a06: rgb(255 255 255 / 0.06);
-  --white-a07: rgb(255 255 255 / 0.07);
-  --white-a08: rgb(255 255 255 / 0.08);
-  --white-a10: rgb(255 255 255 / 0.1);
-  --white-a12: rgb(255 255 255 / 0.12);
-  --white-a14: rgb(255 255 255 / 0.14);
-  --white-a16: rgb(255 255 255 / 0.16);
-  --white-a18: rgb(255 255 255 / 0.18);
-  --white-a20: rgb(255 255 255 / 0.2);
-  --white-a22: rgb(255 255 255 / 0.22);
-  --white-a35: rgb(255 255 255 / 0.35);
-  --white-a45: rgb(255 255 255 / 0.45);
-  --white-a55: rgb(255 255 255 / 0.55);
-  --white-a82: rgb(255 255 255 / 0.82);
+  --white-a04: rgb(242 239 233 / 0.04);
+  --white-a06: rgb(242 239 233 / 0.065);
+  --white-a07: rgb(242 239 233 / 0.07);
+  --white-a08: rgb(242 239 233 / 0.085);
+  --white-a10: rgb(242 239 233 / 0.1);
+  --white-a12: rgb(242 239 233 / 0.12);
+  --white-a14: rgb(242 239 233 / 0.14);
+  --white-a16: rgb(242 239 233 / 0.16);
+  --white-a18: rgb(242 239 233 / 0.18);
+  --white-a20: rgb(242 239 233 / 0.2);
+  --white-a22: rgb(242 239 233 / 0.22);
+  --white-a35: rgb(242 239 233 / 0.35);
+  --white-a45: rgb(242 239 233 / 0.45);
+  --white-a55: rgb(242 239 233 / 0.55);
+  --white-a82: rgb(242 239 233 / 0.82);
   --black-a12: rgb(0 0 0 / 0.12);
   --black-a18: rgb(0 0 0 / 0.18);
   --black-a35: rgb(0 0 0 / 0.35);
@@ -68,26 +117,26 @@
   --black-a72: rgb(0 0 0 / 0.72);
   --black-a75: rgb(0 0 0 / 0.75);
   --black-a86: rgb(0 0 0 / 0.86);
-  --velvet-950-a35: rgb(16 14 12 / 0.35);
-  --velvet-950-a45: rgb(16 14 12 / 0.45);
-  --velvet-950-a55: rgb(16 14 12 / 0.55);
-  --velvet-950-a60: rgb(16 14 12 / 0.6);
-  --velvet-950-a70: rgb(16 14 12 / 0.7);
-  --velvet-950-a72: rgb(16 14 12 / 0.72);
-  --velvet-950-a75: rgb(16 14 12 / 0.75);
-  --velvet-950-a78: rgb(16 14 12 / 0.78);
-  --velvet-950-a85: rgb(16 14 12 / 0.85);
-  --velvet-950-a86: rgb(16 14 12 / 0.86);
-  --velvet-950-a90: rgb(16 14 12 / 0.9);
-  --velvet-900-a92: rgb(26 23 20 / 0.92);
-  --velvet-900-a94: rgb(26 23 20 / 0.94);
-  --velvet-900-a95: rgb(26 23 20 / 0.95);
-  --velvet-900-a96: rgb(26 23 20 / 0.96);
-  --soot-a60: rgb(8 7 6 / 0.6);
-  --paper-100-a75: rgb(244 239 230 / 0.75);
-  --paper-100-a82: rgb(244 239 230 / 0.82);
-  --paper-100-a86: rgb(244 239 230 / 0.86);
-  --tungsten-400-a08: rgb(240 182 78 / 0.08);
+  --velvet-950-a35: rgb(12 12 11 / 0.35);
+  --velvet-950-a45: rgb(12 12 11 / 0.45);
+  --velvet-950-a55: rgb(12 12 11 / 0.55);
+  --velvet-950-a60: rgb(12 12 11 / 0.6);
+  --velvet-950-a70: rgb(12 12 11 / 0.75);
+  --velvet-950-a72: rgb(12 12 11 / 0.72);
+  --velvet-950-a75: rgb(12 12 11 / 0.75);
+  --velvet-950-a78: rgb(12 12 11 / 0.88);
+  --velvet-950-a85: rgb(12 12 11 / 0.85);
+  --velvet-950-a86: rgb(12 12 11 / 0.9);
+  --velvet-950-a90: rgb(12 12 11 / 0.92);
+  --velvet-900-a92: rgb(20 19 18 / 0.93);
+  --velvet-900-a94: rgb(20 19 18 / 0.95);
+  --velvet-900-a95: rgb(20 19 18 / 0.96);
+  --velvet-900-a96: rgb(20 19 18 / 0.97);
+  --soot-a60: rgb(8 7 6 / 0.65);
+  --paper-100-a75: rgb(242 239 233 / 0.75);
+  --paper-100-a82: rgb(242 239 233 / 0.82);
+  --paper-100-a86: rgb(242 239 233 / 0.86);
+  --tungsten-400-a08: rgb(226 99 71 / 0.14);
 
   /* Spacing scale (rem), for shared classes and new work. */
   --space-1: 0.25rem;
@@ -129,13 +178,14 @@
   --dur-1100: 1.1s;
   --dur-1600: 1.6s;
   --dur-2400: 2.4s;
-  --curve-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --curve-out: cubic-bezier(0.22, 1, 0.36, 1);
   --curve-linear: linear;
   --curve-in-out: ease-in-out;
 
   /* Type: families, sizes, line heights, weights, tracking. */
-  --family-system: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --family-mono: monospace;
+  --family-display: 'Instrument Serif', Georgia, serif;
+  --family-system: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --family-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
   --size-0700: 0.7rem;
   --size-0720: 0.72rem;
   --size-0750: 0.75rem;
@@ -156,7 +206,10 @@
   --size-1200: 1.2rem;
   --size-1300: 1.3rem;
   --size-1450: 1.45rem;
+  --size-1650: 1.65rem;
+  --size-1850: 1.85rem;
   --size-2200: 2.2rem;
+  --size-2600: 2.6rem;
 
   /* ======== Semantic tokens ======== */
 
@@ -187,9 +240,9 @@
   --blur-popover: blur(16px);
   --blur-bar: saturate(1.4) blur(18px);
 
-  /* Fills: white light laid over a surface. */
+  /* Fills: light laid over a surface. */
   --fill-faint: var(--white-a04);
-  --fill-subtle: var(--white-a07);
+  --fill-subtle: var(--white-a06);
   --fill: var(--white-a08);
   --fill-strong: var(--white-a12);
   --fill-hover: var(--white-a14);
@@ -200,7 +253,7 @@
 
   /* Lines. */
   --line: var(--velvet-700);
-  --line-hairline: var(--white-a06);
+  --line-hairline: var(--white-a08);
   --line-overlay: var(--white-a10); /* dialogs, menus, the header's search */
   --line-control: var(--white-a12);
   --line-quiet: var(--white-a14);
@@ -209,22 +262,23 @@
   --line-hover: var(--white-a55);
 
   /* Text. */
-  --text: var(--paper-100); /* projector white */
+  --text: var(--paper-100); /* warm ivory ink */
   --text-muted: var(--paper-500);
+  --text-faint: var(--paper-600);
   --text-inverse: var(--velvet-950); /* on a light fill (a pressed chip) */
   --text-dim: var(--paper-100-a75); /* the player's subtitle line */
   --text-hero-meta: var(--paper-100-a82);
   --text-lede: var(--paper-100-a86);
   --text-on-art: var(--white-a82); /* initials on a generated tile */
   /* The generated tile (no artwork): saturation and lightness of its two ends, around the title's hue. */
-  --tile-from: 50% 36%;
-  --tile-to: 45% 15%;
-  --tile-hue-shift: 45;
+  --tile-from: 24% 22%;
+  --tile-to: 20% 11%;
+  --tile-hue-shift: 28;
 
   /* Accent and signals. */
-  --accent: var(--tungsten-400); /* tungsten lamp: fallback when a film has no colour yet */
+  --accent: var(--tungsten-400); /* Lumière cinema vermilion/terracotta */
   --accent-wash: var(--tungsten-400-a08);
-  --on-accent: var(--tungsten-950);
+  --on-accent: var(--paper-100);
   --tint: var(--accent); /* set per page from artwork; see lib/ambient */
   --danger: var(--coral-300);
   --on-danger: var(--coral-950);
@@ -274,17 +328,17 @@
   --text-shadow-hero: 0 2px 30px var(--black-a35);
   --drop-shadow-logo: drop-shadow(0 2px 24px var(--black-a45));
   --focus-ring-w: 2px;
-  --focus-ring: var(--focus-ring-w) solid var(--text);
+  --focus-ring: var(--focus-ring-w) solid var(--accent);
   --focus-offset: 3px;
 
-  /* Radii. */
+  /* Radii: sharp gallery framing for artwork (2px), pill for interactive controls. */
   --radius-xs: var(--radius-2); /* the scrubber */
-  --radius-sm: var(--radius-4); /* badges, small tags, posters in lists */
-  --radius-kbd: var(--radius-5);
-  --radius-item: var(--radius-6); /* rows of a menu, thumbnails */
-  --radius-row: var(--radius-8); /* rows of a list, the token field */
-  --radius: var(--radius-10); /* cards, fields */
-  --radius-lg: var(--radius-16); /* panels, dialogs */
+  --radius-sm: var(--radius-2); /* badges, small tags, posters in lists */
+  --radius-kbd: var(--radius-4);
+  --radius-item: var(--radius-4); /* rows of a menu, thumbnails */
+  --radius-row: var(--radius-4); /* rows of a list, the token field */
+  --radius: var(--radius-2); /* poster and still frames */
+  --radius-lg: var(--radius-6); /* panels, dialogs */
   --radius-pill: 999px;
   --radius-round: 50%;
 
@@ -318,11 +372,11 @@
 
   /* Opacity steps that repeat. */
   --opacity-disabled: 0.5;
-  --light-dim: 0.12; /* the projection light with no film */
-  --light-lit: 0.3;
+  --light-dim: 0.08; /* the projection light with no film */
+  --light-lit: 0.18;
 
   /* The A to Z rail of Movies and Shows (grid task). */
-  --opacity-rail-idle: 0.4; /* until a pointer is over it, or it has the focus */
+  --opacity-rail-idle: 0.45; /* until a pointer is over it, or it has the focus */
   --rail-w: 24px; /* a letter's target: 24 px at the least (WCAG 2.5.8) */
   --rail-letter-h: 24px;
   --bubble-size: 4.5rem; /* the big letter beside a dragging finger */
@@ -336,16 +390,10 @@
   --chip-h: 2rem; /* a rating chip */
   --chip-pad: 0.2rem 0.7rem;
   --chip-gap: 0.4rem;
-  /* Settings tabs (settings task). --page-max: the width of the centred pages of text and controls
-     (.page-container: Settings and Activity); --side-nav-w: Settings' column of tabs; the fade at the
-     edge of a row that scrolls sideways (a mask: only its alpha counts). */
   --page-max: 68rem;
   --side-nav-w: 11rem;
   --fade-edge: 2rem;
   --mask-solid: var(--black);
-  /* Season posters on a show's page (seasons task): a card's width in the row, from 600 px and
-     below (SeasonRow's `sizes` repeats both); the ring of the selected one; the band that names the
-     season over a show's poster standing in for its own; the dot of a season started. */
   --season-w: 8.5rem;
   --season-w-narrow: 7rem;
   --ring-selected: 0 0 0 2px var(--surface-room), 0 0 0 4px var(--text);
@@ -354,10 +402,10 @@
 
   /* Fonts. */
   --font-text: var(--family-system);
-  --font-display: var(--family-system);
+  --font-display: var(--family-display);
   --font-mono: var(--family-mono);
 
-  /* Type scale: from 3xs up to 4xl. The "-2", "-3" steps sit just above their name. */
+  /* Type scale: from 3xs up to 4xl. */
   --fs-3xs: var(--size-0700);
   --fs-2xs: var(--size-0720);
   --fs-2xs-2: var(--size-0750);
@@ -377,14 +425,17 @@
   --fs-xl: var(--size-1150);
   --fs-xl-2: var(--size-1200);
   --fs-2xl: var(--size-1300);
+  --fs-2xl-2: var(--size-1650);
   --fs-3xl: var(--size-1450);
+  --fs-3xl-2: var(--size-1850);
   --fs-4xl: var(--size-2200);
+  --fs-4xl-2: var(--size-2600);
   /* Fluid sizes. */
-  --fs-lede: clamp(1rem, 1.6vw, 1.2rem);
+  --fs-lede: clamp(1.05rem, 1.7vw, 1.3rem);
   --fs-lede-2: clamp(1rem, 1.6vw, 1.15rem);
-  --fs-tile: clamp(1.4rem, 5vw, 2.4rem);
-  --fs-h1: clamp(1.9rem, 4.2vw, 3rem);
-  --fs-display: clamp(2.2rem, 5.2vw, 4.4rem);
+  --fs-tile: clamp(1.5rem, 5vw, 2.5rem);
+  --fs-h1: clamp(2.1rem, 4.2vw, 3.25rem);
+  --fs-display: clamp(2.5rem, 5vw, 4.25rem);
   /* Relative to the text around. */
   --fs-rel-half: 0.5em;
   --fs-rel-sm: 0.8em;
@@ -394,42 +445,95 @@
   --fs-root-narrow: 15px; /* phones */
 
   --lh-none: 1;
-  --lh-display: 1.08;
-  --lh-tight: 1.2;
-  --lh-snug: 1.25;
-  --lh-snug-2: 1.3;
+  --lh-display: 0.96;
+  --lh-tight: 1.12;
+  --lh-snug: 1.2;
+  --lh-snug-2: 1.28;
   --lh-compact: 1.35;
   --lh-body-2: 1.45;
   --lh-body: 1.5;
   --lh-badge: 1.55;
-  --lh-relaxed: 1.6;
+  --lh-relaxed: 1.62;
 
   --fw-regular: 400;
   --fw-medium: 500;
-  --fw-medium-2: 550;
+  --fw-medium-2: 500;
   --fw-semibold: 600;
-  --fw-semibold-2: 650;
-  --fw-bold: 700;
-  --fw-heavy: 800;
-  --fw-black: 850;
+  --fw-semibold-2: 600;
+  --fw-bold: 600;
+  --fw-heavy: 400; /* Instrument Serif display headings stay unbolded */
+  --fw-black: 400;
 
-  --tracking-brand: -0.04em;
-  --tracking-display: -0.025em;
+  --tracking-brand: -0.02em;
+  --tracking-display: -0.015em;
   --tracking-tight: -0.01em;
-  --tracking-wide: 0.01em;
-  --tracking-wider: 0.02em;
-  --tracking-widest: 0.04em;
+  --tracking-wide: 0.04em;
+  --tracking-wider: 0.1em;
+  --tracking-widest: 0.16em;
 
   /* ======== The names before this file (kept: components and agents use them) ======== */
-  --bg: var(--surface-room); /* velvet: the room */
-  --bg-2: var(--surface-raised); /* seat: raised surfaces */
-  --bg-3: var(--surface-control); /* aisle: controls */
+  --bg: var(--surface-room);
+  --bg-2: var(--surface-raised);
+  --bg-3: var(--surface-control);
   --muted: var(--text-muted);
   --font-sans: var(--font-text);
 }
 
+:root[data-theme='light'] {
+  --surface-room: var(--paper-bg);
+  --surface-raised: var(--paper-elev);
+  --surface-control: var(--paper-subtle);
+  --surface-dialog: var(--paper-dialog);
+  --surface-palette: var(--paper-dialog);
+  --surface-menu: var(--paper-dialog);
+  --surface-popover: var(--paper-dialog);
+  --surface-bar: var(--paper-sheet);
+  --surface-bar-fade: var(--paper-sheet-fade);
+  --surface-tabbar: var(--paper-sheet);
+  --surface-tooltip: var(--paper-dialog);
+  --surface-badge: var(--paper-sheet);
+  --surface-tag: var(--paper-sheet);
+  --surface-well: var(--ink-a04);
+  --surface-inset: var(--ink-a04);
+  --glass: var(--paper-sheet);
+  --glass-line: var(--ink-a16);
+  --glass-line-hover: var(--ink-a45);
+  --fill-faint: var(--ink-a04);
+  --fill-subtle: var(--ink-a06);
+  --fill: var(--ink-a06);
+  --fill-strong: var(--ink-a12);
+  --fill-hover: var(--ink-a12);
+  --fill-primary-hover: var(--ink-900);
+  --line: var(--ink-a09);
+  --line-hairline: var(--ink-a09);
+  --line-overlay: var(--ink-a16);
+  --line-control: var(--ink-a16);
+  --line-quiet: var(--ink-a16);
+  --line-badge: var(--ink-a22);
+  --line-spinner: var(--ink-a22);
+  --line-hover: var(--ink-a45);
+  --text: var(--ink-900);
+  --text-muted: var(--ink-500);
+  --text-faint: var(--ink-400);
+  --text-inverse: var(--paper-bg);
+  --text-dim: var(--ink-a75);
+  --text-hero-meta: var(--ink-a86);
+  --text-lede: var(--ink-a86);
+  --accent: var(--terracotta-600);
+  --accent-wash: var(--terracotta-600-a12);
+  --on-accent: var(--paper-bg);
+  --scrim-hero-bottom: var(--paper-sheet);
+  --scrim-hero-mid: var(--paper-sheet-fade);
+  --scrim-hero-side: var(--paper-sheet);
+  --scrim-hero-side-mid: var(--paper-sheet-fade);
+  --scrim-hero-narrow: var(--paper-sheet);
+  --scrim-hero-narrow-mid: var(--paper-sheet-fade);
+  --tile-from: 24% 84%;
+  --tile-to: 20% 74%;
+}
+
 @media (max-width: 600px) {
   :root {
-    --bar-h: 3rem;
+    --bar-h: 3.25rem;
   }
 }

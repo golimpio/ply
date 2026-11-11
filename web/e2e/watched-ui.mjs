@@ -532,8 +532,8 @@ const scenarios = {
     check('it is gone from the rail, though /api/continue still lists it', (await inRail()) === 0 && mock.continueList.includes(3));
     const rewatch = await page.locator('section.rail', { hasText: 'Continue watching' }).locator('a.card[href^="#/play/8"]').count();
     check('a film seen in one version and being watched again in another stays', rewatch === 1);
-    const shelf = page.locator('section.rail').filter({ has: page.locator('h2', { hasText: /^Movies$/ }) }).locator('a.card[href="#/item/3"]');
-    check('its card on the Movies shelf has the check', (await badgeOf(shelf))?.kind === 'done');
+    const shelf = page.locator('section.rail', { hasText: 'World & Auteur Cinema' }).locator('a.card[href="#/item/3"]');
+    check('its card on the Auteur Cinema shelf has the check', (await badgeOf(shelf))?.kind === 'done');
     await context.close();
   },
 

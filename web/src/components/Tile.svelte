@@ -18,8 +18,10 @@
     /* --h, the title's hue, is set inline; the rest of the colour is the theme's. */
     background: linear-gradient(145deg, hsl(var(--h) var(--tile-from)), hsl(calc(var(--h) + var(--tile-hue-shift)) var(--tile-to)));
     color: var(--text-on-art);
-    font-weight: var(--fw-bold);
-    letter-spacing: var(--tracking-widest);
+    font-family: var(--font-display);
+    font-style: italic;
+    font-weight: var(--fw-regular);
+    letter-spacing: var(--tracking-wide);
     font-size: var(--fs-tile);
     user-select: none;
   }

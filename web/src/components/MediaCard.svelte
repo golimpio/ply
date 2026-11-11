@@ -154,18 +154,20 @@
     left: 0;
     right: 0;
     bottom: 0;
-    height: 4px;
+    height: 3px;
     background: var(--progress-track);
   }
   .progress span {
     display: block;
     height: 100%;
-    background: var(--text);
+    background: var(--accent);
   }
   .title {
-    margin-top: 0.6rem;
-    font-weight: var(--fw-semibold-2);
-    line-height: var(--lh-snug);
+    margin-top: 0.55rem;
+    font-family: var(--font-display);
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-regular);
+    line-height: var(--lh-tight);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -174,10 +176,11 @@
   .sub {
     display: flex;
     height: 1lh;
-    gap: 0.75rem;
+    gap: 0.65rem;
     margin-top: 0.1rem;
     color: var(--text-muted);
-    font-size: var(--fs-sm);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
     font-variant-numeric: tabular-nums;
     overflow: hidden;
     text-overflow: ellipsis;

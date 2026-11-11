@@ -133,6 +133,13 @@
   const logo = $derived(isEpisode ? '' : logoSrc(meta));
   const year = $derived(isEpisode ? undefined : (yearOf(meta) ?? item?.year));
   const runtime = $derived(meta?.runtimeMin && !isEpisode ? runtimeLabel(meta.runtimeMin) : formatDuration(item?.durationSec ?? 0));
+  const endsAt = $derived.by(() => {
+    const dur = item?.durationSec || (meta?.runtimeMin ? meta.runtimeMin * 60 : 0);
+    const rem = Math.max(dur - resumeAt, 0);
+    if (!rem || rem <= 0) return '';
+    const end = new Date(Date.now() + rem * 1000);
+    return `Ends ${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
+  });
   // An episode's TMDB score (a number, as before M10) beside its own chips (IMDb); a film's chips
   // are every rating of its title, the card's one until the detail has come.
   const epScore = $derived(isEpisode ? ratingLabel(ep?.rating) : '');
@@ -266,11 +273,11 @@
     <div class="hero-actions">
       {#if resumeAt}
         <a class="btn primary" href={href.play(item.id, resumeAt)}>
-          <Icon name="play" />Resume from {formatClock(resumeAt)}
+          <Icon name="play" />Resume from {formatClock(resumeAt)}{#if endsAt} · {endsAt}{/if}
         </a>
         <a class="btn" href={href.play(item.id)}>Play from start</a>
       {:else}
-        <a class="btn primary" href={href.play(item.id)}><Icon name="play" />Play</a>
+        <a class="btn primary" href={href.play(item.id)}><Icon name="play" />Play{#if endsAt} · {endsAt}{/if}</a>
       {/if}
       <!-- A film's own; an episode's meta is its show's, whose trailer is on the show's page. -->
       {#if !isEpisode && meta}{#key meta.id}<TrailerButton titleId={meta.id} {title} />{/key}{/if}
@@ -296,26 +303,32 @@
 
     {#if overview || meta?.genres.length || credits.length || meta?.collection}
       <section class="about">
-        {#if overview}<p class="title-overview">{overview}</p>{/if}
-        {#if meta?.genres.length}
-          <ul class="genres" aria-label="Genres">
-            {#each meta.genres as g (g.id)}<li><a class="chip" href={href.genre(g.id)}>{g.name}</a></li>{/each}
-          </ul>
-        {/if}
-        {#if credits.length}
-          <dl class="credits">
-            {#each credits as line (line.label)}
-              <dt>{line.people.length > 1 ? line.plural : line.label}</dt>
-              <dd>
-                {#each line.people as p, i (p.personId)}{#if i}{', '}{/if}<a class="link" href={href.person(p.personId)}>{p.name}</a>{/each}
-              </dd>
-            {/each}
-          </dl>
-        {/if}
-        {#if meta?.collection}
-          <p class="collection">
-            Part of <a class="link" href={href.collection(meta.collection.id)}>{meta.collection.name}</a>
-          </p>
+        <div class="about-main">
+          {#if overview}<p class="title-overview">{overview}</p>{/if}
+          {#if meta?.genres.length}
+            <ul class="genres" aria-label="Genres">
+              {#each meta.genres as g (g.id)}<li><a class="chip" href={href.genre(g.id)}>{g.name}</a></li>{/each}
+            </ul>
+          {/if}
+        </div>
+        {#if credits.length || meta?.collection}
+          <div class="about-side">
+            {#if credits.length}
+              <dl class="credits">
+                {#each credits as line (line.label)}
+                  <dt>{line.people.length > 1 ? line.plural : line.label}</dt>
+                  <dd>
+                    {#each line.people as p, i (p.personId)}{#if i}{', '}{/if}<a class="link" href={href.person(p.personId)}>{p.name}</a>{/each}
+                  </dd>
+                {/each}
+              </dl>
+            {/if}
+            {#if meta?.collection}
+              <p class="collection">
+                Part of <a class="link" href={href.collection(meta.collection.id)}>{meta.collection.name}</a>
+              </p>
+            {/if}
+          </div>
         {/if}
       </section>
     {/if}
@@ -471,7 +484,8 @@
   }
   .tagline {
     margin: -0.2rem 0 0;
-    font-size: var(--fs-lede);
+    font-family: var(--font-display);
+    font-size: var(--fs-3xl);
     font-style: italic;
     color: var(--text-lede);
     text-wrap: balance;
@@ -489,8 +503,8 @@
     color: var(--rating-star);
   }
   .body {
-    padding: 0.5rem var(--gutter) 0;
-    max-width: 60rem;
+    padding: 1.25rem var(--gutter) 0;
+    max-width: 72rem;
     display: grid;
     gap: 2rem;
   }
@@ -502,7 +516,35 @@
   }
   .about {
     display: grid;
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    gap: 2rem;
+    align-items: start;
+    padding-top: 1rem;
+    border-top: 1px solid var(--line);
+  }
+  .about-main {
+    display: grid;
     gap: 1.25rem;
+    min-width: 0;
+  }
+  .about-side {
+    display: grid;
+    gap: 1.1rem;
+    padding-left: 2rem;
+    border-left: 1px solid var(--line);
+    min-width: 0;
+  }
+  @media (max-width: 760px) {
+    .about {
+      grid-template-columns: 1fr;
+      gap: 1.25rem;
+    }
+    .about-side {
+      padding-left: 0;
+      border-left: 0;
+      padding-top: 1rem;
+      border-top: 1px solid var(--line);
+    }
   }
   .versions .chip {
     display: inline-flex;

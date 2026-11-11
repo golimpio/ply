@@ -9,6 +9,10 @@
   font-family: var(--font-text);
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+:root[data-theme='light'] {
+  color-scheme: light;
 }
 
 *,
@@ -59,13 +63,14 @@ h3 {
 }
 h1 {
   font-size: var(--fs-h1);
-  font-weight: var(--fw-heavy);
+  font-weight: var(--fw-regular);
   line-height: var(--lh-display);
   letter-spacing: var(--tracking-display);
 }
 h2 {
-  font-size: var(--fs-xl-2);
-  font-weight: var(--fw-bold);
+  font-size: var(--fs-3xl-2);
+  font-weight: var(--fw-regular);
+  line-height: var(--lh-tight);
   letter-spacing: var(--tracking-tight);
 }
 
@@ -179,12 +184,13 @@ code {
   cursor: default;
 }
 .btn.primary {
-  color: var(--on-accent);
+  color: var(--text-inverse);
   background: var(--text);
   border-color: var(--text);
 }
 .btn.primary:hover:not(:disabled) {
   background: var(--fill-primary-hover);
+  opacity: 0.9;
 }
 .btn.icon {
   width: 2.5rem;

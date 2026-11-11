@@ -589,8 +589,8 @@ Svelte 5 (runes) + Vite + TypeScript, hls.js. No UI framework; small hand-writte
   (`--fs-xs-3`, `--fs-sm-4`...) are interim: they go once the merge candidates below are decided, and the scale is
   named again from what is left. `--space-*` and the old names stay.
 - **Swapping the theme or the fonts** is an edit of tokens.css alone: change the primitives, or point the semantic
-  tokens at others; change `--font-*`. `index.html` and `public/manifest.json` repeat the room colour (`#100e0c`) as
-  `theme-color`: they can't read CSS, so change them with it.
+  tokens at others; change `--font-*`. `index.html` and `public/manifest.json` repeat the room colour (`#0c0c0b`, Cinema Dark) as
+  `theme-color` (switched dynamically to `#f6f4ef`, Warm Paper, when the light theme is toggled): they can't read CSS, so change them with it.
 - **Shared classes** in `app.css`, for what repeats: `.btn`, `.chip`/`.chips`, `.badge`, `.score-chip`,
   `.settings-panel` (every card of Settings), `.text-field` and `.settings-input` (text fields and selects), `.switch`
   (recoloured with `--switch-on`), `.grid`/`.poster-grid`, and for a title's page `.cert`, `.badges`, `.hero-actions`,

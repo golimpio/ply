@@ -258,21 +258,25 @@
 
     {#if meta?.overview || summary?.overview || meta?.genres.length || credits.length}
       <section class="about">
-        {#if meta?.overview || summary?.overview}<p class="title-overview">{meta?.overview || summary?.overview}</p>{/if}
-        {#if meta?.genres.length}
-          <ul class="genres" aria-label="Genres">
-            {#each meta.genres as g (g.id)}<li><a class="chip" href={href.genre(g.id)}>{g.name}</a></li>{/each}
-          </ul>
-        {/if}
+        <div class="about-main">
+          {#if meta?.overview || summary?.overview}<p class="title-overview">{meta?.overview || summary?.overview}</p>{/if}
+          {#if meta?.genres.length}
+            <ul class="genres" aria-label="Genres">
+              {#each meta.genres as g (g.id)}<li><a class="chip" href={href.genre(g.id)}>{g.name}</a></li>{/each}
+            </ul>
+          {/if}
+        </div>
         {#if credits.length}
-          <dl class="credits">
-            {#each credits as line (line.label)}
-              <dt>{line.people.length > 1 ? line.plural : line.label}</dt>
-              <dd>
-                {#each line.people as p, i (p.personId)}{#if i}{', '}{/if}<a class="link" href={href.person(p.personId)}>{p.name}</a>{/each}
-              </dd>
-            {/each}
-          </dl>
+          <div class="about-side">
+            <dl class="credits">
+              {#each credits as line (line.label)}
+                <dt>{line.people.length > 1 ? line.plural : line.label}</dt>
+                <dd>
+                  {#each line.people as p, i (p.personId)}{#if i}{', '}{/if}<a class="link" href={href.person(p.personId)}>{p.name}</a>{/each}
+                </dd>
+              {/each}
+            </dl>
+          </div>
         {/if}
       </section>
     {/if}
@@ -411,8 +415,36 @@
   }
   .about {
     display: grid;
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    gap: 2rem;
+    align-items: start;
+    max-width: 72rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--line);
+  }
+  .about-main {
+    display: grid;
     gap: 1.25rem;
-    max-width: 60rem;
+    min-width: 0;
+  }
+  .about-side {
+    display: grid;
+    gap: 1.1rem;
+    padding-left: 2rem;
+    border-left: 1px solid var(--line);
+    min-width: 0;
+  }
+  @media (max-width: 760px) {
+    .about {
+      grid-template-columns: 1fr;
+      gap: 1.25rem;
+    }
+    .about-side {
+      padding-left: 0;
+      border-left: 0;
+      padding-top: 1rem;
+      border-top: 1px solid var(--line);
+    }
   }
   .season-top {
     display: grid;
@@ -453,15 +485,15 @@
     margin: 1.25rem 0 0;
     padding: 0;
     display: grid;
-    gap: 0.5rem;
+    border-top: 1px solid var(--line);
   }
   li {
     display: flex;
     align-items: center;
     gap: 1rem;
-    padding: 0.5rem;
+    padding: 0.9rem 0.5rem;
     margin: 0 -0.5rem;
-    border-radius: var(--radius-lg);
+    border-bottom: 1px solid var(--line);
   }
   li:hover,
   li:focus-within {
@@ -473,7 +505,7 @@
     display: grid;
     grid-template-columns: clamp(8rem, 22vw, 13rem) 1fr;
     align-items: center;
-    gap: 1.1rem;
+    gap: 1.25rem;
   }
   .ep:focus-visible {
     outline: none;
@@ -493,13 +525,13 @@
   .bar {
     position: absolute;
     inset: auto 0 0;
-    height: 4px;
+    height: 3px;
     background: var(--progress-track);
   }
   .bar span {
     display: block;
     height: 100%;
-    background: var(--text);
+    background: var(--accent);
   }
   .watched {
     position: absolute;
@@ -522,11 +554,16 @@
     align-items: baseline;
   }
   .num {
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
     color: var(--text-muted);
-    min-width: 1.5rem;
+    min-width: 1.75rem;
   }
   .title {
-    font-weight: var(--fw-semibold-2);
+    font-family: var(--font-display);
+    font-size: var(--fs-2xl-2);
+    font-weight: var(--fw-regular);
+    line-height: var(--lh-tight);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
