@@ -28,7 +28,6 @@
     airLabel,
     crewWith,
     groupByTitle,
-    logoSrc,
     onePerTitle,
     posterImg,
     prefersPosters,
@@ -41,7 +40,6 @@
   import { app, rescan, scan } from '../lib/state.svelte';
   import { artOf, progressOf } from '../lib/ui-types';
   import Art, { type ArtItem } from '../components/Art.svelte';
-  import HeroTitle from '../components/HeroTitle.svelte';
   import Icon from '../components/Icon.svelte';
   import MediaCard from '../components/MediaCard.svelte';
   import Rail from '../components/Rail.svelte';
@@ -269,13 +267,22 @@
     return full.item ? { ...full.item, watched: lead.watched, progress: lead.progress } : lead;
   });
   const featureDetail = $derived(full?.id === lead?.id ? full?.item : null);
-  const featureLogo = $derived(feature?.kind === 'movie' ? logoSrc(feature) : '');
   const featureDirector = $derived.by(() => {
     if (feature?.kind === 'episode') return '';
     const dirs = crewWith(featureDetail?.meta, ['Director']);
     return dirs.length ? dirs[0].name : '';
   });
   const featureTagline = $derived(featureDetail?.meta?.tagline || '');
+  const featureBrief = $derived.by(() => {
+    return (
+      featureDetail?.meta?.overview ||
+      featureDetail?.episodeInfo?.overview ||
+      ('overview' in (feature ?? {}) ? (feature as { overview?: string }).overview : '') ||
+      featureDetail?.meta?.tagline ||
+      featureTagline ||
+      (feature?.genres?.length ? feature.genres.slice(0, 3).join(' · ') : '')
+    );
+  });
   const featureScores = $derived.by(() => {
     const fallback = lead && 'rating' in lead ? lead : null;
     const list = titleRatings(featureDetail?.meta, fallback);
@@ -365,6 +372,14 @@
     if (!companion || !feature) return '';
     const shared = companion.genres?.find((g) => feature.genres?.includes(g));
     return shared ? `Paired ${shared.toLowerCase()} study from your archive` : 'Complementary screening from your archive';
+  });
+  const companionBrief = $derived.by(() => {
+    return (
+      companionDetail?.meta?.overview ||
+      companionDetail?.meta?.tagline ||
+      companionNote ||
+      (companion?.genres?.length ? companion.genres.slice(0, 3).join(' · ') : '')
+    );
   });
 
   // Curated Chapter 01: Auteur & Critics Focus
@@ -476,14 +491,12 @@
               {/if}
             </div>
 
-            <HeroTitle title={cardTitle(feature)} logo={featureLogo} />
+            <a class="hero-title-wrap" href={href.item(feature.id)} onclick={morph}>
+              <h1 class="hero-title">{cardTitle(feature)}</h1>
+            </a>
 
-            {#if featureDetail?.meta?.originalTitle && featureDetail.meta.originalTitle !== cardTitle(feature)}
-              <div class="hero-orig">{featureDetail.meta.originalTitle}</div>
-            {:else if featureTagline}
-              <p class="hero-orig">{featureTagline}</p>
-            {:else if feature.genres?.length}
-              <p class="hero-orig">{feature.genres.slice(0, 3).join(' · ')}</p>
+            {#if featureBrief}
+              <p class="hero-brief">{featureBrief}</p>
             {/if}
 
             {#if featureScores.length}
@@ -542,8 +555,8 @@
               <h3 class="companion-title">{companion.title}</h3>
             </a>
 
-            {#if companionNote}
-              <p class="hero-orig">— {companionNote}</p>
+            {#if companionBrief}
+              <p class="hero-brief">{companionBrief}</p>
             {/if}
 
             {#if companionScores.length}
@@ -858,7 +871,7 @@
     color: var(--accent);
     text-transform: uppercase;
   }
-  .feature-copy :global(h1),
+  .hero-title,
   .companion-title {
     font-family: var(--font-display);
     font-size: var(--fs-3xl);
@@ -868,30 +881,28 @@
     color: var(--text);
     margin: 0 0 0.45rem 0;
   }
+  .hero-title-wrap,
   .companion-title-wrap {
     text-decoration: none;
     color: inherit;
+    display: inline-block;
   }
+  .hero-title-wrap:hover .hero-title,
   .companion-title-wrap:hover .companion-title {
     color: var(--accent);
   }
-  .feature-copy :global(.logo) {
-    display: block;
-    max-width: min(18rem, 90%);
-    max-height: 4.5rem;
-    width: auto;
-    height: auto;
-    object-fit: contain;
-    object-position: left bottom;
-    margin-bottom: 0.5rem;
-  }
-  .hero-orig {
+  .hero-brief {
     margin: 0 0 0.85rem 0;
-    font-family: var(--font-display);
-    font-style: italic;
-    font-size: var(--fs-lede);
+    font-family: var(--font-text);
+    font-size: var(--fs-sm);
     color: var(--text-muted);
-    line-height: 1.25;
+    line-height: var(--lh-body-2);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .hero-scores {
     display: flex;
