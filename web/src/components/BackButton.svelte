@@ -32,14 +32,30 @@
 
 <style>
   .back {
-    display: flex; /* on a line of its own above the title */
+    display: inline-flex;
+    align-items: center;
     min-height: 2.25rem;
-    gap: 0.3rem;
-    padding: 0.3rem 0.95rem 0.3rem 0.6rem;
+    gap: 0.35rem;
+    padding: 0.35rem 0.95rem 0.35rem 0.65rem;
     font-size: var(--fs-sm-3);
+    font-weight: var(--fw-medium);
     width: fit-content;
     max-width: 100%;
-    margin-bottom: 0.75rem;
+    margin-bottom: 0.85rem;
+    background: var(--glass);
+    border: 1px solid var(--glass-line);
+    backdrop-filter: var(--glass-blur);
+    border-radius: var(--radius-pill);
+    color: var(--text);
+    transition:
+      background var(--motion-hover),
+      border-color var(--motion-hover),
+      color var(--motion-hover);
+  }
+  .back:hover {
+    background: var(--fill-hover);
+    border-color: var(--glass-line-hover);
+    color: var(--text);
   }
   .back span {
     overflow: hidden;
@@ -57,11 +73,5 @@
     z-index: var(--z-over);
     max-width: calc(100% - 2 * var(--gutter));
     margin: 0;
-    background: var(--glass);
-    border-color: var(--glass-line);
-    backdrop-filter: var(--glass-blur);
-  }
-  .over:hover {
-    border-color: var(--glass-line-hover);
   }
 </style>

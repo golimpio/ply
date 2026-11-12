@@ -148,6 +148,14 @@
    * bitmap track would turn the whole playback into a transcode before the viewer asked for it.
    */
   function defaultSubtitle(subs: Subtitle[]): string | null {
+    if (item?.id) {
+      const stored = sessionStorage.getItem(`ply_sub_${item.id}`);
+      if (stored !== null) {
+        if (!stored) return null;
+        const found = subs.find((s) => s.key === stored && !s.image && s.url);
+        if (found) return found.key;
+      }
+    }
     const text = subs.filter((s) => !s.image && s.url);
     return (text.find((s) => s.default) ?? text.find((s) => s.forced))?.key ?? null;
   }

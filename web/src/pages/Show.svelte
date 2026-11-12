@@ -221,9 +221,8 @@
   };
 </script>
 
-<BackButton over />
 {#if episodeList.error && !episodeList.loaded}
-  <div class="page"><p class="error">{episodeList.error}</p></div>
+  <div class="page"><BackButton /><p class="error">{episodeList.error}</p></div>
 {:else if !episodeList.loaded}
   <div class="skeleton hero-sk" aria-busy="true"></div>
 {:else if !entry}
@@ -232,7 +231,8 @@
     <p><a href={href.shows}>Back to all shows</a></p>
   </div>
 {:else}
-  <Hero item={entry.cover} img={backdropOf(summary) ?? undefined} label={show} landing back>
+  <Hero item={entry.cover} img={backdropOf(summary) ?? undefined} label={show} landing>
+    <BackButton />
     <HeroTitle title={meta?.title || show} {logo} />
     {#if meta?.tagline}<p class="tagline">{meta.tagline}</p>{/if}
     <div class="meta">
@@ -504,7 +504,7 @@
     display: grid;
     border-top: 1px solid var(--line);
   }
-  li {
+  .episodes li {
     display: flex;
     align-items: center;
     gap: 1rem;
@@ -514,11 +514,11 @@
     border-radius: var(--radius-item);
     transition: background var(--motion-hover);
   }
-  li:last-child {
+  .episodes li:last-child {
     border-bottom: none;
   }
-  li:hover,
-  li:focus-within {
+  .episodes li:hover,
+  .episodes li:focus-within {
     background: var(--fill-faint);
   }
   .ep {

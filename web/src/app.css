@@ -324,11 +324,13 @@ code {
 }
 /* Where the details come from (TVDB, TMDB, .nfo): a fact, not a feature, so quieter. */
 .badge.source {
-  font-weight: var(--fw-semibold);
+  font-weight: var(--fw-medium);
   letter-spacing: var(--tracking-wide);
   color: var(--text-muted);
-  background: transparent;
-  border-color: var(--line-quiet);
+  background: var(--fill-faint);
+  border: 1px solid var(--line-quiet);
+  border-radius: var(--radius-pill);
+  padding: 0.1rem 0.5rem;
   backdrop-filter: none;
 }
 
@@ -628,7 +630,8 @@ select.settings-input option {
 .credits {
   display: grid;
   grid-template-columns: max-content 1fr;
-  gap: 0.55rem 1.75rem;
+  align-content: start;
+  gap: 0.75rem 1.75rem;
   margin: 0;
 }
 .credits dt {
@@ -660,8 +663,11 @@ select.settings-input option {
   min-width: 0;
 }
 .about-side {
-  display: grid;
-  gap: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  align-content: start;
+  justify-content: flex-start;
+  gap: 1.25rem;
   padding-left: 2rem;
   border-left: 1px solid var(--line);
   min-width: 0;
@@ -678,6 +684,82 @@ select.settings-input option {
     padding-top: 1.25rem;
     border-top: 1px solid var(--line);
   }
+}
+
+/* Media stream specs (Video, Audio, Subtitles): useful technical summary on detail pages */
+.media-specs {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.25rem 0 0.5rem;
+  font-size: var(--fs-sm-3);
+  line-height: var(--lh-snug);
+}
+.spec-row {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  align-items: center;
+  gap: 1rem;
+}
+.spec-label {
+  color: var(--text-muted);
+  font-size: var(--fs-sm-3);
+  font-weight: var(--fw-regular);
+}
+.spec-label-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: color var(--motion-hover);
+}
+.spec-label-btn:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+.spec-value {
+  margin: 0;
+  color: var(--text);
+  font-weight: var(--fw-medium);
+}
+.spec-select-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+}
+.spec-select-wrap::after {
+  content: '';
+  display: inline-block;
+  width: 0;
+  height: 0;
+  margin-left: -0.65rem;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--accent);
+  pointer-events: none;
+  vertical-align: middle;
+}
+.spec-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font: inherit;
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+  padding: 0 1rem 0 0;
+  margin: 0;
+  outline: none;
+  transition: opacity var(--motion-hover);
+}
+.spec-select:hover,
+.spec-select:focus-visible {
+  opacity: 0.8;
 }
 
 /* Callout cards: interactive glass cards linking to a collection, series, etc. */
@@ -736,6 +818,42 @@ select.settings-input option {
 }
 
 /* Ratings (M10): one chip per source on a detail page, and the quiet form of cards and rows. */
+.ratings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1.25rem;
+}
+.ratings .score-chip {
+  background: none;
+  border: none;
+  backdrop-filter: none;
+  padding: 0;
+  min-height: 0;
+  gap: 0.4rem;
+  font-size: var(--fs-base);
+  font-weight: var(--fw-bold);
+}
+.ratings a.score-chip:hover {
+  border-color: transparent;
+}
+.ratings a.score-chip:hover .score-value {
+  color: var(--text);
+  text-decoration: underline;
+}
+.ratings [data-source='imdb'] .score-name {
+  background: var(--warn);
+  color: var(--on-warn);
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-2xs);
+  line-height: 1;
+  padding: 0.15rem 0.35rem;
+  border-radius: var(--radius-sm);
+  letter-spacing: -0.02em;
+}
+.ratings [data-source='imdb'] .glyph.imdb {
+  display: none;
+}
 .score-chip {
   display: inline-flex;
   align-items: center;

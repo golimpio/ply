@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, type CardRating, type EpisodeCard, type ItemDetail, type ItemSummary, type ItemWatch, type Stream } from '../lib/api';
+  import { api, type CardRating, type EpisodeCard, type ItemDetail, type ItemSummary, type ItemWatch, type Stream, type Subtitle } from '../lib/api';
   import { useAmbient } from '../lib/ambient.svelte';
   import {
     channelLabel,
@@ -9,6 +9,7 @@
     formatBytes,
     formatClock,
     formatDuration,
+    languageLabel,
     methodLabel,
   } from '../lib/format';
   import { detail as loadDetail } from '../lib/details.svelte';
@@ -251,19 +252,77 @@
     nfo: 'the .nfo file next to it',
     mixed: 'TMDB and the .nfo file',
   };
+
+  const d = $derived(detail.data);
+
+  const videoStream = $derived(d?.streams?.find((s) => s.type === 'video'));
+  const audioStream = $derived(
+    d?.streams?.find((s) => s.type === 'audio' && s.default) ??
+    d?.streams?.find((s) => s.type === 'audio'),
+  );
+
+  const videoInfo = $derived.by(() => {
+    if (!d) return '';
+    const res = d.height >= 2160 ? '4K' : d.height >= 1080 ? '1080p' : d.height ? `${d.height}p` : '';
+    const codec = codecLabel(d.videoCodec || videoStream?.codec);
+    if (res && codec) return `${res} (${codec})`;
+    return res || codec || '';
+  });
+
+  const audioInfo = $derived.by(() => {
+    if (!audioStream) return '';
+    const lang = languageLabel(audioStream.language) || 'Unknown';
+    const codec = codecLabel(audioStream.codec);
+    const ch = audioStream.channels ? channelLabel(audioStream.channels) : '';
+    const details = [codec, ch].filter(Boolean).join(' ');
+    return details ? `${lang} (${details})` : lang;
+  });
+
+  let selectedSubKey = $state('');
+
+  $effect(() => {
+    if (!item?.id) return;
+    const stored = sessionStorage.getItem(`ply_sub_${item.id}`);
+    if (stored !== null) {
+      selectedSubKey = stored;
+      return;
+    }
+    const def = d?.subtitles?.find((s) => s.default) ?? d?.subtitles?.find((s) => s.forced);
+    selectedSubKey = def?.key ?? '';
+  });
+
+  function handleSubChange(e: Event) {
+    const val = (e.currentTarget as HTMLSelectElement).value;
+    if (val === '__manage__') {
+      managingSubs = true;
+      selectedSubKey = sessionStorage.getItem(`ply_sub_${item?.id}`) ?? '';
+      return;
+    }
+    selectedSubKey = val;
+    if (item?.id) {
+      sessionStorage.setItem(`ply_sub_${item.id}`, val);
+    }
+  }
+
+  function formatSubTrack(sub: Subtitle): string {
+    const lang = languageLabel(sub.language) || 'Unknown';
+    const flags = [sub.forced && 'Forced', sub.default && 'Default'].filter(Boolean).join(', ');
+    const extra = flags ? ` (${flags})` : '';
+    return `${lang}${extra}`;
+  }
 </script>
 
-<!-- Until the item is known, an episode's parent (its show) isn't: the button keeps its place unseen. -->
-<BackButton fallback={parent} pending={!item && !detail.error} over />
 {#if !item && detail.error}
   <div class="page center">
+    <BackButton fallback={parent} />
     <p class="error">{detail.error}</p>
     <p><a href={href.home}>Back to the library</a></p>
   </div>
 {:else if !item}
   <div class="skeleton hero-sk" aria-busy="true"></div>
 {:else}
-  <Hero {item} label={item.show || item.title} landing back>
+  <Hero {item} label={item.show || item.title} landing>
+    <BackButton fallback={parent} pending={!item && !detail.error} />
     {#if isEpisode && item.show}
       <a class="show link" href={href.show(item.show, item.season)}>{meta?.title || item.show}</a>
     {/if}
@@ -289,9 +348,6 @@
       {/if}
       <!-- A film's own; an episode's meta is its show's, whose trailer is on the show's page. -->
       {#if !isEpisode && meta}{#key meta.id}<TrailerButton titleId={meta.id} {title} />{/key}{/if}
-      <button class="btn" onclick={() => (managingSubs = true)}>
-        <Icon name="cc" />Subtitles
-      </button>
       <span class="pair">
         <button class="btn" aria-disabled={marking} onclick={toggleWatched}>
           <Icon name="check" />{item.watched ? 'Mark as unwatched' : 'Mark as watched'}
@@ -316,6 +372,41 @@
       <section class="about">
         <div class="about-main">
           {#if overview}<p class="title-overview">{overview}</p>{/if}
+          {#if videoInfo || audioInfo || d?.subtitles?.length}
+            <dl class="media-specs">
+              {#if videoInfo}
+                <div class="spec-row">
+                  <dt class="spec-label">Video</dt>
+                  <dd class="spec-value">{videoInfo}</dd>
+                </div>
+              {/if}
+              {#if audioInfo}
+                <div class="spec-row">
+                  <dt class="spec-label">Audio</dt>
+                  <dd class="spec-value">{audioInfo}</dd>
+                </div>
+              {/if}
+              <div class="spec-row">
+                <dt class="spec-label"><button type="button" class="spec-label-btn" onclick={() => (managingSubs = true)}>Subtitles</button></dt>
+                <dd class="spec-value">
+                  <div class="spec-select-wrap">
+                    <select
+                      class="spec-select"
+                      aria-label="Subtitles"
+                      bind:value={selectedSubKey}
+                      onchange={handleSubChange}
+                    >
+                      <option value="">None</option>
+                      {#each d?.subtitles ?? [] as sub (sub.key)}
+                        <option value={sub.key}>{formatSubTrack(sub)}</option>
+                      {/each}
+                      <option value="__manage__">Manage subtitles…</option>
+                    </select>
+                  </div>
+                </dd>
+              </div>
+            </dl>
+          {/if}
           {#if meta?.genres.length}
             <ul class="genres" aria-label="Genres">
               {#each meta.genres as g (g.id)}<li><a class="chip" href={href.genre(g.id)}>{g.name}</a></li>{/each}
