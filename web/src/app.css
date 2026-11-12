@@ -622,6 +622,12 @@ select.settings-input option {
   flex-wrap: wrap;
   gap: 0.5rem;
 }
+.genres li {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+}
 .genres .chip {
   display: inline-flex;
   align-items: center;
