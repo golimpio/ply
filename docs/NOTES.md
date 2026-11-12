@@ -232,3 +232,19 @@ file (init 1.3-4.1 s at a resume; the `-probesize 1M` idea of M9-ARCHITECTURE it
 index (40-65 ms). After segment 0 delivery is NAS-bound and bursty: 2-3.5x real time on average, with 3-4 stalls of
 8-20 s per 30 segments; a player at real time would not have rebuffered in 3 minutes (closest: 0.8 s of lead), but the
 first minute is thin. Found on the way: `DELETE /api/sessions/{sid}` took 18 s with ffmpeg in an SMB read; stopping ply, 16-20 s.
+
+### The keyframe index is not the problem, so the EVENT playlist is not being built (2026-11-12)
+
+`-analyzeduration 0 -probesize 1M` is now on ffmpeg's input (c16372a): measured against the NAS, a cold seek to
+1200 s in a 6.9 GB film, copying one second of video, went from 1.79 s to 0.07 s (a second round on the same seek is
+0.04 s either way: the page cache).
+
+The EVENT-playlist design (M9-ARCHITECTURE, "EVENT playlist") exists for a file whose container has no index, where
+building one means reading the whole file. Sampling 30 files from both roots (28 MKV, 2 MP4; a 2 MB head and a 4 MB
+tail searched for `Cues` and for `moov`/`stss`) found an index in **all 30**. Together with this section's earlier
+"not on the keyframe index (40-65 ms)", that says an index-less file is at most rare here.
+
+So the EVENT playlist is not worth its playlist state machine for this library. If a cold resume is still slow, the
+cheaper levers, in order, are: cut a transcode for the session (an encoder needs no keyframe index, so the first
+segment comes at once), and record the keyframes a remux play already demuxes into the item's cached index, so a film
+played once is never cold again. Both are smaller than EVENT and cover deep resumes, which EVENT deliberately does not.
