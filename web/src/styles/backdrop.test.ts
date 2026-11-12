@@ -26,6 +26,24 @@ describe('backdrop-filter in the built CSS', () => {
     for (const body of blurred) expect(unprefixed(body), body).toBe(true);
   });
 
+  it('the header when not scrolled has no backdrop-filter (transparent over hero)', () => {
+    // Positive control: the header once scrolled DOES have backdrop-filter.
+    const scrolled = rules(/^\.bar\.scrolled\.svelte-/).filter((b) => b.includes('backdrop-filter'));
+    expect(scrolled.length).toBeGreaterThanOrEqual(1);
+
+    // When unscrolled, .bar has no backdrop-filter property.
+    const unscrolled = rules(/^\.bar(?!\.scrolled)\.svelte-/).filter(unprefixed);
+    expect(unscrolled).toEqual([]);
+  });
+
+  it('the hero scrim darkens toward the top with --scrim-hero-top', () => {
+    const scrimRules = rules(/^\.scrim\.svelte-/).filter((b) => b.includes('--scrim-hero-top'));
+    expect(scrimRules.length).toBeGreaterThanOrEqual(1);
+    for (const body of scrimRules) {
+      expect(body).toContain('--scrim-hero-top');
+    }
+  });
+
   it('no rule anywhere has the -webkit- form alone', () => {
     const lone = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter((m) => m[2].includes('-webkit-backdrop-filter') && !unprefixed(m[2])).map((m) => m[1]);
     expect(lone).toEqual([]);

@@ -542,6 +542,7 @@
     gap: 2rem;
   }
   .body:last-of-type {
+    padding-top: var(--shelf-pad-y);
     padding-bottom: 4rem;
   }
   .notice {
@@ -550,10 +551,8 @@
   .about {
     display: grid;
     grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
-    gap: 2rem;
-    align-items: start;
-    padding-top: 1rem;
-    border-top: 1px solid var(--line);
+    gap: 2.5rem;
+    padding: 0.5rem 0 var(--shelf-pad-y);
   }
   .about-main {
     display: grid;
@@ -570,12 +569,13 @@
   @media (max-width: 760px) {
     .about {
       grid-template-columns: 1fr;
-      gap: 1.25rem;
+      gap: 1.75rem;
+      padding-bottom: var(--shelf-pad-y);
     }
     .about-side {
       padding-left: 0;
       border-left: 0;
-      padding-top: 1rem;
+      padding-top: 1.25rem;
       border-top: 1px solid var(--line);
     }
   }

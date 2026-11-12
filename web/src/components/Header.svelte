@@ -76,8 +76,7 @@
     align-items: center;
     gap: 1.15rem;
     padding: calc(env(safe-area-inset-top) + var(--bar-pad-y)) var(--gutter) var(--bar-pad-y);
-    background: var(--surface-bar-fade);
-    backdrop-filter: var(--glass-blur);
+    background: transparent;
     border-bottom: 1px solid transparent;
     transition:
       background var(--motion-bar),

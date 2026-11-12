@@ -78,12 +78,13 @@
        var() colours the minifier leaves a gradient alone, so this is the form that matches what
        was on screen before the tokens. The same holds for the narrow scrim below. */
     background:
+      linear-gradient(to bottom, var(--scrim-hero-top) 0%, var(--scrim-hero-top-mid) 22%, transparent 45%),
       linear-gradient(transparent 38%, var(--scrim-hero-mid) 70%, var(--scrim-hero-bottom) 100%),
       linear-gradient(90deg, var(--scrim-hero-side) 0%, var(--scrim-hero-side-mid) 45%, transparent 75%);
   }
   .content {
     padding: calc(var(--bar-h) + 2rem) var(--gutter) clamp(1.5rem, 4vw, 3rem);
-    max-width: min(46rem, 100%);
+    max-width: min(68rem, 100%);
     display: grid;
     gap: 0.85rem;
   }
@@ -111,7 +112,9 @@
       min-height: 72vh;
     }
     .scrim {
-      background: linear-gradient(transparent 25%, var(--scrim-hero-narrow-mid) 62%, var(--scrim-hero-narrow) 100%);
+      background:
+        linear-gradient(to bottom, var(--scrim-hero-top) 0%, var(--scrim-hero-top-mid) 22%, transparent 45%),
+        linear-gradient(transparent 25%, var(--scrim-hero-narrow-mid) 62%, var(--scrim-hero-narrow) 100%);
     }
   }
 </style>

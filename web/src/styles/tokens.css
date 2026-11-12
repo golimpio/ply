@@ -312,6 +312,8 @@
   --scrim-player-strong: var(--black-a86);
   --scrim-player-top: var(--black-a65);
   --scrim-player-bottom: var(--black-a75);
+  --scrim-hero-top: var(--velvet-950-a85);
+  --scrim-hero-top-mid: var(--velvet-950-a35);
   --scrim-hero-bottom: var(--velvet-950-a55);
   --scrim-hero-mid: var(--velvet-950-a45);
   --scrim-hero-side: var(--velvet-950-a85);
@@ -535,6 +537,8 @@
   --accent: var(--terracotta-600);
   --accent-wash: var(--terracotta-600-a12);
   --on-accent: var(--paper-bg);
+  --scrim-hero-top: var(--paper-sheet);
+  --scrim-hero-top-mid: var(--paper-sheet-fade);
   --scrim-hero-bottom: var(--paper-sheet);
   --scrim-hero-mid: var(--paper-sheet-fade);
   --scrim-hero-side: var(--paper-sheet);
