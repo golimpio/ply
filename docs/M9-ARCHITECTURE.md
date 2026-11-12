@@ -386,6 +386,11 @@ The aim is a "now playing" that is always right, including a cast to Apple TV or
   - Dedupe: one queued job per kind+key, merged (`Spec.Merge`), with the merge check and the insert as one step;
     a job never runs beside one with its key. A job the last run left queued and one this run queued with the same
     key are one job.
+  - **Stopping:** ply stopping is a cause of its own (`jobs.ErrStopping`), not a person's cancellation
+    (`ErrCancelled`). `Queue.Run` gives its jobs a context of its own and cancels the running ones with that cause
+    at once; `Run.Stopping()` lets a job tell the two apart, and `finish` queues a stopped job again rather than
+    failing or cancelling it. A job that starts in the same moment is signalled by `work` (it sees `q.stopping`).
+    A scan stops between files and kills the ffprobe it waits on; its pass writes nothing it did not finish.
   - Retries: a failure retries with backoff (1 min doubling, at most 30 min, 5 attempts); `Permanent` fails at once.
   - A panic is a failure.
   - A person's actions: cancel (`context.WithCancelCause`), bump (priority 0), retry, and pause/resume (persisted).
@@ -395,11 +400,12 @@ The aim is a "now playing" that is always right, including a cast to Apple TV or
   - An in-memory ring of 512 events serves `Last-Event-ID` replays. Ids start from the clock, so an id from an
     earlier process gets a snapshot, not a replay.
 - Kinds in use:
-  - `scan.full` (30): every interval, and at once. "Scan now" queues it at 0, or moves a queued one to the front. It
-    needs CPU and every root: it does not start while a video plays from the library's disk.
+  - `scan.full` (30): on its schedule (`docs/M12-SCHEDULES.md`), and at once on request. "Scan now" queues it at
+    0, or moves a queued one to the front. It needs CPU and every root: it does not start while a video plays from
+    the library's disk.
   - `scan.dirs` (10): the watcher's batches, through `Queue.Do`. It needs CPU only: a few headers, so a play from the
     same disk does not hold it. A batch that never ran is reported to the watcher as `ErrNotScanned`, which it retries.
-  - `meta.match` (20): the worker's passes, woken by `OnWake` (asynchronously), and every minute.
+  - `meta.match` (20): the worker's passes, woken by `OnWake` (asynchronously), and on its schedule.
     - Each item may probe its file and read its sidecars, even with lookups off. On a NAS that shares the link
       with a film (measured 2026-11-05), so it needs the roots' disks: it does not start while a video plays from
       them.
@@ -431,6 +437,11 @@ The aim is a "now playing" that is always right, including a cast to Apple TV or
     (`Options.Extra`, from `Scanner.Busy`). They pace through the governor directly.
 - The scanner yields per file: `Scanner.SetPace` is called before each probe (with done/total, which becomes the
   job's progress) and every 100 directories of a walk.
+- The schedules (`internal/schedule`, `docs/M12-SCHEDULES.md`) are a small loop beside the queue: a tick every 30 s
+  reads the `schedules` table (migration 015), asks the server's checker what each task can do (its key, the privacy
+  switch) and enqueues the kinds above when they fall due. A blocked task is logged once a day and not queued; its
+  `last_run` is left alone, so storing the key runs it at once. A task is never queued twice, and `last_run` lives
+  in the database: a restart does not scan or ask again.
 - Verified live (a remux session plus "Scan now"): the scan waits with "a video is playing from the same disk", and
   runs within a second of the session stopping.
 

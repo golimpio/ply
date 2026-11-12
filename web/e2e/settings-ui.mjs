@@ -79,6 +79,24 @@ function view(st) {
 
 const snapshot = jobsSnapshot();
 
+/** The schedules of Settings → Schedules: one of every kind, one of them missing its key. */
+const schedulesView = () => {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(2, 30, 0, 0);
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  yesterday.setHours(2, 30, 0, 0);
+  const next = tomorrow.toISOString();
+  const last = yesterday.toISOString();
+  return [
+    { task: 'scan.full', title: 'Scan the library', detail: 'Walks every library folder and reads the files that are new or changed.', enabled: true, at: '02:30', days: [], lastRun: last, next, missing: [], warnings: [] },
+    { task: 'meta.match', title: 'Fill in movie and show details', detail: 'Matches what has no details yet and refreshes what is due.', enabled: true, at: '03:00', days: [1, 2, 3, 4, 5], lastRun: last, next, missing: [], warnings: ['The TVDB key is not set: shows are looked up at TMDB.'] },
+    { task: 'ratings.mdblist', title: 'Fill in Rotten Tomatoes and other ratings', detail: 'Asks MDBList for the Rotten Tomatoes, Metacritic, Letterboxd and Trakt ratings.', enabled: true, at: '03:30', days: [], blocked: 'The MDBList key is not set.', missing: ['MDBList key'], warnings: [] },
+    { task: 'ratings.imdb', title: 'Download IMDb ratings', detail: "Downloads IMDb's datasets and fills in the IMDb ratings.", enabled: false, at: '04:00', days: [7], lastRun: last, missing: [], warnings: [] },
+  ];
+};
+
 /**
  * A fresh page on the mocked server.
  *   test     (provider) => json for POST /api/settings/test ({ ok: true } by default)
@@ -95,7 +113,7 @@ const snapshot = jobsSnapshot();
 async function open(browser, opts = {}) {
   const context = await browser.newContext({ viewport: { width: opts.width ?? 1280, height: 900 }, serviceWorkers: 'block' });
   const page = await context.newPage();
-  const st = { keys: opts.keys ?? { tmdb: TMDB_KEY, tvdb: TVDB_KEY, mdblist: '' }, tested: { tmdb: { at: now() - 300, ok: true } } };
+  const st = { keys: opts.keys ?? { tmdb: TMDB_KEY, tvdb: TVDB_KEY, mdblist: '' }, tested: { tmdb: { at: now() - 300, ok: true } }, schedules: opts.schedules ?? schedulesView() };
   const calls = [];
   const gets = [];
   const errors = [];
@@ -119,6 +137,25 @@ async function open(browser, opts = {}) {
       return json(route, { enabled: true, keySet: true, tvdbKeySet: true, running: false, pending: 0, unmatched: 0, needsReview: 0, lastError: '', showsLine: 'Shows: TVDB', ...opts.status });
     if (p === '/api/metadata/search' && opts.search) return json(route, opts.search[1], opts.search[0]);
     if (p === '/api/jobs') return json(route, snapshot);
+    if (p === '/api/schedules' && method === 'GET') return json(route, st.schedules);
+    if (method === 'PUT' && p.startsWith('/api/schedules/')) {
+      const task = decodeURIComponent(p.slice('/api/schedules/'.length));
+      const i = st.schedules.findIndex((s) => s.task === task);
+      if (i < 0) return json(route, { error: 'no such scheduled task' }, 404);
+      const s = { ...st.schedules[i], ...body };
+      if (body?.days) s.days = [...body.days].sort((a, b) => a - b);
+      if (s.enabled === false) s.next = undefined;
+      else if (!s.next && !s.blocked) s.next = new Date(Date.now() + 6 * 3600_000).toISOString();
+      st.schedules[i] = s;
+      return json(route, s);
+    }
+    if (method === 'POST' && p.startsWith('/api/schedules/') && p.endsWith('/run')) {
+      const task = decodeURIComponent(p.slice('/api/schedules/'.length, -'/run'.length));
+      const s = st.schedules.find((x) => x.task === task);
+      if (!s) return json(route, { error: 'no such scheduled task' }, 404);
+      if (s.blocked) return json(route, { error: s.blocked }, 409);
+      return route.fulfill({ status: 204 });
+    }
     if (p === '/api/events') return route.fulfill(eventStream({ jobs: snapshot, retry: 300 }));
     if (p === '/api/settings' && method === 'GET') return opts.settingsFail ? json(route, { error: 'settings are not available' }, 500) : json(route, view(st));
     if (p === '/api/settings') {
@@ -161,12 +198,13 @@ async function until(fn, timeout = 3000) {
 // /api/scan and the activity feed, are made on every page).
 const TABS = {
   library: { heading: '#folders-h', own: ['/api/folders', '/api/metadata/review', '/api/metadata/status'] },
+  schedules: { heading: '#schedules-h', own: ['/api/schedules'] },
   details: { heading: '#meta-h', own: ['/api/settings', '/api/metadata/status'] },
   ratings: { heading: '#ratings-h', own: ['/api/settings'] },
   playback: { heading: '#playback-h', own: ['/api/settings'] },
   keys: { heading: '#keys-h', own: ['/api/settings', '/api/metadata/status'] },
 };
-const TAB_PATHS = ['/api/settings', '/api/metadata/status', '/api/metadata/review', '/api/folders'];
+const TAB_PATHS = ['/api/settings', '/api/metadata/status', '/api/metadata/review', '/api/folders', '/api/schedules'];
 
 const scenarios = {
   // Mutant caught: aria-selected or the roving tabindex left on the first tab; aria-controls
@@ -176,9 +214,9 @@ const scenarios = {
     await page.goto(`${base}/#/settings?tab=ratings`);
     await page.locator(TABS.ratings.heading).waitFor();
     const tabs = page.locator('[role="tablist"] [role="tab"]');
-    check('a tablist named Settings, with five tabs', (await page.locator('[role="tablist"][aria-label="Settings"]').count()) === 1 && (await tabs.count()) === 5);
+    check('a tablist named Settings, with six tabs', (await page.locator('[role="tablist"][aria-label="Settings"]').count()) === 1 && (await tabs.count()) === 6);
     const names = await tabs.allTextContents();
-    check('the tabs, in order', names.map((n) => n.trim()).join('|') === 'Library|Details|Ratings|Playback|API keys', names.join('|'));
+    check('the tabs, in order', names.map((n) => n.trim()).join('|') === 'Library|Schedules|Details|Ratings|Playback|API keys', names.join('|'));
     const state = await tabs.evaluateAll((ts) => ts.map((t) => [t.id, t.getAttribute('aria-selected'), t.getAttribute('tabindex'), t.getAttribute('aria-controls')]));
     const sel = state.filter(([, s]) => s === 'true');
     check('one tab selected: Ratings', sel.length === 1 && sel[0][0] === 'settings-tab-ratings', JSON.stringify(state));
@@ -240,10 +278,10 @@ const scenarios = {
       await page.locator(TABS[want].heading).waitFor({ timeout: 3000 }).catch(() => {});
       check(`${key}: ${want} selected, with the focus`, (await selectedTab(page)) === `settings-tab-${want}` && (await focused()) === `settings-tab-${want}`, `${await selectedTab(page)} / ${await focused()}`);
     };
-    await press('ArrowDown', 'details');
-    check('ArrowDown: the URL follows', (await hash(page)) === '#/settings?tab=details', await hash(page));
-    await press('ArrowRight', 'ratings');
-    await press('ArrowUp', 'details');
+    await press('ArrowDown', 'schedules');
+    check('ArrowDown: the URL follows', (await hash(page)) === '#/settings?tab=schedules', await hash(page));
+    await press('ArrowRight', 'details');
+    await press('ArrowUp', 'schedules');
     await press('ArrowLeft', 'library');
     await press('ArrowUp', 'keys'); // from the first, round to the last
     await press('ArrowDown', 'library'); // and back
@@ -622,6 +660,69 @@ const scenarios = {
       check('375, scrolled to the start: no fade before', !(await list.evaluate((e) => e.classList.contains('fade-before'))));
       await context.close();
     }
+  },
+
+  // Mutants caught: a card that does not show the key it lacks (or enables "Run now" for it); a
+  // switch or a time or a day that is not saved; the time the server answered not kept; "Run now"
+  // not queuing the task; the link in the blocked card not opening API keys.
+  async 'Schedules: times, days, a missing key, a change and Run now'(browser) {
+    const { context, page, calls } = await open(browser);
+    await page.goto(`${base}/#/settings?tab=schedules`);
+    await page.locator('#schedules-h').waitFor();
+    const card = (id) => page.locator(`#${id}`);
+    const scan = card('schedule-scan-full');
+    const meta = card('schedule-meta-match');
+    const mdblist = card('schedule-ratings-mdblist');
+    const imdb = card('schedule-ratings-imdb');
+
+    check('four tasks, one card each', (await page.locator('.schedule').count()) === 4);
+    check('the scan: every day at 02:30', (await text(scan)).includes('Every day') && (await scan.locator('input[type="time"]').inputValue()) === '02:30');
+    check('the scan: next and last run', (await text(scan.locator('.state'))).includes('Next run') && (await text(scan.locator('.state'))).includes('Last run'));
+    check('the details task: weekdays', (await text(meta)).includes('Weekdays'));
+    check('a warning is shown, not a refusal', (await text(meta)).includes('The TVDB key is not set'));
+    check('IMDb is off', (await text(imdb.locator('.state'))).includes('Off.'));
+
+    // The task that cannot run says which key is missing, and cannot be queued.
+    check('the blocked task says why', (await text(mdblist.locator('.blocked'))).includes('The MDBList key is not set.'));
+    check('and which key', (await text(mdblist)).includes('MDBList key'));
+    check('Run now is disabled for it', await mdblist.getByRole('button', { name: 'Run now' }).isDisabled());
+
+    // The switch: saved at once, and the page keeps what the server answered.
+    await scan.locator('button.switch').click();
+    await until(async () => calls.some((c) => c.method === 'PUT' && c.path === '/api/schedules/scan.full' && c.body?.enabled === false));
+    check('the switch is a PUT', calls.some((c) => c.method === 'PUT' && c.path === '/api/schedules/scan.full' && c.body?.enabled === false));
+    await until(async () => (await scan.locator('button.switch').getAttribute('aria-checked')) === 'false');
+    check('the switch shows the server’s answer', (await scan.locator('button.switch').getAttribute('aria-checked')) === 'false');
+    check('and the state says off', (await text(scan.locator('.state'))).includes('Off.'));
+
+    // The time, and a day: each its own change, one field at a time.
+    await scan.locator('input[type="time"]').evaluate((e, v) => {
+      e.value = v;
+      e.dispatchEvent(new Event('change', { bubbles: true }));
+    }, '04:15');
+    await until(async () => calls.some((c) => c.path === '/api/schedules/scan.full' && c.body?.at === '04:15'));
+    check('a new time is a PUT with at only', calls.some((c) => c.path === '/api/schedules/scan.full' && JSON.stringify(c.body) === '{"at":"04:15"}'));
+    await until(async () => (await scan.locator('input[type="time"]').inputValue()) === '04:15');
+    check('the time shown is the one saved', (await scan.locator('input[type="time"]').inputValue()) === '04:15');
+    await scan.getByRole('button', { name: 'Monday' }).click();
+    await until(async () => calls.some((c) => c.path === '/api/schedules/scan.full' && c.body?.days?.join() === '1'));
+    check('a day is a PUT with days only', calls.some((c) => c.path === '/api/schedules/scan.full' && JSON.stringify(c.body) === '{"days":[1]}'));
+    await until(async () => (await text(scan.locator('.days'))).includes('Mon') && !(await text(scan.locator('.days'))).includes('Every day'));
+    check('the days read back from the server', (await text(scan.locator('.days'))).includes('Mon'));
+
+    // Run now: a person's request, queued.
+    await meta.getByRole('button', { name: 'Run now' }).click();
+    await until(async () => calls.some((c) => c.method === 'POST' && c.path === '/api/schedules/meta.match/run'));
+    check('Run now queues the task', calls.some((c) => c.method === 'POST' && c.path === '/api/schedules/meta.match/run'));
+    await until(async () => (await text(meta.locator('.message'))).includes('Queued now'));
+    check('and says it is queued', (await text(meta.locator('.message'))).includes('Queued now'));
+
+    // The blocked card's link opens the keys: the reason names a key one can add.
+    await mdblist.getByRole('link', { name: 'API keys' }).click();
+    await page.locator('#keys-h').waitFor();
+    check('the missing key links to API keys', (await selectedTab(page)) === 'settings-tab-keys');
+    check('no request was made for the blocked task', !calls.some((c) => c.path === '/api/schedules/ratings.mdblist/run'));
+    await context.close();
   },
 };
 

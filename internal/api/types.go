@@ -91,6 +91,8 @@ type Subtitle struct {
 	Forced   bool   `json:"forced"`
 	Default  bool   `json:"default"`
 	URL      string `json:"url,omitempty"`
+	External bool   `json:"external,omitempty"`
+	Path     string `json:"path,omitempty"`
 }
 
 // ItemDetail is the full item view.
@@ -187,7 +189,14 @@ func (s *Server) subtitlesOf(e store.Entry) []Subtitle {
 		list = append(list, sub)
 	}
 	for i, x := range e.External {
-		sub := Subtitle{Key: extKey(i), Language: x.Language, Format: x.Format, Forced: x.Forced}
+		sub := Subtitle{
+			Key:      extKey(i),
+			Language: x.Language,
+			Format:   x.Format,
+			Forced:   x.Forced,
+			External: true,
+			Path:     filepath.Base(x.Path),
+		}
 		if s.Subs != nil {
 			sub.URL = s.subtitleURL(e.ID, sub.Key)
 		}

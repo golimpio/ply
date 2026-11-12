@@ -33,6 +33,7 @@ var privateRequests = []privateRequest{
 		func(f *folderEnv) string { return fmt.Sprintf(`{"path":%q,"kind":"movies"}`, f.path("movies")) }},
 	{"change the type", "PATCH", func(_ *folderEnv, id int64) string { return fmt.Sprintf("/api/folders/%d", id) },
 		func(*folderEnv) string { return `{"kind":"movies"}` }},
+	{"scan", "POST", func(_ *folderEnv, id int64) string { return fmt.Sprintf("/api/folders/%d/scan", id) }, nil},
 	{"remove", "DELETE", func(_ *folderEnv, id int64) string { return fmt.Sprintf("/api/folders/%d", id) }, nil},
 	{"remove, forgetting", "DELETE", func(_ *folderEnv, id int64) string { return fmt.Sprintf("/api/folders/%d?forget=1", id) }, nil},
 }

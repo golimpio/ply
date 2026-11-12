@@ -55,8 +55,4 @@
     gap: 0.75rem 2rem;
     margin: 1.25rem 0 1.75rem;
   }
-  .chip {
-    display: inline-flex;
-    align-items: center;
-  }
 </style>

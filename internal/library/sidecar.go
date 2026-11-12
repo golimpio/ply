@@ -20,6 +20,29 @@ var langToken = regexp.MustCompile(`^[a-zA-Z]{2,3}([-_][a-zA-Z0-9]{2,4})?$`)
 // language. Only "forced" changes behaviour. ("hi" is not here: it is Hindi.)
 var flagTokens = map[string]bool{"forced": true, "sdh": true, "cc": true, "default": true, "full": true}
 
+// Sidecars picks, from the file names of one directory, the subtitles that
+// belong to the video at videoPath: "<base>.srt|vtt|ass" and
+// "<base>.<lang>[.forced].srt|vtt|ass" (base compared case-insensitively).
+// The result is ordered by path.
+func Sidecars(videoPath string, names []string) []store.ExternalSubtitle {
+	return sidecars(videoPath, names)
+}
+
+// ScanSidecars reads the directory containing videoPath and returns the sidecar subtitles found.
+func ScanSidecars(videoPath string) ([]store.ExternalSubtitle, error) {
+	entries, err := os.ReadDir(filepath.Dir(videoPath))
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	return sidecars(videoPath, names), nil
+}
+
 // sidecars picks, from the file names of one directory, the subtitles that
 // belong to the video at videoPath: "<base>.srt|vtt|ass" and
 // "<base>.<lang>[.forced].srt|vtt|ass" (base compared case-insensitively).

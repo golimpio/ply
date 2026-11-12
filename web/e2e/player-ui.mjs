@@ -167,8 +167,8 @@ async function open(browser, opts = {}) {
     const { pathname: p } = new URL(req.url());
     const m = req.method();
     if (m === 'PUT' && p.startsWith('/api/devices/')) return route.fulfill({ status: 204 }); // the app says who it is (M11)
-    if (m === 'GET' && p === '/api/info') return json(route, { id: 'x', name: 'overlay', version: '0', authRequired: false });
     if (m === 'GET' && p === '/api/receivers') return json(route, []);
+    if (m === 'GET' && p === '/api/info') return json(route, { id: 'x', name: 'overlay', version: '0', authRequired: false });
     if (m === 'GET' && p === '/api/scan') return json(route, { running: false, itemCount: 1 });
     if (m === 'GET' && p === '/api/items') return json(route, []);
     if (m === 'GET' && p === '/api/shows') return json(route, []);
@@ -823,6 +823,23 @@ try {
     await until('the session to end', () => s.sessions.get('s1').deleted);
     check('close: ends the session (DELETE, keepalive)', s.deletes().some((d) => d.id === 's1' && d.keepalive), JSON.stringify(s.deletes()));
     check('close: the video is gone', (await s.page.locator('video').count()) === 0);
+  });
+
+  // Stop button: in the controls row after pause; stops playback, returns to the film, and ends session.
+  await scenario('stop-button', { hls: true }, async (s) => {
+    await s.go('#/item/1');
+    await s.page.locator('a.btn.primary[href="#/play/1"]').click();
+    await s.ready();
+    check('stop: the session is open (control)', s.sessions.get('s1')?.deleted === false);
+    await s.page.mouse.move(700, 400);
+    const stopBtn = s.page.locator('button[aria-label="Stop playback"]');
+    check('stop: button exists in player controls', (await stopBtn.count()) === 1);
+    await stopBtn.click();
+    await until('the film page', async () => (await s.hash()) === '#/item/1');
+    check('stop: goes back to the film', (await s.hash()) === '#/item/1');
+    await until('the session to end', () => s.sessions.get('s1').deleted);
+    check('stop: ends the session (DELETE, keepalive)', s.deletes().some((d) => d.id === 's1' && d.keepalive));
+    check('stop: the video is gone', (await s.page.locator('video').count()) === 0);
   });
 
   // Escape: one layer at a time. A menu, then full screen, then the player (a deep link: to the

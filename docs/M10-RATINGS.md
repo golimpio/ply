@@ -169,9 +169,11 @@ uses TMDB or TVDB, so neither shares a limiter with the metadata pass (`meta.mat
     it is given up on like the case above (the count is in memory, and a success clears it). The run **stops**, with the
     error and for the queue to retry, for what is not the title's: a 429, a network failure (no answer), the key, or
     **three titles in a row** answered with a server error (MDBList is down).
-- The schedule (`scheduleRatings`) looks at start, every 15 minutes for the datasets, every 2 minutes for titles due (it
-  queues the one job, and not while one is queued or running), at once on `Ratings.Wake` (a settings change), and 20
-  seconds after the first `Ratings.Nudge` of a run of them (the metadata pass nudges whenever it ends).
+- The schedule is the one on Settings → Schedules (`docs/M12-SCHEDULES.md`, M12): `ratings.mdblist` nightly, and
+  `ratings.imdb` weekly, at the times the owner sets. `Ratings.Wake` (a settings change, the privacy switch) wakes
+  the scheduler, which runs a task that could not run for a missing key at once; a title matched since the last run
+  gets its ratings at the next one, or from "Run now". The jobs keep their own gates: `IMDbDue`, `DueMDBList`, the
+  daily MDBList budget and its backoff, so a run that is not due returns at once.
 - `-metadata=false`, or the setting, means no download of any kind: the datasets and MDBList are all gated on the privacy
   switch, which they check themselves (not only the schedule). Ratings already stored are still shown.
 

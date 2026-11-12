@@ -169,7 +169,7 @@
           <li class:off={!on}>
             <input type="checkbox" id="rs-{src}" checked={on} onchange={(e) => toggle(src, e.currentTarget.checked)} />
             <label for="rs-{src}">
-              {SOURCE_NAMES[src]}{#if note}<span class="muted note"> ({note})</span>{/if}
+              {SOURCE_NAMES[src]}{#if note}{' '}<span class="muted note">({note})</span>{/if}
             </label>
             <span class="moves">
               <button
@@ -240,8 +240,8 @@
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    padding: 0.3rem 0.25rem 0.3rem 0.6rem;
-    border-radius: var(--radius);
+    padding: 0.35rem 0.75rem;
+    border-radius: var(--radius-pill);
   }
   .shown li:hover,
   .shown li:focus-within {

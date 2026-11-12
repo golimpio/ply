@@ -26,16 +26,17 @@ import (
 // ratingsRig is the ratings schedule and its kinds over a real store, with the dataset and MDBList
 // on servers of the test's.
 type ratingsRig struct {
-	t      *testing.T
-	st     *store.Store
-	dbPath string
-	rt     *metadata.Ratings
-	q      *jobs.Queue
-	imdb   *httptest.Server
-	hits   atomic.Int32 // requests to the dataset
-	mdb    atomic.Int32 // requests to MDBList
-	mdbBad atomic.Int32 // when set, the status MDBList answers everything with
-	movies int
+	t        *testing.T
+	st       *store.Store
+	dbPath   string
+	rt       *metadata.Ratings
+	settings *metadata.Settings
+	q        *jobs.Queue
+	imdb     *httptest.Server
+	hits     atomic.Int32 // requests to the dataset
+	mdb      atomic.Int32 // requests to MDBList
+	mdbBad   atomic.Int32 // when set, the status MDBList answers everything with
+	movies   int
 
 	imdbBody atomic.Pointer[[]byte]                                        // what the dataset server gives
 	mdbOver  atomic.Pointer[func(http.ResponseWriter, *http.Request) bool] // when it returns true, it answered
@@ -88,6 +89,7 @@ func newRatingsRig(t *testing.T, so func(*metadata.SettingsOptions), pace func(*
 		so(&opts)
 	}
 	settings := metadata.NewSettings(opts)
+	r.settings = settings
 	ropts := metadata.RatingsOptions{Store: r.st, Settings: settings, Dir: filepath.Join(t.TempDir(), "imdb"), IMDbURL: r.imdb.URL,
 		Logger: slog.New(slog.DiscardHandler)}
 	if pace != nil {
@@ -150,19 +152,6 @@ func (r *ratingsRig) queued() map[string]jobs.Job {
 	return out
 }
 
-func startSchedule(t *testing.T, r *ratingsRig) context.CancelFunc {
-	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		scheduleRatings(ctx, r.q, r.rt, slog.New(slog.DiscardHandler))
-	}()
-	t.Cleanup(func() { cancel(); wg.Wait() })
-	return cancel
-}
-
 func waitUntil(t *testing.T, what string, timeout time.Duration, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -171,153 +160,6 @@ func waitUntil(t *testing.T, what string, timeout time.Duration, cond func() boo
 			t.Fatalf("timed out waiting for %s", what)
 		}
 		time.Sleep(5 * time.Millisecond)
-	}
-}
-
-// The ratings kinds are declared as the queue's refresh work, with the keys that merge repeats, and
-// the schedule queues them when they fall due: one job for the IMDb datasets, and one for every title
-// MDBList is to be asked about, not one each.
-func TestRatingsKindsAndSchedule(t *testing.T) {
-	r := newRatingsRig(t, nil, nil)
-	r.addMovies(3)
-	r.queue(nil)
-	startSchedule(t, r)
-
-	waitUntil(t, "the IMDb job and the titles' job are queued", 5*time.Second, func() bool { return len(r.queued()) == 2 })
-	got := r.queued()
-	if j, ok := got["ratings.imdb/imdb"]; !ok || j.Priority != jobs.PriorityRefresh || j.Title != "Fetch IMDb ratings" || j.Held != "" {
-		t.Errorf("the IMDb job = %+v, %v", j, ok)
-	}
-	if j, ok := got["ratings.mdblist/mdblist"]; !ok || j.Priority != jobs.PriorityRefresh || j.Title != "Fetch ratings from MDBList" || j.Held != "" {
-		t.Errorf("the MDBList job = %+v, %v (one job for the three titles)", j, ok)
-	}
-	// Nothing in the schedule asks anyone: it only queues.
-	if r.hits.Load() != 0 || r.mdb.Load() != 0 {
-		t.Errorf("the schedule made %d + %d requests", r.hits.Load(), r.mdb.Load())
-	}
-
-	// Waking again merges into what is queued, not twice.
-	for range 3 {
-		r.rt.Wake()
-		time.Sleep(20 * time.Millisecond)
-	}
-	if len(r.queued()) != 2 {
-		t.Errorf("after waking again: %d queued, want 2", len(r.queued()))
-	}
-}
-
-// While a job for the titles is queued or running (here a job of its own, with another key), the
-// schedule does not queue a second one.
-func TestRatingsScheduleDoesNotQueueTheTitlesJobWhileOneIsBusy(t *testing.T) {
-	count := func(r *ratingsRig) (n int) {
-		for _, j := range r.queued() {
-			if j.Kind == kindRatingsMDBList {
-				n++
-			}
-		}
-		return n
-	}
-
-	// Control: with none busy, the schedule queues its own.
-	free := newRatingsRig(t, nil, nil)
-	free.addMovies(2)
-	free.queue(nil)
-	startSchedule(t, free)
-	waitUntil(t, "the titles' job to be queued", 5*time.Second, func() bool { return count(free) == 1 })
-
-	r := newRatingsRig(t, nil, nil)
-	r.addMovies(2)
-	r.queue(nil)
-	if _, err := r.q.Enqueue(t.Context(), kindRatingsMDBList, jobs.Opt{Key: "by hand"}); err != nil {
-		t.Fatal(err)
-	}
-	startSchedule(t, r)
-	waitUntil(t, "the IMDb job to be queued", 5*time.Second, func() bool { _, ok := r.queued()["ratings.imdb/imdb"]; return ok })
-	for range 3 {
-		r.rt.Wake()
-		time.Sleep(20 * time.Millisecond)
-	}
-	if n := count(r); n != 1 {
-		t.Errorf("%d jobs for the titles queued, want only the one that was busy", n)
-	}
-}
-
-// With the privacy switch off, or no key, the schedule queues nothing that would ask: no IMDb job, no
-// MDBList jobs. The controls are the same rig with them on.
-func TestRatingsScheduleQueuesNothingWithLookupsOff(t *testing.T) {
-	for name, tc := range map[string]struct {
-		so           func(*metadata.SettingsOptions)
-		imdb, titles bool
-	}{
-		"control":     {nil, true, true},
-		"lookups off": {func(o *metadata.SettingsOptions) { o.Disabled = true }, false, false},
-		"no MDBList":  {func(o *metadata.SettingsOptions) { o.MDBListKeyFlag = "" }, true, false},
-	} {
-		t.Run(name, func(t *testing.T) {
-			r := newRatingsRig(t, tc.so, nil)
-			r.addMovies(2)
-			r.queue(nil)
-			startSchedule(t, r)
-			r.rt.Wake()
-			if tc.imdb || tc.titles {
-				waitUntil(t, "something to be queued", 5*time.Second, func() bool { return len(r.queued()) > 0 })
-			}
-			time.Sleep(150 * time.Millisecond) // long enough for the first look and a wake
-			_, hasIMDb := r.queued()["ratings.imdb/imdb"]
-			titles := 0
-			for _, j := range r.queued() {
-				if j.Kind == kindRatingsMDBList {
-					titles++
-				}
-			}
-			if hasIMDb != tc.imdb || (titles > 0) != tc.titles {
-				t.Errorf("queued: IMDb job %v, %d title jobs; want %v and %v", hasIMDb, titles, tc.imdb, tc.titles)
-			}
-		})
-	}
-}
-
-// A nudge (the metadata pass ended) makes the schedule look once nudgeSettle after the first of a run of
-// them, however many come.
-func TestRatingsScheduleLooksAfterANudge(t *testing.T) {
-	old := nudgeSettle
-	nudgeSettle = 80 * time.Millisecond
-	t.Cleanup(func() { nudgeSettle = old })
-
-	r := newRatingsRig(t, nil, nil)
-	r.queue(nil)
-	startSchedule(t, r)
-	time.Sleep(100 * time.Millisecond) // the first look: an empty library
-	if len(r.queued()) != 0 {
-		t.Fatalf("control: %d queued with an empty library", len(r.queued()))
-	}
-	r.addMovies(2) // matched since the first look
-	start := time.Now()
-	// Nudges keep coming (the metadata pass runs on and on through a big first scan): the look is still
-	// nudgeSettle after the first, not after the last.
-	stop := make(chan struct{})
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for {
-			r.rt.Nudge()
-			select {
-			case <-stop:
-				return
-			case <-time.After(10 * time.Millisecond):
-			}
-		}
-	}()
-	time.Sleep(20 * time.Millisecond)
-	if len(r.queued()) != 0 {
-		t.Errorf("%d queued straight after a nudge; the look is nudgeSettle later", len(r.queued()))
-	}
-	waitUntil(t, "the look while the nudges go on", 3*time.Second, func() bool { return len(r.queued()) == 2 })
-	took := time.Since(start)
-	close(stop)
-	<-done
-	if took < 60*time.Millisecond || took > 400*time.Millisecond {
-		t.Errorf("the look came after %v, want about %v, with the nudges still coming", took, nudgeSettle)
 	}
 }
 

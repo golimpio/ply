@@ -235,6 +235,24 @@ code {
   background: var(--fill-primary-hover);
   opacity: 0.9;
 }
+.btn.ok,
+.settings-panel .btn.ok {
+  color: var(--on-ok);
+  background: var(--ok);
+  border-color: var(--ok);
+}
+.btn.ok:hover:not(:disabled) {
+  opacity: 0.9;
+}
+.btn.danger,
+.settings-panel .btn.danger {
+  color: var(--on-danger);
+  background: var(--danger);
+  border-color: var(--danger);
+}
+.btn.danger:hover:not(:disabled) {
+  opacity: 0.9;
+}
 .btn.icon {
   width: 2.5rem;
   padding: 0;
@@ -321,6 +339,10 @@ code {
   gap: 0.5rem;
 }
 .chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
   min-height: 2.25rem;
   padding: 0.3rem 0.9rem;
   font: inherit;
@@ -330,9 +352,20 @@ code {
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
   cursor: pointer;
+  white-space: nowrap;
+  transition:
+    color var(--motion-hover),
+    border-color var(--motion-hover),
+    background var(--motion-hover);
+}
+.chip svg {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
 }
 .chip:hover {
   color: var(--text);
+  border-color: var(--line-hover);
 }
 .chip[aria-pressed='true'],
 .chip[aria-checked='true'],
@@ -348,9 +381,10 @@ code {
   display: grid;
   gap: 1.1rem;
   padding: 1.1rem 1.25rem;
-  background: var(--surface-raised);
+  background: var(--surface-panel);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
+  backdrop-filter: var(--glass-blur);
 }
 .settings-panel p {
   margin: 0;
@@ -368,7 +402,8 @@ code {
 .settings-panel .hint {
   font-size: var(--fs-sm);
 }
-.settings-panel .ok {
+.settings-panel p.ok,
+.settings-panel span.ok {
   color: var(--ok);
 }
 /* A key's card in Settings → API keys (TmdbKey, TvdbKey, MdblistKey): one layout for the three. */
@@ -392,10 +427,14 @@ code {
   font-size: var(--fs-xs-3);
 }
 .key-card .key-buttons {
+  order: 1;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.6rem;
+}
+.key-card .key-message {
+  order: 2;
 }
 .key-card .key-notice {
   padding-top: 1.1rem;
@@ -407,12 +446,12 @@ code {
 .text-field,
 .settings-input {
   min-height: 2.5rem;
-  padding: 0.45rem 0.85rem;
+  padding: 0.45rem 1.1rem;
   font: inherit;
   color: var(--text);
   background: var(--surface-room);
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
 }
 .text-field:focus-visible {
   border-color: var(--text);
@@ -422,6 +461,29 @@ code {
   border-color: var(--text);
   outline: var(--focus-ring);
   outline-offset: 2px;
+}
+textarea.text-field,
+textarea.settings-input {
+  border-radius: var(--radius-lg);
+  padding: 0.65rem 0.9rem;
+}
+select.text-field,
+select.settings-input {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: var(--select-chevron);
+  background-repeat: no-repeat;
+  background-position: right 1.1rem center;
+  background-size: 1rem 1rem;
+  padding-left: 1.1rem;
+  padding-right: 2.75rem;
+  cursor: pointer;
+}
+select.text-field option,
+select.settings-input option {
+  background: var(--surface-raised);
+  color: var(--text);
 }
 
 /* An on/off switch: role="switch" with aria-checked, and an empty <span> for the knob. A component
@@ -613,19 +675,29 @@ a.score-chip:hover {
 /* Tables (technical details) */
 .table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: var(--fs-sm-3);
+  background: var(--surface-panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  backdrop-filter: var(--glass-blur);
+  overflow: hidden;
 }
 .table th,
 .table td {
-  padding: 0.45rem 0.75rem;
+  padding: 0.6rem 0.9rem;
   text-align: left;
   white-space: nowrap;
   border-bottom: 1px solid var(--line);
 }
+.table tr:last-child td {
+  border-bottom: none;
+}
 .table th {
   color: var(--text-muted);
   font-weight: var(--fw-medium);
+  background: var(--surface-panel);
 }
 
 /* Skeletons */

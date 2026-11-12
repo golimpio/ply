@@ -520,7 +520,7 @@ const scenarios = {
   // Mutants caught: Home keeps a film in Continue watching once it is watched (no filter by the cache).
   async 'Continue watching drops a film once it is marked watched'(browser) {
     const { context, page } = await open(browser, { hash: '#/' });
-    const inRail = () => page.locator('section.rail', { hasText: 'Continue watching' }).locator('a.card[href^="#/play/3"]').count();
+    const inRail = () => page.locator('section.rail', { hasText: 'Continue watching' }).locator('a.card[href^="#/item/3"]').count();
     await until(async () => (await inRail()) > 0);
     check('the film is in Continue watching (positive control)', (await inRail()) === 1);
     await go(page, '#/item/3');
@@ -531,7 +531,7 @@ const scenarios = {
     await page.locator('section.rail', { hasText: 'Recently added' }).waitFor();
     await sleep(300);
     check('it is gone from the rail, though /api/continue still lists it', (await inRail()) === 0 && mock.continueList.includes(3));
-    const rewatch = await page.locator('section.rail', { hasText: 'Continue watching' }).locator('a.card[href^="#/play/8"]').count();
+    const rewatch = await page.locator('section.rail', { hasText: 'Continue watching' }).locator('a.card[href^="#/item/8"]').count();
     check('a film seen in one version and being watched again in another stays', rewatch === 1);
     const shelf = page.locator('section.rail', { hasText: 'World & Auteur Cinema' }).locator('a.card[href="#/item/3"]');
     check('its card on the Auteur Cinema shelf has the check', (await badgeOf(shelf))?.kind === 'done');
@@ -715,7 +715,7 @@ const scenarios = {
     await go(page, '#/');
     await page.locator('section.rail', { hasText: 'Recently added' }).waitFor();
     await sleep(300);
-    check('it is gone from Continue watching', (await page.locator('section.rail', { hasText: 'Continue watching' }).locator('a.card[href^="#/play/3"]').count()) === 0);
+    check('it is gone from Continue watching', (await page.locator('section.rail', { hasText: 'Continue watching' }).locator('a.card[href^="#/item/3"]').count()) === 0);
     await context.close();
   },
 };

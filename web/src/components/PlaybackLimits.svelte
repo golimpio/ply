@@ -143,14 +143,15 @@
     padding-top: 1.1rem;
     border-top: 1px solid var(--line);
   }
-  .card .lock {
+  .lock {
     margin-top: 0.3rem;
     font-size: var(--fs-sm);
   }
   input {
     flex: none;
     width: 5.5rem;
-    padding: 0.45rem 0.6rem 0.45rem 0.85rem;
+    padding: 0.45rem 1rem;
+    text-align: center;
     font-variant-numeric: tabular-nums;
   }
   input:disabled {

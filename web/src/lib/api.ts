@@ -205,6 +205,28 @@ export interface Subtitle {
   default?: boolean;
   /** WebVTT for a <track>; set for text tracks only (with ?token= when the server needs one). */
   url?: string;
+  /** True for external sidecar files next to the video. */
+  external?: boolean;
+  /** Base filename for sidecar subtitles on disk. */
+  path?: string;
+}
+
+export interface SubtitleSearchResult {
+  id: string;
+  fileId: number;
+  fileName: string;
+  language: string;
+  format: string;
+  downloadCount: number;
+  hearingImpaired: boolean;
+  release: string;
+  ratings: number;
+}
+
+export interface SubtitleSearchResponse {
+  configured: boolean;
+  message?: string;
+  results: SubtitleSearchResult[];
 }
 
 export interface Playback {
@@ -553,6 +575,7 @@ export interface Settings {
   tvdbKeyTestOk?: boolean;
   mdblistKeyTestedAt?: number;
   mdblistKeyTestOk?: boolean;
+  opensubtitlesKeySet?: boolean;
 }
 
 export type LimitSource = 'flag' | 'settings' | 'default';
@@ -575,6 +598,8 @@ export interface SettingsUpdate {
   ratingsPrimary?: RatingSource;
   /** Each source once, in order; [] shows none. */
   ratingsShown?: RatingSource[];
+  /** OpenSubtitles REST API consumer key. "" removes it. */
+  opensubtitlesKey?: string;
 }
 
 /** The settings with Go's nulls in the ratings lists as []. */
@@ -798,6 +823,43 @@ export interface JobEvent {
   type: string;
   job?: Job;
   tier?: TierState;
+}
+
+// ---- schedules (M12) ------------------------------------------------------------
+
+/** A background task's schedule (GET /api/schedules): one of the queue's kinds. */
+export interface ScheduledTask {
+  /** The queue kind: 'scan.full', 'meta.match', 'ratings.mdblist' or 'ratings.imdb'. */
+  task: string;
+  title: string;
+  detail: string;
+  enabled: boolean;
+  /** 'HH:MM' on the server's clock. */
+  at: string;
+  /** ISO weekdays, Monday 1 to Sunday 7; [] is every day. */
+  days: number[];
+  /** When the schedule last queued it (RFC 3339); absent: never. */
+  lastRun?: string;
+  /** The next run (RFC 3339); absent when it is off or cannot run. */
+  next?: string;
+  /** Why it cannot run now ('' or absent: it can): a key is missing, or lookups are off. */
+  blocked?: string;
+  /** The keys it needs that are not set, as the page words them ("MDBList key"). */
+  missing: string[];
+  /** What it will not do with the keys it has (a warning, not a refusal). */
+  warnings: string[];
+}
+
+/** A change of a schedule; a field left out stays as it is. */
+export interface ScheduleUpdate {
+  enabled?: boolean;
+  at?: string;
+  days?: number[];
+}
+
+/** A schedule with Go's nulls as lists. */
+export function normaliseSchedule(s: ScheduledTask): ScheduledTask {
+  return { ...s, days: s.days ?? [], missing: s.missing ?? [], warnings: s.warnings ?? [] };
 }
 
 /** Something being played (GET /api/sessions). */
@@ -1077,7 +1139,9 @@ export const NO_ANSWER = 'The server didn’t answer.';
 async function request<T>(method: string, path: string, body?: unknown, keepalive = false, timeoutMs = 0): Promise<T> {
   const headers: Record<string, string> = { [DEVICE_HEADER]: deviceId() };
   if (token) headers.Authorization = `Bearer ${token}`;
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  if (body !== undefined && !(typeof FormData !== 'undefined' && body instanceof FormData)) {
+    headers['Content-Type'] = 'application/json';
+  }
 
   const abort = timeoutMs > 0 ? new AbortController() : null;
   const timer = abort ? setTimeout(() => abort.abort(), timeoutMs) : undefined;
@@ -1099,12 +1163,13 @@ async function send<T>(
   keepalive: boolean,
   signal: AbortSignal | undefined,
 ): Promise<T> {
+  const isForm = typeof FormData !== 'undefined' && body instanceof FormData;
   let res: Response;
   try {
     res = await fetch(path, {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: isForm ? (body as FormData) : body === undefined ? undefined : JSON.stringify(body),
       keepalive,
       ...(signal ? { signal } : {}),
     });
@@ -1342,6 +1407,43 @@ export const api = {
     await request<{ started: boolean }>('POST', `/api/items/${id}/metadata/refresh`);
   },
 
+  // ---- subtitles ----
+
+  /** Delete an external sidecar subtitle file attached to an item. */
+  async deleteSubtitle(itemId: number, key: string): Promise<void> {
+    await request<void>('DELETE', `/api/items/${itemId}/subtitles/${key}`);
+  },
+
+  /** Upload a sidecar subtitle file (.srt, .vtt, .ass) for an item. */
+  async uploadSubtitle(
+    itemId: number,
+    file: File,
+    options?: { language?: string; forced?: boolean },
+  ): Promise<Subtitle[]> {
+    const fd = new FormData();
+    fd.append('file', file);
+    if (options?.language) fd.append('language', options.language);
+    if (options?.forced) fd.append('forced', 'true');
+    return await request<Subtitle[]>('POST', `/api/items/${itemId}/subtitles`, fd);
+  },
+
+  /** Search OpenSubtitles for subtitles matching the item. */
+  async searchSubtitles(
+    itemId: number,
+    params?: { query?: string; language?: string },
+  ): Promise<SubtitleSearchResponse> {
+    const q = qs({ q: params?.query, lang: params?.language });
+    return await request<SubtitleSearchResponse>('GET', `/api/items/${itemId}/subtitles/search${q}`);
+  },
+
+  /** Download a subtitle from OpenSubtitles or a URL and attach it to the item. */
+  async downloadSubtitle(
+    itemId: number,
+    req: { fileId?: number; fileName: string; language?: string; forced?: boolean; url?: string },
+  ): Promise<Subtitle[]> {
+    return await request<Subtitle[]>('POST', `/api/items/${itemId}/subtitles/download`, req);
+  },
+
   async refreshShow(name: string): Promise<void> {
     await request<{ started: boolean }>('POST', `/api/shows/${encodeURIComponent(name)}/metadata/refresh`);
   },
@@ -1376,6 +1478,9 @@ export const api = {
   async removeFolder(id: number, forget = false): Promise<void> {
     await request<void>('DELETE', `/api/folders/${id}${forget ? '?forget=1' : ''}`);
   },
+
+  /** Start a scan of a single library folder. */
+  scanFolder: (id: number) => request<{ started: boolean }>('POST', `/api/folders/${id}/scan`),
 
   /** Directories only, dot-folders left out. With no path: home, mounted disks and the library folders. */
   async listDirs(path?: string): Promise<DirListing> {
@@ -1426,6 +1531,23 @@ export const api = {
 
   async resumeQueue(): Promise<void> {
     await request<void>('POST', '/api/queue/resume');
+  },
+
+  // ---- schedules (M12) ----
+  // A task's job is queued now: ApiError 409 says why not (its key is missing, or it is already
+  // queued or running), 404 for a task this server does not schedule.
+
+  async schedules(): Promise<ScheduledTask[]> {
+    const list = await request<ScheduledTask[] | null>('GET', '/api/schedules');
+    return (list ?? []).map(normaliseSchedule);
+  },
+
+  /** Changes one schedule; the answer is the schedule as the server keeps it. */
+  updateSchedule: (task: string, u: ScheduleUpdate) =>
+    request<ScheduledTask>('PUT', `/api/schedules/${encodeURIComponent(task)}`, u).then(normaliseSchedule),
+
+  async runSchedule(task: string): Promise<void> {
+    await request<void>('POST', `/api/schedules/${encodeURIComponent(task)}/run`);
   },
 
   /** Everything being played, oldest first. */

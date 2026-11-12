@@ -29,6 +29,7 @@ import (
 	"ply/internal/metadata"
 	"ply/internal/probe"
 	"ply/internal/proc"
+	"ply/internal/schedule"
 	"ply/internal/store"
 	"ply/internal/stream"
 	"ply/internal/subs"
@@ -70,6 +71,12 @@ func run() error {
 	}
 	log, closeLog, isInteractive := setupLogger(cfg)
 	defer closeLog()
+	if cfg.ScanIntervalSet {
+		// The scan no longer runs on an interval: the schedules page decides when, and the database
+		// remembers it. The flag is still read so that an old unit file starts.
+		log.Warn("-scan-interval no longer sets the scan: it runs on its schedule",
+			"interval", cfg.ScanInterval, "configure", "Settings › Schedules")
+	}
 
 	if err := os.MkdirAll(cfg.Data, 0o700); err != nil {
 		return fmt.Errorf("create data dir: %w", err)
@@ -260,6 +267,14 @@ func run() error {
 	if subGen != nil {
 		subsFeed = newSubsFeeder(st, queue, subGen, log)
 	}
+	// The schedules (docs/M12-SCHEDULES.md): which background tasks run, at what time of night and on
+	// which days, kept in the database so that a restart neither repeats a run nor loses one. Each
+	// queues a kind the queue already has, so a scheduled run is the job a button would queue.
+	sched, err := schedule.New(schedule.Options{Store: st, Queue: queue, Tasks: scheduleTasks(),
+		Check: scheduleChecker(settings), Logger: log})
+	if err != nil {
+		return fmt.Errorf("schedules: %w", err)
+	}
 
 	// The scanner gets the folders' types last, with its settle time and its hooks
 	// in place: first the types they had before this start's flags, which it takes
@@ -277,7 +292,7 @@ func run() error {
 		log.Warn("metadata: releasing pending files", "err", err)
 	}
 
-	var bg sync.WaitGroup // the queue, its schedule, the watcher, the match restorer, the lookups check, the ratings schedule and the subtitle feeder
+	var bg sync.WaitGroup // the queue, its schedules, the watcher, the match restorer, the lookups check, the ratings wake and the subtitle feeder
 	bg.Add(5)
 	if subsFeed != nil {
 		bg.Add(1)
@@ -288,7 +303,7 @@ func run() error {
 	}
 	go func() {
 		defer bg.Done()
-		scheduleRatings(ctx, queue, ratings, log)
+		watchRatingsWake(ctx, ratings, sched)
 	}()
 	go func() {
 		defer bg.Done()
@@ -309,7 +324,7 @@ func run() error {
 	}()
 	go func() {
 		defer bg.Done()
-		schedule(ctx, queue, cfg.ScanInterval, metadata.DefaultTick, log)
+		sched.Run(ctx)
 	}()
 	go func() {
 		defer bg.Done()
@@ -365,6 +380,16 @@ func run() error {
 		// it archives and removes the folder's items.
 		DropRoot: scanner.DropRoot,
 		LastScan: scanner.LastScan,
+		ScanFolder: func(path string) bool {
+			if queue.Busy(kindScanFull) {
+				return false
+			}
+			_, err := queue.Enqueue(context.Background(), kindScanDirs, jobs.Opt{
+				Payload: []library.Dir{{Path: path, Recursive: true}},
+				User:    true,
+			})
+			return err == nil
+		},
 
 		AllowedHosts: cfg.AllowHosts,
 		Logger:       log,
@@ -377,10 +402,11 @@ func run() error {
 		ArtLater:          artLater(ctx, queue, log),
 		Subs:              subGen,
 
-		Metadata: worker,
-		Settings: settings,
-		Images:   images,
-		Ratings:  ratings,
+		Metadata:  worker,
+		Settings:  settings,
+		Images:    images,
+		Ratings:   ratings,
+		Schedules: sched,
 
 		Jobs:     queue,
 		Governor: gov,

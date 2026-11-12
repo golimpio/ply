@@ -173,6 +173,13 @@ const HEAT_DETAIL = {
     reasons: ['HEVC Main 10 with HDR is not played by this browser', 'TrueHD audio is not played by this browser'] },
   meta: HEAT_META,
 };
+// What the subtitles dialog's Search online tab finds: one plain result and one SDH.
+const SUBTITLE_RESULTS = [
+  { id: 'r1', fileId: 501, fileName: 'Heat.1995.2160p.BluRay.en.srt', language: 'eng', format: 'srt',
+    downloadCount: 184_233, hearingImpaired: false, release: 'Heat.1995.2160p.BluRay.x265-GROUP', ratings: 9 },
+  { id: 'r2', fileId: 502, fileName: 'Heat.1995.2160p.BluRay.en.SDH.srt', language: 'eng', format: 'srt',
+    downloadCount: 7_412, hearingImpaired: true, release: 'Heat (1995) 2160p REMUX', ratings: 7 },
+];
 const PLAYER_DETAIL = {
   ...HEAT_DETAIL, durationSec: 10, width: 320, height: 180, videoCodec: 'h264', audioCodec: 'aac', container: 'mp4',
   streams: [
@@ -356,6 +363,8 @@ async function open(browser, width, opts = {}) {
       });
     }
     if (p === '/api/items/1/subtitles/3.vtt') return route.fulfill({ contentType: 'text/vtt', body: 'WEBVTT\n' });
+    // The dialog's Search online tab asks as soon as it opens.
+    if (p === '/api/items/1/subtitles/search') return json(route, { configured: true, results: SUBTITLE_RESULTS });
     if (p === '/api/items/1/progress' || p.endsWith('/heartbeat')) return route.fulfill({ status: 204 });
     // A rotten Tomatometer and a spilled audience, beside the fresh and upright ones of Heat.
     if (p === '/api/items/8') {
@@ -526,6 +535,29 @@ const SHOTS = [
       await openMenu(page);
       await page.click('[role="menuitem"]:has-text("Edit details")');
       await visible(page, 'dialog[open] input');
+    },
+  },
+  {
+    name: 'subtitles', hash: '#/item/1', ready: 'ul.ratings .score-chip',
+    act: async (page) => {
+      await page.locator('button:has-text("Subtitles")').first().click();
+      await visible(page, 'dialog[open] [role="tab"][aria-selected="true"]');
+    },
+  },
+  {
+    name: 'subtitles-search', hash: '#/item/1', ready: 'ul.ratings .score-chip',
+    act: async (page) => {
+      await page.locator('button:has-text("Subtitles")').first().click();
+      await page.locator('[role="tab"]:has-text("Search online")').click();
+      await visible(page, 'dialog[open] ul[aria-label="Subtitles found online"] li');
+    },
+  },
+  {
+    name: 'subtitles-upload', hash: '#/item/1', ready: 'ul.ratings .score-chip',
+    act: async (page) => {
+      await page.locator('button:has-text("Subtitles")').first().click();
+      await page.locator('[role="tab"]:has-text("Upload file")').click();
+      await visible(page, 'dialog[open] .drop');
     },
   },
   { name: 'menu', hash: '#/item/1', ready: 'ul.ratings .score-chip', act: openMenu },

@@ -233,36 +233,6 @@ func (c scanControl) Status(ctx context.Context) library.Status {
 	return s
 }
 
-// schedule queues the periodic work: a full scan now and every interval (none
-// when interval <= 0 after the first), and a look at due metadata every tick.
-func schedule(ctx context.Context, q *jobs.Queue, interval, tick time.Duration, log *slog.Logger) {
-	enqueue := func(kind, key string) {
-		if _, err := q.Enqueue(ctx, kind, jobs.Opt{Key: key}); err != nil && ctx.Err() == nil {
-			log.Warn("queue: scheduling", "kind", kind, "err", err)
-		}
-	}
-	enqueue(kindScanFull, "full")
-	enqueue(kindMetaMatch, "match")
-	var scanC <-chan time.Time
-	if interval > 0 {
-		t := time.NewTicker(interval)
-		defer t.Stop()
-		scanC = t.C
-	}
-	metaT := time.NewTicker(tick)
-	defer metaT.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-scanC:
-			enqueue(kindScanFull, "full")
-		case <-metaT.C:
-			enqueue(kindMetaMatch, "match")
-		}
-	}
-}
-
 // pruneCaches removes cached artwork and subtitles of items that are gone or
 // changed. Either generator may be nil.
 func pruneCaches(ctx context.Context, st *store.Store, artGen *art.Generator, subGen *subs.Generator, log *slog.Logger) error {

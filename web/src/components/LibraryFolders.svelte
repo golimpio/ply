@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ApiError, api, type FolderKind, type LibraryFolder } from '../lib/api';
   import { resource } from '../lib/resource.svelte';
-  import { app, attachToRunningScan } from '../lib/state.svelte';
+  import { app, attachToRunningScan, rescan, rescanFolder, scan } from '../lib/state.svelte';
   import Dialog from './Dialog.svelte';
   import FolderPicker from './FolderPicker.svelte';
   import Icon from './Icon.svelte';
@@ -54,6 +54,15 @@
   function added(f: LibraryFolder) {
     say(`${baseName(f.path)} was added. Its files are being read now.`);
     changed();
+  }
+
+  async function scanThisFolder(f: LibraryFolder) {
+    if (scan.running) return;
+    if (f.id) {
+      await rescanFolder(f.id, baseName(f.path));
+    } else {
+      await rescan();
+    }
   }
 
   // Changing a folder's type, after a confirmation: every file is read again.
@@ -172,7 +181,7 @@
   <div class="skeleton block" aria-busy="true"></div>
 {:else}
   {#if !folders.data.length}
-    <div class="empty card">
+    <div class="settings-panel empty card">
       <p>No folders yet. Add the folder your movies or your TV shows are in.</p>
     </div>
   {:else}
@@ -180,7 +189,7 @@
       {#each folders.data as f, i (f.path)}
         {@const w = watchOf(f.path)}
         {@const noteId = `folder-note-${i}`}
-        <li class="card">
+        <li class="settings-panel card">
           <div class="head">
             <Icon name="folder" />
             <code class="path">{f.path}</code>
@@ -231,19 +240,41 @@
             {:else if f.guessed}
               <span class="muted note" id={noteId}>Guessed from the file names. Change it if it's wrong.</span>
             {/if}
-            {#if f.source === 'ui' && f.id}
-              <button type="button" class="btn remove" aria-label={`Remove ${f.path}`} onclick={() => askRemove(f)}>Remove</button>
-            {/if}
+            <div class="folder-actions">
+              <button
+                type="button"
+                class="btn"
+                aria-label={`Scan ${f.path}`}
+                disabled={scan.running}
+                onclick={() => void scanThisFolder(f)}
+              >
+                Scan
+              </button>
+              {#if f.source === 'ui' && f.id}
+                <button type="button" class="btn remove" aria-label={`Remove ${f.path}`} onclick={() => askRemove(f)}>Remove</button>
+              {/if}
+            </div>
           </div>
         </li>
       {/each}
     </ul>
   {/if}
+{/if}
+
+<div class="library-actions">
   <div class="add">
     <button type="button" class="btn primary" onclick={() => (picking = true)}><Icon name="plus" /> Add a folder</button>
     <p class="muted" role="status">{notice}</p>
   </div>
-{/if}
+  <button
+    type="button"
+    class="btn scan-btn"
+    onclick={rescan}
+    disabled={scan.running}
+  >
+    {scan.running ? 'Scanning…' : 'Scan library now'}
+  </button>
+</div>
 
 <FolderPicker bind:open={picking} onadded={added} />
 
@@ -302,12 +333,6 @@
   }
   .block {
     height: 7rem;
-  }
-  .card {
-    padding: 1rem 1.25rem;
-    background: var(--surface-raised);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
   }
   .empty p {
     margin: 0;
@@ -407,13 +432,19 @@
   .seg button:disabled:not([aria-pressed='true']) {
     opacity: 0.45;
   }
-  .remove {
+  .folder-actions {
     margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
   }
-  .btn.danger {
-    color: var(--on-danger);
-    background: var(--danger);
-    border-color: var(--danger);
+  .library-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.6rem 1rem;
+    margin-top: 1rem;
   }
   .add {
     display: flex;
@@ -423,6 +454,9 @@
   }
   .add p {
     margin: 0;
+  }
+  .scan-btn {
+    margin-left: auto;
   }
   .forget {
     display: flex;

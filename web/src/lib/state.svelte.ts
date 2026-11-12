@@ -55,6 +55,21 @@ export async function rescan(): Promise<void> {
   await follow();
 }
 
+/** POST /api/folders/{id}/scan (409 = already running) and follow it to completion. */
+export async function rescanFolder(id: number, name?: string): Promise<void> {
+  if (scan.running) return;
+  scan.running = true;
+  say(name ? `Scanning ${name}…` : 'Scanning folder…');
+  try {
+    await api.scanFolder(id);
+  } catch (e) {
+    scan.running = false;
+    say(e instanceof Error ? e.message : 'Could not start scan', 8000);
+    return;
+  }
+  await follow();
+}
+
 /** On load: attach to a scan already in progress (e.g. the periodic one). */
 export async function attachToRunningScan(): Promise<void> {
   try {

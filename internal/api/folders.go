@@ -237,6 +237,27 @@ func (s *Server) loadFolder(w http.ResponseWriter, r *http.Request) (store.Folde
 	return f, true
 }
 
+func (s *Server) handleScanFolder(w http.ResponseWriter, r *http.Request) {
+	s.foldersMu.Lock()
+	defer s.foldersMu.Unlock()
+	f, ok := s.loadFolder(w, r)
+	if !ok {
+		return
+	}
+	if s.ScanFolder != nil {
+		if !s.ScanFolder(f.Path) {
+			writeError(w, http.StatusConflict, "scan already running")
+			return
+		}
+	} else if s.Scanner != nil {
+		if !s.Scanner.Trigger() {
+			writeError(w, http.StatusConflict, "scan already running")
+			return
+		}
+	}
+	writeJSON(w, http.StatusAccepted, map[string]bool{"started": true})
+}
+
 func (s *Server) handlePatchFolder(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Kind string `json:"kind"`

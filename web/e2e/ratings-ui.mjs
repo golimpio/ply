@@ -486,6 +486,12 @@ const scenarios = {
     check('with its link', (await card(page).locator('.imdb-notice a').getAttribute('href')) === 'https://www.imdb.com');
     check('the dataset date', (await text(card(page).locator('.dataset'))) === 'IMDb ratings updated 3 November 2026.', await text(card(page).locator('.dataset')));
     check('without an MDBList key, its sources say why they are not there', (await text(card(page).locator('li', { hasText: 'Metacritic' }))).includes('(needs an MDBList key)'));
+    check('without an MDBList key, there is a space before the note bracket', (await text(card(page).locator('li', { hasText: 'Rotten Tomatoes critics' }))).includes('Rotten Tomatoes critics (needs an MDBList key)'));
+    const selStyle = await card(page).locator('#ratings-primary').evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { appearance: cs.appearance, paddingLeft: cs.paddingLeft, paddingRight: cs.paddingRight };
+    });
+    check('primary select has appearance none', selStyle.appearance === 'none');
     // MDBList's notice is with its key, in API keys.
     await page.goto(`${base}/#/settings?tab=keys`);
     await keyCard(page).waitFor();

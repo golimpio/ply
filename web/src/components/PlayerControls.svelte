@@ -51,12 +51,14 @@
     onSelectSubtitle,
     onSeek,
     onClose,
+    onStop,
     active = true,
     airplayAvailable = false,
     wireless = false,
     onAirPlay,
     receivers = [],
     onReceiver,
+    busy = false,
     info,
   }: {
     video: HTMLVideoElement;
@@ -74,6 +76,7 @@
     onSelectSubtitle?: (id: Track['id'] | null) => void;
     onSeek?: (absSec: number) => boolean | void;
     onClose?: () => void;
+    onStop?: () => void;
     active?: boolean;
     airplayAvailable?: boolean;
     wireless?: boolean;
@@ -81,6 +84,7 @@
     /** The AirPlay targets found on the LAN (docs/AIRPLAY.md): offered by name beside the picker. */
     receivers?: Receiver[];
     onReceiver?: (id: string) => void;
+    busy?: boolean;
     info?: Snippet;
   } = $props();
 
@@ -91,11 +95,11 @@
   let volume = $state(1);
   let muted = $state(false);
   let waiting = $state(false);
+  const isBuffering = $derived(waiting || busy);
   let menu = $state<'audio' | 'subs' | 'airplay' | null>(null);
   let fullscreen = $state(false);
   let scrub = $state<number | null>(null); // value while dragging the scrubber
   let hover = $state<{ x: number; t: number } | null>(null);
-
   const total = $derived(Number.isFinite(mediaDuration) && mediaDuration > 0 ? offset + mediaDuration : duration);
   const position = $derived(scrub ?? offset + current);
   const pipSupported =
@@ -163,6 +167,7 @@
     const handlers: [MediaSessionAction, MediaSessionActionHandler][] = [
       ['play', () => void video.play().catch(() => {})],
       ['pause', () => video.pause()],
+      ['stop', handleStop],
       ['seekbackward', (d) => skip(-(d.seekOffset ?? 10))],
       ['seekforward', (d) => skip(d.seekOffset ?? 10)],
       ['seekto', (d) => d.seekTime !== undefined && seekTo(d.seekTime)],
@@ -218,6 +223,13 @@
     if (video.paused) video.play().catch(() => {});
     else video.pause();
     poke();
+  }
+
+  function handleStop() {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    }
+    (onStop ?? onClose)?.();
   }
 
   function setVolume(v: number) {
@@ -432,6 +444,7 @@
     const keys: Record<string, () => void> = {
       ' ': toggle,
       k: toggle,
+      s: handleStop,
       j: () => skip(-10),
       l: () => skip(10),
       ArrowLeft: () => skip(-5),
@@ -548,8 +561,7 @@
     {/if}
   </div>
 
-  {#if waiting}<div class="spinner" aria-label="Buffering" role="status"></div>{/if}
-
+  {#if isBuffering}<div class="spinner" aria-label="Buffering" role="status"></div>{/if}
   <div class="bottom">
     <div
       class="scrubber"
@@ -589,6 +601,9 @@
     <div class="row">
       <button class="ctl big" onclick={toggle} aria-label={paused ? 'Play' : 'Pause'}>
         <Icon name={paused ? 'play' : 'pause'} />
+      </button>
+      <button class="ctl stop" onclick={handleStop} aria-label="Stop playback" title="Stop">
+        <Icon name="stop" />
       </button>
       <button class="ctl skip" onclick={() => skip(-10)} aria-label="Back 10 seconds"><Icon name="back10" /></button>
       <button class="ctl skip" onclick={() => skip(10)} aria-label="Forward 10 seconds"><Icon name="fwd10" /></button>
@@ -924,10 +939,10 @@
     max-height: 50vh;
     overflow-y: auto;
     padding: 0.35rem;
-    background: var(--surface-popover);
-    backdrop-filter: var(--blur-popover);
-    border: 1px solid var(--line-overlay);
-    border-radius: var(--radius);
+    background: var(--surface-panel);
+    backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
     box-shadow: var(--shadow-popover);
   }
   .menu button {
@@ -943,9 +958,12 @@
     border-radius: var(--radius-item);
     cursor: pointer;
     position: relative;
+    transition: background var(--motion-hover) var(--ease);
   }
-  .menu button:hover {
-    background: var(--fill);
+  .menu button:hover,
+  .menu button:focus-visible {
+    background: var(--fill-hover);
+    outline: none;
   }
   .menu button[aria-checked='true']::before {
     content: '';
@@ -960,6 +978,11 @@
   }
   /* A narrow window has no room to keep for the slider (the bar would wrap): mute stays, and the
      arrow keys still set the volume. */
+  @media (max-width: 720px) {
+    .ctl.stop {
+      display: none;
+    }
+  }
   @media (max-width: 700px) {
     .volume input {
       display: none;
@@ -977,6 +1000,7 @@
       height: 2.5rem;
     }
     .ctl.skip,
+    .ctl.stop,
     .ctl.pip,
     .volume,
     .time .muted {

@@ -3,7 +3,7 @@
   import { groupByTitle } from '../lib/meta';
   import { openSearch } from '../lib/palette.svelte';
   import { href, router } from '../lib/router.svelte';
-  import { app, rescan, scan } from '../lib/state.svelte';
+  import { scan } from '../lib/state.svelte';
   import { theme, toggleTheme } from '../lib/theme.svelte';
   import ActivityIndicator from './ActivityIndicator.svelte';
   import Icon from './Icon.svelte';
@@ -35,21 +35,17 @@
   </nav>
   <div class="grow"></div>
   {#if scan.message}<span class="status" role="status">{scan.message}</span>{/if}
-  <button class="search" onclick={openSearch} aria-label="Search the library" aria-keyshortcuts={mac ? 'Meta+K' : 'Control+K'}>
+  <button
+    class="btn icon search-btn"
+    type="button"
+    onclick={openSearch}
+    aria-label="Search the library"
+    title={mac ? 'Search (⌘K)' : 'Search (Ctrl+K)'}
+    aria-keyshortcuts={mac ? 'Meta+K' : 'Control+K'}
+  >
     <Icon name="search" />
-    <span class="hint">Search title, director, year…</span>
-    <kbd>{mac ? '⌘' : 'Ctrl'} K</kbd>
   </button>
   <ActivityIndicator current={section === 'activity'} />
-  <button
-    class="btn icon"
-    onclick={rescan}
-    disabled={scan.running}
-    aria-label={scan.running ? 'Scanning the library' : 'Rescan the library'}
-    title={app.serverName ? `Rescan ${app.serverName}` : 'Rescan'}
-  >
-    <span class="spin" class:on={scan.running}><Icon name="rescan" /></span>
-  </button>
   <button
     class="btn icon"
     type="button"
@@ -79,11 +75,13 @@
     display: flex;
     align-items: center;
     gap: 1.15rem;
-    padding: env(safe-area-inset-top) var(--gutter) 0;
-    background: transparent;
+    padding: calc(env(safe-area-inset-top) + var(--bar-pad-y)) var(--gutter) var(--bar-pad-y);
+    background: var(--surface-bar-fade);
+    backdrop-filter: var(--glass-blur);
     border-bottom: 1px solid transparent;
     transition:
       background var(--motion-bar),
+      backdrop-filter var(--motion-bar),
       border-color var(--motion-bar),
       box-shadow var(--motion-bar);
   }
@@ -145,57 +143,9 @@
     color: var(--text-muted);
     font-size: var(--fs-xs-3);
   }
-  .search {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.55rem;
-    min-height: 2.25rem;
-    padding: 0 0.65rem 0 0.9rem;
-    font: inherit;
-    font-size: var(--fs-xs-3);
-    color: var(--text-muted);
-    background: var(--fill-subtle);
-    border: 1px solid var(--line-overlay);
-    border-radius: var(--radius-pill);
-    cursor: pointer;
-    transition:
-      color var(--motion-hover),
-      border-color var(--motion-hover);
-  }
-  .search:hover {
-    color: var(--text);
-    border-color: var(--line-quiet);
-  }
-  .search :global(svg) {
-    width: 1rem;
-    height: 1rem;
-  }
-  kbd {
-    font-family: var(--font-mono);
-    font-size: var(--fs-2xs);
-    padding: 0.05rem 0.4rem;
-    border: 1px solid var(--line-quiet);
-    border-radius: var(--radius-kbd);
-  }
-  .spin {
-    display: inline-flex;
-  }
-  .spin.on {
-    animation: turn var(--motion-spin-slow) var(--ease-linear) infinite;
-  }
-  @keyframes turn {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-  @media (max-width: 900px) {
-    .hint {
-      display: none;
-    }
-  }
   @media (max-width: 600px) {
     nav,
-    .search,
+    .search-btn,
     .status {
       display: none; /* the tab bar carries navigation and search on phones */
     }

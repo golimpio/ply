@@ -138,6 +138,11 @@
         </p>
       {/if}
     </div>
+    {#if message}
+      <p bind:this={messageEl} class="key-message" class:error={!message.ok} class:ok={message.ok} role="status" tabindex="-1">
+        {message.text}
+      </p>
+    {/if}
     <div class="key-buttons">
       <button class="btn primary" disabled={saving || (!key.trim() && !pin.trim())}>{saving ? 'Checking…' : 'Save'}</button>
       {#if s.tvdbKeySet && s.tvdbKeySource === 'settings'}
@@ -146,24 +151,18 @@
       {#if pinRemovable}
         <ConfirmRemove label="Remove PIN" question="Remove the TVDB PIN?" disabled={saving} onconfirm={() => save({ tvdbPin: '' }, 'PIN removed.')} />
       {/if}
+      <KeyTest
+        provider="tvdb"
+        name="TVDB"
+        busy={saving}
+        unavailable={testUnavailable}
+        about={testAbout}
+        {onworks}
+        testedAt={s.tvdbKeyTestedAt}
+        testOk={s.tvdbKeyTestOk}
+      />
     </div>
   </form>
-  {#if message}
-    <p bind:this={messageEl} class="key-message" class:error={!message.ok} class:ok={message.ok} role="status" tabindex="-1">
-      {message.text}
-    </p>
-  {/if}
-
-  <KeyTest
-    provider="tvdb"
-    name="TVDB"
-    busy={saving}
-    unavailable={testUnavailable}
-    about={testAbout}
-    {onworks}
-    testedAt={s.tvdbKeyTestedAt}
-    testOk={s.tvdbKeyTestOk}
-  />
 
   {#if s.tvdbAttribution}
     <!-- TVDB's terms ask for this notice, with a direct link to TheTVDB.com: shown as the server gives it. -->

@@ -2,8 +2,9 @@
 // Every colour, font, font size, radius and motion value of the web UI comes from
 // src/styles/tokens.css. This finds the ones that don't: raw colours (hex, rgb()/hsl()/...,
 // named colours), raw font-family and font-size, raw border-radius, and raw durations or easings in
-// transition and animation. It reads the <style> blocks of .svelte files and every .css file under
-// src, except tokens.css itself, and prints file:line for each.
+// transition and animation. It also finds a var() that names a custom property the app never
+// defines, which the browser drops without a word. It reads the <style> blocks of .svelte files and
+// every .css file under src, except tokens.css itself, and prints file:line for each.
 //
 //   node scripts/check-tokens.mjs [dir]     (default: the src next to this script)
 //
@@ -104,6 +105,20 @@ function primitivesOf(tokens) {
   return new Set([...m[1].replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/(--[\w-]+)\s*:/g)].map((x) => x[1]));
 }
 
+/**
+ * Every custom property the app defines anywhere: tokens.css, a component's own declarations, and
+ * the ones a component's markup sets (Svelte's style:--x). A var() naming none of them is dead —
+ * the browser drops the whole declaration, so the rule silently does nothing.
+ */
+function definedTokens(sources) {
+  const names = new Set();
+  for (const text of Object.values(sources)) {
+    for (const m of text.matchAll(/(?:^|[\s{;:"'(])(--[\w-]+)\s*:/gm)) names.add(m[1]);
+    for (const m of text.matchAll(/\bstyle:(--[\w-]+)/g)) names.add(m[1]);
+  }
+  return names;
+}
+
 /** The declarations of a stylesheet, as [property, value, line] (line counted from `firstLine`). */
 function declarations(css, firstLine) {
   // Comments become spaces (newlines kept), so that offsets and lines stay true.
@@ -145,15 +160,19 @@ function files(dir) {
 export function checkSources(sources) {
   const tokens = sources['styles/tokens.css'] ?? readFileSync(join(SRC, 'styles', 'tokens.css'), 'utf8');
   const primitives = primitivesOf(tokens);
+  const defined = definedTokens({ ...sources, 'styles/tokens.css': tokens });
   const found = [];
   for (const [file, text] of Object.entries(sources)) {
     if (file === 'styles/tokens.css' || !/\.(svelte|css)$/.test(file)) continue;
     for (const [css, firstLine] of stylesheets(file, text)) {
       for (const [prop, value, line] of declarations(css, firstLine)) {
+        const unknown = [...value.matchAll(/var\((--[\w-]+)/g)].map((x) => x[1]).find((n) => !defined.has(n));
         const primitive = [...value.matchAll(/var\((--[\w-]+)/g)].find((x) => primitives.has(x[1]));
-        const message = primitive
-          ? `primitive ${primitive[1]} in ${prop}: components use the semantic tokens (see tokens.css)`
-          : problem(prop, value);
+        const message = unknown
+          ? `no such token ${unknown} in ${prop}: tokens.css defines no such custom property, so the browser drops the declaration`
+          : primitive
+            ? `primitive ${primitive[1]} in ${prop}: components use the semantic tokens (see tokens.css)`
+            : problem(prop, value);
         if (!message) continue;
         if (ALLOW.some((a) => a.file === file && a.prop === prop && a.value.test(value))) continue;
         found.push({ file, line, message });
@@ -177,6 +196,6 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const dir = process.argv[2] ?? SRC;
   const found = checkTokens(dir);
   for (const f of found) console.log(`${join(relative(process.cwd(), dir), f.file)}:${f.line}: ${f.message}`);
-  console.log(found.length ? `\n${found.length} raw value(s): see src/styles/tokens.css` : 'check-tokens: no raw values');
+  console.log(found.length ? `\n${found.length} problem(s): see src/styles/tokens.css` : 'check-tokens: no raw values, no unknown tokens');
   process.exit(found.length ? 1 : 0);
 }

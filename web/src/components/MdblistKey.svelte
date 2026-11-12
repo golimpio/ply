@@ -85,6 +85,11 @@
         <label for="mdblist-key">{s.mdblistKeySet ? 'Replace the key' : 'Key'}</label>
         <KeyField id="mdblist-key" set={!!s.mdblistKeySet} bind:value={key} />
       </div>
+      {#if keyMessage}
+        <p bind:this={keyMessageEl} class="key-message" class:error={!keyMessage.ok} class:ok={keyMessage.ok} role="status" tabindex="-1">
+          {keyMessage.text}
+        </p>
+      {/if}
       <div class="key-buttons">
         <button class="btn primary" disabled={saving || !key.trim()}>{saving ? 'Checking…' : 'Save key'}</button>
         {#if s.mdblistKeySet && s.mdblistKeySource === 'settings'}
@@ -95,23 +100,35 @@
             onconfirm={() => saveKey({ mdblistKey: '' }, 'Key removed.')}
           />
         {/if}
+        <KeyTest
+          provider="mdblist"
+          name="MDBList"
+          busy={saving}
+          unavailable={testUnavailable}
+          about={testAbout}
+          testedAt={s.mdblistKeyTestedAt}
+          testOk={s.mdblistKeyTestOk}
+        />
       </div>
     </form>
+  {:else}
+    {#if keyMessage}
+      <p bind:this={keyMessageEl} class="key-message" class:error={!keyMessage.ok} class:ok={keyMessage.ok} role="status" tabindex="-1">
+        {keyMessage.text}
+      </p>
+    {/if}
+    <div class="key-buttons">
+      <KeyTest
+        provider="mdblist"
+        name="MDBList"
+        busy={saving}
+        unavailable={testUnavailable}
+        about={testAbout}
+        testedAt={s.mdblistKeyTestedAt}
+        testOk={s.mdblistKeyTestOk}
+      />
+    </div>
   {/if}
-  {#if keyMessage}
-    <p bind:this={keyMessageEl} class="key-message" class:error={!keyMessage.ok} class:ok={keyMessage.ok} role="status" tabindex="-1">
-      {keyMessage.text}
-    </p>
-  {/if}
-  <KeyTest
-    provider="mdblist"
-    name="MDBList"
-    busy={saving}
-    unavailable={testUnavailable}
-    about={testAbout}
-    testedAt={s.mdblistKeyTestedAt}
-    testOk={s.mdblistKeyTestOk}
-  />
 
   {#if s.mdblistAttribution}
     <!-- MDBList is credited with a link, as the server gives the notice. -->

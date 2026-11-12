@@ -531,3 +531,57 @@ describe('library folders', () => {
     expect(d.places).toBeUndefined();
   });
 });
+
+describe('the schedules', () => {
+  const call = (fn: ReturnType<typeof stubFetch>, i = 0) => fn.mock.calls[i] as unknown as FetchCall;
+  const scan = {
+    task: 'scan.full', title: 'Scan the library', detail: 'Walks the folders.', enabled: true, at: '02:30',
+    days: [1, 4], lastRun: '2026-11-08T02:30:00Z', next: '2026-11-09T02:30:00Z', missing: ['MDBList key'], warnings: ['A warning.'],
+  };
+
+  it('lists every schedule, with the null Go sends as empty lists', async () => {
+    const fn = stubFetch(json([{ ...scan, days: null, missing: null, warnings: null }]));
+    const list = await m.api.schedules();
+    expect(call(fn)[0]).toBe('/api/schedules');
+    expect(list[0].task).toBe('scan.full');
+    expect(list[0].days).toEqual([]);
+    expect(list[0].missing).toEqual([]);
+    expect(list[0].warnings).toEqual([]);
+  });
+
+  it('is empty for a null answer', async () => {
+    stubFetch(json(null));
+    expect(await m.api.schedules()).toEqual([]);
+  });
+
+  it('saves one schedule with a PUT, and reads the answer as the server keeps it', async () => {
+    const fn = stubFetch(json({ ...scan, enabled: false, at: '04:15', days: [] }));
+    const got = await m.api.updateSchedule('ratings.mdblist', { enabled: false, at: '04:15', days: [] });
+    const [path, init] = call(fn);
+    expect(path).toBe('/api/schedules/ratings.mdblist');
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(String(init.body))).toEqual({ enabled: false, at: '04:15', days: [] });
+    expect(got.enabled).toBe(false);
+    expect(got.at).toBe('04:15');
+    expect(got.days).toEqual([]);
+  });
+
+  it('escapes the task in the path', async () => {
+    const fn = stubFetch(json(scan));
+    await m.api.updateSchedule('odd/task', { enabled: true });
+    expect(call(fn)[0]).toBe('/api/schedules/odd%2Ftask');
+  });
+
+  it('queues one now, and passes the refusal on', async () => {
+    const fn = stubFetch(new Response(null, { status: 204 }));
+    await m.api.runSchedule('ratings.mdblist');
+    expect(call(fn)[0]).toBe('/api/schedules/ratings.mdblist/run');
+    expect(call(fn)[1].method).toBe('POST');
+
+    stubFetch(json({ error: 'The MDBList key is not set.' }, 409));
+    await expect(m.api.runSchedule('ratings.mdblist')).rejects.toMatchObject({
+      status: 409,
+      message: 'The MDBList key is not set.',
+    });
+  });
+});

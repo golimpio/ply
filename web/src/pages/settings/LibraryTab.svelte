@@ -3,7 +3,7 @@
   import { matchingStatus } from '../../lib/matching.svelte';
   import { href } from '../../lib/router.svelte';
   import { resource } from '../../lib/resource.svelte';
-  import { app, rescan, scan } from '../../lib/state.svelte';
+  import { app } from '../../lib/state.svelte';
   import FixMatch from '../../components/FixMatch.svelte';
   import LibraryFolders from '../../components/LibraryFolders.svelte';
   import Picture from '../../components/Picture.svelte';
@@ -43,10 +43,6 @@
   <h2 id="folders-h">Library folders</h2>
   <p class="muted lead">Each folder holds movies or TV shows, never both. Changes take effect at once.</p>
   <LibraryFolders />
-  <div class="scan">
-    <button class="btn" onclick={rescan} disabled={scan.running}>{scan.running ? 'Scanning…' : 'Scan the library now'}</button>
-    <span class="muted">Reads every folder again, for what is new, changed or gone.</span>
-  </div>
 </section>
 
 <section aria-labelledby="review-h">
@@ -114,15 +110,6 @@
 />
 
 <style>
-  .scan {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.6rem 1rem;
-  }
-  .scan .muted {
-    font-size: var(--fs-sm);
-  }
   .matching {
     margin: 0;
     font-size: var(--fs-sm);
@@ -139,9 +126,11 @@
     grid-template-columns: 2.6rem 1fr auto;
     align-items: center;
     gap: 0.9rem;
-    padding: 0.5rem 0.75rem 0.5rem 0.5rem;
-    background: var(--surface-raised);
-    border-radius: var(--radius);
+    padding: 0.65rem 0.85rem;
+    background: var(--surface-panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    backdrop-filter: var(--glass-blur);
   }
   .review .poster {
     border-radius: var(--radius-sm);

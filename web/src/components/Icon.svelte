@@ -21,7 +21,8 @@
     pip: 'M3.5 5.5h17v13h-17zM12.5 12h6v5h-6z',
     cc: 'M3.5 5.5h17v13h-17zM10.5 10.2a2.3 2.3 0 1 0 0 3.6M17 10.2a2.3 2.3 0 1 0 0 3.6',
     audio: 'M9 18V6l11-2v12M9 18a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0zM20 16a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z',
-    airplay: 'M6 17H4.5V5h15v12H18M12 14.5l5 5.5H7z',
+    // A rounded screen with the triangle set into its bottom edge: the modern AirPlay mark.
+    airplay: 'M8.7 15.5H5.7A2.2 2.2 0 0 1 3.5 13.3V7.7A2.2 2.2 0 0 1 5.7 5.5H18.3A2.2 2.2 0 0 1 20.5 7.7V13.3A2.2 2.2 0 0 1 18.3 15.5H15.3M8.7 15.5 12 11.6 15.3 15.5Z',
     more: 'M6 12h.01M12 12h.01M18 12h.01',
     star: 'M12 4l2.4 5 5.4.6-4 3.7 1.1 5.3L12 16l-4.9 2.6 1.1-5.3-4-3.7 5.4-.6z',
     settings:
@@ -36,6 +37,9 @@
     check: 'M5 12.5l4.5 4.5L19 7.5',
     sun: 'M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10zM12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42',
     moon: 'M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z',
+    trash: 'M5 7h14M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3',
+    download: 'M12 4v12M7 11l5 5 5-5M4 20h16',
+    upload: 'M12 16V4M7 9l5-5 5 5M4 20h16',
   } as const;
   export type IconName = keyof typeof PATHS;
 </script>
@@ -47,8 +51,8 @@
 <svg
   viewBox="0 0 24 24"
   aria-hidden="true"
-  fill={filled || name === 'play' || name === 'pause' ? 'currentColor' : 'none'}
+  fill={filled || name === 'play' || name === 'pause' || name === 'stop' ? 'currentColor' : 'none'}
   stroke="currentColor"
-  stroke-width={name === 'play' || name === 'pause' ? 0 : name === 'more' ? 3.2 : 1.8}
+  stroke-width={name === 'play' || name === 'pause' || name === 'stop' ? 0 : name === 'more' ? 3.2 : 1.8}
   stroke-linecap="round"
   stroke-linejoin="round"><path d={PATHS[name]} /></svg>

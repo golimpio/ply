@@ -165,6 +165,19 @@
     if (sub.language) t.srclang = sub.language.slice(0, 2);
     t.src = mediaUrl(sub.url);
 
+    const positionCue = (cue: TextTrackCue) => {
+      const v = cue as VTTCue;
+      if (v && 'snapToLines' in v) {
+        v.snapToLines = false;
+        v.line = 88;
+        try {
+          v.lineAlign = 'end';
+        } catch {
+          // ignore
+        }
+      }
+    };
+
     // Sanitize cues: deduplicate overlapping identical cues and cap runaway durations.
     // Broken subtitle authoring (e.g. calculated end = start * 2 lasting 20-70 mins) otherwise stays on screen forever.
     const sanitizeCues = () => {
@@ -174,6 +187,7 @@
       for (let i = 0; i < cues.length; i++) {
         const cue = cues[i] as VTTCue;
         if (!cue || typeof cue.startTime !== 'number' || typeof cue.endTime !== 'number') continue;
+        positionCue(cue);
         if (i + 1 < cues.length) {
           const next = cues[i + 1] as VTTCue;
           if (
@@ -204,11 +218,21 @@
       }
     };
 
+    const onCueChange = () => {
+      const active = t.track?.activeCues;
+      if (!active) return;
+      for (let i = 0; i < active.length; i++) {
+        positionCue(active[i]);
+      }
+    };
+
     t.addEventListener('load', sanitizeCues);
+    t.track?.addEventListener('cuechange', onCueChange);
     v.appendChild(t);
     t.track.mode = 'showing';
     return () => {
       t.removeEventListener('load', sanitizeCues);
+      t.track?.removeEventListener('cuechange', onCueChange);
       t.remove();
     };
   });
@@ -379,6 +403,7 @@
     progress.begin(at);
     phase = 'starting';
     error = '';
+    airplayNotice = '';
     playback = undefined;
     resumed = false;
 
@@ -673,6 +698,7 @@
     {#if video}
       <PlayerControls
         {video}
+        busy={phase === 'starting'}
         {title}
         {subtitle}
         {active}
@@ -704,8 +730,6 @@
         <span>Someone stopped this video from another device. It won't start again on its own.</span>
         <button class="btn primary" onclick={() => void start(progress.position())}>Play again</button>
       </div>
-    {:else if phase === 'starting'}
-      <div class="overlay passive"><span class="spinner"></span> Preparing stream…</div>
     {:else if phase === 'error'}
       <div class="overlay" role="alert">
         <strong>Cannot play this item</strong>
@@ -755,9 +779,10 @@
   }
   .remote,
   .why-body {
-    background: var(--surface-popover);
-    border: 1px solid var(--line-overlay);
-    border-radius: var(--radius);
+    background: var(--surface-panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    backdrop-filter: var(--glass-blur);
     box-shadow: var(--shadow-popover);
   }
   .remote span {
@@ -802,11 +827,6 @@
     text-align: center;
     background: var(--scrim-player);
   }
-  .overlay.passive {
-    flex-direction: row;
-    pointer-events: none;
-    color: var(--text-muted);
-  }
   .overlay strong {
     color: var(--danger);
   }
@@ -818,19 +838,6 @@
     justify-content: safe center;
     overflow-y: auto;
     background: var(--scrim-player-strong);
-  }
-  .spinner {
-    width: 1.1em;
-    height: 1.1em;
-    border: 2px solid var(--line);
-    border-top-color: var(--accent);
-    border-radius: var(--radius-round);
-    animation: spin var(--motion-spin) var(--ease-linear) infinite;
-  }
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
   }
   .why {
     flex: none;
@@ -848,7 +855,6 @@
     right: max(var(--gutter-player), env(safe-area-inset-right));
     max-width: min(26rem, calc(100vw - 2rem));
     padding: 0.6rem 0.8rem;
-    backdrop-filter: var(--blur-popover);
   }
   .why p,
   .why ul {

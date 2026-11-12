@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, ApiError, type EpisodeCard, type EpisodeOrder } from '../lib/api';
+  import { api, ApiError, type EpisodeCard, type EpisodeOrder, type Subtitle } from '../lib/api';
   import { useAmbient } from '../lib/ambient.svelte';
   import { episodeLabel, formatDuration, seasonLabel } from '../lib/format';
   import { ensureEpisodes, episodes as episodeList, episodesOf, markWatched, showMeta, showsOf, type WatchTarget } from '../lib/library.svelte';
@@ -22,6 +22,7 @@
   import Icon from '../components/Icon.svelte';
   import Menu from '../components/Menu.svelte';
   import PersonCard from '../components/PersonCard.svelte';
+  import SubtitleManager from '../components/SubtitleManager.svelte';
   import Rail from '../components/Rail.svelte';
   import Rating from '../components/Rating.svelte';
   import Ratings from '../components/Ratings.svelte';
@@ -94,7 +95,17 @@
 
   let fixing = $state(false);
   let editing = $state(false);
+  let managingSubs = $state(false);
+  let nextSubs = $state<Subtitle[]>([]);
   let notice = $state('');
+
+  $effect(() => {
+    if (managingSubs && next) {
+      void api.item(next.id).then((d) => {
+        nextSubs = d.subtitles ?? [];
+      });
+    }
+  });
 
   // Marking: one at a time; the cards and counts change at once and go back on an error, which is
   // said next to what was pressed (the hero's button, or the season's).
@@ -188,6 +199,13 @@
       },
       hidden: !meta,
     },
+    {
+      label: 'Manage subtitles',
+      run: (): void => {
+        managingSubs = true;
+      },
+      hidden: !next,
+    },
     { label: 'Refresh details', run: refresh },
   ]);
 
@@ -233,6 +251,9 @@
           {resumeAt(next) ? 'Resume' : 'Play'}
           {episodeLabel(next.season, next.episode)}
         </a>
+        <button class="btn" onclick={() => (managingSubs = true)}>
+          <Icon name="cc" />Subtitles
+        </button>
       {/if}
       {#if meta}{#key meta.id}<TrailerButton titleId={meta.id} title={meta.title || show} />{/key}{/if}
       <span class="pair">
@@ -374,6 +395,21 @@
 
   <FixMatch bind:open={fixing} kind="series" {show} query={show} matched={!!meta && meta.matchState !== 'unmatched'} />
   {#if meta}<EditTitle bind:open={editing} {meta} />{/if}
+  {#if next}
+    <SubtitleManager
+      bind:open={managingSubs}
+      itemId={next.id}
+      title={meta?.title || show}
+      isEpisode={true}
+      show={show}
+      season={next.season ?? undefined}
+      episode={next.episode ?? undefined}
+      subtitles={nextSubs}
+      onchange={(newSubs) => {
+        nextSubs = newSubs;
+      }}
+    />
+  {/if}
 {/if}
 
 <style>

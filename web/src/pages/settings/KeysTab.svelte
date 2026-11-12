@@ -4,6 +4,7 @@
   import { resource } from '../../lib/resource.svelte';
   import { app } from '../../lib/state.svelte';
   import MdblistKey from '../../components/MdblistKey.svelte';
+  import OpensubtitlesKey from '../../components/OpensubtitlesKey.svelte';
   import TmdbKey from '../../components/TmdbKey.svelte';
   import TvdbKey from '../../components/TvdbKey.svelte';
 
@@ -47,6 +48,7 @@
     {#if s.tvdbKeySet !== undefined}<TvdbKey settings={s} onworks={status.refresh} />{/if}
     <!-- Nor older than M10, which has no ratings. -->
     {#if s.mdblistKeySet !== undefined}<MdblistKey settings={s} />{/if}
+    <OpensubtitlesKey settings={s} />
   {/if}
 </section>
 

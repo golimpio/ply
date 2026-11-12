@@ -863,6 +863,9 @@ func (s *Server) settingsView(ctx context.Context) SettingsView {
 	l := s.playLimits(ctx)
 	v.MaxStreams, v.MaxStreamsSource = l.streams, l.streamsSource
 	v.MaxTranscodes, v.MaxTranscodesSource = l.transcodes, l.transcodesSource
+	if val, ok, _ := s.Store.GetSetting(ctx, "opensubtitles_key"); ok && strings.TrimSpace(val) != "" {
+		v.OpenSubtitlesKeySet = true
+	}
 	return v
 }
 
@@ -880,9 +883,10 @@ type settingsRequest struct {
 	MaxTranscodes   *int    `json:"maxTranscodes"`
 	// M10: the MDBList key ("" removes the stored one), the source whose rating cards show, and the
 	// sources to show, in order (null leaves them alone; [] shows none).
-	MDBListKey     *string   `json:"mdblistKey"`
-	RatingsPrimary *string   `json:"ratingsPrimary"`
-	RatingsShown   *[]string `json:"ratingsShown"`
+	MDBListKey       *string   `json:"mdblistKey"`
+	RatingsPrimary   *string   `json:"ratingsPrimary"`
+	RatingsShown     *[]string `json:"ratingsShown"`
+	OpenSubtitlesKey *string   `json:"opensubtitlesKey"`
 }
 
 // handlePatchSettings is PATCH (and PUT) /api/settings: it changes the settings
@@ -901,7 +905,7 @@ func (s *Server) handlePatchSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req == (settingsRequest{}) {
-		writeError(w, http.StatusBadRequest, "give at least one of tmdbKey, tvdbKey, tvdbPin, mdblistKey, metadataEnabled, language, ratingsPrimary, ratingsShown, maxStreams, maxTranscodes")
+		writeError(w, http.StatusBadRequest, "give at least one of tmdbKey, tvdbKey, tvdbPin, mdblistKey, opensubtitlesKey, metadataEnabled, language, ratingsPrimary, ratingsShown, maxStreams, maxTranscodes")
 		return
 	}
 	metadataChange := req.TMDBKey != nil || req.TVDBKey != nil || req.TVDBPIN != nil || req.MetadataEnabled != nil || req.Language != nil ||
@@ -912,6 +916,13 @@ func (s *Server) handlePatchSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if !s.checkPINChange(r.Context(), w, req) || !s.checkLimitChange(r.Context(), w, req) {
 		return
+	}
+	if req.OpenSubtitlesKey != nil {
+		if strings.TrimSpace(*req.OpenSubtitlesKey) == "" {
+			_ = s.Store.DeleteSetting(r.Context(), "opensubtitles_key")
+		} else {
+			_ = s.Store.SetSetting(r.Context(), "opensubtitles_key", strings.TrimSpace(*req.OpenSubtitlesKey))
+		}
 	}
 	if metadataChange {
 		err := s.Settings.Update(r.Context(), metadata.Update{Key: req.TMDBKey, Enabled: req.MetadataEnabled, Language: req.Language,

@@ -184,6 +184,10 @@ func Permanent(err error) error {
 // ErrCancelled is the cause of a job's context when a person cancels it.
 var ErrCancelled = errors.New("cancelled")
 
+// ErrStopping is the cause of a job's context when ply is stopping: the job is asked to stop at its
+// next step, and it is queued again for the next start. It is not a person's cancellation.
+var ErrStopping = errors.New("ply is stopping")
+
 // ErrUnknownKind is returned for a kind nobody registered.
 var ErrUnknownKind = errors.New("jobs: unknown kind")
 

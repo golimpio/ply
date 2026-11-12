@@ -38,7 +38,8 @@ CGO_ENABLED=0 must build for darwin/linux × amd64/arm64.
 
 ## Config
 Flags: `-media` (repeatable roots), `-addr` (default `:8420`, `:0` allowed), `-data`, `-token`, `-name`
-(default hostname), `-scan-interval` (default 15m, 0 disables), `-ffprobe`, `-ffmpeg` (default from PATH).
+(default hostname), `-scan-interval` (accepted and ignored since M12: the full scan runs on its schedule in
+Settings → Schedules; a value other than the old default logs where to set it), `-ffprobe`, `-ffmpeg` (default from PATH).
 M6 (metadata, live library):
 - `-watch` (default true): watch the media folders and pick up changes within seconds (`internal/watch`).
 - `-allow-host <name>` (repeatable; env `PLY_ALLOW_HOSTS`, comma-separated; `.example.org` allows every name under it):
@@ -84,6 +85,10 @@ streams(item_id FK ON DELETE CASCADE, idx INT /*ffprobe index*/, type TEXT /*vid
 subtitles_external(item_id FK CASCADE, path, language, format /*srt|vtt|ass*/)        -- M5
 progress(item_id PK FK CASCADE, position_sec REAL, duration_sec REAL, watched_at INT, play_count INT, updated_at INT)  -- M5, M11 (see "Watch state")
 ```
+
+M12 adds `schedules(task TEXT PK, enabled INT, at_minute INT 0..1439, days TEXT /* ISO weekdays, '' every day */,
+last_run INT, updated_at INT)`: the background tasks' times, kept in the database so a restart neither repeats a
+run nor loses one (`docs/M12-SCHEDULES.md`).
 
 ## Probe
 `ffprobe -v error -print_format json -show_format -show_streams -i <ABS path>` with a context timeout.
@@ -201,6 +206,9 @@ bad input → 400, TMDB unreachable → 502, lookups off (no key / `-metadata=fa
 | GET | `/api/metadata/status` | `{enabled, keySet, running, pending, unmatched, needsReview, lastRefresh, lastError}` |
 | GET | `/api/metadata/review` | `[{kind, itemId?, show?, title, year, matchState, needsReview, score, candidate?}]` unmatched first |
 | GET, PATCH (PUT too) | `/api/settings` | `{tmdbKeySet, tmdbKeySource: flag\|env\|settings\|default\|"", metadataEnabled, metadataForcedOff, language, maxStreams, maxTranscodes, maxStreamsSource, maxTranscodesSource: flag\|settings\|default}`; PATCH `{tmdbKey?, metadataEnabled?, language?, maxStreams?: 1..32, maxTranscodes?: 1..16}`: a new key is checked against TMDB (400 refused, 502 unreachable), `""` removes the stored key; a limit out of range → 400, one given by `-max-streams`/`-max-transcodes` (or `PLY_MAX_*`) → 409; everything is checked before anything is stored; limits apply at once; **the key is never returned or logged** |
+| GET | `/api/schedules` | (M12) `[{task, title, detail, enabled, at: "HH:MM", days: [1..7], lastRun?, next?, blocked?, missing, warnings}]`, in the catalog's order; `next` absent when off or blocked; lists never null. Private (`docs/M12-SCHEDULES.md`) |
+| PUT | `/api/schedules/{task}` | (M12) `{enabled?, at?, days?}`, one field or all; 400 for a time or a day that is not one, 404 for an unknown task; wakes the scheduler |
+| POST | `/api/schedules/{task}/run` | (M12) queues the task now as a person's request → 204; 409 with the reason when it is blocked or already queued |
 | GET | `/api/images/tmdb/{size}/{file}` | size ∈ `w92 w185 w342 w500 w780 w1280 original`, file `^[A-Za-z0-9_-]+\.(jpg\|png\|svg)$` else 400; downloaded once into `<data>/images`, `Cache-Control: public, max-age=31536000, immutable`; not available → 404 |
 | GET | `/api/images/local/{item\|series}/{id}/{poster\|backdrop\|thumb}` | sidecar art (path from the DB, must be a regular file whose bytes sniff as an image) or a cover extracted from the media file; `no-cache` |
 
@@ -503,18 +511,19 @@ Svelte 5 (runes) + Vite + TypeScript, hls.js. No UI framework; small hand-writte
   `az.test.ts` and `e2e/library-ui.mjs` (5,000 films: the DOM bound, priorities mid-list and at 2x, cards with a
   rating glyph, the measured pitch and a live resize, the rail's targets at five sizes, by mouse, touch and
   keyboard, Back at another width, a 304 revisit).
-- **Settings** (`pages/Settings.svelte`, a tab each in `pages/settings/`): five tabs, **Library** (folders, a scan,
-  Needs attention), **Details** (online lookups, language, the matching status, Refresh all details), **Ratings**
+- **Settings** (`pages/Settings.svelte`, a tab each in `pages/settings/`): six tabs, **Library** (folders, a scan,
+  Needs attention), **Schedules** (when each background task runs, and why one cannot: M12), **Details** (online
+  lookups, language, the matching status, Refresh all details), **Ratings**
   (primary, shown order, a link to the MDBList key), **Playback** (the limits) and **API keys** (TMDB, TVDB key and
-  PIN, MDBList, each with its notice). The tab is in the hash, `#/settings?tab=details|ratings|playback|keys`
+  PIN, MDBList, each with its notice). The tab is in the hash, `#/settings?tab=schedules|details|ratings|playback|keys`
   (Library, the default, is the bare `#/settings`; the player's older `?s=playback` opens Playback:
   `lib/settings-tabs.ts`), and a switch is a `redirect()`, so tabs add no history entries and Back leaves Settings.
   `components/Tabs.svelte` is the WAI-ARIA tabs pattern (tablist/tab/tabpanel, `aria-selected`, `aria-controls` on
   the selected tab, roving tabindex, arrows, Home and End, selection follows focus; the panel is not a Tab stop of its
   own, every panel having controls); only the selected panel is mounted, so a tab fetches only what it shows
-  (Library: folders, review, status; Details: settings and status; API keys: settings and the status once, for the
-  server's word on a key; Ratings and Playback: settings). Library and Details poll the status while matching runs
-  (`lib/matching.svelte.ts`, `poll: true`); API keys doesn't. From 900 px the tabs are a column beside the panel (the
+  (Library: folders, review, status; Schedules: the schedules; Details: settings and status; API keys: settings and
+  the status once, for the server's word on a key; Ratings and Playback: settings). Library and Details poll the status
+  while matching runs (`lib/matching.svelte.ts`, `poll: true`); API keys doesn't. From 900 px the tabs are a column beside the panel (the
   selected one a quiet fill and the accent's bar), below a row that scrolls sideways, the selected tab in its middle
   and a fade (`--fade-edge`, a mask) at an edge with more past it. The three key cards share one layout (`.key-card`
   in app.css) and one field, `components/KeyField.svelte`: a key that is set shows as a mask, eight dots in the
@@ -524,7 +533,8 @@ Svelte 5 (runes) + Vite + TypeScript, hls.js. No UI framework; small hand-writte
   ago" or "Failed when tested ..." from `<p>KeyTestedAt`/`<p>KeyTestOk` (M8-TVDB.md › Last tested), its own result at
   once, and drops it when the key changes. The TMDB notice (`TmdbNotice`) is in the TMDB card and in Details, whether
   or not the settings load. Settings and Activity are centred in `.page-container` (app.css, `--page-max`). Tested by
-  `lib/settings-tabs.test.ts` and `e2e/settings-ui.mjs`.
+  `lib/settings-tabs.test.ts`, `lib/schedules.test.ts` and `e2e/settings-ui.mjs` (the tabs, the keys, and the
+  schedules page).
 - **Season posters** (`components/SeasonRow.svelte`, `lib/seasons.ts`): a show's seasons are a row of 2:3 posters
   (`--season-w`, `--season-w-narrow` from 600 px down), each with its name ("Specials" for 0, last), its episode count
   and its watch badge; a season with no poster of its own has the show's, its name on a band over it. The row

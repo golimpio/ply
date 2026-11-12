@@ -79,7 +79,15 @@ func (f *folderEnv) path(name string) string { return filepath.Join(f.base, name
 func (f *folderEnv) callLog() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return slices.Clone(f.calls)
+	res := slices.Clone(f.calls)
+	if f.scanner != nil {
+		f.scanner.mu.Lock()
+		for i := 0; i < f.scanner.triggered; i++ {
+			res = append(res, "scan:triggered")
+		}
+		f.scanner.mu.Unlock()
+	}
+	return res
 }
 
 // post adds a folder; it returns the response.
@@ -581,6 +589,41 @@ func TestDeleteFolderFailsWhenTheItemsCannotBeDropped(t *testing.T) {
 	// Control: with the failure gone it works.
 	f.dropErr = nil
 	wantStatus(t, f.do("DELETE", fmt.Sprintf("/api/folders/%d", ui.ID), nil, ""), 204)
+}
+
+func TestScanFolder(t *testing.T) {
+	f := newFolderEnv(t, "")
+	ui := f.add(f.path("other"), "movies")
+
+	// 404 on nonexistent folder
+	wantJSONError(t, f.do("POST", "/api/folders/9999/scan", nil, ""), 404)
+	wantJSONError(t, f.do("POST", "/api/folders/abc/scan", nil, ""), 404)
+
+	// Scan existing folder -> 202
+	rec := f.do("POST", fmt.Sprintf("/api/folders/%d/scan", ui.ID), nil, "")
+	wantStatus(t, rec, 202)
+	got := decode[map[string]bool](t, rec)
+	if !got["started"] {
+		t.Errorf("expected started: true, got %+v", got)
+	}
+
+	// 409 when scan is already running
+	f.scanner.running = true
+	rec2 := f.do("POST", fmt.Sprintf("/api/folders/%d/scan", ui.ID), nil, "")
+	wantJSONError(t, rec2, 409)
+
+	// Custom ScanFolder option
+	scannedPath := ""
+	f.srv.ScanFolder = func(p string) bool {
+		scannedPath = p
+		return true
+	}
+	f.scanner.running = false
+	rec3 := f.do("POST", fmt.Sprintf("/api/folders/%d/scan", ui.ID), nil, "")
+	wantStatus(t, rec3, 202)
+	if scannedPath != ui.Path {
+		t.Errorf("scannedPath = %q, want %q", scannedPath, ui.Path)
+	}
 }
 
 func TestFS(t *testing.T) {

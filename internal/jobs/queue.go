@@ -68,6 +68,7 @@ type Queue struct {
 	nextTemp  int64            // ids for a queue without Persist
 	lastTier  tier.State
 	lastExtra string // what Extra said last, to publish a change
+	stopping  bool   // Run is stopping: a job that starts now is signalled at once
 }
 
 type runKey struct{}
@@ -305,11 +306,16 @@ func (q *Queue) poke() {
 	}
 }
 
-// Run loads what the last run left, then dispatches jobs until ctx ends. Jobs
-// running then are stopped and queued again for the next start.
+// Run loads what the last run left, then dispatches jobs until ctx ends. The jobs it runs have a
+// context of their own, so that a stop of ply is told apart from a person's cancel: it is signalled
+// with ErrStopping, and every such job is queued again for the next start.
 func (q *Queue) Run(ctx context.Context) {
 	q.load(ctx)
 	close(q.ready)
+	// The jobs' context keeps the values of this one, and its cancellation is explicit: ply stopping
+	// is a cause of its own (ErrStopping), not the context.Canceled a parent would give.
+	runCtx, stop := context.WithCancelCause(context.WithoutCancel(ctx))
+	defer stop(nil) // after the jobs have finished: see the order of the defers below
 	// Last of all, once the running jobs are back in the queue: no more enqueues.
 	// (An enqueue while the jobs stop is fine: it is stored, and runs at the next start.)
 	defer func() {
@@ -325,7 +331,7 @@ func (q *Queue) Run(ctx context.Context) {
 	defer wg.Wait()
 	for {
 		var held bool
-		for {
+		for ctx.Err() == nil {
 			e, wait, h := q.next()
 			held = held || h
 			if e == nil {
@@ -335,7 +341,7 @@ func (q *Queue) Run(ctx context.Context) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				q.work(ctx, e)
+				q.work(runCtx, e)
 			}()
 		}
 		// A job the gate holds is looked at again when playback changes, or at
@@ -350,6 +356,7 @@ func (q *Queue) Run(ctx context.Context) {
 		}
 		select {
 		case <-ctx.Done():
+			q.stopRunning()
 			return
 		case <-q.wake:
 		case <-q.timerC():
@@ -363,6 +370,24 @@ func (q *Queue) Run(ctx context.Context) {
 		if poll != nil {
 			poll.Stop()
 		}
+	}
+}
+
+// stopRunning asks every running job to stop because ply is stopping. A job that starts in the same
+// moment is signalled by work itself, which sees q.stopping.
+func (q *Queue) stopRunning() {
+	q.mu.Lock()
+	q.stopping = true
+	var n int
+	for _, e := range q.live {
+		if e.started && e.cancel != nil {
+			e.cancel(ErrStopping)
+			n++
+		}
+	}
+	q.mu.Unlock()
+	if n > 0 {
+		q.log.Info("jobs: stopping the running ones", "running", n)
 	}
 }
 
@@ -595,6 +620,9 @@ func (q *Queue) work(parent context.Context, e *entry) {
 	if e.cancelled {
 		cancel(ErrCancelled)
 	}
+	if q.stopping {
+		cancel(ErrStopping) // ply stopped before this job got going: it runs at the next start
+	}
 	e.State, e.StartedAt, e.Error = Running, q.o.Now(), ""
 	e.Attempts++
 	e.Done, e.Total, e.Note = 0, 0, ""
@@ -605,7 +633,7 @@ func (q *Queue) work(parent context.Context, e *entry) {
 	}
 	q.mu.Unlock()
 
-	r := &Run{q: q, e: e, need: yield}
+	r := &Run{q: q, e: e, need: yield, ctx: ctx}
 	ctx = context.WithValue(ctx, runKey{}, r)
 	q.save(ctx, j)
 	q.publish("job.started", &j)
@@ -614,7 +642,7 @@ func (q *Queue) work(parent context.Context, e *entry) {
 	if err == nil {
 		err = q.call(ctx, e, r)
 	}
-	q.finish(parent, ctx, e, err)
+	q.finish(ctx, e, err)
 }
 
 // call runs the job's Run, turning a panic into an error.
@@ -628,13 +656,13 @@ func (q *Queue) call(ctx context.Context, e *entry, r *Run) (err error) {
 	return e.spec.Run(ctx, r)
 }
 
-func (q *Queue) finish(parent, ctx context.Context, e *entry, err error) {
+func (q *Queue) finish(ctx context.Context, e *entry, err error) {
 	now := q.o.Now()
 	q.mu.Lock()
 	q.running[e.heavy]--
 	e.started, e.cancel, e.cancelled, e.Held = false, nil, false, ""
 	cause := context.Cause(ctx)
-	shutdown := parent.Err() != nil && !errors.Is(cause, ErrCancelled)
+	shutdown := errors.Is(cause, ErrStopping)
 	var requeue bool
 	switch {
 	case shutdown:
@@ -931,10 +959,16 @@ type Run struct {
 	q    *Queue
 	e    *entry
 	need tier.Need
+	ctx  context.Context // the job's own context: its cause says why it is stopping
 }
 
 // ID is the job's id.
 func (r *Run) ID() int64 { return r.e.ID }
+
+// Stopping reports whether ply is stopping, rather than a person cancelling this job: the job should
+// stop at its next step, and it runs again at the next start. Most jobs need not ask: the ctx they
+// are given ends either way.
+func (r *Run) Stopping() bool { return errors.Is(context.Cause(r.ctx), ErrStopping) }
 
 // Decode unmarshals the job's payload into v.
 func (r *Run) Decode(v any) error {

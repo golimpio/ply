@@ -104,6 +104,9 @@ type Options struct {
 	// scanner's LastScan); the zero time means not since the server started. nil
 	// reports 0 (unknown) for every folder.
 	LastScan func(root string) time.Time
+	// ScanFolder starts a scan of a single folder in the background. false
+	// means a scan is already running. nil falls back to Scanner.Trigger().
+	ScanFolder func(path string) bool
 
 	// The limits on plays given with -max-streams and -max-transcodes (or the
 	// environment variables that stand in for them); 0 means not given. A limit
@@ -115,6 +118,10 @@ type Options struct {
 	// nil: the Activity endpoints answer 503. Governor nil: browsing holds nothing.
 	Jobs     *jobs.Queue
 	Governor *tier.Governor
+
+	// Schedules are the background tasks' schedules (M12, docs/M12-SCHEDULES.md): when each runs,
+	// and why one cannot. nil: the schedules endpoints answer 503.
+	Schedules Scheduler
 
 	// Receivers are the AirPlay targets found on the LAN (docs/AIRPLAY.md). nil: none are
 	// known, GET /api/receivers lists none, and a play keeps the page's own address.
@@ -167,6 +174,10 @@ func New(o Options) *Server {
 	mux.HandleFunc("PUT /api/items/{id}/match", s.handleMatchItem)
 	mux.HandleFunc("DELETE /api/items/{id}/match", s.handleUnmatchItem)
 	mux.HandleFunc("POST /api/items/{id}/metadata/refresh", s.handleRefreshItem)
+	mux.HandleFunc("GET /api/items/{id}/subtitles/search", s.handleSearchSubtitles)
+	mux.HandleFunc("POST /api/items/{id}/subtitles/download", s.handleDownloadSubtitle)
+	mux.HandleFunc("POST /api/items/{id}/subtitles", s.handleAddSubtitle)
+	mux.HandleFunc("DELETE /api/items/{id}/subtitles/{key}", s.handleDeleteSubtitle)
 	mux.HandleFunc("GET /api/items/{id}/subtitles/{file}", s.handleSubtitle)
 	mux.HandleFunc("PUT /api/items/{id}/progress", s.handleProgress)
 	mux.HandleFunc("PUT /api/items/{id}/watched", s.handleItemWatched)
@@ -206,11 +217,15 @@ func New(o Options) *Server {
 	mux.HandleFunc("GET /api/scan", s.handleScanStatus)
 	mux.HandleFunc("GET /api/folders", s.handleFolders)
 	mux.HandleFunc("POST /api/folders", s.handleAddFolder)
+	mux.HandleFunc("POST /api/folders/{id}/scan", s.handleScanFolder)
 	mux.HandleFunc("PATCH /api/folders/{id}", s.handlePatchFolder)
 	mux.HandleFunc("DELETE /api/folders/{id}", s.handleDeleteFolder)
 	mux.HandleFunc("GET /api/fs", s.handleFS)
 	mux.HandleFunc("GET /api/jobs", s.handleJobs)
 	mux.HandleFunc("POST /api/jobs/{id}/{action}", s.handleJobAction)
+	mux.HandleFunc("GET /api/schedules", s.handleSchedules)
+	mux.HandleFunc("PUT /api/schedules/{task}", s.handlePutSchedule)
+	mux.HandleFunc("POST /api/schedules/{task}/run", s.handleRunSchedule)
 	mux.HandleFunc("POST /api/queue/pause", s.handleQueuePause)
 	mux.HandleFunc("POST /api/queue/resume", s.handleQueuePause)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
@@ -257,7 +272,7 @@ func private(urlPath string) bool {
 	if p == "/api/settings/test" { // it makes the server log in to a provider with a key the page cannot see
 		return true
 	}
-	for _, root := range []string{"/api/folders", "/api/fs", "/api/jobs", "/api/queue", "/api/events", "/api/devices", "/api/receivers"} {
+	for _, root := range []string{"/api/folders", "/api/fs", "/api/jobs", "/api/queue", "/api/schedules", "/api/events", "/api/devices", "/api/receivers"} {
 		if p == root || strings.HasPrefix(p, root+"/") {
 			return true
 		}

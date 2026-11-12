@@ -87,6 +87,7 @@ func TestSettingsDefaultsAndShape(t *testing.T) {
 		// The last test of each key: 0 (never tested, or the key changed since) and false, exactly these names.
 		"tmdbKeyTestedAt": 0.0, "tmdbKeyTestOk": false, "tvdbKeyTestedAt": 0.0, "tvdbKeyTestOk": false,
 		"mdblistKeyTestedAt": 0.0, "mdblistKeyTestOk": false,
+		"opensubtitlesKeySet": false,
 	}
 	for k, v := range want {
 		if raw[k] != v {
@@ -311,6 +312,9 @@ func (m *menv) authCases() []authCase {
 		{"GET", "/api/settings", ""},
 		{"PUT", "/api/settings", `{"language": "fr-FR"}`},
 		{"POST", "/api/settings/test", `{"provider": "tmdb"}`},
+		{"GET", "/api/schedules", ""},
+		{"PUT", "/api/schedules/scan.full", `{"enabled": true}`},
+		{"POST", "/api/schedules/scan.full/run", ""},
 		{"GET", "/api/images/tmdb/w342/p603.jpg", ""},
 		{"GET", fmt.Sprintf("/api/images/local/item/%d/poster", m.mp4), ""},
 	}

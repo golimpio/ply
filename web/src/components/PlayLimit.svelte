@@ -142,9 +142,10 @@
     justify-content: space-between;
     gap: 0.75rem;
     padding: 0.5rem 0.5rem 0.5rem 0.8rem;
-    background: var(--surface-raised);
+    background: var(--surface-panel);
     border: 1px solid var(--line);
-    border-radius: var(--radius);
+    border-radius: var(--radius-lg);
+    backdrop-filter: var(--glass-blur);
   }
   .what {
     display: grid;

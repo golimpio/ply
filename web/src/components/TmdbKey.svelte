@@ -87,25 +87,25 @@
       <label for="tmdb-key">{s.tmdbKeySet ? 'Replace the key' : 'Key'}</label>
       <KeyField id="tmdb-key" set={s.tmdbKeySet} bind:value={key} />
     </div>
+    {#if message}
+      <p bind:this={messageEl} class="key-message" class:error={!message.ok} class:ok={message.ok} role="status" tabindex="-1">{message.text}</p>
+    {/if}
     <div class="key-buttons">
       <button class="btn primary" disabled={saving || !key.trim()}>{saving ? 'Checking…' : 'Save key'}</button>
       {#if s.tmdbKeySet && s.tmdbKeySource === 'settings'}
         <ConfirmRemove label="Remove key" question="Remove the TMDB key?" disabled={saving} onconfirm={() => save('', 'Key removed.')} />
       {/if}
+      <KeyTest
+        provider="tmdb"
+        name="TMDB"
+        busy={saving}
+        about={[s.tmdbKeySet, s.tmdbKeySource, s.metadataEnabled, s.metadataForcedOff, keySaves].join('|')}
+        {onworks}
+        unavailable={testUnavailable}
+        testedAt={s.tmdbKeyTestedAt}
+        testOk={s.tmdbKeyTestOk}
+      />
     </div>
   </form>
-  {#if message}
-    <p bind:this={messageEl} class="key-message" class:error={!message.ok} class:ok={message.ok} role="status" tabindex="-1">{message.text}</p>
-  {/if}
-  <KeyTest
-    provider="tmdb"
-    name="TMDB"
-    busy={saving}
-    about={[s.tmdbKeySet, s.tmdbKeySource, s.metadataEnabled, s.metadataForcedOff, keySaves].join('|')}
-    {onworks}
-    unavailable={testUnavailable}
-    testedAt={s.tmdbKeyTestedAt}
-    testOk={s.tmdbKeyTestOk}
-  />
   <TmdbNotice class="key-notice" />
 </div>

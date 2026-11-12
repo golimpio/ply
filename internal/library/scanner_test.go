@@ -807,3 +807,39 @@ func newScanner2(t *testing.T) (*store.Store, *fakeProber) {
 	_, st, fp := newScanner(t)
 	return st, fp
 }
+
+// A scan is background work on a queue job, and the daemon's stop ends it at the file it is on:
+// the probe's context is cancelled (ffprobe is killed), the scan returns at once, and nothing it
+// had not finished is written. This is the scan's half of jobs.ErrStopping.
+func TestAScanStopsAtTheFileItIsOnWhenTheDaemonStops(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "a (2020).mp4"), "a")
+	write(t, filepath.Join(root, "b (2021).mp4"), "b")
+	s, st, fp := newScanner(t, root)
+	fp.block = make(chan struct{})
+	fp.entered = make(chan struct{}, 4)
+	defer close(fp.block)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.Scan(ctx) }()
+	select {
+	case <-fp.entered: // it is in a probe
+	case <-time.After(5 * time.Second):
+		t.Fatal("the scan never started probing")
+	}
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("the stopped scan = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the scan did not stop: it is not checking the daemon's signal")
+	}
+	// The probe was cancelled, so neither file was read: nothing half-scanned is in the library.
+	if got := paths(t, st); len(got) != 0 {
+		t.Errorf("the stopped scan wrote %v", keys(got))
+	}
+}

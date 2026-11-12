@@ -442,8 +442,7 @@
         {#each LENSES as [id, label] (id)}
           <button
             type="button"
-            class="lens-pill"
-            class:active={moodLens === id}
+            class="chip"
             aria-pressed={moodLens === id}
             onclick={() => {
               moodLens = id;
@@ -454,8 +453,9 @@
           </button>
         {/each}
       </div>
-      <button type="button" class="shuffle-btn" onclick={() => heroOffset++}>
-        ↻ Shuffle Screening Suggestion
+      <button type="button" class="chip shuffle-btn" onclick={() => heroOffset++} aria-label="Shuffle suggestion">
+        <Icon name="rescan" />
+        <span>Shuffle</span>
       </button>
     </div>
 
@@ -617,7 +617,7 @@
             <MediaCard
               item={i}
               shape="wide"
-              href={href.play(i.id, i.progress?.positionSec ?? 0)}
+              href={href.item(i.id)}
               title={cardTitle(i)}
               note={leftLabel(i)}
               sub={cardSub(i)}
@@ -723,7 +723,6 @@
   }
   .lens-bar {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
     gap: 0.75rem 1.25rem;
@@ -733,11 +732,19 @@
   }
   .lens-pills {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
     gap: 0.5rem;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    min-width: 0;
+    flex: 1;
+  }
+  .lens-pills::-webkit-scrollbar {
+    display: none;
   }
   .lens-label {
+    flex: none;
     font-family: var(--font-mono);
     font-size: var(--fs-2xs);
     text-transform: uppercase;
@@ -745,42 +752,15 @@
     color: var(--text-faint);
     margin-right: 0.25rem;
   }
-  .lens-pill {
-    padding: 0.35rem 0.9rem;
-    font: inherit;
-    font-size: var(--fs-xs);
-    color: var(--text-muted);
-    background: var(--fill-subtle);
-    border: 1px solid transparent;
-    border-radius: var(--radius-pill);
-    cursor: pointer;
-    transition:
-      color var(--motion-hover),
-      border-color var(--motion-hover),
-      background var(--motion-hover);
-  }
-  .lens-pill:hover {
-    color: var(--text);
-  }
-  .lens-pill.active {
+  .lens-pills :global(.chip[aria-pressed='true']) {
     color: var(--text);
     font-weight: var(--fw-medium);
     background: var(--accent-wash);
     border-color: var(--accent);
   }
   .shuffle-btn {
-    padding: 0.35rem 0.85rem;
-    font-family: var(--font-mono);
-    font-size: var(--fs-2xs);
-    color: var(--text-muted);
-    background: var(--fill-subtle);
-    border: 1px solid transparent;
-    border-radius: var(--radius-pill);
-    cursor: pointer;
-    transition: color var(--motion-hover);
-  }
-  .shuffle-btn:hover {
-    color: var(--text);
+    flex: none;
+    margin-left: auto;
   }
 
   /* Top 50/50 Equal Editorial Spread */
@@ -970,9 +950,10 @@
     padding: 1.1rem 1.25rem;
     background:
       radial-gradient(120% 140% at 0% 0%, color-mix(in oklab, var(--accent) 16%, transparent), transparent 60%),
-      var(--surface-raised);
+      var(--surface-panel);
     border: 1px solid var(--line);
     border-radius: var(--radius-lg);
+    backdrop-filter: var(--glass-blur);
   }
   .setup h2 {
     margin-bottom: 0.2rem;

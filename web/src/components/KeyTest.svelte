@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api, type KeyProvider } from '../lib/api';
   import { testedLine } from '../lib/settings-tabs';
+  import Icon from './Icon.svelte';
 
   // "Test": asks the server to use the key in use (from wherever it comes) now. The page never
   // sees the key; only whether it works, and why not.
@@ -57,6 +58,8 @@
   });
   const lastLine = $derived(last ? testedLine(last.at, last.ok, now) : '');
 
+  const passed = $derived(unavailable ? null : result ? result.ok : last ? last.ok : null);
+
   async function test() {
     const mine = ++asked;
     testing = true;
@@ -70,6 +73,7 @@
     } catch (e) {
       if (mine !== asked) return;
       result = { ok: false, text: e instanceof Error ? e.message : String(e) };
+      tested = { at: Date.now() / 1000, ok: false };
     } finally {
       testing = false;
     }
@@ -79,45 +83,44 @@
 <div class="test">
   <button
     type="button"
-    class="btn"
+    class="btn test-btn"
+    class:ok={passed === true}
+    class:danger={passed === false}
     disabled={busy || testing || !!unavailable}
     onclick={test}
     aria-label="Test the {name} key"
     aria-describedby={unavailable ? `${provider}-test-why` : undefined}
+    title={result?.text || (last && !last.ok ? 'Test failed' : undefined)}
   >
-    {testing ? 'Testing…' : 'Test'}
+    {#if testing}
+      Testing…
+    {:else if passed === true}
+      <Icon name="check" /> Test
+    {:else if passed === false}
+      <Icon name="alert" /> Test
+    {:else}
+      Test
+    {/if}
   </button>
-  {#if unavailable}<span id="{provider}-test-why" class="muted why">{unavailable}</span>{/if}
-  <p class="result" class:ok={result?.ok} class:error={result && !result.ok} role="status">{result?.text ?? ''}</p>
+  {#if unavailable}<span id="{provider}-test-why" class="why sr-only">{unavailable}</span>{/if}
+  <p class="result" class:sr-only={result} class:ok={result?.ok} class:error={result && !result.ok} role="status">{result?.text ?? ''}</p>
   {#if lastLine}
-    <p class="tested muted" class:failed={!last?.ok} title={last ? new Date(last.at * 1000).toLocaleString() : undefined}>{lastLine}</p>
+    <p class="tested sr-only" class:failed={!last?.ok} title={last ? new Date(last.at * 1000).toLocaleString() : undefined}>{lastLine}</p>
   {/if}
 </div>
 
 <style>
   .test {
-    display: flex;
-    flex-wrap: wrap;
+    margin-left: auto;
+    display: inline-flex;
     align-items: center;
-    gap: 0.5rem 0.9rem;
   }
-  .why {
-    font-size: var(--fs-sm);
+  .test-btn {
+    white-space: nowrap;
   }
   .result {
     margin: 0;
     min-width: 0;
     overflow-wrap: anywhere;
-  }
-  .ok {
-    color: var(--ok);
-  }
-  .tested {
-    flex-basis: 100%;
-    margin: 0;
-    font-size: var(--fs-sm);
-  }
-  .tested.failed {
-    color: var(--warn);
   }
 </style>

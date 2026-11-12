@@ -1,8 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"mime/multipart"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -242,4 +245,84 @@ func TestSubtitleConversionFailure(t *testing.T) {
 	e := newEnv(t, "")
 	e.withSubs("echo 'Invalid data found' >&2; exit 1")
 	wantJSONError(t, e.get(fmt.Sprintf("/api/items/%d/subtitles/3.vtt", e.mkv)), 422)
+}
+
+func TestSubtitleDelete(t *testing.T) {
+	e := newEnv(t, "")
+	e.withSubs(fakeSubsScript)
+
+	// Positive control: verify ext0 exists initially
+	d := e.detailOf(e.mp4, nil)
+	if len(d.Subtitles) != 2 || d.Subtitles[0].Key != "ext0" {
+		t.Fatalf("positive control failed: expected ext0 to exist, got: %+v", d.Subtitles)
+	}
+
+	// Embedded subtitle stream cannot be deleted -> 400
+	resp := e.do("DELETE", fmt.Sprintf("/api/items/%d/subtitles/3", e.mkv), nil, "")
+	if resp.Code != 400 {
+		t.Fatalf("delete embedded subtitle = %d, want 400", resp.Code)
+	}
+
+	// Delete sidecar subtitle ext0 -> 204
+	resp = e.do("DELETE", fmt.Sprintf("/api/items/%d/subtitles/ext0", e.mp4), nil, "")
+	if resp.Code != 204 {
+		t.Fatalf("delete ext0 = %d, want 204", resp.Code)
+	}
+
+	// Verify ext0 is gone and only 1 remains
+	dAfter := e.detailOf(e.mp4, nil)
+	if len(dAfter.Subtitles) != 1 {
+		t.Fatalf("after delete, subtitles count = %d, want 1; %+v", len(dAfter.Subtitles), dAfter.Subtitles)
+	}
+}
+
+func TestSubtitleUpload(t *testing.T) {
+	e := newEnv(t, "")
+
+	// Create multipart upload request
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("file", "test.es.srt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	part.Write([]byte("1\n00:00:01,000 --> 00:00:04,000\nHola mundo\n"))
+	_ = writer.WriteField("language", "es")
+	_ = writer.WriteField("forced", "false")
+	writer.Close()
+
+	req := httptest.NewRequest("POST", fmt.Sprintf("/api/items/%d/subtitles", e.mp4), body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	w := httptest.NewRecorder()
+	e.srv.ServeHTTP(w, req)
+
+	if w.Code != 201 {
+		t.Fatalf("upload status = %d, want 201: %s", w.Code, w.Body.String())
+	}
+
+	// Verify subtitle exists on item
+	d := e.detailOf(e.mp4, nil)
+	found := false
+	for _, s := range d.Subtitles {
+		if s.Language == "es" && s.Format == "srt" && s.External {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("uploaded subtitle not found on item detail: %+v", d.Subtitles)
+	}
+}
+
+func TestSubtitleSearchUnconfigured(t *testing.T) {
+	e := newEnv(t, "")
+	resp := e.get(fmt.Sprintf("/api/items/%d/subtitles/search", e.mp4))
+	if resp.Code != 200 {
+		t.Fatalf("search status = %d, want 200", resp.Code)
+	}
+	var res SubtitleSearchResponse
+	res = decode[SubtitleSearchResponse](t, resp)
+	if res.Configured {
+		t.Fatalf("expected configured = false, got true")
+	}
 }

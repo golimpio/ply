@@ -53,11 +53,11 @@
   }
   input {
     font: inherit;
-    padding: 0.65rem 0.8rem;
+    padding: 0.5rem 1.1rem;
     color: var(--text);
-    background: var(--surface-raised);
+    background: var(--surface-room);
     border: 1px solid var(--line);
-    border-radius: var(--radius-row);
+    border-radius: var(--radius-pill);
   }
   input:focus {
     outline: 2px solid var(--accent);

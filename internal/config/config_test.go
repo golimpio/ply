@@ -75,6 +75,27 @@ func TestParseZeroScanInterval(t *testing.T) {
 	if c.ScanInterval != 0 {
 		t.Errorf("ScanInterval = %v, want 0", c.ScanInterval)
 	}
+	if !c.ScanIntervalSet {
+		t.Error("-scan-interval was given, and the server must say it no longer sets the scan")
+	}
+}
+
+// The flag is still read so that an older unit file starts, and a start without it says nothing.
+func TestScanIntervalSetOnlyWhenGiven(t *testing.T) {
+	c, err := Parse([]string{"-data", t.TempDir()}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.ScanIntervalSet {
+		t.Error("a start without -scan-interval reports it given")
+	}
+	c, err = Parse([]string{"-data", t.TempDir(), "-scan-interval", "15m"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.ScanIntervalSet || c.ScanInterval != 15*time.Minute {
+		t.Errorf("-scan-interval 15m = %v, given %v", c.ScanInterval, c.ScanIntervalSet)
+	}
 }
 
 func TestDataDir(t *testing.T) {

@@ -169,6 +169,10 @@ async function open(browser, opts = {}) {
       folders = folders.filter((x) => x.id !== Number(m[1]));
       return route.fulfill({ status: 204, body: '' }).catch(() => {});
     }
+    const mScan = /^\/api\/folders\/(\d+)\/scan$/.exec(p);
+    if (mScan && req.method() === 'POST') {
+      return json(route, { started: true }, 202);
+    }
     if (p === '/api/fs') {
       const path = u.searchParams.get('path');
       if (!path)
@@ -765,6 +769,29 @@ const scenarios = {
     check('the match is not called unsure for it', !(await lost.textContent()).includes('not for sure'));
     const plain = page.locator('ul.review > li', { has: page.locator('a.title:has-text("Plain")') });
     check('a movie has no episode list', (await plain.locator('details').count()) === 0); // positive control above
+    await context.close();
+  },
+
+  // Mutant caught: Scan button on folder absent; scan library row not on same row; explanatory text still present.
+  async 'folder scan and scan library row layout'(browser) {
+    const { context, page, calls } = await open(browser);
+    const nas = row(page, '/Volumes/NAS/Movies-3');
+    const scanBtn = nas.locator('button:has-text("Scan")');
+    check('each folder has a Scan button', (await scanBtn.count()) === 1);
+    const removeBtn = nas.locator('button:has-text("Remove")');
+    check('Remove button is present', (await removeBtn.count()) === 1);
+
+    const libActions = page.locator('.library-actions');
+    check('library actions container is present', (await libActions.count()) === 1);
+    check('Add a folder is inside library actions', (await libActions.locator('button:has-text("Add a folder")').count()) === 1);
+    check('Scan library now is inside library actions before scan', (await libActions.locator('button:has-text("Scan library now")').count()) === 1);
+    check('old explanatory text is gone', (await page.locator('text=Reads every folder again').count()) === 0);
+
+    await scanBtn.click();
+    await until(() => calls.some((c) => c.method === 'POST' && c.path === '/api/folders/2/scan'));
+    check('clicking folder Scan calls POST /api/folders/2/scan', calls.some((c) => c.method === 'POST' && c.path === '/api/folders/2/scan'));
+    check('Scan library now turns to Scanning… while scan is running', (await libActions.locator('button:has-text("Scanning…")').count()) === 1);
+
     await context.close();
   },
 };

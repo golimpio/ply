@@ -9,6 +9,7 @@
   import LibraryTab from './settings/LibraryTab.svelte';
   import PlaybackTab from './settings/PlaybackTab.svelte';
   import RatingsTab from './settings/RatingsTab.svelte';
+  import SchedulesTab from './settings/SchedulesTab.svelte';
 
   // Settings, in tabs: the tab is in the URL (#/settings?tab=keys), so a link, a reload and Back
   // find it. Switching tabs replaces the entry rather than adding one: Back leaves Settings.
@@ -41,6 +42,8 @@
       <div class="panel-body">
         {#if t === 'library'}
           <LibraryTab />
+        {:else if t === 'schedules'}
+          <SchedulesTab onkeys={openKeys} />
         {:else if t === 'details'}
           <DetailsTab onkeys={openKeys} />
         {:else if t === 'ratings'}
@@ -74,7 +77,8 @@
     margin: 0;
     max-width: 62ch;
   }
-  .panel-body :global(.ok) {
+  .panel-body :global(p.ok),
+  .panel-body :global(span.ok) {
     color: var(--ok);
   }
   .panel-body :global(.warn) {

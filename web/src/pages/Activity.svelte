@@ -435,9 +435,10 @@
     gap: 1rem;
     max-width: 24rem;
     padding: 0.7rem 0.8rem 0.7rem 1rem;
-    background: var(--surface-raised);
+    background: var(--surface-panel);
     border: 1px solid var(--line);
     border-radius: var(--radius-lg);
+    backdrop-filter: var(--glass-blur);
   }
   .pause > div {
     display: grid;
@@ -474,9 +475,10 @@
     padding: 0;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    background: var(--surface-raised);
+    background: var(--surface-panel);
     border: 1px solid var(--line);
     border-radius: var(--radius-lg);
+    backdrop-filter: var(--glass-blur);
     overflow: hidden;
   }
   .lane {
@@ -543,9 +545,10 @@
     list-style: none;
     margin: 0;
     padding: 0;
-    background: var(--surface-raised);
+    background: var(--surface-panel);
     border: 1px solid var(--line);
     border-radius: var(--radius-lg);
+    backdrop-filter: var(--glass-blur);
     overflow: hidden;
   }
   .panel ol {
@@ -619,9 +622,11 @@
     background: color-mix(in oklab, var(--danger) 85%, var(--lighten));
   }
   .empty-note {
-    padding: 0.9rem 1rem;
-    border: 1px dashed var(--line);
+    padding: 0.9rem 1.1rem;
+    background: var(--surface-panel);
+    border: 1px solid var(--line);
     border-radius: var(--radius-lg);
+    backdrop-filter: var(--glass-blur);
     font-size: var(--fs-sm-4);
   }
   .panel.empty {

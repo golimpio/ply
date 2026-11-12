@@ -40,10 +40,13 @@ type Config struct {
 	Token        string
 	Name         string
 	ScanInterval time.Duration
-	FFprobe      string
-	FFmpeg       string
-	StreamIdle   time.Duration // a streaming session without a segment request or a heartbeat this long is stopped
-	HWAccel      string        // auto, none, or a hardware encoder family (see hwaccel.ValidMode)
+	// ScanIntervalSet says -scan-interval was given. Since M12 it no longer sets the scan (the
+	// schedule does), and main warns about it when it is set.
+	ScanIntervalSet bool
+	FFprobe         string
+	FFmpeg          string
+	StreamIdle      time.Duration // a streaming session without a segment request or a heartbeat this long is stopped
+	HWAccel         string        // auto, none, or a hardware encoder family (see hwaccel.ValidMode)
 
 	// The limits on plays: -max-streams and -max-transcodes, or their environment
 	// variables. 0 means not given, and then the settings table, then the default,
@@ -262,7 +265,7 @@ func Parse(args []string, out io.Writer) (Config, error) {
 		c.AllowHosts = append(c.AllowHosts, v)
 		return nil
 	})
-	fs.DurationVar(&c.ScanInterval, "scan-interval", 15*time.Minute, "periodic rescan interval (0 disables; a scan always runs at startup)")
+	fs.DurationVar(&c.ScanInterval, "scan-interval", 15*time.Minute, "accepted for an older start script and ignored: the full scan runs on its schedule in Settings › Schedules")
 	fs.StringVar(&c.FFprobe, "ffprobe", "ffprobe", "ffprobe binary")
 	fs.StringVar(&c.FFmpeg, "ffmpeg", "ffmpeg", "ffmpeg binary")
 	fs.DurationVar(&c.StreamIdle, "stream-idle", defaultStreamIdle(), "stop a streaming session after this long without requests, for a player that does not send heartbeats; one that does is stopped 30 s after its last beat or request (env "+StreamIdleEnv+" sets the default)")
@@ -301,6 +304,11 @@ func Parse(args []string, out io.Writer) (Config, error) {
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
 	}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "scan-interval" {
+			c.ScanIntervalSet = true
+		}
+	})
 	c.TMDBKeyEnv = os.Getenv(TMDBKeyEnv)
 	c.TVDBKeyEnv = os.Getenv(TVDBKeyEnv)
 	c.TVDBPINEnv = os.Getenv(TVDBPINEnv)

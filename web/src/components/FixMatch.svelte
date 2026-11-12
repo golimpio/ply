@@ -269,8 +269,10 @@
     gap: 1rem;
     margin-top: 1rem;
     padding: 0.75rem 0.9rem;
-    background: var(--surface-raised);
-    border-radius: var(--radius);
+    background: var(--surface-panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    backdrop-filter: var(--glass-blur);
   }
   .pasted p {
     margin: 0;

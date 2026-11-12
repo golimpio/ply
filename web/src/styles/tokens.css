@@ -59,6 +59,7 @@
   --coral-300: #ff8a7a;
   --coral-950: #2a0c08;
   --mint-300: #7fd19b;
+  --mint-950: #0a2412;
   --amber-200: #ffcf70;
   --amber-950: #1d1400;
   --umber-950: #15110c;
@@ -162,6 +163,8 @@
   --radius-8: 8px;
   --radius-10: 10px;
   --radius-16: 16px;
+  --radius-18: 18px;
+  --radius-20: 20px;
 
   /* Durations and easings. */
   --dur-instant: 0.01ms;
@@ -216,13 +219,14 @@
   /* Surfaces: the room, what is raised from it, what floats over it. */
   --surface-room: var(--velvet-950);
   --surface-raised: var(--velvet-900);
+  --surface-panel: var(--white-a04);
   --surface-control: var(--velvet-800);
   --surface-dialog: var(--velvet-900-a94);
   --surface-palette: var(--velvet-900-a92);
   --surface-menu: var(--velvet-900-a96);
   --surface-popover: var(--velvet-900-a95); /* the player's track menus */
   --surface-bar: var(--velvet-950-a78); /* the header once scrolled */
-  --surface-bar-fade: var(--velvet-950-a70); /* the header over a hero */
+  --surface-bar-fade: var(--velvet-950-a45); /* the header over a hero */
   --surface-tabbar: var(--velvet-950-a86);
   --surface-tooltip: var(--velvet-950-a90);
   --surface-badge: var(--velvet-950-a72);
@@ -284,6 +288,7 @@
   --danger: var(--coral-300);
   --on-danger: var(--coral-950);
   --ok: var(--mint-300);
+  --on-ok: var(--mint-950);
   --warn: var(--amber-200);
   --on-warn: var(--amber-950);
 
@@ -337,10 +342,11 @@
   --radius-xs: var(--radius-2); /* the scrubber */
   --radius-sm: var(--radius-2); /* badges, small tags, posters in lists */
   --radius-kbd: var(--radius-4);
-  --radius-item: var(--radius-4); /* rows of a menu, thumbnails */
+  --radius-item: var(--radius-10); /* rows of a menu, search hits, thumbnails */
   --radius-row: var(--radius-4); /* rows of a list, the token field */
   --radius: var(--radius-2); /* poster and still frames */
-  --radius-lg: var(--radius-6); /* panels, dialogs */
+  --radius-lg: var(--radius-18); /* panels, dialogs */
+  --radius-panel: var(--radius-18);
   --radius-pill: 999px;
   --radius-round: 50%;
 
@@ -388,6 +394,7 @@
   --gutter: clamp(1rem, 4vw, 3rem);
   --gutter-player: clamp(0.75rem, 2.5vw, 1.5rem); /* the player's bars, from the window's edges */
   --bar-h: 3.5rem;
+  --bar-pad-y: 0.625rem; /* vertical breathing room inside the header bar (10px) */
   --shelf-pad-y: 2.25rem; /* vertical padding between a shelf and its divider line */
   --volume-w: 5.5rem; /* the player's volume slider, open */
   --chip-h: 2rem; /* a rating chip */
@@ -436,7 +443,7 @@
   /* Fluid sizes. */
   --fs-lede: clamp(1.05rem, 1.7vw, 1.3rem);
   --fs-lede-2: clamp(1rem, 1.6vw, 1.15rem);
-  --fs-subtitle: clamp(0.95rem, 1.6vw, 1.25rem);
+  --fs-subtitle: clamp(1.2rem, 2.2vw, 1.75rem);
   --fs-tile: clamp(1.5rem, 5vw, 2.5rem);
   --fs-h1: clamp(2.1rem, 4.2vw, 3.25rem);
   --fs-display: clamp(2.5rem, 5vw, 4.25rem);
@@ -481,11 +488,13 @@
   --bg-3: var(--surface-control);
   --muted: var(--text-muted);
   --font-sans: var(--font-text);
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23a09a90' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
 }
 
 :root[data-theme='light'] {
   --surface-room: var(--paper-bg);
   --surface-raised: var(--paper-elev);
+  --surface-panel: var(--ink-a04);
   --surface-control: var(--paper-subtle);
   --surface-dialog: var(--paper-dialog);
   --surface-palette: var(--paper-dialog);
@@ -534,6 +543,7 @@
   --scrim-hero-narrow-mid: var(--paper-sheet-fade);
   --tile-from: 24% 84%;
   --tile-to: 20% 74%;
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%235c5852' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
 }
 
 :root[data-focus-ring='true'] {

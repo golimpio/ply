@@ -1,11 +1,12 @@
 // The tabs of Settings, in the URL as #/settings?tab=<id> (Library, the default, as #/settings), and
 // the "last tested" line of a key.
 
-export const SETTINGS_TABS = ['library', 'details', 'ratings', 'playback', 'keys'] as const;
+export const SETTINGS_TABS = ['library', 'schedules', 'details', 'ratings', 'playback', 'keys'] as const;
 export type SettingsTab = (typeof SETTINGS_TABS)[number];
 
 export const TAB_LABELS: Record<SettingsTab, string> = {
   library: 'Library',
+  schedules: 'Schedules',
   details: 'Details',
   ratings: 'Ratings',
   playback: 'Playback',

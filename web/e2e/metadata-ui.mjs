@@ -447,7 +447,7 @@ const scenarios = {
     check('Recently added: the film once, beside the other two', recent.length === 3 && recent.filter((t) => t === 'Twin Film').length === 1, recent.join(' | '));
     check('Recently added: its newest version', (await rail('Recently added').locator('a[href="#/item/4"]').count()) === 1);
     const resume = await rail('Continue watching').locator('a').evaluateAll((as) => as.map((a) => a.getAttribute('href')));
-    check('Continue watching: one tile, the version played last', resume.length === 1 && resume[0].startsWith('#/play/4'), resume.join(' | '));
+    check('Continue watching: one tile, the version played last', resume.length === 1 && resume[0].startsWith('#/item/4'), resume.join(' | '));
     await context.close();
   },
 

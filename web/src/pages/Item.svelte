@@ -32,6 +32,7 @@
   import Ratings from '../components/Ratings.svelte';
   import SourceBadge from '../components/SourceBadge.svelte';
   import TrailerButton from '../components/TrailerButton.svelte';
+  import SubtitleManager from '../components/SubtitleManager.svelte';
   import WatchBadge from '../components/WatchBadge.svelte';
 
   let { id }: { id: number } = $props();
@@ -157,6 +158,7 @@
 
   let fixing = $state(false);
   let editing = $state(false);
+  let managingSubs = $state(false);
   let notice = $state('');
 
   // Marking the film (all its versions) or the episode: the page changes at once and goes back on
@@ -210,6 +212,12 @@
         editing = true;
       },
       hidden: !meta || isEpisode, // an episode's meta is its show's: edited on the show page
+    },
+    {
+      label: 'Manage subtitles',
+      run: (): void => {
+        managingSubs = true;
+      },
     },
     { label: 'Refresh details', run: refresh },
   ]);
@@ -281,6 +289,9 @@
       {/if}
       <!-- A film's own; an episode's meta is its show's, whose trailer is on the show's page. -->
       {#if !isEpisode && meta}{#key meta.id}<TrailerButton titleId={meta.id} {title} />{/key}{/if}
+      <button class="btn" onclick={() => (managingSubs = true)}>
+        <Icon name="cc" />Subtitles
+      </button>
       <span class="pair">
         <button class="btn" aria-disabled={marking} onclick={toggleWatched}>
           <Icon name="check" />{item.watched ? 'Mark as unwatched' : 'Mark as watched'}
@@ -445,16 +456,23 @@
           </table>
         </div>
 
-        {#if d.subtitles.length}
+        <div class="subs-header">
           <h3>Subtitles</h3>
+          <button class="btn pill subtle" onclick={() => (managingSubs = true)}>
+            <Icon name="cc" />Manage subtitles
+          </button>
+        </div>
+        {#if d.subtitles.length}
           <ul class="reasons">
             {#each d.subtitles as sub (sub.key)}
               <li>
                 {sub.title || sub.language || sub.key}
-                <span class="muted">{sub.format}{sub.image ? ', image (burned in when selected)' : ''}</span>
+                <span class="muted">{sub.format}{sub.image ? ', image (burned in when selected)' : ''}{sub.external ? ' (sidecar)' : ''}</span>
               </li>
             {/each}
           </ul>
+        {:else}
+          <p class="muted">No subtitles attached to this file.</p>
         {/if}
       {:else if detail.error}
         <p class="error">{detail.error}</p>
@@ -474,6 +492,21 @@
     matched={!!meta && meta.matchState !== 'unmatched'}
   />
   {#if meta && !isEpisode}<EditTitle bind:open={editing} {meta} />{/if}
+  <SubtitleManager
+    bind:open={managingSubs}
+    itemId={item.id}
+    title={title}
+    isEpisode={isEpisode}
+    show={item.show}
+    season={item.season ?? undefined}
+    episode={item.episode ?? undefined}
+    subtitles={detail.data?.subtitles ?? []}
+    onchange={(newSubs) => {
+      if (detail.data) {
+        detail.data.subtitles = newSubs;
+      }
+    }}
+  />
 {/if}
 
 <style>
@@ -577,11 +610,17 @@
     display: grid;
     gap: 0.1rem;
     padding: 0.85rem 1rem;
-    background: var(--surface-raised);
-    border-radius: var(--radius);
+    background: var(--surface-panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    backdrop-filter: var(--glass-blur);
+    transition:
+      background var(--motion-hover),
+      border-color var(--motion-hover);
   }
   .siblings a:hover {
-    background: var(--surface-control);
+    background: var(--fill-hover);
+    border-color: var(--line-hover);
   }
   .siblings .next {
     grid-column: 2;
@@ -604,8 +643,11 @@
     margin: 0;
   }
   .tech {
-    border-top: 1px solid var(--line);
-    padding-top: 1rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+    backdrop-filter: var(--glass-blur);
+    padding: 1.1rem 1.25rem;
   }
   .tech summary {
     cursor: pointer;
@@ -615,6 +657,16 @@
   .tech h3 {
     margin: 1.5rem 0 0.6rem;
     font-size: var(--fs-base);
+  }
+  .subs-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin: 1.5rem 0 0.6rem;
+  }
+  .subs-header h3 {
+    margin: 0;
   }
   .source {
     margin: 1rem 0 0;

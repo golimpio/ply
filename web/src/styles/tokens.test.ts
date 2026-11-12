@@ -6,9 +6,9 @@ import { checkSources, readSources } from '../../scripts/check-tokens.mjs';
 // imported: vitest hands .css imports over empty, even with ?raw.
 const tree = readSources();
 
-const svelte = (css: string) => `<script lang="ts">\n  let a = 1;\n</script>\n\n<p>{a}</p>\n\n<style>\n${css}\n</style>\n`;
+const svelte = (css: string) => `<script lang="ts">\n  let a = 1;\n</script>\n\n<p style:--h={a}>{a}</p>\n\n<style>\n${css}\n</style>\n`;
 const clean = `  .a {\n    color: var(--text);\n    border: 1px solid transparent;\n    font: inherit;\n    border-radius: 0 var(--radius) 0 0;\n    transition: opacity var(--motion-hover) var(--ease);\n  }`;
-const TOKENS = '/* ======== Primitives ======== */\n:root {\n  --stone-900: #111;\n  --dur-9: 0.9s;\n  /* ======== Semantic tokens ======== */\n  --surface: var(--stone-900);\n}\n';
+const TOKENS = '/* ======== Primitives ======== */\n:root {\n  --stone-900: #111;\n  --dur-9: 0.9s;\n  /* ======== Semantic tokens ======== */\n  --surface: var(--stone-900);\n  --text: var(--stone-900);\n  --danger: var(--stone-900);\n  --radius: 2px;\n  --radius-lg: 8px;\n  --fs-sm: 1rem;\n  --motion-hover: 0.15s;\n  --motion-spin: 0.8s;\n  --ease: linear;\n}\n';
 /** One declaration in app.css, line 2. */
 const decl = (d: string) => checkSources({ 'styles/tokens.css': TOKENS, 'app.css': `.a {\n  ${d}\n}\n` });
 
@@ -114,7 +114,22 @@ describe('check-tokens', () => {
     ]);
   });
 
-  it('finds no raw value in the real tree', () => {
+  it('lets a component set and use its own custom property, in its sheet or its markup', () => {
+    // --mine is declared in the sheet, --h is set by the markup (Svelte's style:--h, see svelte()).
+    const a = `${svelte('  .a {\n    --mine: var(--radius);\n    margin: var(--mine);\n    z-index: var(--h);\n  }')}`;
+    expect(checkSources({ 'styles/tokens.css': TOKENS, 'components/A.svelte': a })).toEqual([]);
+  });
+
+  it.each([
+    ['a spacing token that is not there', 'gap: var(--space-200);', '--space-200'],
+    ['a surface that is not there', 'background: var(--surface-card);', '--surface-card'],
+    ['a line that is not there', 'border: 1px solid var(--border-subtle);', '--border-subtle'],
+    ['the second of two var()s', 'padding: var(--text) var(--radius-md);', '--radius-md'],
+  ])('flags %s', (_, d, name) => {
+    expect(decl(d)).toEqual([{ file: 'app.css', line: 2, message: expect.stringContaining(`no such token ${name}`) }]);
+  });
+
+  it('finds no raw value and no unknown token in the real tree', () => {
     // Positive control: the tree was read, components and app.css included, with their text.
     expect(Object.keys(tree)).toEqual(expect.arrayContaining(['app.css', 'components/MediaCard.svelte', 'styles/tokens.css']));
     expect(tree['app.css']).toContain('.btn {');

@@ -315,6 +315,7 @@ type SettingsView struct {
 	MDBListKeySet         bool     `json:"mdblistKeySet"`
 	MDBListKeySource      string   `json:"mdblistKeySource"`
 	MDBListKeyChecked     *bool    `json:"mdblistKeyChecked,omitempty"`
+	OpenSubtitlesKeySet   bool     `json:"opensubtitlesKeySet"`
 	RatingsPrimary        string   `json:"ratingsPrimary"`
 	RatingsShown          []string `json:"ratingsShown"`
 	RatingsAvailable      []string `json:"ratingsAvailable"`
