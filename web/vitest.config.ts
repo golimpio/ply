@@ -23,6 +23,9 @@ export default mergeConfig(
     resolve: { conditions: ['browser'] },
     test: {
       restoreMocks: true,
+      // In web/: Vitest's default is node_modules at the root it finds above, which can be outside
+      // the project (a node_modules in the home directory), where a sandbox refuses to write.
+      fsModuleCachePath: 'node_modules/.vitest-cache',
       projects: [
         {
           extends: true,
