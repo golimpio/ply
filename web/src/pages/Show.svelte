@@ -234,6 +234,7 @@
 {:else}
   <Hero item={entry.cover} img={backdropOf(summary) ?? undefined} label={show} landing back>
     <HeroTitle title={meta?.title || show} {logo} />
+    {#if meta?.tagline}<p class="tagline">{meta.tagline}</p>{/if}
     <div class="meta">
       {#if years}<span>{years}</span>{/if}
       {#if meta?.certification}<span class="cert">{meta.certification}</span>{/if}
@@ -303,12 +304,14 @@
     {/if}
 
     {#if order}
-      <div class="order">
-        <label for="episode-order">Episode order</label>
-        <select id="episode-order" class="settings-input" value={order} disabled={ordering} aria-describedby="episode-order-hint" onchange={changeOrder}>
-          {#each ORDERS as [value, label] (value)}<option {value}>{label}</option>{/each}
-        </select>
-        <span id="episode-order-hint" class="muted">
+      <div class="order panel-card">
+        <div class="order-main">
+          <label for="episode-order">Episode order</label>
+          <select id="episode-order" class="settings-input" value={order} disabled={ordering} aria-describedby="episode-order-hint" onchange={changeOrder}>
+            {#each ORDERS as [value, label] (value)}<option {value}>{label}</option>{/each}
+          </select>
+        </div>
+        <span id="episode-order-hint" class="order-hint muted">
           {ordering ? 'Numbering the episodes again…' : 'How your files are numbered: as aired, as on DVD, or straight through.'}
         </span>
       </div>
@@ -414,7 +417,7 @@
 
 <style>
   .body {
-    padding: 0.5rem var(--gutter) 0;
+    padding: 1.25rem var(--gutter) 0;
     max-width: 72rem;
     display: grid;
     gap: 2rem;
@@ -432,55 +435,33 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.5rem 0.75rem;
+    justify-content: space-between;
+    gap: 0.75rem 1.5rem;
+    padding: 0.9rem 1.25rem;
+  }
+  .order-main {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
   }
   .order label {
-    font-weight: var(--fw-semibold-2);
-  }
-  .order select {
-    background: var(--surface-raised);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    letter-spacing: var(--tracking-wider);
+    text-transform: uppercase;
+    color: var(--text-faint);
   }
   .order select:disabled {
     opacity: 0.6;
   }
-  .order .muted {
-    font-size: var(--fs-sm);
+  .order-hint {
+    font-size: var(--fs-sm-3);
   }
   .order-msg {
     margin: -1.25rem 0 0;
   }
-  .about {
-    display: grid;
-    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
-    gap: 2rem;
-    align-items: start;
-    max-width: 72rem;
-    padding-top: 1rem;
-    border-top: 1px solid var(--line);
-  }
-  .about-main {
-    display: grid;
-    gap: 1.25rem;
-    min-width: 0;
-  }
-  .about-side {
-    display: grid;
-    gap: 1.1rem;
-    padding-left: 2rem;
-    border-left: 1px solid var(--line);
-    min-width: 0;
-  }
-  @media (max-width: 760px) {
-    .about {
-      grid-template-columns: 1fr;
-      gap: 1.25rem;
-    }
-    .about-side {
-      padding-left: 0;
-      border-left: 0;
-      padding-top: 1rem;
-      border-top: 1px solid var(--line);
-    }
+  .season {
+    padding-bottom: var(--shelf-pad-y);
   }
   .season-top {
     display: grid;
@@ -530,6 +511,11 @@
     padding: 0.9rem 0.5rem;
     margin: 0 -0.5rem;
     border-bottom: 1px solid var(--line);
+    border-radius: var(--radius-item);
+    transition: background var(--motion-hover);
+  }
+  li:last-child {
+    border-bottom: none;
   }
   li:hover,
   li:focus-within {

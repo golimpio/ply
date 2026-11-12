@@ -343,6 +343,15 @@
                 <span class="collection-arrow" aria-hidden="true">→</span>
               </a>
             {/if}
+            {#if isEpisode && item.show}
+              <a class="callout-card" href={href.show(item.show, item.season)}>
+                <div class="callout-meta">
+                  <span class="callout-kicker">Part of the series</span>
+                  <span class="callout-name">{meta?.title || item.show}</span>
+                </div>
+                <span class="callout-arrow" aria-hidden="true">→</span>
+              </a>
+            {/if}
           </div>
         {/if}
       </section>
@@ -519,16 +528,6 @@
     font-size: var(--fs-lg);
     width: fit-content;
   }
-  .tagline {
-    margin: 0;
-    font-family: var(--font-display);
-    font-size: var(--fs-xl);
-    line-height: var(--lh-snug);
-    font-style: italic;
-    color: var(--text-lede);
-    text-wrap: balance;
-    max-width: 48rem;
-  }
   .rating {
     display: inline-flex;
     align-items: center;
@@ -554,88 +553,7 @@
   .notice {
     margin: 0;
   }
-  .about {
-    display: grid;
-    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
-    gap: 2.5rem;
-    padding: 0.5rem 0 var(--shelf-pad-y);
-  }
-  .about-main {
-    display: grid;
-    gap: 1.25rem;
-    min-width: 0;
-  }
-  .about-side {
-    display: grid;
-    gap: 1.1rem;
-    padding-left: 2rem;
-    border-left: 1px solid var(--line);
-    min-width: 0;
-  }
-  @media (max-width: 760px) {
-    .about {
-      grid-template-columns: 1fr;
-      gap: 1.75rem;
-      padding-bottom: var(--shelf-pad-y);
-    }
-    .about-side {
-      padding-left: 0;
-      border-left: 0;
-      padding-top: 1.25rem;
-      border-top: 1px solid var(--line);
-    }
-  }
   .versions .chip {
-    display: inline-flex;
-    align-items: center;
-  }
-  .collection-callout {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    padding: 0.85rem 1.15rem;
-    background: var(--surface-panel);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
-    backdrop-filter: var(--glass-blur);
-    margin-top: 0.5rem;
-    transition:
-      background var(--motion-hover),
-      border-color var(--motion-hover);
-  }
-  .collection-callout:hover {
-    background: var(--fill-hover);
-    border-color: var(--line-hover);
-  }
-  .collection-meta {
-    display: grid;
-    gap: 0.15rem;
-  }
-  .collection-kicker {
-    font-family: var(--font-mono);
-    font-size: var(--fs-2xs-2);
-    letter-spacing: var(--tracking-widest);
-    text-transform: uppercase;
-    color: var(--text-faint);
-  }
-  .collection-name {
-    font-size: var(--fs-sm-3);
-    font-weight: var(--fw-semibold);
-    color: var(--text);
-  }
-  .collection-arrow {
-    font-size: var(--fs-lg);
-    color: var(--text-muted);
-    transition:
-      transform var(--motion-hover),
-      color var(--motion-hover);
-  }
-  .collection-callout:hover .collection-arrow {
-    color: var(--text);
-    transform: translateX(3px);
-  }
-  .versions h2 {
     margin-bottom: 0.6rem;
   }
   .versions ul {

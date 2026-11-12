@@ -377,14 +377,17 @@ code {
 
 /* A raised card of the settings, in parts divided by a line. Named so that no component's own
    .panel (the search palette, Activity, the sign-in prompt) picks it up. */
+.panel-card,
 .settings-panel {
-  display: grid;
-  gap: 1.1rem;
-  padding: 1.1rem 1.25rem;
   background: var(--surface-panel);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   backdrop-filter: var(--glass-blur);
+}
+.settings-panel {
+  display: grid;
+  gap: 1.1rem;
+  padding: 1.1rem 1.25rem;
 }
 .settings-panel p {
   margin: 0;
@@ -560,6 +563,18 @@ select.settings-input option {
     flex-wrap: nowrap;
   }
 }
+/* Hero tagline: elegant italic lede */
+.tagline {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-xl);
+  line-height: var(--lh-snug);
+  font-style: italic;
+  color: var(--text-lede);
+  text-wrap: balance;
+  max-width: 48rem;
+}
+
 /* "This might not be the right film": a note in the warning colour, with an icon and a button. */
 .review-note {
   display: flex;
@@ -621,6 +636,95 @@ select.settings-input option {
   font-size: var(--fs-sm-3);
   color: var(--text);
   line-height: var(--lh-snug);
+}
+
+/* Detail page overview & credits layout: DRY across films (Item) and series (Show) */
+.about {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  gap: 2.5rem;
+  align-items: stretch;
+  padding: 0.5rem 0 var(--shelf-pad-y);
+}
+.about-main {
+  display: grid;
+  gap: 1.25rem;
+  min-width: 0;
+}
+.about-side {
+  display: grid;
+  gap: 1.1rem;
+  padding-left: 2rem;
+  border-left: 1px solid var(--line);
+  min-width: 0;
+}
+@media (max-width: 760px) {
+  .about {
+    grid-template-columns: 1fr;
+    gap: 1.75rem;
+    padding-bottom: var(--shelf-pad-y);
+  }
+  .about-side {
+    padding-left: 0;
+    border-left: 0;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--line);
+  }
+}
+
+/* Callout cards: interactive glass cards linking to a collection, series, etc. */
+.callout-card,
+.collection-callout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1.15rem;
+  background: var(--surface-panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  backdrop-filter: var(--glass-blur);
+  margin-top: 0.5rem;
+  transition:
+    background var(--motion-hover),
+    border-color var(--motion-hover);
+}
+.callout-card:hover,
+.collection-callout:hover {
+  background: var(--fill-hover);
+  border-color: var(--line-hover);
+}
+.callout-meta,
+.collection-meta {
+  display: grid;
+  gap: 0.15rem;
+}
+.callout-kicker,
+.collection-kicker {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs-2);
+  letter-spacing: var(--tracking-widest);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.callout-name,
+.collection-name {
+  font-size: var(--fs-sm-3);
+  font-weight: var(--fw-semibold);
+  color: var(--text);
+}
+.callout-arrow,
+.collection-arrow {
+  font-size: var(--fs-lg);
+  color: var(--text-muted);
+  transition:
+    transform var(--motion-hover),
+    color var(--motion-hover);
+}
+.callout-card:hover .callout-arrow,
+.collection-callout:hover .collection-arrow {
+  color: var(--text);
+  transform: translateX(3px);
 }
 
 /* Ratings (M10): one chip per source on a detail page, and the quiet form of cards and rows. */
