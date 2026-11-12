@@ -44,6 +44,11 @@ var (
 
 const rootNotFound = "root not found"
 
+// statusSettingUp is the reason a root carries while its first walk runs. A big tree on a slow
+// share can take a while, and until it finishes the root is neither watched nor refused: without
+// this, Settings says "Not watched" with no reason, which reads like a failure it has not had.
+const statusSettingUp = "setting up"
+
 // setupConcurrency is how many directories the setup of a tree lists, and
 // watches and snapshots, at once. On a network share each of those waits for the
 // server: on an SMB NAS (measured 2026-11-11, 440 show folders) the walk took 65 s,
@@ -645,6 +650,7 @@ func (w *Watcher) setupRoot(ctx context.Context, i int) bool {
 		return w.rootUnavailable(i, err.Error())
 	}
 	r.missing, r.hopeless, r.info = false, false, fi
+	w.setStatus(i, false, statusSettingUp)
 	if err := w.addTree(ctx, r.path, i, false); err != nil {
 		if ctx.Err() == nil {
 			w.failRoot(i, err)

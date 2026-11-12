@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -252,6 +253,30 @@ func TestNewWatchesEverything(t *testing.T) {
 	if s := w.Status()[0]; s.Depth != DepthAll {
 		t.Fatalf("status %+v, want depth %d", s, DepthAll)
 	}
+}
+
+// A root whose first walk is still running says so. It is neither watched nor refused yet, and the
+// old silence showed in Settings as "Not watched" with no reason -- which is how the deep root of a
+// local library looked while its setup was blocked.
+func TestSettingUpRootSaysSo(t *testing.T) {
+	root := t.TempDir()
+	mkdirs(t, root, "A/b")
+	log, _ := testLogger(t)
+	fb := newFakeBackend()
+	w := New(&fakeScanner{}, []string{root}, log)
+	w.mkBackend = func() (backend, error) { return fb, nil }
+	w.maxDirs = -1
+	gate := make(chan struct{})
+	var once sync.Once
+	w.readDir = func(d string) ([]os.DirEntry, error) {
+		once.Do(func() { <-gate }) // the walk's first read: the status has to say it is setting up
+		return os.ReadDir(d)
+	}
+	w.quiet, w.maxWait, w.retry, w.recheck = 100*time.Millisecond, time.Second, 200*time.Millisecond, time.Hour
+	start(t, w)
+	waitRoot(t, w, 0, "setting up", func(s RootStatus) bool { return s.Error == statusSettingUp && !s.Watching })
+	close(gate)
+	waitRoot(t, w, 0, "watched", func(s RootStatus) bool { return s.Watching && s.Error == "" })
 }
 
 func TestGoneDirThatCameBackIsWatchedAgain(t *testing.T) {
