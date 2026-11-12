@@ -2,6 +2,7 @@ package api
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -32,7 +33,7 @@ func TestAirPlayUsesOneReceiverIndependentSession(t *testing.T) {
 	rec := e.start(e.mp4, `{"profile":"airplay","startSec":37,"audioIndex":1}`, safari)
 	wantStatus(t, rec, 200)
 	pb := decode[Playback](t, rec)
-	if pb.Method != "remux" || pb.SessionID == "" || pb.AudioIndex != 1 || pb.StartSec != 37 {
+	if pb.Method != "transcode" || pb.SessionID == "" || pb.AudioIndex != 1 || pb.StartSec != 37 {
 		t.Fatalf("AirPlay playback: %+v", pb)
 	}
 	// The receiver has its own address and user agent. It fetches the same HLS
@@ -55,7 +56,7 @@ func TestAirPlayTextSubtitleRendition(t *testing.T) {
 	token := "s3 cret&x"
 	e := newEnv(t, token)
 	e.withSubs(fakeSubsScript)
-	e.withStreams(fakeAirPlayFFmpeg(t), func(o *stream.Options) { o.WaitTimeout = 5 * time.Second })
+	e.withAirPlayStreams()
 	auth := map[string]string{"Authorization": "Bearer " + token}
 	rec := e.post(fmt.Sprintf("/api/items/%d/playback", e.mkv), `{"profile":"airplay","subtitleKey":"3","startSec":123}`, auth)
 	wantStatus(t, rec, 200)
@@ -69,7 +70,7 @@ func TestAirPlayTextSubtitleRendition(t *testing.T) {
 	for _, want := range []string{
 		`TYPE=SUBTITLES,GROUP-ID="subs",NAME="Portuguese"`,
 		`DEFAULT=YES,AUTOSELECT=YES,LANGUAGE="pt"`,
-		`CODECS="avc1.640028,mp4a.40.2",RESOLUTION=640x360`,
+		`CODECS="avc1.640028,mp4a.40.2",RESOLUTION=640x360`, "#EXT-X-VERSION:4",
 		`SUBTITLES="subs"`, "subtitles.m3u8?token=s3+cret%26x", "index.m3u8?token=s3+cret%26x",
 	} {
 		if !strings.Contains(master.Body.String(), want) {
@@ -114,7 +115,7 @@ func TestAirPlayTextSubtitleRendition(t *testing.T) {
 func TestAirPlaySubtitleValidationAndSidecar(t *testing.T) {
 	e := newEnv(t, "")
 	e.withSubs(fakeSubsScript)
-	e.withStreams(fakeAirPlayFFmpeg(t), func(o *stream.Options) { o.WaitTimeout = 5 * time.Second })
+	e.withAirPlayStreams()
 	entry, err := e.store.GetEntry(t.Context(), e.mp4)
 	if err != nil {
 		t.Fatal(err)
@@ -312,4 +313,83 @@ done
 cp %q "$init"
 exec sleep 60
 `, path))
+}
+
+func (e *env) withAirPlayStreams() *stream.Manager {
+	e.t.Helper()
+	packet := make([]byte, 188)
+	copy(packet, []byte{0x47, 0x1f, 0xff, 0x10})
+	path := filepath.Join(e.t.TempDir(), "packet.ts")
+	if err := os.WriteFile(path, bytes.Repeat(packet, 3), 0o600); err != nil {
+		e.t.Fatal(err)
+	}
+	ffmpeg := fakeFFmpeg(e.t, fmt.Sprintf(`
+last=""; n=0
+for a in "$@"; do
+  if [ "$last" = "-start_number" ]; then n="$a"; fi
+  last="$a"
+done
+end=$((n+4))
+while [ "$n" -lt "$end" ]; do
+  cp %q "$(printf 'gop%%05d.ts' "$n")"
+  n=$((n+1))
+done
+exec sleep 60
+`, path))
+	ffprobe := fakeFFmpeg(e.t, `cat >/dev/null
+printf '%s' '{"streams":[{"codec_type":"video","codec_name":"h264","width":640,"height":360,"extradata":"00000000: 0000 0001 6764 0028 aabb ccdd                 ....gd.(...."},{"codec_type":"audio","codec_name":"aac","profile":"LC"}]}'
+`)
+	return e.withStreams(ffmpeg, func(o *stream.Options) {
+		o.FFprobe = ffprobe
+		o.WaitTimeout = 5 * time.Second
+	})
+}
+
+func TestAirPlayTransportIsolation(t *testing.T) {
+	e := newEnv(t, "")
+	m := e.withAirPlayStreams()
+	pb := decode[Playback](t, e.start(e.mp4, `{"profile":"airplay"}`, safari))
+	root := "/api/sessions/" + pb.SessionID + "/"
+	playlist := e.get(pb.URL)
+	wantStatus(t, playlist, 200)
+	if !strings.Contains(playlist.Body.String(), "#EXT-X-VERSION:3") || !strings.Contains(playlist.Body.String(), "seg00000.ts") {
+		t.Fatalf("legacy playlist: %s", playlist.Body.String())
+	}
+	segment := e.get(root + "seg00000.ts")
+	wantStatus(t, segment, 200)
+	if segment.Header().Get("Content-Type") != "video/mp2t" || segment.Body.Len() != 3*188 || segment.Body.Bytes()[0] != 0x47 {
+		t.Fatalf("TS response: %v len=%d", segment.Header(), segment.Body.Len())
+	}
+	// Establish a working MP4 init before rejecting that resource on the TS session.
+	m.Delete(pb.SessionID)
+	m = e.withStreams(fakeAirPlayFFmpeg(t), func(o *stream.Options) { o.WaitTimeout = 5 * time.Second })
+	entry, err := e.store.GetEntry(t.Context(), e.mp4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	control, err := m.Create(t.Context(), stream.Request{ItemID: e.mp4, Path: entry.Path, Container: entry.Container, DurationSec: entry.DurationSec, AudioIndex: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	modernRoot := "/api/sessions/" + control.ID + "/"
+	init := e.get(modernRoot + "init.mp4")
+	wantStatus(t, init, 200)
+	if init.Header().Get("Content-Type") != "video/mp4" || init.Body.Len() == 0 {
+		t.Fatalf("MP4 init control: %v", init.Header())
+	}
+	modernPlaylist := e.get(modernRoot + "index.m3u8")
+	wantStatus(t, modernPlaylist, 200)
+	if !strings.Contains(modernPlaylist.Body.String(), "#EXT-X-MAP:") || !strings.Contains(modernPlaylist.Body.String(), "seg00000.m4s") {
+		t.Fatalf("MP4 playlist control: %s", modernPlaylist.Body.String())
+	}
+	wantStatus(t, e.get(modernRoot+"seg00000.ts"), 404)
+
+	// Create a live TS play to prove aliases are refused,
+	// rather than obtaining a 404 from a deleted session.
+	e.withAirPlayStreams()
+	pb = decode[Playback](t, e.start(e.mp4, `{"profile":"airplay"}`, safari))
+	root = "/api/sessions/" + pb.SessionID + "/"
+	wantStatus(t, e.get(root+"seg00000.ts"), 200)
+	wantStatus(t, e.get(root+"seg00000.m4s"), 404)
+	wantStatus(t, e.get(root+"init.mp4"), 404)
 }

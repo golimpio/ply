@@ -49,7 +49,7 @@ func TestAirPlayEndToEnd(t *testing.T) {
 			if err := json.Unmarshal(b, &pb); err != nil {
 				t.Fatal(err)
 			}
-			if pb.Method != "remux" || pb.SessionID == "" || !strings.Contains(pb.URL, "master.m3u8?token=") {
+			if pb.Method != "transcode" || pb.SessionID == "" || !strings.Contains(pb.URL, "master.m3u8?token=") {
 				t.Fatalf("playback: %+v", pb)
 			}
 			base := "/api/sessions/" + pb.SessionID + "/"
@@ -58,7 +58,7 @@ func TestAirPlayEndToEnd(t *testing.T) {
 			if resp.StatusCode != 200 {
 				t.Fatalf("master = %d: %s", resp.StatusCode, master)
 			}
-			for _, want := range []string{`CODECS="avc1.`, "mp4a.40.2", "RESOLUTION=320x180", "subtitles.m3u8" + suffix, "index.m3u8" + suffix} {
+			for _, want := range []string{"#EXT-X-VERSION:4", `CODECS="avc1.`, "mp4a.40.2", "RESOLUTION=320x180", "subtitles.m3u8" + suffix, "index.m3u8" + suffix} {
 				if !strings.Contains(string(master), want) {
 					t.Errorf("master lacks %q: %s", want, master)
 				}
@@ -67,18 +67,20 @@ func TestAirPlayEndToEnd(t *testing.T) {
 			if resp.StatusCode != 200 || !strings.Contains(string(playlist), "#EXT-X-START:TIME-OFFSET=3.000") {
 				t.Fatalf("media playlist: %d %s", resp.StatusCode, playlist)
 			}
-			initURI, segs := parsePlaylist(t, string(playlist))
-			resp, init := e.do("GET", base+initURI, "", nil)
-			if resp.StatusCode != 200 {
-				t.Fatalf("init = %d: %s", resp.StatusCode, init)
+			segs := extinf.FindAllStringSubmatch(string(playlist), -1)
+			if len(segs) == 0 || !strings.Contains(string(playlist), "#EXT-X-VERSION:3") || !strings.Contains(segs[0][2], ".ts") {
+				t.Fatalf("legacy media playlist: %s", playlist)
 			}
-			resp, segment := e.do("GET", base+segs[0].uri, "", nil)
+			resp, segment := e.do("GET", base+segs[0][2], "", nil)
 			if resp.StatusCode != 200 {
 				t.Fatalf("segment = %d: %s", resp.StatusCode, segment)
 			}
-			start, _ := videoSpan(t, init, segment)
-			if math.Abs(start-(segs[0].start+stream.TimelineOffset)) > 0.1 {
-				t.Errorf("media timeline starts %.3f; want %.3f", start, segs[0].start+stream.TimelineOffset)
+			if resp.Header.Get("Content-Type") != "video/mp2t" || len(segment) < 188 || segment[0] != 0x47 {
+				t.Fatalf("TS segment: %v len=%d", resp.Header, len(segment))
+			}
+			start, _ := videoSpan(t, nil, segment)
+			if math.Abs(start-stream.TimelineOffset) > 0.1 {
+				t.Errorf("media timeline starts %.3f; want %.3f", start, stream.TimelineOffset)
 			}
 			resp, subtitles := e.do("GET", base+"subtitles.m3u8"+suffix, "", nil)
 			if resp.StatusCode != 200 || !strings.Contains(string(subtitles), "subtitles.vtt"+suffix) {

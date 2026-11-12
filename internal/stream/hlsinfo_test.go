@@ -1,9 +1,16 @@
 package stream
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func hlsDescriptor(tag byte, payload []byte) []byte {
@@ -119,5 +126,100 @@ func TestHLSAACDescriptorBoundaries(t *testing.T) {
 		if _, err := aacHLSCodec(bad); err == nil {
 			t.Fatalf("invalid descriptor accepted: %x", bad)
 		}
+	}
+}
+
+const tsMetadataFixture = `{"streams":[
+	{"codec_type":"video","codec_name":"h264","width":640,"height":360,"extradata":"00000000: 0000 0001 6764 0028 aabb ccdd                 ....gd.(...."},
+	{"codec_type":"audio","codec_name":"aac","profile":"LC"}
+]}`
+
+func TestMPEGTSMetadataUsesOutputSPS(t *testing.T) {
+	got, err := parseMPEGTSHLSInfo([]byte(tsMetadataFixture))
+	if err != nil || got.Codecs != "avc1.640028,mp4a.40.2" || got.Width != 640 || got.Height != 360 {
+		t.Fatalf("output metadata = %+v, %v", got, err)
+	}
+	// SPS NAL data, rather than a named profile or an assumed level, determines
+	// all three RFC 6381 bytes. Both Annex B start-code sizes are accepted.
+	for _, tc := range []struct {
+		data []byte
+		want string
+	}{
+		{[]byte{0, 0, 1, 0x67, 0x42, 0xe0, 0x1e}, "avc1.42E01E"},
+		{[]byte{0, 0, 0, 1, 0x68, 1, 2, 0, 0, 1, 0x67, 0x4d, 0x40, 0x29}, "avc1.4D4029"},
+	} {
+		codec, err := annexBAVCCodec(tc.data)
+		if err != nil || codec != tc.want {
+			t.Fatalf("SPS %x: codec %q, %v; want %s", tc.data, codec, err, tc.want)
+		}
+	}
+	for _, bad := range []string{
+		"{",
+		strings.Replace(tsMetadataFixture, `"width":640`, `"width":0`, 1),
+		strings.Replace(tsMetadataFixture, `"codec_name":"h264"`, `"codec_name":"hevc"`, 1),
+		strings.Replace(tsMetadataFixture, "6764", "6864", 1),
+		strings.Replace(tsMetadataFixture, "00000000:", "00000010:", 1),
+		strings.Replace(tsMetadataFixture, "aabb", "zzzz", 1),
+		strings.Replace(tsMetadataFixture, `"profile":"LC"`, `"profile":"HE-AAC"`, 1),
+		`{"streams":[{"codec_type":"audio","codec_name":"aac","profile":"LC"}]}`,
+	} {
+		if info, err := parseMPEGTSHLSInfo([]byte(bad)); err == nil {
+			t.Fatalf("invalid output accepted as %+v: %s", info, bad)
+		}
+	}
+}
+
+func metadataProbe(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "ffprobe")
+	if err := writeExecutable(path, "#!/bin/sh\n"+body); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestMPEGTSMetadataProbeIsConfiguredAndBounded(t *testing.T) {
+	bin := metadataProbe(t, "cat > \"$0.input\"\nprintf '%s\\n' \"$@\" > \"$0.args\"\ncat <<'JSON'\n"+tsMetadataFixture+"\nJSON\n")
+	input := bytes.Repeat([]byte{0x47}, metadataInputLimit+1024)
+	got, err := probeMPEGTSHLSInfo(t.Context(), bin, bytes.NewReader(input))
+	if err != nil || got.Codecs != "avc1.640028,mp4a.40.2" {
+		t.Fatalf("configured metadata probe: %+v, %v", got, err)
+	}
+	read, err := os.ReadFile(bin + ".input")
+	if err != nil || len(read) != metadataInputLimit || !bytes.Equal(read, input[:metadataInputLimit]) {
+		t.Fatalf("metadata input length=%d, %v; want bounded generated media", len(read), err)
+	}
+	args, err := os.ReadFile(bin + ".args")
+	if err != nil || !strings.Contains(string(args), "-show_data\n") || !strings.Contains(string(args), "-i\npipe:0\n") {
+		t.Fatalf("metadata arguments %q, %v", args, err)
+	}
+
+	overflow := metadataProbe(t, fmt.Sprintf("printf '%%s' '%s'\n", strings.Repeat("x", metadataOutputLimit+1)))
+	if _, err := probeMPEGTSHLSInfo(t.Context(), overflow, strings.NewReader("")); err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("unbounded output was not rejected: %v", err)
+	}
+	failed := metadataProbe(t, "printf 'bad generated media' >&2\nexit 3\n")
+	if _, err := probeMPEGTSHLSInfo(t.Context(), failed, strings.NewReader("")); err == nil || !strings.Contains(err.Error(), "bad generated media") {
+		t.Fatalf("probe failure was ignored: %v", err)
+	}
+}
+
+func TestMPEGTSMetadataProbeCancelsAndCanRetry(t *testing.T) {
+	bin := metadataProbe(t, "exec sleep 1\n")
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err := probeMPEGTSHLSInfo(ctx, bin, strings.NewReader(""))
+	if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > 500*time.Millisecond {
+		t.Fatalf("probe cancellation: %v after %s", err, time.Since(started))
+	}
+	// A cancelled request is not a cached media failure: another request can
+	// probe the same configured binary and get the actual output metadata.
+	if err := writeExecutable(bin, "#!/bin/sh\ncat <<'JSON'\n"+tsMetadataFixture+"\nJSON\n"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := probeMPEGTSHLSInfo(t.Context(), bin, strings.NewReader(""))
+	if err != nil || got.Width != 640 {
+		t.Fatalf("retry after cancellation: %+v, %v", got, err)
 	}
 }

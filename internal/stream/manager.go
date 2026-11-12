@@ -208,6 +208,9 @@ type Request struct {
 	AudioCodec  string
 	AudioCopy   bool
 	StartSec    float64
+	// MPEGTS is legacy HLS transport. It requires a video transcode so each
+	// synthetic segment is exactly one GOP, with no transport-stream splicing.
+	MPEGTS bool
 	// Wireless starts with a bounded receiver grace period; a heartbeat can change it.
 	Wireless bool
 	// SubtitleKey is the text rendition exposed by the API for this session.
@@ -640,6 +643,9 @@ func (m *Manager) Close() {
 // segment containing r.StartSec so the first segment is ready when asked for.
 func (m *Manager) Create(ctx context.Context, r Request) (*Session, error) {
 	transcode := r.transcode()
+	if r.MPEGTS && (!transcode || (r.Fallback != nil && r.Fallback.copy())) {
+		return nil, fmt.Errorf("MPEG-TS HLS requires primary and fallback video transcodes")
+	}
 	m.mu.Lock()
 	if m.closed {
 		m.unlock()
@@ -684,7 +690,7 @@ func (m *Manager) Create(ctx context.Context, r Request) (*Session, error) {
 		release()
 		return nil, err
 	}
-	plan, err := NewPlan(kf, r.DurationSec, m.o.SegmentSec)
+	plan, err := newPlan(kf, r.DurationSec, m.o.SegmentSec, !r.MPEGTS)
 	if err != nil {
 		release()
 		return nil, fmt.Errorf("%s: %w", filepath.Base(r.Path), err)

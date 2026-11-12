@@ -13,6 +13,13 @@ const TimelineOffset = 2.0
 // gopPattern and gopFile name the per-GOP fragments ffmpeg writes.
 const gopPattern = "gop%05d.m4s"
 
+func fragmentPattern(mpegts bool) string {
+	if mpegts {
+		return "gop%05d.ts"
+	}
+	return gopPattern
+}
+
 // VideoSpec says how the video stream is produced. The zero value copies it.
 type VideoSpec struct {
 	Codec  string   // source codec; hevc copies are tagged hvc1
@@ -40,6 +47,7 @@ type RunSpec struct {
 	AudioIndex int // ffprobe stream index, <0 for none
 	Video      VideoSpec
 	Audio      AudioSpec
+	MPEGTS     bool
 	SeekSec    float64 // input seek (see SeekTarget); <=0 starts at the beginning
 	StartGOP   int
 	InitName   string // per-run init file, so a restart never rewrites the served one
@@ -71,7 +79,12 @@ func BuildArgs(r RunSpec) []string {
 	a = append(a, "-analyzeduration", "0", "-probesize", "1M")
 	a = append(a, "-i", r.Input)
 	if r.Video.Complex != "" && !r.Video.copy() {
-		a = append(a, "-filter_complex", r.Video.Complex, "-map", "[v]")
+		graph, output := r.Video.Complex, "[v]"
+		if r.MPEGTS {
+			graph += ";[v]fps=30[legacy]"
+			output = "[legacy]"
+		}
+		a = append(a, "-filter_complex", graph, "-map", output)
 	} else {
 		a = append(a, "-map", "0:"+strconv.Itoa(r.VideoIndex))
 	}
@@ -85,35 +98,54 @@ func BuildArgs(r RunSpec) []string {
 			a = append(a, "-tag:v", "hvc1")
 		}
 	} else {
-		if r.Video.Filter != "" && r.Video.Complex == "" {
-			a = append(a, "-vf", r.Video.Filter)
+		if r.Video.Complex == "" {
+			filter := r.Video.Filter
+			if r.MPEGTS {
+				if filter != "" {
+					filter += ","
+				}
+				filter += "fps=30"
+			}
+			if filter != "" {
+				a = append(a, "-vf", filter)
+			}
 		}
 		a = append(a, r.Video.Encode...)
-		a = append(a, "-force_key_frames", KeyFrameExpr(r.SegmentSec), "-fps_mode", "passthrough")
+		a = append(a, "-force_key_frames", KeyFrameExpr(r.SegmentSec))
+		if r.MPEGTS {
+			a = append(a, "-profile:v", "high", "-level:v", "4.0")
+		}
+		a = append(a, "-fps_mode", "passthrough")
 	}
 	switch {
 	case r.AudioIndex < 0:
 		a = append(a, "-an")
-	case r.Audio.Copy:
+	case r.Audio.Copy && !r.MPEGTS:
 		a = append(a, "-c:a", "copy")
 		if r.Audio.Codec == "aac" {
 			a = append(a, "-bsf:a", "aac_adtstoasc") // ADTS (ts) to MP4 framing; a no-op otherwise
 		}
 	default:
 		a = append(a, "-c:a", "aac", "-b:a", "192k", "-ac", "2")
+		if r.MPEGTS {
+			a = append(a, "-profile:a", "aac_low", "-ar", "48000")
+		}
 	}
 	a = append(a, "-sn", "-dn", "-max_muxing_queue_size", "4096")
 
 	a = append(a,
 		"-copyts", "-start_at_zero", "-avoid_negative_ts", "disabled",
 		"-output_ts_offset", seconds(r.Offset),
-		"-f", "hls", "-hls_time", "0.001", "-hls_list_size", "0",
-		"-hls_segment_type", "fmp4", "-hls_fmp4_init_filename", r.InitName,
-		"-start_number", strconv.Itoa(r.StartGOP),
-		"-hls_segment_filename", gopPattern,
-		"-hls_flags", "temp_file",
-		"-hls_segment_options", "movflags=frag_discont+skip_sidx+",
-		"ffmpeg.m3u8")
+		"-f", "hls", "-hls_time", "0.001", "-hls_list_size", "0")
+	if r.MPEGTS {
+		a = append(a, "-hls_segment_type", "mpegts", "-muxdelay", "0", "-muxpreload", "0",
+			"-hls_segment_options", "mpegts_copyts=1:mpegts_flags=+initial_discontinuity")
+	} else {
+		a = append(a, "-hls_segment_type", "fmp4", "-hls_fmp4_init_filename", r.InitName,
+			"-hls_segment_options", "movflags=frag_discont+skip_sidx+")
+	}
+	a = append(a, "-start_number", strconv.Itoa(r.StartGOP),
+		"-hls_segment_filename", fragmentPattern(r.MPEGTS), "-hls_flags", "temp_file", "ffmpeg.m3u8")
 	return a
 }
 

@@ -4,10 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"os/exec"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // HLSInfo describes the generated stream, which may differ from the source after
@@ -17,8 +22,11 @@ type HLSInfo struct {
 	Width, Height int
 }
 
-// HLSInfo reads the generated init segment, never the source film.
+// HLSInfo reads generated media metadata, never the source film.
 func (s *Session) HLSInfo(ctx context.Context) (HLSInfo, error) {
+	if s.MPEGTS() {
+		return s.mpegTSHLSInfo(ctx)
+	}
 	f, err := s.OpenInit(ctx)
 	if err != nil {
 		return HLSInfo{}, err
@@ -225,4 +233,176 @@ func aacHLSCodec(data []byte) (string, error) {
 		return "", errMalformedMP4
 	}
 	return fmt.Sprintf("mp4a.40.%d", objectType), nil
+}
+
+func (s *Session) mpegTSHLSInfo(ctx context.Context) (HLSInfo, error) {
+	if err := ctx.Err(); err != nil {
+		return HLSInfo{}, err
+	}
+	if s.stopping() {
+		return HLSInfo{}, ErrClosed
+	}
+	if cached := s.hlsInfo.Load(); cached != nil {
+		return *cached, nil
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		select {
+		case <-s.Done():
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	release := s.Hold()
+	defer release()
+	if _, err := s.Playlist(ctx, ""); err != nil {
+		return HLSInfo{}, err
+	}
+	media, err := s.OpenSegment(ctx, s.Plan().SegmentAt(s.req.StartSec))
+	if err != nil {
+		return HLSInfo{}, err
+	}
+	defer media.Close()
+	info, err := probeMPEGTSHLSInfo(ctx, s.m.o.FFprobe, media)
+	if s.stopping() {
+		return HLSInfo{}, ErrClosed
+	}
+	if err == nil && s.req.AudioIndex >= 0 && !strings.Contains(info.Codecs, "mp4a.40.2") {
+		return HLSInfo{}, errors.New("HLS metadata probe did not find the selected audio")
+	}
+	if err == nil {
+		// Later master requests must not rewind an active producer to the resume segment.
+		s.hlsInfo.CompareAndSwap(nil, &info)
+	}
+	return info, err
+}
+
+const (
+	metadataInputLimit  = 4 << 20
+	metadataOutputLimit = 64 << 10
+)
+
+// Only a bounded prefix of a completed generated segment is inspected. The
+// open Media retains its files across a concurrent seek or cache pruning.
+func probeMPEGTSHLSInfo(ctx context.Context, ffprobe string, media io.Reader) (HLSInfo, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, ffprobe, "-v", "error", "-f", "mpegts",
+		"-probesize", strconv.Itoa(metadataInputLimit), "-analyzeduration", "1000000",
+		"-show_entries", "stream=codec_type,codec_name,width,height,profile,extradata",
+		"-show_data", "-of", "json", "-i", "pipe:0")
+	cmd.Stdin = io.LimitReader(media, metadataInputLimit)
+	var stderr tailBuffer
+	cmd.Stderr = &stderr
+	cmd.WaitDelay = 2 * time.Second
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return HLSInfo{}, err
+	}
+	if err := cmd.Start(); err != nil {
+		return HLSInfo{}, fmt.Errorf("start HLS metadata probe: %w", err)
+	}
+	data, readErr := io.ReadAll(io.LimitReader(stdout, metadataOutputLimit+1))
+	overflow := len(data) > metadataOutputLimit
+	if overflow || readErr != nil {
+		cancel()
+	}
+	waitErr := cmd.Wait()
+	switch {
+	case overflow:
+		return HLSInfo{}, errors.New("HLS metadata probe output is too large")
+	case ctx.Err() != nil:
+		return HLSInfo{}, ctx.Err()
+	case readErr != nil:
+		return HLSInfo{}, readErr
+	case waitErr != nil:
+		return HLSInfo{}, fmt.Errorf("HLS metadata probe: %w: %s", waitErr, stderr.String())
+	}
+	return parseMPEGTSHLSInfo(data)
+}
+
+func parseMPEGTSHLSInfo(data []byte) (HLSInfo, error) {
+	var result struct {
+		Streams []struct {
+			Type      string `json:"codec_type"`
+			Codec     string `json:"codec_name"`
+			Width     int    `json:"width"`
+			Height    int    `json:"height"`
+			Profile   string `json:"profile"`
+			ExtraData string `json:"extradata"`
+		} `json:"streams"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return HLSInfo{}, fmt.Errorf("HLS metadata JSON: %w", err)
+	}
+	var info HLSInfo
+	videoCodec, audioCodec := "", ""
+	for _, track := range result.Streams {
+		switch track.Type {
+		case "video":
+			if videoCodec != "" || track.Codec != "h264" || track.Width <= 0 || track.Height <= 0 {
+				return HLSInfo{}, errors.New("HLS transport stream has invalid AVC video")
+			}
+			config, err := probeHexData(track.ExtraData)
+			if err != nil {
+				return HLSInfo{}, err
+			}
+			videoCodec, err = annexBAVCCodec(config)
+			if err != nil {
+				return HLSInfo{}, err
+			}
+			info.Width, info.Height = track.Width, track.Height
+		case "audio":
+			if audioCodec != "" || track.Codec != "aac" || track.Profile != "LC" {
+				return HLSInfo{}, fmt.Errorf("HLS transport stream has invalid AAC-LC audio: codec %q, profile %q", track.Codec, track.Profile)
+			}
+			audioCodec = "mp4a.40.2"
+		}
+	}
+	if videoCodec == "" {
+		return HLSInfo{}, errors.New("HLS transport stream has no AVC video")
+	}
+	info.Codecs = videoCodec
+	if audioCodec != "" {
+		info.Codecs += "," + audioCodec
+	}
+	return info, nil
+}
+
+// ffprobe prints extradata as offset-prefixed hex groups followed by ASCII.
+func probeHexData(dump string) ([]byte, error) {
+	var data []byte
+	for _, line := range strings.Split(strings.TrimSpace(dump), "\n") {
+		offset, body, ok := strings.Cut(line, ":")
+		n, err := strconv.ParseUint(strings.TrimSpace(offset), 16, 32)
+		if !ok || err != nil || n != uint64(len(data)) {
+			return nil, errors.New("invalid HLS codec hex data")
+		}
+		body = strings.TrimLeft(body, " ")
+		hexPart, _, _ := strings.Cut(body, "  ")
+		part, err := hex.DecodeString(strings.Join(strings.Fields(hexPart), ""))
+		if err != nil || len(part) == 0 {
+			return nil, errors.New("invalid HLS codec hex data")
+		}
+		data = append(data, part...)
+	}
+	return data, nil
+}
+
+func annexBAVCCodec(data []byte) (string, error) {
+	for i := 0; i+5 < len(data); i++ {
+		if data[i] != 0 || data[i+1] != 0 {
+			continue
+		}
+		start := i + 2
+		if data[start] == 0 {
+			start++
+		}
+		if start+4 >= len(data) || data[start] != 1 || data[start+1]&0x9f != 7 {
+			continue
+		}
+		return fmt.Sprintf("avc1.%02X%02X%02X", data[start+2], data[start+3], data[start+4]), nil
+	}
+	return "", errors.New("HLS transport stream has no AVC SPS")
 }

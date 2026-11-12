@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"ply/internal/hwaccel"
@@ -34,6 +35,10 @@ func (s *Server) attachSession(w http.ResponseWriter, r *http.Request, e store.E
 		writeError(w, http.StatusUnprocessableEntity, "item has no video stream")
 		return false
 	}
+	if profile.Name == "airplay" && (video.Width <= 0 || video.Height <= 0) {
+		writeError(w, http.StatusUnprocessableEntity, "video dimensions are unknown; rescan this item before using AirPlay")
+		return false
+	}
 	if d.Method == playback.MethodTranscode && e.DurationSec <= 0 {
 		writeError(w, http.StatusUnprocessableEntity, "item has no known duration; it cannot be transcoded")
 		return false
@@ -52,6 +57,7 @@ func (s *Server) attachSession(w http.ResponseWriter, r *http.Request, e store.E
 		Client:      clientLabel(r),
 		Device:      s.playDevice(r),
 		Wireless:    profile.Name == "airplay",
+		MPEGTS:      profile.Name == "airplay",
 		SubtitleKey: subtitleKey,
 	}
 	if a, ok := playback.AudioStream(e.Streams, d.AudioIndex); ok && d.AudioIndex >= 0 {
@@ -100,6 +106,12 @@ func (s *Server) videoSpecs(video probe.Stream, d playback.Decision, profile pla
 		VideoIndex:   video.Index,
 		BurnSubtitle: d.BurnSubtitle,
 		MaxHeight:    profile.HLSHeight(), // a transcode is played over HLS
+	}
+	// The legacy receiver has a width limit too; reuse the existing aspect-ratio
+	// scaler by lowering its height cap for DCI and ultrawide sources.
+	const airPlayMaxWidth = 1920
+	if profile.Name == "airplay" && video.Width > airPlayMaxWidth && video.Height > 0 {
+		hreq.MaxHeight = min(hreq.MaxHeight, max(2, int(float64(video.Height)*airPlayMaxWidth/float64(video.Width))))
 	}
 	spec := info.Plan(hreq)
 	primary = videoSpec(video.Codec, spec)
@@ -187,6 +199,10 @@ func (s *Server) handleSessionFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if sess.MPEGTS() != strings.HasSuffix(name, ".ts") {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
 	var (
 		media io.ReadSeekCloser
 		err   error
@@ -207,7 +223,11 @@ func (s *Server) handleSessionFile(w http.ResponseWriter, r *http.Request) {
 	defer media.Close()
 
 	h := w.Header()
-	h.Set("Content-Type", "video/mp4")
+	if sess.MPEGTS() {
+		h.Set("Content-Type", "video/mp2t")
+	} else {
+		h.Set("Content-Type", "video/mp4")
+	}
 	h.Set("Cache-Control", "private, max-age=600")
 	http.ServeContent(w, r, name, time.Time{}, media)
 }

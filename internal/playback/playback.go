@@ -35,9 +35,10 @@ type Profile struct {
 	MaxHeight   int      `json:"maxHeight"`   // 0 = unlimited
 	// MaxHLSHeight is the tallest video the client plays over HLS, when that is less than
 	// what it plays as a file (MaxHeight); 0 = MaxHeight.
-	MaxHLSHeight int      `json:"maxHlsHeight,omitempty"`
-	HLS          bool     `json:"hls"`      // client can play HLS (all of ours can)
-	TextSubs     []string `json:"textSubs"` // subtitle formats renderable as sidecar (vtt)
+	MaxHLSHeight   int      `json:"maxHlsHeight,omitempty"`
+	ForceTranscode bool     `json:"forceTranscode,omitempty"` // always re-encode video and the selected audio
+	HLS            bool     `json:"hls"`                      // client can play HLS (all of ours can)
+	TextSubs       []string `json:"textSubs"`                 // subtitle formats renderable as sidecar (vtt)
 }
 
 // HLSHeight is the tallest video p plays over HLS (a remux or a transcode); 0 = no limit.
@@ -124,12 +125,13 @@ func Chromecast() Profile {
 	}
 }
 
-// AirPlay uses a receiver-independent HLS session even for an MP4. The browser
-// and TV have different addresses, and subtitles must travel in the HLS manifest.
+// AirPlay uses MPEG-TS HLS compatible with Apple TV 3. Safari cannot report the
+// receiver model, and source metadata cannot establish its level/frame-rate limits,
+// so re-encode to bounded H.264 and stereo AAC even for an otherwise compatible MP4.
 func AirPlay() Profile {
 	return Profile{
 		Name: "airplay", VideoCodecs: []string{"h264"}, AudioCodecs: []string{"aac"},
-		MaxHeight: 1080, HLS: true, TextSubs: []string{"vtt"},
+		MaxHeight: 1080, ForceTranscode: true, HLS: true, TextSubs: []string{"vtt"},
 	}
 }
 
@@ -240,6 +242,9 @@ func Decide(item Item, streams []Stream, p Profile, opts Options) Decision {
 	switch {
 	case !hasVideo:
 		reason("no video stream")
+	case p.ForceTranscode:
+		videoCopyable = false
+		reason("%s requires video conversion for receiver compatibility", name)
 	case !contains(p.VideoCodecs, video.Codec):
 		videoCopyable = false
 		reason("video codec %s not supported by %s", video.Codec, name)
@@ -256,7 +261,10 @@ func Decide(item Item, streams []Stream, p Profile, opts Options) Decision {
 	audioCopyable := true
 	if audio, ok := AudioStream(streams, opts.AudioIndex); ok {
 		d.AudioIndex = audio.Index
-		if !contains(p.AudioCodecs, audio.Codec) {
+		if p.ForceTranscode {
+			audioCopyable = false
+			reason("%s requires audio conversion for receiver compatibility", name)
+		} else if !contains(p.AudioCodecs, audio.Codec) {
 			audioCopyable = false
 			reason("audio codec %s not supported by %s", audio.Codec, name)
 		}

@@ -195,7 +195,11 @@ marked FUTURE is designed here and built later; everything else is the groundwor
   - Doze ends connections: reconnect with `Last-Event-ID`.
   - Newer Android versions add a local-network permission. Check it against the current documentation when the
     app is built.
-- **AirPlay** (docs/AIRPLAY.md): the Apple TV fetches the HLS itself over plain HTTP. No HTTPS is needed.
+- **AirPlay** (docs/AIRPLAY.md): the Apple TV fetches MPEG-TS HLS itself over plain HTTP. No HTTPS is needed.
+  The default browser profile targets Apple TV 3rd generation and newer with H.264 High level 4.0,
+  up to 1080p/30 fps and AAC-LC stereo 48 kHz. It re-encodes both selected streams because Safari
+  cannot expose receiver capabilities. Older Apple TV software predates fMP4 HLS; a modern sender
+  decoding fMP4 does not prove receiver support. Other profiles retain the existing fMP4 path.
 - **Chromecast:** the receiver is a web page the Chromecast loads from a registered HTTPS URL (Google's Default
   Media Receiver, or a custom one). ply cannot serve it.
   - **Plain HTTP works, measured on 2026-11-12** (results below). The receiver page, served from

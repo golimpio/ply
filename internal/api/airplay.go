@@ -67,6 +67,10 @@ func (s *Server) handleAirPlayMaster(w http.ResponseWriter, r *http.Request) {
 		s.streamError(w, r, err, "stream metadata")
 		return
 	}
+	version := 7
+	if sess.MPEGTS() {
+		version = 4
+	}
 	lang, err := language.Parse(sub.Language)
 	if err != nil {
 		lang = language.Und
@@ -80,8 +84,8 @@ func (s *Server) handleAirPlayMaster(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	w.Header().Set("Cache-Control", "no-cache")
-	fmt.Fprintf(w, "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=\"%s\",DEFAULT=YES,AUTOSELECT=YES,LANGUAGE=\"%s\",URI=\"subtitles.m3u8%s\"\n#EXT-X-STREAM-INF:BANDWIDTH=%d,CODECS=%q,RESOLUTION=%dx%d,SUBTITLES=\"subs\"\nindex.m3u8%s\n",
-		name, lang.String(), s.uriSuffix(), max(e.Bitrate, 12000000), info.Codecs, info.Width, info.Height, s.uriSuffix())
+	fmt.Fprintf(w, "#EXTM3U\n#EXT-X-VERSION:%d\n#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=\"%s\",DEFAULT=YES,AUTOSELECT=YES,LANGUAGE=\"%s\",URI=\"subtitles.m3u8%s\"\n#EXT-X-STREAM-INF:BANDWIDTH=%d,CODECS=%q,RESOLUTION=%dx%d,SUBTITLES=\"subs\"\nindex.m3u8%s\n",
+		version, name, lang.String(), s.uriSuffix(), max(e.Bitrate, 12000000), info.Codecs, info.Width, info.Height, s.uriSuffix())
 }
 
 func (s *Server) handleAirPlaySubtitles(w http.ResponseWriter, r *http.Request) {
@@ -132,7 +136,7 @@ func (s *Server) handleAirPlayVTT(w http.ResponseWriter, r *http.Request) {
 	s.handleSubtitle(&hlsVTTWriter{ResponseWriter: w}, r)
 }
 
-// hlsVTTWriter maps full-file subtitle times to ply's fMP4 clock. It only buffers
+// hlsVTTWriter maps full-file subtitle times to ply's media clock. It only buffers
 // the first line, so cues still reach the receiver while extraction is running.
 type hlsVTTWriter struct {
 	http.ResponseWriter

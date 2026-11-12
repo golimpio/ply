@@ -51,12 +51,12 @@ func TestBuiltinMatrix(t *testing.T) {
 	// A Chromecast plays 1080p as a file, but HLS only to 720p: what it cannot play as a file at
 	// 1080p is a transcode, not a remux (docs/M11-CLIENTS.md, the Chromecast test).
 	want := map[string]map[string]string{ // file -> profile -> method[/audio action]
-		"mp4 h264 aac":      {"avplayer": "direct", "browser": "direct", "chromecast": "direct", "airplay": "remux"},
-		"mp4 h264 ac3":      {"avplayer": "direct", "browser": "remux/transcode", "chromecast": "transcode", "airplay": "remux/transcode"},
+		"mp4 h264 aac":      {"avplayer": "direct", "browser": "direct", "chromecast": "direct", "airplay": "transcode"},
+		"mp4 h264 ac3":      {"avplayer": "direct", "browser": "remux/transcode", "chromecast": "transcode", "airplay": "transcode"},
 		"mp4 h264 4k":       {"avplayer": "direct", "browser": "direct", "chromecast": "transcode", "airplay": "transcode"},
 		"mp4 hevc hvc1 aac": {"avplayer": "direct", "browser": "transcode", "chromecast": "transcode", "airplay": "transcode"},
-		"mkv h264 aac":      {"avplayer": "remux", "browser": "remux", "chromecast": "transcode", "airplay": "remux"},
-		"mkv h264 eac3":     {"avplayer": "remux", "browser": "remux/transcode", "chromecast": "transcode", "airplay": "remux/transcode"},
+		"mkv h264 aac":      {"avplayer": "remux", "browser": "remux", "chromecast": "transcode", "airplay": "transcode"},
+		"mkv h264 eac3":     {"avplayer": "remux", "browser": "remux/transcode", "chromecast": "transcode", "airplay": "transcode"},
 		"mkv hevc eac3":     {"avplayer": "remux", "browser": "transcode", "chromecast": "transcode", "airplay": "transcode"},
 		"webm vp9 opus":     {"avplayer": "transcode", "browser": "direct", "chromecast": "transcode", "airplay": "transcode"},
 		"webm av1 opus":     {"avplayer": "transcode", "browser": "direct", "chromecast": "transcode", "airplay": "transcode"},
@@ -91,8 +91,8 @@ func TestDecisionOrder(t *testing.T) {
 	audios := []string{"aac", "ac3", "eac3", "opus", "flac", "mp3", "dts", "truehd"}
 
 	oracle := func(p Profile, c string, v Stream, a string) (method string, audioCopy bool) {
-		videoOK := contains(p.VideoCodecs, v.Codec) && (p.MaxHeight == 0 || v.Height <= p.MaxHeight)
-		audioOK := contains(p.AudioCodecs, a)
+		videoOK := !p.ForceTranscode && contains(p.VideoCodecs, v.Codec) && (p.MaxHeight == 0 || v.Height <= p.MaxHeight)
+		audioOK := !p.ForceTranscode && contains(p.AudioCodecs, a)
 		tagOK := !(p.RequireHVC1 && v.Codec == "hevc" && v.CodecTag != "hvc1")
 		switch {
 		case !videoOK:
@@ -141,18 +141,49 @@ func TestBurnInForcesTranscodeOnEveryProfile(t *testing.T) {
 		st := streams(vid("h264", "avc1", 720), aud(1, "aac", true), sub(2, "hdmv_pgs_subtitle"), sub(3, "subrip"))
 		control := MethodDirect
 		if pn == "airplay" {
-			control = MethodRemux
+			control = MethodTranscode
 		}
 		if d := Decide(Item{Container: "mp4"}, st, p, NoOptions); d.Method != control {
 			t.Fatalf("%s: control: %+v", pn, d) // positive control
 		}
 		d := Decide(Item{Container: "mp4"}, st, p, Options{AudioIndex: -1, SubtitleIndex: 2})
-		if d.Method != MethodTranscode || d.BurnSubtitle != 2 || d.VideoAction != ActionTranscode || d.AudioAction != ActionCopy {
+		audioAction := ActionCopy
+		if p.ForceTranscode {
+			audioAction = ActionTranscode
+		}
+		if d.Method != MethodTranscode || d.BurnSubtitle != 2 || d.VideoAction != ActionTranscode || d.AudioAction != audioAction {
 			t.Errorf("%s: %+v", pn, d)
 		}
 		// A text subtitle is delivered as a sidecar, not burned.
 		if d := Decide(Item{Container: "mp4"}, st, p, Options{AudioIndex: -1, SubtitleIndex: 3}); d.Method != control || d.BurnSubtitle != -1 {
 			t.Errorf("%s: text subtitle: %+v", pn, d)
 		}
+	}
+}
+
+func TestAirPlayConservativeConversion(t *testing.T) {
+	source := streams(vid("h264", "avc1", 1080), aud(1, "aac", true), aud(2, "aac", false))
+	source[1].Channels = 6
+	for _, index := range []int{-1, 1, 2} {
+		opts := Options{AudioIndex: index, SubtitleIndex: -1}
+		p := AirPlay()
+		p.ForceTranscode = false
+		control := Decide(Item{Container: "mp4"}, source, p, opts)
+		if control.Method != MethodRemux || control.VideoAction != ActionCopy || control.AudioAction != ActionCopy {
+			t.Fatalf("ordinary HLS control: %+v", control)
+		}
+		got := Decide(Item{Container: "mp4"}, source, AirPlay(), opts)
+		if got.Method != MethodTranscode || got.VideoAction != ActionTranscode || got.AudioAction != ActionTranscode || got.AudioIndex != control.AudioIndex {
+			t.Fatalf("legacy receiver requires bounded video and stereo AAC, preserving selection: %+v", got)
+		}
+		if !strings.Contains(strings.Join(got.Reasons, " "), "receiver compatibility") {
+			t.Fatalf("missing compatibility reason: %+v", got)
+		}
+	}
+	if got := Decide(Item{Container: "mp4"}, source, Browser(), NoOptions); got.Method != MethodDirect {
+		t.Fatalf("browser control changed: %+v", got)
+	}
+	if got := Decide(Item{Container: "mp4"}, source[:1], AirPlay(), NoOptions); got.AudioIndex != -1 || got.AudioAction != ActionCopy {
+		t.Fatalf("silent video invented audio: %+v", got)
 	}
 }

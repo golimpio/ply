@@ -13,9 +13,25 @@ appears when Safari reports an available target, stays available while connected
 The picker is called synchronously from its click handler; no network request precedes it.
 
 AirPlay-capable Safari uses the built-in `airplay` profile from initial playback, even before a TV
-is selected. The first version is deliberately conservative: H.264/AAC up to 1080p, always native
-HLS. This can remux a compatible MP4 or transcode a 4K/HEVC source even for local Safari playback.
-It avoids a format switch after selecting a receiver whose codecs the browser cannot query.
+is selected. Safari cannot report the receiver model, and the source index does not establish
+H.264 level or frame-rate limits, so the profile deliberately re-encodes both video and selected audio:
+H.264 High level 4.0, up to 1080p at 30 fps, with AAC-LC stereo at 48 kHz / 192 kbit/s. This includes
+an otherwise compatible MP4 and local Safari playback before choosing a TV. It avoids a format
+switch after opening the synchronous native picker.
+
+AirPlay uses MPEG-TS HLS (`segNNNNN.ts`, `video/mp2t`), with a version 3 media playlist and no
+`EXT-X-MAP`/MP4 init. A text-subtitle master uses version 4 and derives codec and resolution attributes
+from actual generated TS media through the configured, bounded ffprobe. Each TS segment is one
+synthetic transcode GOP, with the existing file timeline and receiver session ownership. The ordinary
+browser, AVPlayer and Chromecast profiles retain their existing fMP4 session path.
+
+The compatibility target is Apple TV 3rd generation and newer. The older 2nd generation has a 720p
+limit and is not covered by this 1080p profile; the original silver 2007 model is also out of scope.
+[Apple TV 3 specifications](https://support.apple.com/en-ca/112429) define its H.264 and audio limits.
+The previous fMP4-only implementation was insufficient for an AppleTV3,2 on software 8.4.4 that
+reported a load error. [FFmpeg HLS documentation](https://ffmpeg.org/ffmpeg-formats.html#hls-2)
+notes that MPEG-TS works with all HLS versions, while fMP4 requires HLS version 7. Modern macOS
+AVPlayer playback of the previous output did not establish compatibility with that older receiver.
 
 Every play has an HLS session ID. Receiver requests can therefore come from a different IP and
 User-Agent without registering a second direct play or bypassing the selected audio stream.
@@ -78,7 +94,8 @@ Emulated events are not evidence of Apple's discovery, firmware or rendering beh
 release, run this hardware checklist in Safari on macOS and iPhone/iPad with an actual Apple TV:
 
 1. Open the server's LAN URL; select a TV and confirm receiver-side media requests in server logs.
-2. Play H.264/AAC, incompatible-container remux, HEVC/4K conversion and an alternate audio track.
+2. Play H.264/AAC, HEVC/4K conversion, multichannel-to-stereo audio and an alternate audio track.
+   Include an Apple TV 3rd generation receiver; modern macOS AVPlayer alone is not an acceptance test.
 3. Resume, seek forward/backward, pause/resume and verify reported progress.
 4. Select embedded and external text subtitles, Off, and bitmap burn-in; confirm TV cue sync after seeking.
 5. Browse ply, reopen Controls, use lock-screen controls and explicitly Stop AirPlay.

@@ -42,6 +42,8 @@ type Session struct {
 	// lastUsed is when the session last had a request or a heartbeat (unix
 	// nanoseconds, by the manager's clock): the idle timeout runs from it.
 	lastUsed atomic.Int64
+	// Successful TS metadata is immutable; repeated master fetches must not rewind playback.
+	hlsInfo atomic.Pointer[HLSInfo]
 
 	// What the player says of itself (heartbeat), and, until it does, a guess: the
 	// start of the last segment it asked for (estPos, as float64 bits).
@@ -215,6 +217,9 @@ func (s *Session) Hold() func() {
 // Subtitle identifies the selected text rendition and the item it belongs to.
 func (s *Session) Subtitle() (int64, string) { return s.req.ItemID, s.req.SubtitleKey }
 
+// MPEGTS reports whether this session serves legacy transport-stream segments.
+func (s *Session) MPEGTS() bool { return s.req.MPEGTS }
+
 // Plan returns the segment layout (read-only).
 func (s *Session) Plan() Plan {
 	s.mu.Lock()
@@ -256,10 +261,12 @@ func (s *Session) Playlist(ctx context.Context, suffix string) (string, error) {
 	if err := s.awaitPlan(ctx, &w); err != nil {
 		return "", err
 	}
-	return s.Plan().PlaylistFrom(suffix, s.req.StartSec), nil
+	return s.Plan().playlistFrom(suffix, s.req.StartSec, s.req.MPEGTS), nil
 }
 
-func (s *Session) gopPath(g int) string { return filepath.Join(s.dir, fmt.Sprintf(gopPattern, g)) }
+func (s *Session) gopPath(g int) string {
+	return filepath.Join(s.dir, fmt.Sprintf(fragmentPattern(s.req.MPEGTS), g))
+}
 
 // startRunLocked replaces the running ffmpeg, if any, by one that produces
 // fragments from GOP g on. Fragments from g on that an earlier run left
@@ -291,6 +298,7 @@ func (s *Session) startRunLocked(g int) error {
 		AudioIndex: s.req.AudioIndex,
 		Video:      VideoSpec{Codec: s.req.VideoCodec},
 		Audio:      AudioSpec{Codec: s.req.AudioCodec, Copy: s.req.AudioCopy},
+		MPEGTS:     s.req.MPEGTS,
 		SeekSec:    SeekTarget(s.req.Container, s.plan.Keyframes, g),
 		StartGOP:   g,
 		InitName:   r.initName,
@@ -478,8 +486,12 @@ func gopIndex(name string) (int, bool) {
 	if !ok {
 		return 0, false
 	}
-	digits, ext, ok := strings.Cut(rest, ".m4s")
-	if !ok || (ext != "" && ext != ".tmp") {
+	rest = strings.TrimSuffix(rest, ".tmp")
+	digits, ok := strings.CutSuffix(rest, ".m4s")
+	if !ok {
+		digits, ok = strings.CutSuffix(rest, ".ts")
+	}
+	if !ok {
 		return 0, false
 	}
 	n, err := strconv.Atoi(digits)
@@ -653,7 +665,12 @@ func (s *Session) shutdown() {
 }
 
 // gopFile returns the finished fragment for GOP g.
-func (s *Session) gopFile(g int) (fileInfo, bool) { return checkFile(s.gopPath(g), "gop") }
+func (s *Session) gopFile(g int) (fileInfo, bool) {
+	if s.req.MPEGTS {
+		return checkTSFile(s.gopPath(g))
+	}
+	return checkFile(s.gopPath(g), "gop")
+}
 
 // beginRequest registers a segment request and returns its arrival number
 // and the function that ends it.
@@ -857,6 +874,9 @@ type Media struct{ *pieces }
 // OpenInit returns the init segment. It is the one written by the first
 // ffmpeg run that produced one; later runs write identical headers.
 func (s *Session) OpenInit(ctx context.Context) (io.ReadSeekCloser, error) {
+	if s.req.MPEGTS {
+		return nil, ErrNoSegment
+	}
 	s.touch()
 	// Waiting for ffmpeg to write the init segment is a request in progress, as
 	// waiting for a segment is; and the time since the last request starts when this

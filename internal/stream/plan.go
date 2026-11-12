@@ -40,6 +40,12 @@ type Plan struct {
 // last ends at duration; a trailing sliver shorter than half of minSeg is
 // merged into its predecessor.
 func NewPlan(keyframes []float64, duration, minSeg float64) (Plan, error) {
+	return newPlan(keyframes, duration, minSeg, true)
+}
+
+// MPEG-TS keeps the final short GOP separate: cached segments from different
+// encoder runs must never be spliced into one transport stream.
+func newPlan(keyframes []float64, duration, minSeg float64, mergeTail bool) (Plan, error) {
 	if minSeg <= 0 {
 		minSeg = DefaultSegmentSec
 	}
@@ -68,7 +74,7 @@ func NewPlan(keyframes []float64, duration, minSeg float64) (Plan, error) {
 		p.Segments = append(p.Segments, Segment{Start: start, Duration: end - start, First: i, End: j})
 		i = j
 	}
-	if n := len(p.Segments); n > 1 && p.Segments[n-1].Duration < minSeg/2 {
+	if n := len(p.Segments); mergeTail && n > 1 && p.Segments[n-1].Duration < minSeg/2 {
 		last := p.Segments[n-1]
 		prev := &p.Segments[n-2]
 		prev.Duration += last.Duration
@@ -133,20 +139,33 @@ func (p Plan) Playlist(suffix string) string { return p.PlaylistFrom(suffix, 0) 
 // The playlist is the whole file's, so the time is the file's. Nothing is added for a
 // start at the beginning, or one outside the file.
 func (p Plan) PlaylistFrom(suffix string, startSec float64) string {
+	return p.playlistFrom(suffix, startSec, false)
+}
+
+func (p Plan) playlistFrom(suffix string, startSec float64, mpegts bool) string {
 	target := 1.0
 	for _, s := range p.Segments {
 		target = math.Max(target, math.Ceil(s.Duration))
 	}
 	var b strings.Builder
-	b.WriteString("#EXTM3U\n#EXT-X-VERSION:7\n")
+	version := 7
+	if mpegts {
+		version = 3
+	}
+	fmt.Fprintf(&b, "#EXTM3U\n#EXT-X-VERSION:%d\n", version)
 	fmt.Fprintf(&b, "#EXT-X-TARGETDURATION:%d\n", int(target))
-	b.WriteString("#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-INDEPENDENT-SEGMENTS\n")
+	b.WriteString("#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n")
+	if !mpegts {
+		b.WriteString("#EXT-X-INDEPENDENT-SEGMENTS\n")
+	}
 	if startSec > 0 && startSec < p.Duration && !math.IsInf(startSec, 0) { // NaN fails both comparisons
 		fmt.Fprintf(&b, "#EXT-X-START:TIME-OFFSET=%.3f,PRECISE=YES\n", startSec)
 	}
-	fmt.Fprintf(&b, "#EXT-X-MAP:URI=\"%s%s\"\n", InitName, suffix)
+	if !mpegts {
+		fmt.Fprintf(&b, "#EXT-X-MAP:URI=\"%s%s\"\n", InitName, suffix)
+	}
 	for i, s := range p.Segments {
-		fmt.Fprintf(&b, "#EXTINF:%.3f,\n%s%s\n", s.Duration, SegmentName(i), suffix)
+		fmt.Fprintf(&b, "#EXTINF:%.3f,\n%s%s\n", s.Duration, mediaSegmentName(i, mpegts), suffix)
 	}
 	b.WriteString("#EXT-X-ENDLIST\n")
 	return b.String()
@@ -155,14 +174,21 @@ func (p Plan) PlaylistFrom(suffix string, startSec float64) string {
 // InitName is the name of the fMP4 initialisation segment.
 const InitName = "init.mp4"
 
-var nameRE = regexp.MustCompile(`^(init\.mp4|seg\d{5}\.m4s)$`)
+var nameRE = regexp.MustCompile(`^(init\.mp4|seg\d{5}\.(m4s|ts))$`)
 
 // ValidName reports whether name is a servable session file: the init
 // segment or a media segment.
 func ValidName(name string) bool { return nameRE.MatchString(name) }
 
 // SegmentName is the file name of segment i.
-func SegmentName(i int) string { return fmt.Sprintf("seg%05d.m4s", i) }
+func SegmentName(i int) string { return mediaSegmentName(i, false) }
+
+func mediaSegmentName(i int, mpegts bool) string {
+	if mpegts {
+		return fmt.Sprintf("seg%05d.ts", i)
+	}
+	return fmt.Sprintf("seg%05d.m4s", i)
+}
 
 // ParseSegmentName returns the segment index of a name such as seg00042.m4s.
 func ParseSegmentName(name string) (int, bool) {
