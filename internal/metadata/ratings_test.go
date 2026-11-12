@@ -1501,31 +1501,47 @@ func TestMDBListBudget(t *testing.T) {
 		}
 	})
 
-	t.Run("the day's allowance gone, said by MDBList", func(t *testing.T) {
-		e := newRatingsEnv(t)
-		a, b := e.movie(1, "tt0000001"), e.movie(2, "tt0000002")
-		e.reply(func(w http.ResponseWriter, r *http.Request, n int) {
-			if r.URL.Path == "/user" {
-				fmt.Fprint(w, `{"api_requests": 1000, "api_requests_count": 0}`)
-				return
+	// Also in the last hour of the UTC day, when what is left of it is shorter than some 429s ask for:
+	// the MDBList client runs on the test's clock here.
+	for _, at := range []time.Duration{0, 13*time.Hour + 49*time.Minute} {
+		t.Run(fmt.Sprintf("the day's allowance gone, said by MDBList, %v on", at), func(t *testing.T) {
+			var e *ratingsEnv
+			e = newRatingsEnv(t, func(so *SettingsOptions, _ *RatingsOptions) {
+				so.NewMDBList = func(key string) *MDBListClient {
+					c := NewMDBListClient(MDBListOptions{Key: key, BaseURL: so.MDBListBaseURL, Logger: so.Logger})
+					c.now = e.clock
+					return c
+				}
+			})
+			e.advance(at)
+			a, b := e.movie(1, "tt0000001"), e.movie(2, "tt0000002")
+			e.reply(func(w http.ResponseWriter, r *http.Request, n int) {
+				if r.URL.Path == "/user" {
+					fmt.Fprint(w, `{"api_requests": 1000, "api_requests_count": 0}`)
+					return
+				}
+				w.WriteHeader(429)
+				fmt.Fprint(w, `{"error": "You have reached your daily API limit"}`)
+			})
+			if err := e.rt.RunMDBList(ctx, a); err != nil {
+				t.Fatalf("a daily limit is not a failure of the job: %v", err)
 			}
-			w.WriteHeader(429)
-			fmt.Fprint(w, `{"error": "You have reached your daily API limit"}`)
+			client, _ := e.settings.MDBList(ctx)
+			if until, _ := IsMDBListDaily(client.Gate()); until != untilMidnightUTC(e.clock()) {
+				t.Fatalf("paused for %v, want %v: the client is not on the test's clock", until, untilMidnightUTC(e.clock()))
+			}
+			if got := e.rt.RemainingMDBList(ctx); got != 0 {
+				t.Errorf("remaining = %d after MDBList said the day is over", got)
+			}
+			n := e.mdb.count()
+			if err := e.rt.RunMDBList(ctx, b); err != nil || e.mdb.count() != n {
+				t.Errorf("the next title: %v, %d new requests; none while the allowance is gone", err, e.mdb.count()-n)
+			}
+			if due, _ := e.rt.DueMDBList(ctx, 10); len(due) != 0 {
+				t.Errorf("due = %+v", due)
+			}
 		})
-		if err := e.rt.RunMDBList(ctx, a); err != nil {
-			t.Fatalf("a daily limit is not a failure of the job: %v", err)
-		}
-		if got := e.rt.RemainingMDBList(ctx); got != 0 {
-			t.Errorf("remaining = %d after MDBList said the day is over", got)
-		}
-		n := e.mdb.count()
-		if err := e.rt.RunMDBList(ctx, b); err != nil || e.mdb.count() != n {
-			t.Errorf("the next title: %v, %d new requests; none while the allowance is gone", err, e.mdb.count()-n)
-		}
-		if due, _ := e.rt.DueMDBList(ctx, 10); len(due) != 0 {
-			t.Errorf("due = %+v", due)
-		}
-	})
+	}
 
 	t.Run("a batch is no more than what is left", func(t *testing.T) {
 		e := newRatingsEnv(t)

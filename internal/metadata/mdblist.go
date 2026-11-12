@@ -86,6 +86,7 @@ type MDBListClient struct {
 
 	mu         sync.Mutex
 	pauseUntil time.Time
+	pauseDaily bool // the pause is the day's allowance gone, not a limit of the moment
 
 	now   func() time.Time
 	sleep func(ctx context.Context, d time.Duration) error
@@ -225,9 +226,8 @@ func IsMDBListDaily(err error) (until time.Duration, ok bool) {
 func (c *MDBListClient) Gate() error { return c.gate("") }
 
 func (c *MDBListClient) gate(op string) error {
-	if wait := c.pauseLeft(); wait > c.maxWait {
-		return &MDBListError{Op: op, Status: http.StatusTooManyRequests, Transient: true, RetryAfter: wait, Message: "rate limited",
-			Daily: wait > time.Hour}
+	if wait, daily := c.pauseLeft(); wait > c.maxWait {
+		return &MDBListError{Op: op, Status: http.StatusTooManyRequests, Transient: true, RetryAfter: wait, Daily: daily, Message: "rate limited"}
 	}
 	return nil
 }
@@ -240,18 +240,27 @@ func untilMidnightUTC(now time.Time) time.Duration {
 	return next.Sub(n)
 }
 
-func (c *MDBListClient) pauseLeft() time.Duration {
+// pauseLeft is how long requests are still held off, and whether that is for the day's allowance.
+func (c *MDBListClient) pauseLeft() (time.Duration, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.pauseUntil.Sub(c.now())
+	left := c.pauseUntil.Sub(c.now())
+	return left, c.pauseDaily && left > 0
 }
 
-func (c *MDBListClient) pause(d time.Duration) {
+// pause holds every request off for d. daily says it is the day's allowance that ran out, which
+// the length of the pause cannot tell: an hour before midnight, it is shorter than some 429s.
+func (c *MDBListClient) pause(d time.Duration, daily bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if until := c.now().Add(d); until.After(c.pauseUntil) {
+	now := c.now()
+	if !c.pauseUntil.After(now) {
+		c.pauseDaily = false // the last pause is over
+	}
+	if until := now.Add(d); until.After(c.pauseUntil) {
 		c.pauseUntil = until
 	}
+	c.pauseDaily = c.pauseDaily || daily
 }
 
 // acquire waits for a free slot, for any pause MDBList asked for and for a token of the bucket,
@@ -264,13 +273,13 @@ func (c *MDBListClient) acquire(ctx context.Context) (release func(), err error)
 	}
 	release = func() { <-c.slots }
 	for {
-		wait := c.pauseLeft()
+		wait, daily := c.pauseLeft()
 		if wait <= 0 {
 			break
 		}
 		if wait > c.maxWait {
 			release()
-			return nil, &MDBListError{Status: http.StatusTooManyRequests, Transient: true, RetryAfter: wait, Message: "rate limited"}
+			return nil, &MDBListError{Status: http.StatusTooManyRequests, Transient: true, RetryAfter: wait, Daily: daily, Message: "rate limited"}
 		}
 		if err := c.sleep(ctx, wait); err != nil {
 			release()
@@ -335,7 +344,7 @@ func (c *MDBListClient) get(ctx context.Context, path string, out any) error {
 			} else {
 				wait = retryAfter(header.Get("Retry-After"), c.now())
 			}
-			c.pause(wait)
+			c.pause(wait, daily)
 		}
 		release()
 		if err != nil {
@@ -384,13 +393,13 @@ func (c *MDBListClient) failedAnswer(op, msg string) error {
 	msg = tidyMessage(c.redact(msg), maxMDBListMessage)
 	if isDailyLimit(msg) {
 		wait := untilMidnightUTC(c.now())
-		c.pause(wait)
+		c.pause(wait, true)
 		return &MDBListError{Op: op, Status: http.StatusTooManyRequests, Transient: true, RetryAfter: wait, Daily: true, Message: msg}
 	}
 	low := strings.ToLower(msg)
 	switch {
 	case strings.Contains(low, "rate limit"):
-		c.pause(mdblistRateWait)
+		c.pause(mdblistRateWait, false)
 		return &MDBListError{Op: op, Status: http.StatusTooManyRequests, Transient: true, RetryAfter: mdblistRateWait, Message: msg}
 	case strings.Contains(low, "invalid api") || strings.Contains(low, "apikey") || strings.Contains(low, "api key"):
 		return &MDBListError{Op: op, Status: http.StatusUnauthorized, Message: msg}

@@ -95,6 +95,12 @@ func jsonReply(status int, body string) func(http.ResponseWriter, *http.Request,
 // quickMDB is a client for srv that does not wait: its clock is fixed and its sleeps are recorded.
 func quickMDB(t *testing.T, srv *mdbServer, mod ...func(*MDBListOptions)) (*MDBListClient, *[]time.Duration) {
 	t.Helper()
+	return quickMDBAt(t, srv, time.Date(2026, 11, 5, 20, 0, 0, 0, time.UTC), mod...)
+}
+
+// quickMDBAt is quickMDB with its clock stood at now.
+func quickMDBAt(t *testing.T, srv *mdbServer, now time.Time, mod ...func(*MDBListOptions)) (*MDBListClient, *[]time.Duration) {
+	t.Helper()
 	o := MDBListOptions{Key: mdbTestKey, BaseURL: srv.URL, Rate: 1000, Logger: slog.New(slog.DiscardHandler)}
 	for _, f := range mod {
 		f(&o)
@@ -103,7 +109,6 @@ func quickMDB(t *testing.T, srv *mdbServer, mod ...func(*MDBListOptions)) (*MDBL
 	// The clock stands still, and a sleep moves it on by what it was asked: a pause that is waited out ends.
 	var mu sync.Mutex
 	var slept []time.Duration
-	now := time.Date(2026, 11, 5, 20, 0, 0, 0, time.UTC)
 	c.sleep = func(ctx context.Context, d time.Duration) error {
 		mu.Lock()
 		slept = append(slept, d)
@@ -469,33 +474,48 @@ func TestMDBList429(t *testing.T) {
 }
 
 // The day's allowance used up: said in a 429 or in a 200 that says it failed. Nothing is asked
-// again until the day (UTC) is over.
+// again until the day (UTC) is over, and the calls in between say it is the day's allowance, also
+// in the last hour of the day, when the pause is shorter than some 429s ask for.
 func TestMDBListDailyLimit(t *testing.T) {
-	for name, handler := range map[string]func(http.ResponseWriter, *http.Request, int){
-		"429":      jsonReply(429, `{"error": "You have reached your daily API limit"}`),
-		"200 says": jsonReply(200, `{"response": false, "error": "API Limit Reached!"}`),
+	for _, at := range []struct {
+		name  string
+		now   time.Time
+		until time.Duration // to 00:01 UTC
+	}{
+		{"20:00", time.Date(2026, 11, 5, 20, 0, 0, 0, time.UTC), 4*time.Hour + time.Minute},
+		{"23:49", time.Date(2026, 11, 11, 23, 49, 0, 0, time.UTC), 12 * time.Minute},
 	} {
-		srv := newMDBServer(t, handler)
-		c, _ := quickMDB(t, srv)
-		_, err := c.ByTMDB(t.Context(), MDBListMovie, 603)
-		until, daily := IsMDBListDaily(err)
-		if !daily || !IsTransient(err) {
-			t.Fatalf("%s: err = %v, daily %v", name, err, daily)
-		}
-		if want := 4*time.Hour + time.Minute; until != want { // 20:00 UTC now: the day ends at 24:00, and a minute more
-			t.Errorf("%s: until = %v, want %v", name, until, want)
-		}
-		if srv.count() != 1 {
-			t.Errorf("%s: %d requests; a daily limit is not retried", name, srv.count())
-		}
-		if _, err := c.ByIMDb(t.Context(), MDBListMovie, "tt0133093"); !IsTransient(err) {
-			t.Errorf("%s: the next call: %v", name, err)
-		}
-		if _, daily := IsMDBListDaily(err); !daily {
-			t.Errorf("%s: the next call does not say it is the day's allowance: %v", name, err)
-		}
-		if srv.count() != 1 {
-			t.Errorf("%s: %d requests; none is made while the allowance is gone", name, srv.count())
+		for kind, handler := range map[string]func(http.ResponseWriter, *http.Request, int){
+			"429":      jsonReply(429, `{"error": "You have reached your daily API limit"}`),
+			"200 says": jsonReply(200, `{"response": false, "error": "API Limit Reached!"}`),
+		} {
+			name := at.name + " " + kind
+			srv := newMDBServer(t, handler)
+			c, _ := quickMDBAt(t, srv, at.now)
+			_, err := c.ByTMDB(t.Context(), MDBListMovie, 603)
+			until, daily := IsMDBListDaily(err)
+			if !daily || !IsTransient(err) {
+				t.Fatalf("%s: err = %v, daily %v", name, err, daily)
+			}
+			if until != at.until {
+				t.Errorf("%s: until = %v, want %v", name, until, at.until)
+			}
+			if srv.count() != 1 {
+				t.Errorf("%s: %d requests; a daily limit is not retried", name, srv.count())
+			}
+			_, next := c.ByIMDb(t.Context(), MDBListMovie, "tt0133093")
+			if !IsTransient(next) {
+				t.Errorf("%s: the next call: %v", name, next)
+			}
+			if _, daily := IsMDBListDaily(next); !daily {
+				t.Errorf("%s: the next call does not say it is the day's allowance: %v", name, next)
+			}
+			if _, daily := IsMDBListDaily(c.Gate()); !daily {
+				t.Errorf("%s: Gate does not say it is the day's allowance", name)
+			}
+			if srv.count() != 1 {
+				t.Errorf("%s: %d requests; none is made while the allowance is gone", name, srv.count())
+			}
 		}
 	}
 	// A rate limit is not the day's allowance.
@@ -504,6 +524,46 @@ func TestMDBListDailyLimit(t *testing.T) {
 	_, err := c.ByTMDB(t.Context(), MDBListMovie, 603)
 	if _, daily := IsMDBListDaily(err); daily || !IsTransient(err) {
 		t.Errorf("a rate limit: %v", err)
+	}
+}
+
+// Whether a pause is for the day's allowance is kept while it lasts, whatever else pauses the client
+// on top of it, and is forgotten once it is over.
+func TestMDBListDailyPause(t *testing.T) {
+	srv := newMDBServer(t, jsonReply(200, mdbTitle))
+	dailyGate := func(c *MDBListClient) bool {
+		err := c.Gate()
+		if !IsTransient(err) {
+			t.Fatalf("Gate = %v during a pause", err)
+		}
+		_, daily := IsMDBListDaily(err)
+		return daily
+	}
+
+	c, _ := quickMDB(t, srv)
+	c.pause(2*time.Minute, true)
+	c.pause(time.Second, false) // a rate limit while the day's allowance is gone
+	if !dailyGate(c) {
+		t.Error("a rate pause inside the day's pause makes it a rate pause")
+	}
+
+	c, _ = quickMDB(t, srv)
+	c.pause(time.Minute, false)
+	c.pause(2*time.Minute, true) // the day's allowance gone during a rate pause
+	if !dailyGate(c) {
+		t.Error("the day's pause on top of a rate pause is not seen")
+	}
+	// A request queued when the day's pause began says so too.
+	if _, err := c.acquire(t.Context()); !IsTransient(err) {
+		t.Errorf("acquire = %v during the day's pause", err)
+	} else if _, daily := IsMDBListDaily(err); !daily {
+		t.Errorf("acquire does not say it is the day's allowance: %v", err)
+	}
+
+	c.sleep(t.Context(), 3*time.Minute) // the clock moves on past it
+	c.pause(2*time.Minute, false)
+	if dailyGate(c) {
+		t.Error("a rate pause after the day's pause ended is taken for the day's")
 	}
 }
 
