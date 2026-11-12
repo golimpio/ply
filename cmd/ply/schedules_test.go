@@ -205,11 +205,12 @@ func TestScheduledRatingsRunOnceAndRememberTheRun(t *testing.T) {
 
 	// A restart at the same time: the database remembers both runs.
 	r.queue(nil)
-	startRatingSchedule(t, r, &now, nil)
+	stop = startRatingSchedule(t, r, &now, nil)
 	time.Sleep(150 * time.Millisecond)
 	if n := len(r.queued()); n != 0 {
 		t.Errorf("after a restart at the same time: %d queued, want none", n)
 	}
+	stop() // before now is written: its Now reads the variable from the scheduler's own goroutine
 
 	// A week later, on the IMDb schedule's Sunday, both are due again.
 	now = time.Date(2026, 11, 15, 9, 0, 0, 0, time.UTC) // Sunday
