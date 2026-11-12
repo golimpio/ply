@@ -304,6 +304,22 @@ async function open(browser, width, opts = {}) {
   page.on('pageerror', (e) => errors.push(e.message));
   const settings = { ...SETTINGS, ...opts.settings };
   const json = (route, body, status = 200, headers = {}) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body), headers });
+  // Safari's WebKit AirPlay API, which no other browser has (as e2e/player-wiring.mjs stubs it): the
+  // player is then on a route, and its stage says so. Chrome alone would never reach that state.
+  if (opts.airplay) {
+    await context.addInitScript(() => {
+      const can = HTMLMediaElement.prototype.canPlayType;
+      HTMLMediaElement.prototype.canPlayType = function (type) {
+        return /mpegurl/i.test(type) ? 'probably' : can.call(this, type);
+      };
+      HTMLVideoElement.prototype.webkitShowPlaybackTargetPicker = () => {};
+      window.__wireless = (on) => {
+        const v = document.querySelector('video');
+        v.webkitCurrentPlaybackTargetIsWireless = on;
+        v.dispatchEvent(new Event('webkitcurrentplaybacktargetiswirelesschanged'));
+      };
+    });
+  }
   await page.route('**/api/**', async (route) => {
     const req = route.request();
     const u = new URL(req.url());
@@ -572,6 +588,14 @@ const SHOTS = [
     },
   },
   { name: 'player', hash: '#/play/1', ready: '.controls .row button', opts: { player: true }, act: pausedAtStart },
+  {
+    name: 'airplay', hash: '#/play/1', ready: '.controls .row button', opts: { player: true, airplay: true },
+    act: async (page) => {
+      await pausedAtStart(page);
+      await page.evaluate(() => window.__wireless(true));
+      await visible(page, '.airplay-screen');
+    },
+  },
   { name: 'cap', hash: '#/play/1', ready: '.overlay.limit li[data-session]', opts: { player: true, cap: true } },
   // Focus rings.
   { name: 'focus-header', hash: '#/', ready: 'text=Recently added', act: (page) => page.keyboard.press('Tab') },

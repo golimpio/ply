@@ -391,6 +391,38 @@ try {
       ((await s.page.evaluate(() => document.querySelector('.airplay-status')?.textContent ?? '')) || '').includes('Ready for Living Room Apple TV'));
   });
 
+  // The picture on a TV with the player still open: the stage says where it went, names the target when
+  // ply knows which one (it was picked from ply's list), and offers the way back. It goes when the
+  // route does.
+  await scenario('AirPlay stage says where the picture went', { airplay: true, receivers: 'other' }, async (s) => {
+    await s.go('#/play/1?t=10');
+    await s.playingAt('native source to resume', 10, 20);
+    await s.page.evaluate(() => window.__availability('available'));
+    await until('the AirPlay menu', () => s.page.getByRole('button', { name: 'AirPlay', exact: true }).getAttribute('aria-expanded'));
+    await s.click('button[aria-label="AirPlay"]');
+    await until('the TV by name', async () => (await s.page.getByRole('menuitem', { name: 'Living Room Apple TV' }).count()) === 1);
+    await s.page.getByRole('menuitem', { name: 'Living Room Apple TV' }).click();
+    await until('a play for the TV', () => s.posts().length === 2);
+    await s.page.evaluate(() => window.__wireless(true));
+    await until('the stage', async () => (await s.page.locator('.airplay-screen').count()) === 1);
+    check('the stage names the TV ply knows',
+      ((await s.page.locator('.airplay-screen .where').textContent()) ?? '').includes('“Living Room Apple TV”'));
+    // The screen says where the picture is; stopping stays the player's own business, as it is locally.
+    check('the stage adds no second stop control',
+      (await s.page.getByRole('button', { name: 'Stop AirPlay' }).count()) === 0);
+    await s.page.evaluate(() => window.__wireless(false));
+    await until('the stage gone', async () => (await s.page.locator('.airplay-screen').count()) === 0);
+  });
+
+  // Safari's own picker never says which target it chose: the stage says only what it can.
+  await scenario('AirPlay stage with no target named', { airplay: true }, async (s) => {
+    await s.go('#/play/1?t=10');
+    await s.playingAt('native source to resume', 10, 20);
+    await s.page.evaluate(() => window.__wireless(true));
+    await until('the unnamed stage', async () =>
+      ((await s.page.locator('.airplay-screen .where').textContent()) ?? '').includes('another device'));
+  });
+
   await scenario('AirPlay pagehide and route disconnect', { airplay: true, fast: true }, async (s) => {
     await s.go('#/play/1?t=15');
     await s.playingAt('native media', 15, 25);

@@ -12,6 +12,7 @@
   import { goBack, href } from '../lib/router.svelte';
   import { MAX_SESSION_RESTARTS, sessionGone, sessionStopped } from '../lib/session';
   import { artSrc } from '../lib/ui-types';
+  import AirPlayScreen from './AirPlayScreen.svelte';
   import PlayerControls, { type Track } from './PlayerControls.svelte';
   import PlayLimit from './PlayLimit.svelte';
 
@@ -27,6 +28,8 @@
   let airplayError = $state('');
   /** A status line for what the picker will do next (ready for a target on another network). */
   let airplayNotice = $state('');
+  /** The target the viewer picked from ply's list: the stage can then say which TV it went to. */
+  let airplayTargetName = $state('');
   /** The AirPlay targets the server found on the LAN (GET /api/receivers); none when the browse is off. */
   let receivers = $state<Receiver[]>([]);
   /** The target the viewer chose: the play's URLs are on the address that it can reach. */
@@ -584,6 +587,7 @@
       airplayAvailable = state.available;
       wireless = state.wireless;
       if (state.wireless) airplayNotice = '';
+      if (!state.wireless) airplayTargetName = '';
       if (changed) {
         airplayError = '';
         heartbeat.beat();
@@ -627,6 +631,9 @@
   function connectReceiver(id: string) {
     const target = receivers.find((r) => r.id === id);
     if (!target) return;
+    // Remembered before the play is routed: Safari does not say which target it opened, so this is
+    // the only case in which the stage can name the TV.
+    airplayTargetName = target.name;
     if (reachesTarget(playback?.url ?? '', target.base, location.host)) {
       pickAirPlay();
       return;
@@ -695,6 +702,9 @@
       }}
       onerror={onVideoError}
     ></video>
+    {#if wireless && active}
+      <AirPlayScreen device={airplayTargetName} />
+    {/if}
     {#if video}
       <PlayerControls
         {video}

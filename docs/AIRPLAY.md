@@ -52,7 +52,11 @@ The browser uses the returned server URL as `video.src`; no MediaSource blob is 
 
 App keeps the actual Play/Player/video subtree mounted while Safari reports wireless playback.
 Closing the fullscreen player navigates back within ply without changing its media element or
-source. A compact controller offers Controls (reopen the same player) and Stop AirPlay. Hidden
+source. A compact controller offers Controls (reopen the same player) and Stop AirPlay. With the
+player open, its stage says where the picture went instead of showing a still black frame: the AirPlay
+mark and the target's name when it was chosen from ply's list (Safari's own picker never says which one
+it opened). The stage lies behind the player's controls and takes no tap, so the controls stay the only
+way to stop the route, exactly as they are for a local play. Hidden
 player keyboard shortcuts do not consume the library's keys. Choosing another item replaces
 the old play; disconnecting AirPlay while browsing tears down the hidden local player.
 
