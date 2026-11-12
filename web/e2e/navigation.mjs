@@ -108,6 +108,7 @@ async function open(browser, opts = {}) {
     const p = u.pathname;
     if (p.startsWith('/api/images/')) return route.fulfill({ status: 404, body: '' });
     if (p === '/api/info') return json(route, { id: 'x', name: 'e2e', version: 'dev', authRequired: false });
+    if (p === '/api/receivers') return json(route, []); // no AirPlay targets: the plain picker button
     if (p === '/api/scan') return json(route, { running: false, itemCount: items.length, watching: [] });
     if (opts.slowItems && p.startsWith('/api/items')) await sleep(opts.slowItems);
     if (p === '/api/items') return routeItems(route, items);

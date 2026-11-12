@@ -178,6 +178,7 @@ async function api(req, res, u) {
     return res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'max-age=3600' }).end(svg);
   }
   if (p === '/api/info') return json(res, { id: 'x', name: 'e2e', version: 'dev', authRequired: false });
+  if (p === '/api/receivers') return json(res, []); // no AirPlay targets: the plain picker button
   if (p === '/api/scan') return json(res, { running: false, itemCount: ITEMS.length, watching: [] });
   if (p === '/api/items') {
     if (mock.itemsHold) await mock.itemsHold;

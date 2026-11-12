@@ -22,8 +22,9 @@ marked FUTURE is designed here and built later; everything else is the groundwor
   the server sees. It ends when it is stopped or when the lease runs out, never because a client failed to say
   goodbye.
 - **Every URL a client follows is built by the server** (playback, segments, art, subtitles). A client knows only
-  the base URL it found the server at (mDNS or typed). Those URLs carry what the server needs to know whose they
-  are (the session, the token), because a media player sends no headers of the app's.
+  the base URL it found the server at (mDNS or typed), or the base of an AirPlay target it named (below). Those URLs
+  carry what the server needs to know whose they are (the session, the token), because a media player sends no
+  headers of the app's.
 
 ## Versioning
 - **`api` is the version of the API, now 1. `apiMin` is the oldest version the server still serves.** Both are in
@@ -137,8 +138,30 @@ marked FUTURE is designed here and built later; everything else is the groundwor
       sees last wins, and the newest attempt stays as it was.
   - A direct play is held like a session: 30 s after its last heartbeat or request, 3 minutes while its last
     heartbeat said it is paused.
-- **Cast and AirPlay targets are routes, not devices.** The sender (the phone, the browser) keeps the play's lease
-  with its heartbeats. When it can no longer do so, the requests of the target keep the lease alive while it fetches.
+- **Cast and AirPlay targets are routes, not devices** (AirPlay targets below). The sender (the phone, the browser)
+  keeps the play's lease with its heartbeats. When it can no longer do so, the requests of the target keep the lease
+  alive while it fetches.
+
+## AirPlay targets
+- **Ply finds them on the LAN** with DNS-SD (`_airplay._tcp`), beside advertising itself as `_ply._tcp`: an
+  Apple TV, a Mac that accepts AirPlay, or another receiver (docs/AIRPLAY.md, "Network setup").
+  - `GET /api/receivers` lists them, private like the devices: `[{id, name, model, kind, address, port, base}]`.
+  - `id` is the receiver's `deviceid` (its MAC address); `name` is the name it advertises.
+  - `base` is the URL of this server on the receiver's own network (`http://192.168.4.196:8420`), the base of the
+    URLs that receiver fetches. It is absent when the server is on no network of the receiver's.
+- **A play may name one.** `POST /api/items/{id}/playback {"receiver": "<id>"}` answers with every URL on that
+  receiver's network; the segments follow their playlist, which is relative to it. This is for any client, not only
+  a browser: a native app that will hand the play to a TV asks for that TV.
+- **An AirPlay play that names none is routed automatically** to the Apple TVs' network when they all share one and
+  the request did not come in on it (a page opened at `localhost`, or on an Internet Sharing or VPN address). When
+  the TVs disagree, the URLs stay on the page's address.
+- **A receiver the server cannot route is refused**: 422 with the reason, or 400 for an id that is not there. A play
+  is never given a URL that the target cannot fetch without saying so.
+- **The web player offers them only when the choice matters**: the AirPlay button opens Safari's own picker
+  directly when the play is already routed to the Apple TVs' network (the usual case), so a person picks their TV
+  once. It lists the TVs by name first only when they are on more than one network, or on one the page is not on
+  while ply could not route the play there; choosing a TV then starts the play again for its network, and the next
+  AirPlay opening sends it there. Safari's picker needs the person's click, so those two cannot be one.
 
 ## Auth
 - **Today:** one token (`-token`). An empty token means none is required. `/api/info` says whether one is
@@ -190,6 +213,9 @@ marked FUTURE is designed here and built later; everything else is the groundwor
     unless they get an exception of their own. Connect by the address that mDNS gives.
   - **Local network privacy** needs `NSLocalNetworkUsageDescription` and `NSBonjourServices` = `_ply._tcp`.
   - **Discovery** is `NWBrowser` for `_ply._tcp`. The TXT record gives `id`, `name`, `api` and `apiMin`.
+  - **AirPlay receivers are the server's**: `GET /api/receivers` names the TVs and the base URL each can fetch from,
+    and `receiver` on a play routes its media to one. The app does not browse for them itself, and AVPlayer hands a
+    routed URL to the TV unchanged.
   - **The feed:** read `URLSession.bytes(for:)` and parse the SSE frames yourself. `AsyncBytes.lines` hides the
     blank line that ends a frame, so it cannot be used as it is. Use a session of its own, so the stream does not
     hold one of the session's connections to the host.
@@ -258,3 +284,6 @@ Receiver, ply on `http://192.168.4.196:8420`:
 8. The web UI makes its device id (`web/src/lib/device.ts`), registers it at start, and sends it with its requests
    and on the feed.
 9. The Chromecast result, recorded above, and the `chromecast` profile's 720p limit on HLS.
+10. AirPlay targets: a browse for `_airplay._tcp` (`internal/discovery`), `GET /api/receivers`, and `receiver` on
+    `POST /playback`, with every media URL of the play on the receiver's own network and automatic routing for an
+    AirPlay play (docs/AIRPLAY.md, "Network setup").

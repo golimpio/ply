@@ -476,6 +476,13 @@ The aim is a "now playing" that is always right, including a cast to Apple TV or
     the host name is not probed (the system's responder owns it); a conflict after the name was announced is not
     handled; when every name up to "(15)" is taken, nothing is announced. Not
     hashicorp/mdns: it has no probing, conflict handling or goodbye packets.
+  - The AirPlay targets are found by a browse of ply's own in the same package (`receiver.go`): the PTR, SRV,
+    TXT and A records of `_airplay._tcp`, a query every 30 s on each interface, and an entry dropped after 3
+    minutes without an answer. The browse takes its own socket on the same shared port today, beside the
+    responder's, so neither depends on the other; folding it onto the responder's socket (a hook in
+    `responder.handle`) is a follow-up. `subnet.go` picks the address of ply on a receiver's network by longest
+    prefix, which is what a play's media URLs are built on (docs/AIRPLAY.md, "Network setup"). The limits are
+    the responder's: IPv4 only, and the interfaces that were up at start.
 
 ## What to keep
 - The HLS fragment design (`docs/NOTES.md` M3/M4).

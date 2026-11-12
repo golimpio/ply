@@ -339,6 +339,15 @@ func run() error {
 		log.Info("library folders changed", "folders", rootPaths(roots))
 	}
 
+	// The AirPlay targets on the LAN (docs/AIRPLAY.md): a browse over mDNS beside the
+	// advertisement. Without it, a play keeps the page's own address and no receiver is listed.
+	var receivers *discovery.Browser
+	if b, err := discovery.Browse(); err != nil {
+		log.Warn("AirPlay receiver discovery unavailable", "err", err)
+	} else {
+		receivers = b
+	}
+
 	apiOpts := api.Options{
 		Store:   st,
 		Scanner: scanControl{q: queue, scanner: scanner},
@@ -347,6 +356,8 @@ func run() error {
 		Name:    cfg.Name,
 		Version: version,
 		Token:   cfg.Token,
+		// A play is routed only to an address this server listens on.
+		ListenAddr: ln.Addr(),
 
 		FlagFolders: flagRoots,
 		SetRoots:    setRoots,
@@ -376,6 +387,9 @@ func run() error {
 	}
 	if watcher != nil {
 		apiOpts.Watcher = watcher // a nil *Watcher in the interface would not be nil
+	}
+	if receivers != nil {
+		apiOpts.Receivers = receivers // a typed nil in the interface would not be nil
 	}
 	handler := api.New(apiOpts)
 	// The limits on plays: the flags, then the settings, then the defaults; the default
@@ -450,6 +464,7 @@ func run() error {
 		},
 	}.run([]stopStep{
 		{"network announcement", adv.Shutdown},
+		{"receiver discovery", receivers.Close},
 		// Kill every ffmpeg and drop the temp dirs first: requests waiting on
 		// segments return at once instead of holding the HTTP shutdown up. All three
 		// at once: each waits a moment for the exits (an ffmpeg in a read from a slow

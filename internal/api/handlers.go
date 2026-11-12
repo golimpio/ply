@@ -184,6 +184,9 @@ type playbackRequest struct {
 	AudioIndex    *int              `json:"audioIndex"`
 	SubtitleIndex *int              `json:"subtitleIndex"`
 	SubtitleKey   string            `json:"subtitleKey"`
+	// Receiver is the AirPlay target of GET /api/receivers the play is for: the media URLs it is
+	// given are then on the address that target can reach (docs/M11-CLIENTS.md, "AirPlay").
+	Receiver string `json:"receiver"`
 	// Attempt is a number the device makes larger each time it asks (docs/M11-CLIENTS.md): of two asks
 	// for one direct play, the larger one wins, whichever the server handles last. 0: no order.
 	Attempt int64 `json:"attempt"`
@@ -261,6 +264,17 @@ func (s *Server) handlePlayback(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// The base of every media URL of this play: the receiver's network when one was named, or the
+	// Apple TVs' network for an AirPlay play (see playbackBase). None leaves the page's address.
+	base, err := s.playbackBase(r, profile, req.Receiver)
+	if err != nil {
+		code := http.StatusUnprocessableEntity
+		if errors.Is(err, errUnknownReceiver) {
+			code = http.StatusBadRequest
+		}
+		writeError(w, code, err.Error())
+		return
+	}
 	// From here until the first seconds of the play are over, no frame is grabbed from this file:
 	// the grab would read it at the same time as the play.
 	endPlay := s.beginPlay(e.ID)
@@ -281,6 +295,9 @@ func (s *Server) handlePlayback(w http.ResponseWriter, r *http.Request) {
 		}
 	} else if !s.attachSession(w, r, e, d, profile, req.StartSec, req.SubtitleKey, &pb) {
 		return
+	}
+	if base != "" && pb.URL != "" {
+		pb.URL = base + pb.URL
 	}
 	started = true
 	writeJSON(w, http.StatusOK, pb)

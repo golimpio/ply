@@ -155,7 +155,7 @@ async function open(browser, opts = {}) {
     if (m !== 'GET') log.push({ method: m, path: p, body, at: Date.now() });
     if (m === 'GET' && p === '/api/info') return json(route, { id: 'x', name: 'limits', version: '0', authRequired: false });
     if (m === 'GET' && p === '/api/scan') return json(route, { running: false, itemCount: 1 });
-    if (m === 'GET' && ['/api/items', '/api/shows', '/api/continue', '/api/upcoming', '/api/genres', '/api/folders'].includes(p)) return json(route, []);
+    if (m === 'GET' && ['/api/items', '/api/shows', '/api/continue', '/api/upcoming', '/api/genres', '/api/folders', '/api/receivers'].includes(p)) return json(route, []);
     if (m === 'GET' && p === '/api/jobs') return json(route, jobsSnapshot());
     if (m === 'GET' && p === '/api/events')
       return route.fulfill(eventStream());

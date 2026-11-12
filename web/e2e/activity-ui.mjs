@@ -88,6 +88,7 @@ async function open(browser, opts = {}, viewport = { width: 1280, height: 800 })
     if (req.method() !== 'GET') calls.push({ method: req.method(), path: p });
     else hits[p] = (hits[p] ?? 0) + 1;
     if (p === '/api/info') return json(route, { id: 'x', name: 'e2e', version: 'dev', authRequired: false });
+    if (p === '/api/receivers') return json(route, []); // no AirPlay targets: the plain picker button
     if (p === '/api/scan') return json(route, { running: false, itemCount: 0, watching: [] });
     if (['/api/items', '/api/continue', '/api/shows', '/api/upcoming', '/api/genres'].includes(p)) return json(route, []);
     if (p === '/api/jobs') return json(route, st.snapshot);

@@ -307,6 +307,7 @@ async function open(browser, width, opts = {}) {
       return route.fulfill({ contentType: 'image/svg+xml', body: artwork(name) });
     }
     if (p === '/api/info') return json(route, { id: 'x', name: 'Living room', version: 'dev', authRequired: !!opts.auth });
+    if (p === '/api/receivers') return json(route, []); // no AirPlay targets: the plain picker button
     if (p === '/api/scan') return json(route, { running: false, itemCount: ITEMS.length, watching: [{ root: '/Volumes/NAS/Movies', watching: true, dirs: 263 }] });
     if (p === '/api/items') return routeItems(route, opts.items ?? ITEMS);
     if (p === '/api/shows') return json(route, opts.items ? [] : SHOWS);

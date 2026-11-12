@@ -657,6 +657,28 @@ export interface PlaybackRequest {
   audioIndex?: number;
   subtitleIndex?: number;
   subtitleKey?: string;
+  /**
+   * The AirPlay target of GET /api/receivers this play is for: the URLs it gets are then on the
+   * network that target is on (docs/M11-CLIENTS.md, "AirPlay").
+   */
+  receiver?: string;
+}
+
+/** An AirPlay target found on the LAN: an Apple TV, a Mac, or another receiver. */
+export interface Receiver {
+  id: string;
+  name: string;
+  /** "AppleTV3,2", a Mac's model, or a receiver's own; absent when it says nothing. */
+  model?: string;
+  kind: 'airplay';
+  /** Where the receiver is, as the server's browse found it. */
+  address?: string;
+  port?: number;
+  /**
+   * The URL of the server on the receiver's own network: the base of the URLs it fetches. Absent when
+   * the server is on no network of the receiver's.
+   */
+  base?: string;
 }
 
 export interface ScanStatus {
@@ -1129,6 +1151,14 @@ export const api = {
 
   /** Say who this browser is (docs/M11-CLIENTS.md, "Devices"): the server names it after its User-Agent. */
   registerDevice: () => request<void>('PUT', `/api/devices/${encodeURIComponent(deviceId())}`, { kind: 'web', app: 'ply-web' }),
+
+  /**
+   * The AirPlay targets found on the LAN (docs/AIRPLAY.md), with the base URL of this server on each
+   * one's network. The list is private, like the devices.
+   */
+  async receivers(): Promise<Receiver[]> {
+    return (await request<Receiver[] | null>('GET', '/api/receivers')) ?? [];
+  },
 
   // Go encodes nil slices as null; normalise so callers can iterate safely.
   async items(params: { kind?: Kind; show?: string } = {}): Promise<ItemSummary[]> {

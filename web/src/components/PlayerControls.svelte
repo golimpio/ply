@@ -10,6 +10,7 @@
 
 <script lang="ts">
   import { untrack, type Snippet } from 'svelte';
+  import type { Receiver } from '../lib/api';
   import { formatClock } from '../lib/format';
   import Icon from './Icon.svelte';
 
@@ -54,6 +55,8 @@
     airplayAvailable = false,
     wireless = false,
     onAirPlay,
+    receivers = [],
+    onReceiver,
     info,
   }: {
     video: HTMLVideoElement;
@@ -75,6 +78,9 @@
     airplayAvailable?: boolean;
     wireless?: boolean;
     onAirPlay?: () => void;
+    /** The AirPlay targets found on the LAN (docs/AIRPLAY.md): offered by name beside the picker. */
+    receivers?: Receiver[];
+    onReceiver?: (id: string) => void;
     info?: Snippet;
   } = $props();
 
@@ -85,7 +91,7 @@
   let volume = $state(1);
   let muted = $state(false);
   let waiting = $state(false);
-  let menu = $state<'audio' | 'subs' | null>(null);
+  let menu = $state<'audio' | 'subs' | 'airplay' | null>(null);
   let fullscreen = $state(false);
   let scrub = $state<number | null>(null); // value while dragging the scrubber
   let hover = $state<{ x: number; t: number } | null>(null);
@@ -644,7 +650,32 @@
         </div>
       {/if}
       {#if airplayAvailable && onAirPlay}
-        <button class="ctl" class:on={wireless} onclick={onAirPlay} aria-label="AirPlay" aria-pressed={wireless} title={wireless ? 'Playing on AirPlay' : 'Choose an AirPlay device'}><Icon name="airplay" /></button>
+        {#if receivers.length && onReceiver}
+          <div class="menu-anchor">
+            <button
+              class="ctl"
+              class:on={wireless}
+              onclick={() => (menu = menu === 'airplay' ? null : 'airplay')}
+              aria-label="AirPlay"
+              aria-expanded={menu === 'airplay'}
+              aria-pressed={wireless}
+              title={wireless ? 'Playing on AirPlay' : 'Choose an AirPlay device'}
+            >
+              <Icon name="airplay" />
+            </button>
+            {#if menu === 'airplay'}
+              <div class="menu" role="menu" aria-label="AirPlay devices">
+                {#each receivers as r (r.id)}
+                  <button role="menuitem" onclick={() => { menu = null; onReceiver!(r.id); }}>{r.name}</button>
+                {/each}
+                <!-- Safari's own picker: for a target the browse has not seen, or one on another network. -->
+                <button role="menuitem" onclick={() => { menu = null; onAirPlay!(); }}>Other device…</button>
+              </div>
+            {/if}
+          </div>
+        {:else}
+          <button class="ctl" class:on={wireless} onclick={onAirPlay} aria-label="AirPlay" aria-pressed={wireless} title={wireless ? 'Playing on AirPlay' : 'Choose an AirPlay device'}><Icon name="airplay" /></button>
+        {/if}
       {/if}
       {#if pipSupported}
         <button class="ctl pip" onclick={togglePip} aria-label="Picture in picture"><Icon name="pip" /></button>

@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type HlsType from 'hls.js';
-  import { api, ApiError, mediaUrl, type ItemDetail, type Playback, type Subtitle } from '../lib/api';
+  import { api, ApiError, mediaUrl, type ItemDetail, type Playback, type Receiver, type Subtitle } from '../lib/api';
   import { channelLabel, codecLabel, episodeLabel, languageLabel, methodLabel } from '../lib/format';
-  import { observeAirPlay, showAirPlay, supportsAirPlay } from '../lib/airplay';
+  import { needsReceiverChoice, observeAirPlay, reachesTarget, showAirPlay, supportsAirPlay } from '../lib/airplay';
   import { Heartbeat } from '../lib/heartbeat';
   import { applyProgress } from '../lib/library.svelte';
   import { AUTO_RETRIES, limitOf, probeMedia, type PlayLimit as Limit } from '../lib/playlimit';
@@ -25,6 +25,12 @@
 
   let airplayAvailable = $state(false);
   let airplayError = $state('');
+  /** A status line for what the picker will do next (ready for a target on another network). */
+  let airplayNotice = $state('');
+  /** The AirPlay targets the server found on the LAN (GET /api/receivers); none when the browse is off. */
+  let receivers = $state<Receiver[]>([]);
+  /** The target the viewer chose: the play's URLs are on the address that it can reach. */
+  let receiverId = $state('');
   let nativeAirPlay = false;
 
   let video = $state<HTMLVideoElement>();
@@ -37,6 +43,11 @@
   let limitAuto = $state(true);
   let limitRetries = 0;
   let playback = $state<Playback>();
+  /**
+   * What the AirPlay button offers: Safari's picker alone (the usual case, the play is already on the
+   * TVs' network), or the TVs by name first when only that choice can route the play to one.
+   */
+  const airplayChoice = $derived(airplayAvailable && needsReceiverChoice(receivers, playback?.url ?? '', location.host));
   /** The audio stream the viewer picked; undefined until they pick one (the server chooses). */
   let audioIndex = $state<number>();
   /** Key of the selected subtitle track (see Subtitle.key), null for none. */
@@ -379,6 +390,7 @@
         audioIndex,
         subtitleIndex: burnIndex,
         subtitleKey: nativeAirPlay ? textSub?.key : undefined,
+        receiver: receiverId || undefined,
       });
     } catch (e) {
       if (destroyed || run !== attempt) return;
@@ -546,6 +558,7 @@
       const changed = wireless !== state.wireless;
       airplayAvailable = state.available;
       wireless = state.wireless;
+      if (state.wireless) airplayNotice = '';
       if (changed) {
         airplayError = '';
         heartbeat.beat();
@@ -557,14 +570,48 @@
     v.textTracks.addEventListener('addtrack', showNativeSubtitle);
     subKey = defaultSubtitle(item.subtitles);
     void start(startSec);
+    void loadReceivers();
+    const targets = setInterval(() => void loadReceivers(), 30_000);
     return () => {
       destroyed = true;
       leave();
+      clearInterval(targets);
       unwatch();
       v.removeEventListener('timeupdate', onTimeUpdate);
       v.textTracks.removeEventListener('addtrack', showNativeSubtitle);
     };
   });
+
+  /** The AirPlay targets the server found on the LAN: a TV, a Mac, a receiver (GET /api/receivers). */
+  async function loadReceivers() {
+    try {
+      const list = await api.receivers();
+      if (destroyed) return;
+      receivers = list;
+      if (receiverId && !list.some((r) => r.id === receiverId)) receiverId = '';
+    } catch {
+      // The browse is optional: Safari's own picker still works, and the page's address is used.
+    }
+  }
+
+  /**
+   * Offer to connect to one target of the LAN (docs/AIRPLAY.md). The picker is Safari's and works on the
+   * play's own URL, so a play already routed to the target's network opens it at once, from this click.
+   * A play on another address is started again for that target, and the next AirPlay opening sends it.
+   */
+  function connectReceiver(id: string) {
+    const target = receivers.find((r) => r.id === id);
+    if (!target) return;
+    if (reachesTarget(playback?.url ?? '', target.base, location.host)) {
+      pickAirPlay();
+      return;
+    }
+    receiverId = target.id;
+    void start(progress.position()).then(() => {
+      // start() clears the notice: it is set once the play exists on the target's network.
+      if (!destroyed && playback) airplayNotice = `Ready for ${target.name}: open AirPlay to connect.`;
+    });
+  }
 
   function pickAirPlay() {
     airplayError = el && showAirPlay(el) ? '' : 'AirPlay could not open. Try choosing a device again.';
@@ -584,6 +631,7 @@
 <!-- How this is being played, in the top bar: the badge, and why on demand. -->
 {#snippet how()}
   {#if wireless}<span class="airplay-status" role="status">Playing on AirPlay</span>{/if}
+  {#if airplayNotice && !wireless}<span class="airplay-status" role="status">{airplayNotice}</span>{/if}
   {#if airplayError}<span role="alert">{airplayError}</span>{/if}
   {#if playback}
     <details class="why">
@@ -631,6 +679,8 @@
         {airplayAvailable}
         {wireless}
         onAirPlay={pickAirPlay}
+        receivers={airplayChoice ? receivers : []}
+        onReceiver={connectReceiver}
         year={item.kind === 'episode' ? undefined : item.year || undefined}
         artwork={artSrc(item, 'backdrop')}
         duration={item.durationSec}

@@ -77,14 +77,27 @@ suspended may lag the TV; receiver segment positions provide activity, not exact
 
 ## Network setup
 
-Open ply using an address reachable by both Safari and the TV, on a network that permits AirPlay
-discovery and media access. The browser and the TV must agree on the address: AirPlay sends the TV a
-media URL relative to the page, so a page served on one subnet tells a TV on another to fetch an
-address it cannot reach. A Mac with more than one network (Wi-Fi and Ethernet, Internet Sharing, a
-VPN) advertises several addresses; use the interface on the TV's subnet, not a bridge or tunnel
-address. A server's localhost or 127.0.0.1 address is local to each device and is not a usable TV
-media address. The TV must also trust any HTTPS certificate in use. Ply does not discover or
-configure the home network, install certificates, or expose the server to the internet.
+Ply finds the AirPlay receivers on the LAN itself: it browses `_airplay._tcp` with DNS-SD, the
+protocol Safari's picker uses, and follows what answers (an Apple TV, a Mac that accepts AirPlay, a
+receiver such as a WiiM). `GET /api/receivers` lists them with the URL of ply on each one's own
+network. The player's AirPlay button goes straight to Safari's picker when the play is already on the
+TVs' network — the usual case — and offers them by name only when their networks disagree and the
+choice decides which address the play is served on.
+
+A play is then given media URLs on the address its receiver can reach. An AirPlay play that names no
+receiver is routed to the Apple TVs' network when they all share one and the page did not come in on
+it: ply opened at `localhost`, or at an Internet Sharing or VPN address, still gives the TV a URL it
+can fetch. That was the failure this solves — a page served on one subnet telling a TV on another to
+fetch an address it cannot reach. When the Apple TVs are on different networks, or a client wants a
+particular one, it names the receiver (`POST /api/items/{id}/playback {"profile": "airplay",
+"receiver": <id>}`) and every URL of that play is on that network. The same field is what a native
+app uses when it hands a play to a TV.
+
+Ply still does not configure the network: the TV must be allowed to reach the server's port (a
+firewall or an isolated guest network breaks AirPlay), mDNS must reach ply from the TV's network, and
+the TV must trust the certificate if ply is served over HTTPS. A reverse proxy is outside this: these
+URLs name an address of ply itself on the LAN, so a play through a proxy keeps the page's address
+rather than routing to a TV.
 
 ## Verification and device acceptance
 
@@ -93,14 +106,16 @@ real decoded media. They test profile choice, native URLs, subtitles/audio reque
 node/session identity while browsing and returning, pagehide/restore, disconnect and explicit stop.
 Run the focused browser checks with `make e2e-airplay`; `make e2e-web` includes them with the broader
 browser suite. Unit tests cover unsupported browsers, event cleanup and synchronous picker failure. Server tests
-cover receiver identity, authentication, subtitle manifests/timing and bounded lifetime.
+cover receiver identity, authentication, subtitle manifests/timing and bounded lifetime, and the AirPlay
+receivers on the LAN: the browse, the subnet that a play is routed to, and the APIs that name them.
 
 Emulated events are not evidence of Apple's discovery, firmware or rendering behavior. Before
 release, run this hardware checklist in Safari on macOS and iPhone/iPad with an actual Apple TV:
 
-1. Open the server's address on the TV's subnet; select a TV and confirm the TV renders the media.
-   The Activity page and `GET /api/sessions` show the active play and its last activity; individual
-   media requests are not access-logged by default.
+1. Open ply at `http://localhost:8420` — not only at the TV's address; `GET /api/receivers` must name the
+   TV with the base of ply on its network, and the player's AirPlay menu must list it. Select it, choose
+   the TV in the picker and confirm the TV renders the media. The Activity page and `GET /api/sessions`
+   show the active play and its last activity; individual media requests are not access-logged by default.
 2. Play H.264/AAC, HEVC/4K conversion, multichannel-to-stereo audio and an alternate audio track.
    Include an Apple TV 3rd generation receiver; modern macOS AVPlayer alone is not an acceptance test.
 3. Resume, seek forward/backward, pause/resume and verify reported progress.

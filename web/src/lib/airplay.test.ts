@@ -1,6 +1,15 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
-import { observeAirPlay, showAirPlay, supportsAirPlay, type AirPlayVideo } from './airplay';
+import {
+  needsReceiverChoice,
+  observeAirPlay,
+  playBase,
+  reachesTarget,
+  showAirPlay,
+  supportsAirPlay,
+  type AirPlayVideo,
+} from './airplay';
+import type { Receiver } from './api';
 
 function video(): AirPlayVideo {
   const v: AirPlayVideo = document.createElement('video');
@@ -84,5 +93,57 @@ describe('AirPlay', () => {
     expect(showAirPlay(v)).toBe(false);
     delete v.webkitShowPlaybackTargetPicker;
     expect(showAirPlay(v)).toBe(false);
+  });
+});
+
+describe('a play reaching an AirPlay target', () => {
+  it('names the base of an absolute URL only', () => {
+    expect(playBase('http://192.168.4.196:8420/api/sessions/s/index.m3u8')).toBe('http://192.168.4.196:8420');
+    expect(playBase('https://ply.home.arpa/x')).toBe('https://ply.home.arpa');
+    expect(playBase('/api/items/7/file')).toBe('');
+    expect(playBase('blob:http://127.0.0.1:8420/abc')).toBe('');
+  });
+
+  it('says whether the target of a routed play is the one asked for', () => {
+    const tv = 'http://192.168.4.196:8420';
+    // The server routed the play to the TV's network, or to another one.
+    expect(reachesTarget(tv + '/api/sessions/s/index.m3u8', tv, 'localhost:8420')).toBe(true);
+    expect(reachesTarget('http://192.168.139.3:8420/api/x', tv, 'localhost:8420')).toBe(false);
+  });
+
+  it('treats a relative play as the page address, which the target reaches only on its network', () => {
+    const tv = 'http://192.168.4.196:8420';
+    expect(reachesTarget('/api/sessions/s/index.m3u8', tv, '192.168.4.196:8420')).toBe(true);
+    expect(reachesTarget('/api/sessions/s/index.m3u8', tv, 'localhost:8420')).toBe(false);
+    // A target with no base (the server is on no network of its) can never be reached.
+    expect(reachesTarget(tv + '/api/x', undefined, '192.168.4.196:8420')).toBe(false);
+    expect(reachesTarget('/api/x', 'not a url', 'localhost')).toBe(false);
+  });
+});
+
+describe('whether the AirPlay button needs the TVs by name first', () => {
+  const tv = (base: string): Receiver => ({ id: 'tv' + base, name: 'TV', kind: 'airplay', model: 'AppleTV3,2', base });
+  const mac = (base: string): Receiver => ({ id: 'mac' + base, name: 'Mac', kind: 'airplay', model: 'Mac14,13', base });
+  const farm = 'http://192.168.4.196:8420';
+
+  it('goes straight to the picker when the server routed the play', () => {
+    expect(needsReceiverChoice([tv(farm)], farm + '/api/sessions/s/index.m3u8', 'localhost:8420')).toBe(false);
+  });
+
+  it("goes straight to the picker when the page is already on the TV's network", () => {
+    expect(needsReceiverChoice([tv(farm)], '/api/sessions/s/index.m3u8', '192.168.4.196:8420')).toBe(false);
+  });
+
+  it('offers the TVs only when the play was not routed and they are elsewhere', () => {
+    expect(needsReceiverChoice([tv(farm)], '/api/sessions/s/index.m3u8', 'localhost:8420')).toBe(true);
+  });
+
+  it('offers the TVs when they are on different networks', () => {
+    expect(needsReceiverChoice([tv(farm), tv('http://192.168.139.3:8420')], '/x', '192.168.4.196:8420')).toBe(true);
+  });
+
+  it('ignores a Mac and a receiver with no address of ours', () => {
+    expect(needsReceiverChoice([mac('http://192.168.139.3:8420')], '/x', 'localhost:8420')).toBe(false);
+    expect(needsReceiverChoice([{ id: 'x', name: 'x', kind: 'airplay' }], '/x', 'localhost')).toBe(false);
   });
 });

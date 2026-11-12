@@ -26,7 +26,8 @@ internal/library           scanner + nameparse
 internal/store             SQLite (modernc.org/sqlite)
 internal/playback          Profile, built-in profiles, Decide()
 internal/api               HTTP handlers, auth, CORS, SPA serving
-internal/discovery         mDNS (_ply._tcp, a responder of its own on x/net/dns/dnsmessage)
+internal/discovery         mDNS (_ply._tcp, a responder of its own on x/net/dns/dnsmessage; a browse for
+                           _airplay._tcp receivers)
 internal/stream            (M3) HLS session manager, ffmpeg runner
 internal/hwaccel           (M4) encoder probe
 web/                       Svelte 5 + Vite SPA; web/embed.go: package web, //go:embed all:dist

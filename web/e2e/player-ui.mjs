@@ -168,6 +168,7 @@ async function open(browser, opts = {}) {
     const m = req.method();
     if (m === 'PUT' && p.startsWith('/api/devices/')) return route.fulfill({ status: 204 }); // the app says who it is (M11)
     if (m === 'GET' && p === '/api/info') return json(route, { id: 'x', name: 'overlay', version: '0', authRequired: false });
+    if (m === 'GET' && p === '/api/receivers') return json(route, []);
     if (m === 'GET' && p === '/api/scan') return json(route, { running: false, itemCount: 1 });
     if (m === 'GET' && p === '/api/items') return json(route, []);
     if (m === 'GET' && p === '/api/shows') return json(route, []);

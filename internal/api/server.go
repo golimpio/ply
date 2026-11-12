@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"ply/internal/art"
+	"ply/internal/discovery"
 	"ply/internal/hwaccel"
 	"ply/internal/jobs"
 	"ply/internal/library"
@@ -114,6 +115,15 @@ type Options struct {
 	// nil: the Activity endpoints answer 503. Governor nil: browsing holds nothing.
 	Jobs     *jobs.Queue
 	Governor *tier.Governor
+
+	// Receivers are the AirPlay targets found on the LAN (docs/AIRPLAY.md). nil: none are
+	// known, GET /api/receivers lists none, and a play keeps the page's own address.
+	Receivers ReceiverFinder
+
+	// ListenAddr is the address the server listens on (the listener's Addr). A play is only
+	// routed to an address this server serves: one bound to loopback does not name a LAN
+	// address for a TV. nil takes every address of ours as served (a test).
+	ListenAddr net.Addr
 }
 
 // Server is the HTTP handler for the whole application.
@@ -128,6 +138,9 @@ type Server struct {
 	// subsGrace is how long a request for an embedded subtitle waits for the extraction to
 	// finish before it starts to stream what is written so far (a variable for the tests).
 	subsGrace time.Duration
+	// localIPFor is the address of ours that a peer reaches (internal/discovery); a variable
+	// for the tests.
+	localIPFor func(net.IP) (net.IP, bool)
 }
 
 // New builds the server. The returned value is an http.Handler.
@@ -135,7 +148,7 @@ func New(o Options) *Server {
 	if o.Logger == nil {
 		o.Logger = slog.New(slog.DiscardHandler)
 	}
-	s := &Server{Options: o, subsGrace: time.Second}
+	s := &Server{Options: o, subsGrace: time.Second, localIPFor: discovery.LocalIPFor}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/info", s.handleInfo)
@@ -168,6 +181,7 @@ func New(o Options) *Server {
 	mux.HandleFunc("POST /api/sessions/{sid}/heartbeat", s.handleSessionHeartbeat)
 	mux.HandleFunc("GET /api/devices", s.handleDevices)
 	mux.HandleFunc("PUT /api/devices/{id}", s.handleDevicePut)
+	mux.HandleFunc("GET /api/receivers", s.handleReceivers)
 	mux.HandleFunc("GET /api/people", s.handlePeople)
 	mux.HandleFunc("GET /api/people/{id}", s.handlePerson)
 	mux.HandleFunc("GET /api/genres", s.handleGenres)
@@ -230,7 +244,8 @@ func middleware(next http.Handler, token string, hosts []string) http.Handler {
 
 // private reports whether the path is one of the endpoints that show or change
 // the folders ply serves: /api/folders and /api/fs, which lists the server's
-// directories; /api/settings/test, which acts with the keys; or what is being watched and by whom: /api/sessions (titles and
+// directories; /api/settings/test, which acts with the keys; the household's devices and screens:
+// /api/devices and /api/receivers; or what is being watched and by whom: /api/sessions (titles and
 // the addresses of the clients), and the two calls that act on one session,
 // DELETE /api/sessions/{sid} and POST /api/sessions/{sid}/heartbeat. They are for
 // the server's own pages and for native clients, never for a page of another
@@ -242,7 +257,7 @@ func private(urlPath string) bool {
 	if p == "/api/settings/test" { // it makes the server log in to a provider with a key the page cannot see
 		return true
 	}
-	for _, root := range []string{"/api/folders", "/api/fs", "/api/jobs", "/api/queue", "/api/events", "/api/devices"} {
+	for _, root := range []string{"/api/folders", "/api/fs", "/api/jobs", "/api/queue", "/api/events", "/api/devices", "/api/receivers"} {
 		if p == root || strings.HasPrefix(p, root+"/") {
 			return true
 		}

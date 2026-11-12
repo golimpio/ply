@@ -171,6 +171,14 @@ async function open(browser, opts = {}) {
     const { pathname: p } = new URL(req.url());
     const m = req.method();
     if (m === 'PUT' && p.startsWith('/api/devices/')) return route.fulfill({ status: 204 }); // the app says who it is (M11)
+    // The AirPlay targets the server found on the LAN (docs/AIRPLAY.md). By default none: the
+    // plain AirPlay button. `receivers: true` is a TV on this page's network, 'other' one on
+    // another, whose play has to be routed first.
+    if (m === 'GET' && p === '/api/receivers') {
+      const origin = new URL(req.url()).origin;
+      if (opts.receivers === 'other') return json(route, [{ id: 'tv', name: 'Living Room Apple TV', kind: 'airplay', model: 'AppleTV3,2', address: '192.168.4.39', port: 7000, base: 'http://192.168.4.196:8420' }]);
+      return json(route, opts.receivers ? [{ id: 'tv', name: 'Living Room Apple TV', kind: 'airplay', model: 'AppleTV3,2', address: '127.0.0.1', port: 7000, base: origin }] : []);
+    }
     if (m === 'GET' && p === '/api/info') return json(route, { id: 'x', name: 'wiring', version: '0', authRequired: false });
     if (m === 'GET' && p === '/api/scan') return json(route, { running: false, itemCount: 1 });
     if (m === 'GET' && p === '/api/items') return json(route, []); // the item page's neighbours
@@ -347,6 +355,40 @@ try {
     await until('explicit stop releases the session', () => s.deletes().some((d) => d.id === 's1'));
     await until('explicit stop removes the player', async () => await s.page.locator('video').count() === 0);
     check('AirPlay stop sends one DELETE and starts no new stream', s.deletes().length === 1 && s.posts().length === 1);
+  });
+
+  // The TV the server found is on this page's network (or the play was routed there): Safari's picker is
+  // the one choice to make, so the button must go straight to it rather than list the TV again.
+  await scenario('AirPlay goes straight to the picker with the TV on this network', { airplay: true, receivers: true }, async (s) => {
+    await s.go('#/play/1?t=10');
+    await s.playingAt('native source to resume', 10, 20);
+    await s.page.evaluate(() => window.__availability('available'));
+    await until('the AirPlay button', async () => (await s.page.getByRole('button', { name: 'AirPlay', exact: true }).count()) === 1);
+    check('the button offers no second list first',
+      (await s.page.getByRole('button', { name: 'AirPlay', exact: true }).getAttribute('aria-expanded')) === null);
+    await s.click('button[aria-label="AirPlay"]');
+    check('the picker opens on that one click', await s.page.evaluate(() => window.__pickerCalls === 1));
+    check('the TV is not listed before the picker', (await s.page.getByRole('menuitem', { name: 'Living Room Apple TV' }).count()) === 0);
+    check('going to the picker does not restart the play', s.posts().length === 1, JSON.stringify(s.posts()));
+  });
+
+  // A TV on a network the page is not on cannot fetch the page's URL: it is listed by name, and choosing
+  // it starts the play again for that network; the status line says the next AirPlay opening sends it there.
+  await scenario('AirPlay lists the TV to route a play to another network', { airplay: true, receivers: 'other' }, async (s) => {
+    await s.go('#/play/1?t=10');
+    await s.playingAt('native source to resume', 10, 20);
+    await s.page.evaluate(() => window.__availability('available'));
+    await until('the AirPlay menu', () => s.page.getByRole('button', { name: 'AirPlay', exact: true }).getAttribute('aria-expanded'));
+    await s.click('button[aria-label="AirPlay"]');
+    await until('the TV by name', async () => (await s.page.getByRole('menuitem', { name: 'Living Room Apple TV' }).count()) === 1);
+    check("the menu offers Safari's own picker too", (await s.page.getByRole('menuitem', { name: 'Other device…' }).count()) === 1);
+    await s.page.getByRole('menuitem', { name: 'Living Room Apple TV' }).click();
+    await until('a play for the TV', () => s.posts().length === 2);
+    check('the new play names the receiver and keeps the AirPlay profile',
+      s.posts()[1].receiver === 'tv' && s.posts()[1].profile === 'airplay', JSON.stringify(s.posts()[1]));
+    check('the picker waits for the next AirPlay opening', await s.page.evaluate(() => !window.__pickerCalls));
+    await until('the ready notice', async () =>
+      ((await s.page.evaluate(() => document.querySelector('.airplay-status')?.textContent ?? '')) || '').includes('Ready for Living Room Apple TV'));
   });
 
   await scenario('AirPlay pagehide and route disconnect', { airplay: true, fast: true }, async (s) => {
