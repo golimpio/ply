@@ -96,10 +96,16 @@ type feedSnapshot struct {
 	Jobs     *jobs.Snapshot `json:"jobs,omitempty"`
 	Sessions []PlayingEntry `json:"sessions,omitzero"`
 	Tier     *tier.State    `json:"tier,omitempty"`
+	// Commands are the commands to the device of the feed it has not acked yet.
+	Commands []Command `json:"commands,omitzero"`
 }
 
-func (s *Server) feedSnapshot(topics events.Topics) feedSnapshot {
+// feedSnapshot is the snapshot of topics for the feed of device ("" for none).
+func (s *Server) feedSnapshot(topics events.Topics, device string) feedSnapshot {
 	snap := feedSnapshot{API: Version}
+	if hub := s.feedHub(); topics.Has(events.Commands) && device != "" && hub != nil {
+		snap.Commands = pendingCommands(hub, device)
+	}
 	if topics.Has(events.Jobs) && s.Jobs != nil {
 		j := s.Jobs.Snapshot()
 		snap.Jobs = &j
@@ -136,11 +142,10 @@ func SessionEventOf(c stream.PlayChange) (typ string, data SessionEvent) {
 // a server that needs one, comes as ?token= from a browser (EventSource cannot
 // send headers) and as a Bearer header from everything else.
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
-	if s.Jobs == nil {
-		writeError(w, http.StatusServiceUnavailable, "the live feed is not running")
+	hub := s.liveFeed(w)
+	if hub == nil {
 		return
 	}
-	hub := s.Jobs.Events()
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeError(w, http.StatusInternalServerError, "streaming unsupported")
@@ -151,7 +156,8 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		after, _ = strconv.ParseInt(v, 10, 64)
 	}
 	topics := events.ParseTopics(r.URL.Query().Get("topics"))
-	missed, resync, ch, cancel := hub.Subscribe(after, topics)
+	device := deviceID(r) // a paired device's own; the commands for it come on its feed
+	missed, resync, ch, cancel := hub.SubscribeAs(after, topics, device)
 	defer cancel()
 
 	h := w.Header()
@@ -178,7 +184,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	// replayed, is the snapshot of now.
 	sendEvent := func(e events.Event) error {
 		if e.Type == "snapshot" {
-			return send(e.Seq, "snapshot", s.feedSnapshot(topics))
+			return send(e.Seq, "snapshot", s.feedSnapshot(topics, device))
 		}
 		return send(e.Seq, e.Type, e.Data)
 	}
@@ -188,7 +194,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		// The snapshot carries the id of the newest event it includes: replay after it.
 		// The id is taken first, so the snapshot holds at least what it names.
 		last := hub.Last()
-		if err := send(last, "snapshot", s.feedSnapshot(topics)); err != nil {
+		if err := send(last, "snapshot", s.feedSnapshot(topics, device)); err != nil {
 			return
 		}
 	} else {

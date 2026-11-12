@@ -209,6 +209,8 @@ func New(o Options) *Server {
 	mux.HandleFunc("GET /api/devices", s.handleDevices)
 	mux.HandleFunc("PUT /api/devices/{id}", s.handleDevicePut)
 	mux.HandleFunc("DELETE /api/devices/{id}/token", s.handleDeviceRevoke)
+	mux.HandleFunc("POST /api/devices/{id}/commands", s.handleCommand)
+	mux.HandleFunc("POST /api/devices/{id}/commands/{seq}/ack", s.handleCommandAck)
 	mux.HandleFunc("POST /api/pairing", s.handlePairingCode)
 	mux.HandleFunc("POST /api/pair", s.handlePair)
 	mux.HandleFunc("GET /api/receivers", s.handleReceivers)

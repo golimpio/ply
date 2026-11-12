@@ -1,9 +1,10 @@
 # M11: the client contract (native apps, casts, the live feed)
 
 The owner will build native apps for iOS, iPadOS, tvOS and Android, cast to Chromecast and AirPlay to an Apple TV,
-all on the home network over plain HTTP. This file is the contract those clients are built against, written down
-before the first of them (2026-11-12) so that the architecture does not have to change for any of them. What is
-marked FUTURE is designed here and built later; everything else is the groundwork this milestone builds.
+all on the home network, over plain HTTP or HTTPS (below). This file is the contract those clients are built
+against, written down before the first of them (2026-11-12) so that the architecture does not have to change for
+any of them. What is marked FUTURE is designed here and built later; everything else is the groundwork this
+milestone builds.
 
 ## Decisions
 - **Push is SSE, and stays SSE.**
@@ -46,15 +47,16 @@ marked FUTURE is designed here and built later; everything else is the groundwor
   - `event:` is the type.
   - `data:` is one JSON object with one named field per payload: `{"job": …}`, `{"tier": …}`,
     `{"session": …, "reason": …}`, or `{}`.
-- **Topics:** `?topics=jobs,library,sessions,tier` (comma-separated).
+- **Topics:** `?topics=jobs,library,sessions,tier,commands` (comma-separated).
   - Without it, all of them.
   - A name the server does not know is ignored, so a list of only unknown names (a newer client asking an older
     ply for a later topic) gets nothing but the snapshot and the keep-alives.
   - Ids skip the events of other topics: gaps are normal.
 - **Replay and the snapshot:** on reconnect the client sends `Last-Event-ID`.
   - If the server still keeps every event since then (a ring of the last 512), it replays those of its topics.
-  - Otherwise it sends a `snapshot` first: `{api, jobs?, sessions?, tier?}`, with the sections of the topics asked
-    for. `jobs` is what `GET /api/jobs` answers, and `sessions` what `GET /api/sessions` answers.
+  - Otherwise it sends a `snapshot` first: `{api, jobs?, sessions?, tier?, commands?}`, with the sections of the
+    topics asked for (`commands` for a feed that names its device). `jobs` is what `GET /api/jobs` answers, and
+    `sessions` what `GET /api/sessions` answers.
 - **A snapshot may come at any time**, not only first, when the server's state changed in a way its events do not
   say.
   - Each of its sections replaces that state whole. A snapshot also means "fetch the library again".
@@ -79,6 +81,7 @@ marked FUTURE is designed here and built later; everything else is the groundwor
 | library | `library` (what the library shows changed: fetch again, after a quiet second) | none |
 | sessions | `session.started`, `session.updated`, `session.ended` | `session` (as in `GET /api/sessions`), plus `reason` on ended |
 | tier | `tier` (playback and browsing load) | `tier` |
+| commands | `command.play`, `command.pause`, `command.resume`, `command.seek`, `command.stop` (to one device); `command.acked` (to its sender) | `command`; `ack` (Remote control, below) |
 | (all) | `snapshot` | `api` and the topics' sections |
 
 ### Session events
@@ -225,22 +228,36 @@ owner's credential for good. Two ways were weighed:
 - **The web UI** keeps the shared token for its own requests (Bearer, and `?token=` on its EventSource) and follows
   the URLs the server gave it; `mediaUrl` adds the shared token only to a URL that has none.
 
-## FUTURE: remote control
-- **Commands go down the device's own feed:**
-  - an event can be addressed to one device (`to`), and the hub filters it on subscribe;
-  - they use a `commands` topic: `command.play {itemId, positionSec}`, `command.pause`, `command.resume`,
-    `command.seek {positionSec}`, `command.stop`;
-  - each carries `expiresAt`, and a device drops one that has expired. A TV that wakes up hours later must not
-    start a film it was sent at lunchtime.
+## Remote control
+One device asks another to play, pause, resume, seek or stop: a phone driving the TV.
+- **Sending:** `POST /api/devices/{id}/commands {type, itemId?, positionSec?, ttlSec?}` → 202 `{seq, expiresAt}`.
+  - `type` is `play` (needs `itemId`; `positionSec` is where to start), `pause`, `resume`, `seek` (needs
+    `positionSec`) or `stop`; anything else is a 400, an item that is not there a 404.
+  - The target is a device that registered (404 otherwise). The sender is the request's device (a paired one's
+    own), named in the command as `from`; any credential may send, a device's included.
+  - A command lives `ttlSec` (default 30, at most 600) and carries `expiresAt`. A device drops one it gets after
+    that: a TV that wakes up hours later must not start a film it was sent at lunchtime.
+- **Commands go down the device's own feed:** an event can be addressed to one device, and the hub sends it to
+  that device's subscribers alone (`GET /api/events` subscribes as the request's device, `?device=` or a paired
+  device's own). The topic is `commands`, the types `command.<type>`, the payload `{"command": {seq, type,
+  itemId?, positionSec?, from?, expiresAt}}`; `seq` is the event's id.
 - **Pending commands are kept apart from the ring**, until they are acked or have expired, so the busy topics
-  (`job.progress`) cannot push them out. A reconnecting device gets them replayed, or as the `commands` section of
-  its snapshot.
-- **Acks come back as plain requests:** `POST /api/devices/{id}/commands/{seq}/ack {ok, error?}`. The sender sees
-  the outcome as `command.acked` on its feed.
+  (`job.progress`) cannot push them out; 32 a device at most, the oldest going first. A reconnecting device gets
+  them replayed by seq, in order with the rest, or, when the ring no longer reaches back, as the `commands` section
+  of its snapshot.
+- **A device acts on a `seq` once.** The same command can come again: in a snapshot (its `commands` are the ones
+  still waiting, not new ones), in a replay after a snapshot, and live in the moment a feed opens. `play` is not
+  idempotent, so a TV remembers the seqs it has acted on, and acks each.
+- **Acks come back as plain requests:** `POST /api/devices/{id}/commands/{seq}/ack {ok, error?}` (the body is
+  required) → 204, or 404 for a command that is not that device's to answer (acked already, expired, another's).
+  A paired device acks only its own (403). The sender sees the outcome as
+  `command.acked {"ack": {seq, device, ok, error?}}` on its feed; a command sent with no device (a script) is
+  answered to every feed of the topic.
 - **The device's state is its session:** the heartbeats and `session.*` events above. There is no second channel.
-- **Who a command is for** is the device of the token that subscribes, once pairing exists. Before that, remote
-  control is limited to a network the owner trusts.
-- **Nothing in this needs a new transport.** A command is one more topic and one more field on the event.
+- **Who a command is for** is the device of the subscribing token once it is paired; on a server without a token,
+  the `?device=` the feed names, so remote control there is for a network the owner trusts.
+- **The web UI does not act on commands yet**: it is the native apps' (the TV's). Nothing in this needed a new
+  transport: a command is one more topic and one more field on the event.
 
 ## HTTPS
 HTTPS is what a Chromecast's HLS will need the day its receiver page blocks mixed content: the page is served
@@ -303,8 +320,11 @@ over HTTPS, and a fetch from it to `http://` is then refused (Platforms, Chromec
   up to 1080p/30 fps and AAC-LC stereo 48 kHz. It re-encodes both selected streams because Safari
   cannot expose receiver capabilities. Older Apple TV software predates fMP4 HLS; a modern sender
   decoding fMP4 does not prove receiver support. Other profiles retain the existing fMP4 path.
-- **Chromecast:** the receiver is a web page the Chromecast loads from a registered HTTPS URL (Google's Default
-  Media Receiver, or a custom one). ply cannot serve it.
+- **Chromecast:** the receiver is a web page the Chromecast loads from the HTTPS URL registered for its app id
+  (Google's Default Media Receiver, or a custom one). ply does not serve it, even with HTTPS: a custom receiver has
+  one URL per app id, registered with Google, so it lives once on a host of its own (a static site), not on each
+  owner's server. Either receiver plays the URLs ply gives the sender, with their URL tokens (Auth): it sends no
+  headers, and needs none.
   - **Plain HTTP works, measured on 2026-11-12** (results below). The receiver page, served from
     `https://www.gstatic.com`, fetched ply's `http://` playlist and segments: the mixed-content block that was
     expected did not happen on this device and firmware. So HTTPS is not needed for casting today.
@@ -314,8 +334,8 @@ over HTTPS, and a fetch from it to `http://` is then refused (Platforms, Chromec
   - **So, on this device, a play for a Chromecast is a direct file, or HLS at 720p at most.** The `chromecast`
     profile says so (`maxHlsHeight: 720`, beside `maxHeight: 1080`): a 1080p film it cannot play as a file is
     transcoded to 720p, not remuxed at 1080p (which is what failed).
-  - Newer Chromecasts (Google TV) and newer firmware may block mixed content where this one did not, so the HTTPS
-    listener stays the plan for the day one does.
+  - Newer Chromecasts (Google TV) and newer firmware may block mixed content where this one did not. The HTTPS
+    listener (above) is for the day one does: with a publicly trusted certificate, the URLs are `https://<host>`.
 
 ### The Chromecast plain-HTTP test
 The test is automated: `pychromecast` finds the Chromecast and casts. A logging proxy in front of ply, or a small
@@ -362,3 +382,6 @@ Receiver, ply on `http://192.168.4.196:8420`:
 12. Pairing and URL tokens (Auth, above): migration 016 (`devices.token_hash`, `paired_at`), `POST /api/pairing`,
     `POST /api/pair`, `DELETE /api/devices/{id}/token`, the owner-only endpoints, URL tokens in every URL the
     server builds (`internal/api/auth.go`, the secret in `<data>/url-key`), and Settings › Devices.
+13. Remote control (above): addressed events and the `commands` topic in `internal/events` (pending commands kept
+    apart from the ring, replayed by seq), `POST /api/devices/{id}/commands` and `.../commands/{seq}/ack`, and the
+    `commands` section of the snapshot.

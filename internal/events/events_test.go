@@ -132,11 +132,14 @@ func TestParseTopics(t *testing.T) {
 	if ParseTopics("") != nil || ParseTopics("  ") != nil {
 		t.Fatal("empty must be all (nil)")
 	}
-	got := ParseTopics("sessions, jobs,commands")
+	got := ParseTopics("sessions, jobs,later")
 	if len(got) != 2 || !got[Sessions] || !got[Jobs] {
 		t.Fatalf("got %v", got)
 	}
-	none := ParseTopics("commands")
+	if c := ParseTopics("commands"); len(c) != 1 || !c[Commands] {
+		t.Fatalf("commands = %v, want the topic of remote control", c)
+	}
+	none := ParseTopics("later")
 	if none == nil || len(none) != 0 || none.Has(Jobs) {
 		t.Fatalf("only unknown names must be none, not all: %v", none)
 	}
