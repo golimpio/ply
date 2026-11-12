@@ -30,11 +30,11 @@ them in the UI. This builds on M6 and M8. The IDs needed are already stored: `ti
   - It streams the gzip and keeps only the `tconst` values present in the library (`imdb_id` for titles, plus the episodes' IMDb ids, which the same job maps from the episode dataset first).
   - The download goes to `<data>/cache/imdb/`; the file is kept for the next diff and is never served.
   - A file of about 1.5 M rows must be parsed with constant memory, and the job yields between chunks.
-- **`ratings.mdblist`, one job for every title that is due** (by TMDB id or IMDb id) when a key is set.
+- **`ratings.mdblist`, one job for every title that is due** (by TMDB id, else IMDb id, else TVDB id) when a key is set.
   - It's due when the title has none yet, or the ratings are over 14 days old (7 days for titles released in the last 90 days).
   - It's paced to the key's daily budget: read the remaining quota from the API if it gives one, otherwise stay at 900 a day.
   - A 429 pauses the service, through the existing limiter.
-- **Privacy:** `-metadata=false` or lookups off means no rating downloads either. What leaves the machine is the MDBList key and one TMDB or IMDb id per title, to MDBList; the IMDb datasets are downloaded whole, so nothing of the library is sent to IMDb. No titles or file names are sent anywhere by M10.
+- **Privacy:** `-metadata=false` or lookups off means no rating downloads either. What leaves the machine is the MDBList key and one TMDB, IMDb or TVDB id per title, to MDBList; the IMDb datasets are downloaded whole, so nothing of the library is sent to IMDb. No titles or file names are sent anywhere by M10.
 - **Episode IMDb ids:** IMDb's `title.episode.tsv.gz`, mapped by season and number (see *Episode ids*); stored in `episodes.imdb_id` (migration). No request per episode, to TMDB or to TVDB.
 
 ## Store (migration 010)
@@ -154,8 +154,9 @@ uses TMDB or TVDB, so neither shares a limiter with the metadata pass (`meta.mat
   - A file read for a write that is no longer the dataset (changed on disk) is deleted and fetched again.
 - `ratings.mdblist`, key `mdblist`: **one job** (`Ratings.RunMDBListDue`) that goes through every title due
   (`store.DueRatings`: never asked, or last asked over 14 days ago, 7 for a title released in the last 90 days), 20 at a
-  time, calling `Progress` and `Yield` before each title; a title is run once in a job. By TMDB id, else by IMDb id (and by
-  IMDb id when TMDB's is unknown to MDBList); nothing else leaves the machine but the key. It ends when nothing is due, the
+  time, calling `Progress` and `Yield` before each title; a title is run once in a job. By TMDB id first, then IMDb, then
+  TVDB: an id MDBList does not know is left for the next, and a show from TVDB whose `remoteIds` carry neither of the
+  others is rated through its TVDB id. Nothing else leaves the machine but the key. It ends when nothing is due, the
   day's budget is spent, or it has to stop (below). The budget is the allowance MDBList reports less a tenth (900 of 1,000),
   or 900 when it reports none, counted per UTC day in settings (`mdblist_budget`); the first request of a day reads
   `/user`, and a daily-limit answer ends the day. **A request that is not sent is not counted**: while MDBList has the
@@ -229,8 +230,10 @@ machine is let off), and a redirect is an error.
 
 **Known limits.**
 - A title whose rating came from an NFO (source `nfo`) has no `tmdb` entry any more: the number was the NFO's, not TMDB's,
-  and there is no source for it. Cards of such titles show IMDb's (or MDBList's) when the title has an IMDb id.
-- A show from TVDB with no TMDB id in its `remoteIds` is rated by MDBList through its IMDb id only.
+  and there is no source for it. Cards of such titles show IMDb's (or MDBList's) when the title has an IMDb, TMDB or TVDB id.
+- A show from TVDB with no TMDB id in its `remoteIds` is rated by MDBList through its IMDb id, or, when it has no IMDb
+  id either, through its TVDB id. A title with none of the three ids cannot be rated by MDBList: there is nothing to ask
+  by (a title from a provider always has one; an NFO-only title may not).
 - **A first scan rates in steps.** Titles matched after an IMDb write wait for the next one, which is at least ten minutes
   (`IMDbRatingsRefit`) after it, and an hour (`IMDbEpisodesRefit`) for the episodes' ids; MDBList's ratings do not wait
   for either.

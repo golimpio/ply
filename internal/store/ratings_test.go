@@ -357,6 +357,8 @@ func TestDueRatings(t *testing.T) {
 	recentFresh := mk(5, "recent-fresh", "2026-10-01", now.Add(-6*day))
 	edge := mk(6, "edge", "2026-08-10", now.Add(-8*day))            // 87 days ago: still recent
 	notRecent := mk(7, "not-recent", "2026-07-01", now.Add(-8*day)) // over 90 days: 14-day rule
+	tvdbOnly := addShow(t, s, "TVDB Only", []int{1}, &TitleInput{Title: Title{Kind: KindSeries, TVDBID: 9001, Title: "TVDB Only",
+		ReleaseDate: "2020-01-01", Source: SourceTVDB}})
 	_, noIDs := addMovie(t, s, "/media/noids.mkv", &TitleInput{Title: Title{Kind: KindMovie, Title: "No ids", Source: SourceNFO}})
 	if _, err := s.UpsertTitle(ctx, tmdbMovie(8, "ghost", 2020)); err != nil { // no file
 		t.Fatal(err)
@@ -371,11 +373,16 @@ func TestDueRatings(t *testing.T) {
 		got = append(got, d.ID)
 	}
 	slices.Sort(got)
-	want := []int64{never, old, recentOld, edge}
+	want := []int64{never, old, recentOld, edge, tvdbOnly}
 	slices.Sort(want)
 	if !slices.Equal(got, want) {
-		t.Errorf("due = %v, want never %d, old %d, recent-old %d, edge %d (not: fresh %d, recent-fresh %d, not-recent %d, no ids %d)",
-			got, never, old, recentOld, edge, fresh, recentFresh, notRecent, noIDs)
+		t.Errorf("due = %v, want never %d, old %d, recent-old %d, edge %d, TVDB-only %d (not: fresh %d, recent-fresh %d, not-recent %d, no ids %d)",
+			got, never, old, recentOld, edge, tvdbOnly, fresh, recentFresh, notRecent, noIDs)
+	}
+	for _, d := range due {
+		if d.ID == tvdbOnly && d.TVDBID != 9001 {
+			t.Errorf("the TVDB-only title's id = %d, want 9001", d.TVDBID)
+		}
 	}
 	if due[0].ID != never || due[0].Checked != 0 {
 		t.Errorf("the title never asked about comes first, got %+v", due[0])

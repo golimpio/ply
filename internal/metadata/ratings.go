@@ -791,11 +791,26 @@ func (r *Ratings) RunMDBList(ctx context.Context, titleID int64) error {
 	if t.Kind == store.KindSeries {
 		media = MDBListShow
 	}
+	// By TMDB id first, then IMDb, then TVDB: MDBList maps each, and a show from TVDB need not
+	// carry a TMDB or an IMDb id at all.
+	var lookups []func(context.Context) (*MDBListTitle, error)
+	if t.TMDBID > 0 {
+		lookups = append(lookups, func(ctx context.Context) (*MDBListTitle, error) {
+			return client.ByTMDB(ctx, media, t.TMDBID)
+		})
+	}
+	if reIMDbID.MatchString(t.IMDbID) {
+		lookups = append(lookups, func(ctx context.Context) (*MDBListTitle, error) {
+			return client.ByIMDb(ctx, media, t.IMDbID)
+		})
+	}
+	if t.TVDBID > 0 {
+		lookups = append(lookups, func(ctx context.Context) (*MDBListTitle, error) {
+			return client.ByTVDB(ctx, media, t.TVDBID)
+		})
+	}
 	var found *MDBListTitle
-	for _, byTMDB := range []bool{true, false} {
-		if (byTMDB && t.TMDBID == 0) || (!byTMDB && !reIMDbID.MatchString(t.IMDbID)) {
-			continue
-		}
+	for _, lookup := range lookups {
 		// While MDBList has us paused for longer than the client waits, no request is sent: and
 		// none is counted. The day's allowance gone is a pause to the end of the day, and the title
 		// stays due.
@@ -812,12 +827,7 @@ func (r *Ratings) RunMDBList(ctx context.Context, titleID int64) error {
 		if !ok {
 			return nil // the day's budget is spent; the title stays due
 		}
-		var mt *MDBListTitle
-		if byTMDB {
-			mt, err = client.ByTMDB(ctx, media, t.TMDBID)
-		} else {
-			mt, err = client.ByIMDb(ctx, media, t.IMDbID)
-		}
+		mt, err := lookup(ctx)
 		r.o.Settings.NoteMDBList(err)
 		if err == nil {
 			found = mt

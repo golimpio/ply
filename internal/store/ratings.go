@@ -311,6 +311,7 @@ type RatingsDue struct {
 	Kind        string
 	TMDBID      int64 // 0 = none
 	IMDbID      string
+	TVDBID      int64 // 0 = none; a show from TVDB need not have a TMDB or an IMDb id
 	ReleaseDate string
 	Checked     int64 // when it was last asked about, unix seconds; 0 = never
 }
@@ -323,15 +324,15 @@ const (
 	RatingsRecentDays = 90
 )
 
-// DueRatings lists the library titles that have a TMDB or IMDb id and are due for MDBList: never
-// asked about, or last asked longer ago than RatingsAge (RatingsRecentAge for a title released in
-// the last RatingsRecentDays days), the ones waiting longest first.
+// DueRatings lists the library titles that have a TMDB, IMDb or TVDB id and are due for MDBList:
+// never asked about, or last asked longer ago than RatingsAge (RatingsRecentAge for a title released
+// in the last RatingsRecentDays days), the ones waiting longest first.
 func (s *Store) DueRatings(ctx context.Context, now time.Time, limit int) ([]RatingsDue, error) {
 	recent := now.AddDate(0, 0, -RatingsRecentDays).Format(time.DateOnly)
 	rows, err := s.ro.QueryContext(ctx, `
-		SELECT t.id, t.title, t.kind, COALESCE(t.tmdb_id, 0), t.imdb_id, t.release_date, t.ratings_checked
+		SELECT t.id, t.title, t.kind, COALESCE(t.tmdb_id, 0), t.imdb_id, COALESCE(t.tvdb_id, 0), t.release_date, t.ratings_checked
 		FROM titles t
-		WHERE (t.tmdb_id IS NOT NULL OR t.imdb_id <> '') AND `+libraryTitle+`
+		WHERE (t.tmdb_id IS NOT NULL OR t.imdb_id <> '' OR t.tvdb_id IS NOT NULL) AND `+libraryTitle+`
 			AND (t.ratings_checked = 0 OR t.ratings_checked <
 				CASE WHEN t.release_date >= ? THEN ? ELSE ? END)
 		ORDER BY t.ratings_checked, t.id LIMIT ?`,
@@ -343,7 +344,7 @@ func (s *Store) DueRatings(ctx context.Context, now time.Time, limit int) ([]Rat
 	var out []RatingsDue
 	for rows.Next() {
 		var d RatingsDue
-		if err := rows.Scan(&d.ID, &d.Title, &d.Kind, &d.TMDBID, &d.IMDbID, &d.ReleaseDate, &d.Checked); err != nil {
+		if err := rows.Scan(&d.ID, &d.Title, &d.Kind, &d.TMDBID, &d.IMDbID, &d.TVDBID, &d.ReleaseDate, &d.Checked); err != nil {
 			return nil, err
 		}
 		out = append(out, d)

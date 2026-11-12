@@ -556,6 +556,19 @@ func (c *MDBListClient) ByIMDb(ctx context.Context, media, imdbID string) (*MDBL
 	return &out, nil
 }
 
+// ByTVDB asks for a title by its TheTVDB id: the way to a show from TVDB whose remoteIds carry
+// neither a TMDB nor an IMDb id.
+func (c *MDBListClient) ByTVDB(ctx context.Context, media string, id int64) (*MDBListTitle, error) {
+	if (media != MDBListMovie && media != MDBListShow) || id <= 0 {
+		return nil, fmt.Errorf("mdblist: no title to look up (%s %d)", media, id)
+	}
+	var out MDBListTitle
+	if err := c.get(ctx, "/tvdb/"+media+"/"+strconv.FormatInt(id, 10), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // MDBListLimits is the key's allowance: Limit requests a day, Used so far today. Limit is 0 when
 // the answer does not say.
 type MDBListLimits struct {

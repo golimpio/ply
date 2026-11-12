@@ -124,7 +124,7 @@ func quickMDBAt(t *testing.T, srv *mdbServer, now time.Time, mod ...func(*MDBLis
 	return c, &slept
 }
 
-func TestMDBListAskedByTMDBAndByIMDb(t *testing.T) {
+func TestMDBListAskedByTMDBByIMDbAndByTVDB(t *testing.T) {
 	srv := newMDBServer(t, jsonReply(200, mdbTitle))
 	c, _ := quickMDB(t, srv)
 
@@ -147,6 +147,12 @@ func TestMDBListAskedByTMDBAndByIMDb(t *testing.T) {
 	if r := srv.last(); r.Path != "/imdb/movie/tt0133093" {
 		t.Errorf("request = %+v", r)
 	}
+	if _, err := c.ByTVDB(t.Context(), MDBListShow, 81189); err != nil {
+		t.Fatal(err)
+	}
+	if r := srv.last(); r.Path != "/tvdb/show/81189" {
+		t.Errorf("request = %+v", r)
+	}
 
 	// What is not an id is not asked: the id goes in the path.
 	n := srv.count()
@@ -160,6 +166,12 @@ func TestMDBListAskedByTMDBAndByIMDb(t *testing.T) {
 	}
 	if _, err := c.ByTMDB(t.Context(), MDBListMovie, 0); err == nil {
 		t.Error("id 0 was asked")
+	}
+	if _, err := c.ByTVDB(t.Context(), "movie/../user", 1); err == nil {
+		t.Error("a media type with a path in it was asked")
+	}
+	if _, err := c.ByTVDB(t.Context(), MDBListShow, 0); err == nil {
+		t.Error("TVDB id 0 was asked")
 	}
 	if _, err := c.ByIMDb(t.Context(), "movie/../user", "tt1"); err == nil {
 		t.Error("a media type with a path in it was asked")

@@ -1320,14 +1320,17 @@ func TestRunMDBListStoresTheAnswer(t *testing.T) {
 	}
 }
 
-// By TMDB id first, by IMDb id when TMDB's is not known to MDBList or the title has none; an
-// answer of none is an answer.
+// By TMDB id first, then IMDb, then TVDB: a title MDBList does not know under one is tried under
+// the next, and a show from TVDB with neither of the other ids is still asked about. An answer of
+// none is an answer.
 func TestRunMDBListIdsAndNotFound(t *testing.T) {
 	e := newRatingsEnv(t)
 	ctx := t.Context()
 	both := e.movie(1, "tt0000001")
 	onlyIMDb := e.movie(0, "tt0000002")
 	onlyTMDB := e.movie(3, "")
+	tvdbOnly := e.show("TVDB Only", store.Title{TVDBID: 81189, Source: store.SourceTVDB},
+		store.Episode{Season: 1, Number: 1, Name: "One"})
 	nothing := e.movie(0, "")
 	e.reply(func(w http.ResponseWriter, r *http.Request, n int) {
 		switch r.URL.Path {
@@ -1338,6 +1341,8 @@ func TestRunMDBListIdsAndNotFound(t *testing.T) {
 			fmt.Fprint(w, `{"error": "Not found"}`)
 		case "/imdb/movie/tt0000001", "/imdb/movie/tt0000002":
 			fmt.Fprint(w, `{"ratings": [{"source": "metacritic", "value": 70}]}`)
+		case "/tvdb/show/81189": // no TMDB id and no IMDb id: TVDB's is the only one there is
+			fmt.Fprint(w, `{"ratings": [{"source": "trakt", "value": 88}]}`)
 		default: // tmdb 3 is not known at all
 			w.WriteHeader(404)
 			fmt.Fprint(w, `{"error": "Not found"}`)
@@ -1350,7 +1355,7 @@ func TestRunMDBListIdsAndNotFound(t *testing.T) {
 		ids = append(ids, d.ID)
 	}
 	slices.Sort(ids)
-	if want := []int64{both, onlyIMDb, onlyTMDB}; !slices.Equal(ids, want) {
+	if want := []int64{both, onlyIMDb, onlyTMDB, tvdbOnly}; !slices.Equal(ids, want) {
 		t.Fatalf("due = %v, want %v (and not %d, which has no id)", ids, want, nothing)
 	}
 	for _, id := range ids {
@@ -1362,13 +1367,16 @@ func TestRunMDBListIdsAndNotFound(t *testing.T) {
 	for _, r := range e.mdb.requests() {
 		paths = append(paths, r.Path)
 	}
-	if want := []string{"/user", "/tmdb/movie/1", "/imdb/movie/tt0000001", "/imdb/movie/tt0000002", "/tmdb/movie/3"}; !slices.Equal(paths, want) {
+	if want := []string{"/user", "/tmdb/movie/1", "/imdb/movie/tt0000001", "/imdb/movie/tt0000002", "/tmdb/movie/3", "/tvdb/show/81189"}; !slices.Equal(paths, want) {
 		t.Errorf("paths = %v, want %v", paths, want)
 	}
 	for _, id := range []int64{both, onlyIMDb} {
 		if r, ok := e.rating(id, store.RatingMetacritic); !ok || r.Value != 70 {
 			t.Errorf("title %d: metacritic = %+v, %v", id, r, ok)
 		}
+	}
+	if r, ok := e.rating(tvdbOnly, store.RatingTrakt); !ok || r.Value != 88 {
+		t.Errorf("the TVDB-only title: trakt = %+v, %v", r, ok)
 	}
 	if _, ok := e.rating(onlyTMDB, store.RatingMetacritic); ok {
 		t.Error("a title MDBList does not know got a rating")
