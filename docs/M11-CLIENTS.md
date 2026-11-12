@@ -193,17 +193,37 @@ marked FUTURE is designed here and built later; everything else is the groundwor
   control is limited to a network the owner trusts.
 - **Nothing in this needs a new transport.** A command is one more topic and one more field on the event.
 
-## FUTURE: HTTPS
-- **First:** `-tls-cert` and `-tls-key` flags, for a certificate the owner already has. Go then speaks HTTP/2 by
-  itself, which removes the six-connection cost of the feed.
-- **Then:** ACME with a DNS-01 challenge (lego), for a name in a domain the owner controls that points at the LAN
-  address. A publicly trusted certificate does not mean the server is reachable from outside: only its name and
-  certificate are public. This is how Plex does it (`*.plex.direct`).
-- **Self-signed certificates and `.local` names are no use for this.** A Chromecast trusts neither the owner's own
-  CA nor the router's DNS: it uses Google's DNS.
-- **Discovery says how to connect.** The TXT keys `tls` and `host` are reserved: absent today; with HTTPS,
-  `tls=1` and `host=<the certificate's name>`. A client then connects to `https://<host>:<port>`, and to `http://`
-  plus the address otherwise.
+## HTTPS
+HTTPS is what a Chromecast's HLS will need the day its receiver page blocks mixed content: the page is served
+over HTTPS, and a fetch from it to `http://` is then refused (Platforms, Chromecast).
+- **`-tls-cert` and `-tls-key`** (env `PLY_TLS_CERT`, `PLY_TLS_KEY`): PEM files of a certificate the owner
+  already has. The listener then speaks HTTPS only, on the same address, and Go speaks HTTP/2 on it by itself:
+  the feed shares one connection with everything else instead of holding one of the browser's six.
+  - The files are read again when they change (looked at once a minute at most, on a handshake), so a renewed
+    certificate is used without a restart. A pair that does not read yet (the key not written), or a certificate
+    that is not for the host, leaves the one in use, and the log says so once, until the files change again.
+  - A pair that does not load, or a certificate for no DNS name, stops ply at start.
+- **The host** is the name clients connect to: `-tls-host` (env `PLY_TLS_HOST`), which must be one the certificate
+  is for, else its first name that is not a wildcard. A wildcard certificate needs `-tls-host`.
+  - Every name the certificate is for is an allowed host (DESIGN.md, `-allow-host`).
+  - The banner and the log list `https://<host>:<port>` alone: an address is not one the certificate is for.
+- **Discovery says how to connect.** The TXT record adds `tls=1` and `host=<host>` (additive: `v=1` and `api=1`
+  stay). A client then connects to `https://<host>:<port>`, and to `http://` plus the address without them.
+- **The URLs the server builds for a receiver name the host.** A receiver could not verify `https://<address>`.
+  - A receiver's `base` (`GET /api/receivers`), and so the URLs of a play routed to it, is `https://<host>:<port>`
+    when the host resolves to this server's address on the receiver's network (looked up at most once a minute;
+    a name that did not resolve, after 5 s), and none otherwise: the owner's DNS points the name at one address,
+    so on another network of ours it leads elsewhere. A play that names such a receiver is refused (422), as one
+    on no network of ours is.
+  - An AirPlay play from a page opened by an address (its certificate warning accepted) is routed to the host,
+    since the URLs relative to that page are ones the TV cannot verify. A page opened by the host keeps its
+    relative URLs.
+  - Every other URL stays relative (`playbackFrom`), so it is on whatever base the client reached.
+- **FUTURE: ACME** with a DNS-01 challenge (lego), for a name in a domain the owner controls that points at the LAN
+  address, so the owner need not bring a certificate. A publicly trusted certificate does not mean the server is
+  reachable from outside: only its name and certificate are public. This is how Plex does it (`*.plex.direct`).
+- **Self-signed certificates and `.local` names are no use for a Chromecast.** It trusts neither the owner's own
+  CA nor the router's DNS: it uses Google's DNS. An Apple TV needs a certificate it trusts too.
 - **Clients follow the URLs they were given.** Nothing in the contract assumes `http`.
 
 ## Platforms
@@ -287,3 +307,6 @@ Receiver, ply on `http://192.168.4.196:8420`:
 10. AirPlay targets: a browse for `_airplay._tcp` (`internal/discovery`), `GET /api/receivers`, and `receiver` on
     `POST /playback`, with every media URL of the play on the receiver's own network and automatic routing for an
     AirPlay play (docs/AIRPLAY.md, "Network setup").
+11. HTTPS (above): `-tls-cert`, `-tls-key` and `-tls-host`, the certificate read again when it changes
+    (`internal/tlscert`), HTTP/2, `tls=1` and `host=` in the TXT record, and receiver URLs on the certificate's
+    name.

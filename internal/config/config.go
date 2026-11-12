@@ -59,6 +59,11 @@ type Config struct {
 	// PLY_ALLOW_HOSTS comma-separated); see api.Options.AllowedHosts.
 	AllowHosts []string
 
+	// HTTPS (docs/M11-CLIENTS.md, "HTTPS"): a certificate the owner keeps, PEM files read again
+	// when they change. Both or neither; TLSHost is the name clients connect to, which a wildcard
+	// certificate needs said.
+	TLSCert, TLSKey, TLSHost string
+
 	// Metadata (M6). The TMDB key is kept as two values, because the settings
 	// page says where the key in use came from: -tmdb-key, then PLY_TMDB_KEY.
 	TMDBKey          string        // -tmdb-key
@@ -108,6 +113,9 @@ const (
 	IMDbRatingsURLEnv    = "PLY_IMDB_RATINGS_URL"
 	IMDbEpisodesURLEnv   = "PLY_IMDB_EPISODES_URL"
 	AllowHostsEnv        = "PLY_ALLOW_HOSTS"
+	TLSCertEnv           = "PLY_TLS_CERT"
+	TLSKeyEnv            = "PLY_TLS_KEY"
+	TLSHostEnv           = "PLY_TLS_HOST"
 	MaxStreamsEnv        = "PLY_MAX_STREAMS"
 	MaxTranscodesEnv     = "PLY_MAX_TRANSCODES"
 	DefaultMetadataLang  = "en-US"
@@ -265,6 +273,9 @@ func Parse(args []string, out io.Writer) (Config, error) {
 		c.AllowHosts = append(c.AllowHosts, v)
 		return nil
 	})
+	fs.StringVar(&c.TLSCert, "tls-cert", envString(TLSCertEnv, ""), "serve HTTPS (and HTTP/2) with this PEM certificate chain, read again when it changes; needs -tls-key (env "+TLSCertEnv+")")
+	fs.StringVar(&c.TLSKey, "tls-key", envString(TLSKeyEnv, ""), "the PEM private key of -tls-cert (env "+TLSKeyEnv+")")
+	fs.StringVar(&c.TLSHost, "tls-host", envString(TLSHostEnv, ""), "the name clients connect to, one the certificate is for (default: its first name that is not a wildcard; env "+TLSHostEnv+")")
 	fs.DurationVar(&c.ScanInterval, "scan-interval", 15*time.Minute, "accepted for an older start script and ignored: the full scan runs on its schedule in Settings › Schedules")
 	fs.StringVar(&c.FFprobe, "ffprobe", "ffprobe", "ffprobe binary")
 	fs.StringVar(&c.FFmpeg, "ffmpeg", "ffmpeg", "ffmpeg binary")
@@ -325,6 +336,12 @@ func Parse(args []string, out io.Writer) (Config, error) {
 	}
 	if fs.NArg() > 0 {
 		return Config{}, fmt.Errorf("unexpected argument %q", fs.Arg(0))
+	}
+	if (c.TLSCert == "") != (c.TLSKey == "") {
+		return Config{}, errors.New("-tls-cert and -tls-key go together")
+	}
+	if c.TLSHost != "" && c.TLSCert == "" {
+		return Config{}, errors.New("-tls-host needs -tls-cert and -tls-key")
 	}
 	if c.ScanInterval < 0 {
 		return Config{}, errors.New("-scan-interval must not be negative")

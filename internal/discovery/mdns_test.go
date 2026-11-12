@@ -15,7 +15,7 @@ var lan = []net.IP{net.IPv4(192, 168, 1, 20)}
 
 func testZone(t *testing.T) zone {
 	t.Helper()
-	z, err := newZone("Living room", "mac", 8420, txtRecords("Living room", "abc", 1, 1))
+	z, err := newZone("Living room", "mac", 8420, txtRecords(Service{Name: "Living room", ID: "abc", API: 1, APIMin: 1}))
 	if err != nil {
 		t.Fatal(err)
 	}

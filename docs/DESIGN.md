@@ -53,6 +53,9 @@ M6 (metadata, live library):
   Host is the proxy's upstream name and the same-origin check on writes (Origin vs Host) fails: for nginx,
   `proxy_set_header Host $host;` (use `$http_host` to keep a non-default port). The 403 bodies say which name or
   Origin was refused.
+- `-tls-cert`, `-tls-key`, `-tls-host` (M11; env `PLY_TLS_CERT`, `PLY_TLS_KEY`, `PLY_TLS_HOST`): serve HTTPS, and
+  HTTP/2 on it, with a certificate the owner keeps; the names it is for are allowed hosts. docs/M11-CLIENTS.md,
+  "HTTPS".
 - `-tmdb-key` (env `PLY_TMDB_KEY`): TMDB v3 API key or v4 read access token. Precedence: flag > env > the key saved
   from the web UI (settings table) > the build default (`-ldflags -X ply/internal/metadata.DefaultKey=...`). The key
   is never returned by the API nor logged.

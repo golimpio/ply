@@ -131,6 +131,11 @@ type Options struct {
 	// routed to an address this server serves: one bound to loopback does not name a LAN
 	// address for a TV. nil takes every address of ours as served (a test).
 	ListenAddr net.Addr
+
+	// TLSHost is the name the HTTPS listener's certificate is for (-tls-cert; docs/M11-CLIENTS.md,
+	// "HTTPS"); empty for plain HTTP. The URLs a receiver fetches then name it, on the network
+	// it resolves to.
+	TLSHost string
 }
 
 // Server is the HTTP handler for the whole application.
@@ -148,6 +153,8 @@ type Server struct {
 	// localIPFor is the address of ours that a peer reaches (internal/discovery); a variable
 	// for the tests.
 	localIPFor func(net.IP) (net.IP, bool)
+	// hostIPs are the addresses TLSHost resolves to.
+	hostIPs *hostCache
 }
 
 // New builds the server. The returned value is an http.Handler.
@@ -155,7 +162,7 @@ func New(o Options) *Server {
 	if o.Logger == nil {
 		o.Logger = slog.New(slog.DiscardHandler)
 	}
-	s := &Server{Options: o, subsGrace: time.Second, localIPFor: discovery.LocalIPFor}
+	s := &Server{Options: o, subsGrace: time.Second, localIPFor: discovery.LocalIPFor, hostIPs: &hostCache{resolve: resolveHost}}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/info", s.handleInfo)

@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 
 	"ply/internal/discovery"
@@ -12,10 +13,15 @@ import (
 
 // reachableURLs returns the URLs clients can use to access ply.
 // It includes LAN URLs from discovery.URLs, and appends loopback (127.0.0.1)
-// if it is not already included.
-func reachableURLs(addr net.Addr) []string {
+// if it is not already included. With HTTPS it is the certificate's name alone:
+// an address is not one the certificate is for.
+func reachableURLs(addr net.Addr, tlsHost string) []string {
+	tcp, isTCP := addr.(*net.TCPAddr)
+	if tlsHost != "" && isTCP {
+		return []string{"https://" + net.JoinHostPort(tlsHost, strconv.Itoa(tcp.Port))}
+	}
 	urls := discovery.URLs(addr)
-	if tcp, ok := addr.(*net.TCPAddr); ok {
+	if isTCP {
 		local := fmt.Sprintf("http://127.0.0.1:%d", tcp.Port)
 		if !slices.Contains(urls, local) {
 			urls = append(urls, local)

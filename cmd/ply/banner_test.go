@@ -2,6 +2,7 @@ package main
 
 import (
 	"net"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -15,7 +16,7 @@ func TestReachableURLs(t *testing.T) {
 	}
 	defer ln.Close()
 
-	urls := reachableURLs(ln.Addr())
+	urls := reachableURLs(ln.Addr(), "")
 	if len(urls) == 0 {
 		t.Fatal("expected at least 1 reachable URL")
 	}
@@ -38,7 +39,7 @@ func TestReachableURLs(t *testing.T) {
 	}
 	defer lnLoop.Close()
 
-	urlsLoop := reachableURLs(lnLoop.Addr())
+	urlsLoop := reachableURLs(lnLoop.Addr(), "")
 	count127 := 0
 	for _, u := range urlsLoop {
 		if strings.HasPrefix(u, "http://127.0.0.1:") {
@@ -47,6 +48,12 @@ func TestReachableURLs(t *testing.T) {
 	}
 	if count127 != 1 {
 		t.Errorf("reachableURLs duplicated loopback on explicit loopback listener: count=%d, urls=%v", count127, urlsLoop)
+	}
+
+	// 3. HTTPS: the certificate's name, and no address (none is one the certificate is for).
+	port := ln.Addr().(*net.TCPAddr).Port
+	if got := reachableURLs(ln.Addr(), "ply.example.com"); len(got) != 1 || got[0] != "https://ply.example.com:"+strconv.Itoa(port) {
+		t.Errorf("reachableURLs with HTTPS = %v, want the certificate's name alone", got)
 	}
 }
 

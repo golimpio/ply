@@ -17,15 +17,26 @@ type Advertiser struct {
 	r *responder
 }
 
-// Advertise registers a _ply._tcp service on port with the TXT records of
-// txtRecords. api and apiMin are the versions of the API the server serves
-// (docs/M11-CLIENTS.md, "Versioning"). It returns once the socket is open; the
-// name is probed for and announced in the background, and taken as "name (2)"
-// (and so on) while another responder has it.
-func Advertise(name, id string, port, api, apiMin int) (*Advertiser, error) {
+// Service is what the advertisement says of this server.
+type Service struct {
+	Name, ID string
+	Port     int
+	// API and APIMin are the versions of the API the server serves (docs/M11-CLIENTS.md,
+	// "Versioning").
+	API, APIMin int
+	// TLSHost, when the server speaks HTTPS, is the name its certificate is for: clients
+	// connect to https://<TLSHost>:<Port>.
+	TLSHost string
+}
+
+// Advertise registers a _ply._tcp service with the TXT records of txtRecords.
+// It returns once the socket is open; the name is probed for and announced in
+// the background, and taken as "name (2)" (and so on) while another responder
+// has it.
+func Advertise(s Service) (*Advertiser, error) {
 	// A dot would split the instance name into extra labels; and it is one label at most.
-	instance := fitLabel(strings.ReplaceAll(name, ".", "-"), "")
-	z, err := newZone(instance, hostLabel(), port, txtRecords(name, id, api, apiMin))
+	instance := fitLabel(strings.ReplaceAll(s.Name, ".", "-"), "")
+	z, err := newZone(instance, hostLabel(), s.Port, txtRecords(s))
 	if err != nil {
 		return nil, fmt.Errorf("mdns register: %w", err)
 	}
@@ -38,11 +49,15 @@ func Advertise(name, id string, port, api, apiMin int) (*Advertiser, error) {
 }
 
 // txtRecords are what a client learns before it connects: the server's id and
-// name, the API versions it serves, and v, the version of this list's own layout.
-// Keys may be added (tls and host are reserved for HTTPS); a client ignores what
-// it does not know.
-func txtRecords(name, id string, api, apiMin int) []string {
-	return []string{"id=" + id, "v=1", "name=" + name, fmt.Sprintf("api=%d", api), fmt.Sprintf("apiMin=%d", apiMin)}
+// name, the API versions it serves, v, the version of this list's own layout,
+// and, for HTTPS, tls=1 and the host to connect to. Keys may be added; a client
+// ignores what it does not know.
+func txtRecords(s Service) []string {
+	txt := []string{"id=" + s.ID, "v=1", "name=" + s.Name, fmt.Sprintf("api=%d", s.API), fmt.Sprintf("apiMin=%d", s.APIMin)}
+	if s.TLSHost != "" {
+		txt = append(txt, "tls=1", "host="+s.TLSHost)
+	}
+	return txt
 }
 
 // Shutdown says goodbye and closes the responder. It is safe on a nil Advertiser,

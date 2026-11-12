@@ -143,7 +143,7 @@ func TestAdvertiseAnnouncesTheService(t *testing.T) {
 	port := ln.Addr().(*net.TCPAddr).Port
 
 	client := multicastClient(t)
-	adv, err := Advertise(name, id, port, 3, 2)
+	adv, err := Advertise(Service{Name: name, ID: id, Port: port, API: 3, APIMin: 2})
 	if err != nil {
 		t.Fatalf("Advertise where a client can use mDNS: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestAdvertiseAnnouncesTheService(t *testing.T) {
 func TestATakenNameIsRenamed(t *testing.T) {
 	client := multicastClient(t)
 	name := "ply-dup-" + tag(t)
-	first, err := Advertise(name, "a", 9, 1, 1)
+	first, err := Advertise(Service{Name: name, ID: "a", Port: 9, API: 1, APIMin: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestATakenNameIsRenamed(t *testing.T) {
 		t.Fatal("the first server was not seen")
 	}
 
-	second, err := Advertise(name, "b", 10, 1, 1)
+	second, err := Advertise(Service{Name: name, ID: "b", Port: 10, API: 1, APIMin: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func TestATakenNameIsRenamed(t *testing.T) {
 
 	defer func(n int) { maxRenames = n }(maxRenames)
 	maxRenames = 1 // only the name itself may be tried
-	third, err := Advertise(name, "c", 11, 1, 1)
+	third, err := Advertise(Service{Name: name, ID: "c", Port: 11, API: 1, APIMin: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,11 +259,15 @@ func TestATakenNameIsRenamed(t *testing.T) {
 }
 
 // The TXT records, without the network: the multicast test above skips where
-// there is no multicast.
+// there is no multicast. HTTPS adds tls and host, and changes none of the others.
 func TestTXTRecords(t *testing.T) {
-	got := txtRecords("Living room", "abc", 1, 1)
-	want := []string{"id=abc", "v=1", "name=Living room", "api=1", "apiMin=1"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("TXT records = %q, want %q", got, want)
+	s := Service{Name: "Living room", ID: "abc", Port: 8420, API: 1, APIMin: 1}
+	plain := []string{"id=abc", "v=1", "name=Living room", "api=1", "apiMin=1"}
+	if got := txtRecords(s); !slices.Equal(got, plain) {
+		t.Fatalf("TXT records = %q, want %q", got, plain)
+	}
+	s.TLSHost = "ply.home.example.com"
+	if got, want := txtRecords(s), append(slices.Clone(plain), "tls=1", "host=ply.home.example.com"); !slices.Equal(got, want) {
+		t.Fatalf("TXT records with HTTPS = %q, want %q", got, want)
 	}
 }

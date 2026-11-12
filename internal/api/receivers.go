@@ -15,11 +15,15 @@ package api
 // The list is private, like the devices: it is this household's screens.
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	"ply/internal/discovery"
 	"ply/internal/playback"
@@ -91,10 +95,15 @@ func (s *Server) playbackBase(r *http.Request, p playback.Profile, receiverID st
 			if rec.ID != receiverID {
 				continue
 			}
+			ours := false // an address of ours is on its network: only the name leads elsewhere
 			for _, a := range rec.Addrs {
 				if base := s.mediaBaseFor(r, a); base != "" {
 					return base, nil
 				}
+				ours = ours || s.ourAddrOn(a) != nil
+			}
+			if ours && s.TLSHost != "" {
+				return "", fmt.Errorf("%s does not lead to this server's address on the network of %s", s.TLSHost, rec.Name)
 			}
 			return "", fmt.Errorf("no address of this server is on the network of %s", rec.Name)
 		}
@@ -118,10 +127,10 @@ func (s *Server) airplayBase(r *http.Request) string {
 	if p := hostPort(r.Host); p != "" && p != requestPort(r) {
 		return "" // the request came through something that is not this listener
 	}
-	page := pageBase(r)
-	if page == "" {
-		return ""
+	if requestLocalIP(r) == nil {
+		return "" // no connection: nothing to compare the TVs' network with
 	}
+	page := s.pageBase(r) // "" when the page's URLs are none a TV can use: it is routed
 	base := ""
 	for _, rec := range s.receivers() {
 		if !isAppleTV(rec) {
@@ -155,11 +164,34 @@ func isAppleTV(rec discovery.Receiver) bool {
 // address of ours is on that network, or when the address found is one this server does not
 // listen on (a server bound to loopback serves no LAN address).
 func (s *Server) mediaBaseFor(r *http.Request, remote net.IP) string {
-	ip, ok := s.localIPFor(remote)
-	if !ok || ip == nil || !s.servesOn(ip) {
+	ip := s.ourAddrOn(remote)
+	if ip == nil {
 		return ""
 	}
-	return serverScheme(r) + "://" + net.JoinHostPort(ip.String(), requestPort(r))
+	return s.baseAt(r, ip)
+}
+
+// ourAddrOn is the address of ours on remote's network that this server listens on; nil for none.
+func (s *Server) ourAddrOn(remote net.IP) net.IP {
+	if ip, ok := s.localIPFor(remote); ok && ip != nil && s.servesOn(ip) {
+		return ip
+	}
+	return nil
+}
+
+// baseAt is the base URL of this server at ip, an address of ours, with the port this request
+// reached us on. Plain HTTP names the address. HTTPS names the certificate's host, the only name
+// a receiver can verify, and only where that name leads to ip: the owner's DNS points it at one
+// address of ours, so on another of our networks there is no URL to give ("").
+func (s *Server) baseAt(r *http.Request, ip net.IP) string {
+	host := ip.String()
+	if s.TLSHost != "" {
+		if !slices.ContainsFunc(s.hostIPs.lookup(r.Context(), s.TLSHost), ip.Equal) {
+			return ""
+		}
+		host = s.TLSHost
+	}
+	return s.scheme() + "://" + net.JoinHostPort(host, requestPort(r))
 }
 
 // servesOn reports whether this server listens on ip: every address of ours when it was given no
@@ -178,15 +210,16 @@ func (s *Server) servesOn(ip net.IP) bool {
 	return tcp.IP.Equal(ip)
 }
 
-// pageBase is the address of this listener the page itself is on, from the connection the
-// request came in on. "" when the request came through no connection (a handler called
-// directly, as in a test).
-func pageBase(r *http.Request) string {
+// pageBase is the base of this listener the page itself is on, from the connection the request
+// came in on. "" when the request came through no connection (a handler called directly, as in
+// a test), and with HTTPS when the page came by another name than the certificate's (an
+// address): a TV could not verify the URLs relative to it.
+func (s *Server) pageBase(r *http.Request) string {
 	ip := requestLocalIP(r)
-	if ip == nil {
+	if ip == nil || s.TLSHost != "" && !strings.EqualFold(hostOnly(r.Host), s.TLSHost) {
 		return ""
 	}
-	return serverScheme(r) + "://" + net.JoinHostPort(ip.String(), requestPort(r))
+	return s.baseAt(r, ip)
 }
 
 // requestLocalIP is the address of this server the client connected to: for a server with
@@ -225,12 +258,52 @@ func hostPort(host string) string {
 	return ""
 }
 
-// serverScheme is the scheme this server's own listener speaks, for the URLs a receiver fetches
-// from it. A proxy's X-Forwarded-Proto is not it: these URLs name an address of ours, not the
+// scheme is the scheme this server's own listener speaks, for the URLs a receiver fetches from
+// it. A proxy's X-Forwarded-Proto is not it: these URLs name an address of ours, not the
 // proxy's.
-func serverScheme(r *http.Request) string {
-	if r.TLS != nil {
+func (s *Server) scheme() string {
+	if s.TLSHost != "" {
 		return "https"
 	}
 	return "http"
+}
+
+// hostCache keeps where a name leads for a minute, so that a list of receivers does not wait on
+// DNS once for each of their addresses.
+type hostCache struct {
+	resolve func(ctx context.Context, host string) ([]net.IP, error) // a variable for the tests
+
+	mu    sync.Mutex
+	host  string
+	ips   []net.IP
+	until time.Time
+}
+
+const (
+	hostCacheFor  = time.Minute
+	hostMissFor   = 5 * time.Second // a name that did not resolve is asked again sooner
+	hostLookupFor = 2 * time.Second
+)
+
+// lookup is where host leads; none when it does not resolve. The lookup is not the request's:
+// a client that goes away while it runs must not leave "nowhere" for the next ones.
+func (c *hostCache) lookup(ctx context.Context, host string) []net.IP {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if host == c.host && time.Now().Before(c.until) {
+		return c.ips
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), hostLookupFor)
+	defer cancel()
+	ips, err := c.resolve(ctx, host)
+	keep := hostCacheFor
+	if err != nil || len(ips) == 0 {
+		keep = hostMissFor
+	}
+	c.host, c.ips, c.until = host, ips, time.Now().Add(keep)
+	return ips
+}
+
+func resolveHost(ctx context.Context, host string) ([]net.IP, error) {
+	return net.DefaultResolver.LookupIP(ctx, "ip", host)
 }

@@ -105,6 +105,16 @@ func run() error {
 	signal.Notify(sigC, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigC)
 
+	// The certificate first, so that one that does not load stops ply at once.
+	cert, err := loadTLS(&cfg, log)
+	if err != nil {
+		return err
+	}
+	tlsHost := ""
+	if cert != nil {
+		tlsHost = cert.Host()
+	}
+
 	// Listen before anything advertises the address, so ":0" works.
 	ln, err := net.Listen("tcp", cfg.Addr)
 	if err != nil {
@@ -369,6 +379,7 @@ func run() error {
 		Token:   cfg.Token,
 		// A play is routed only to an address this server listens on.
 		ListenAddr: ln.Addr(),
+		TLSHost:    tlsHost,
 
 		FlagFolders: flagRoots,
 		SetRoots:    setRoots,
@@ -426,20 +437,23 @@ func run() error {
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		BaseContext:       func(net.Listener) context.Context { return ctx },
+		// In the log, not on the terminal: with HTTPS a refused handshake is one line each.
+		ErrorLog: slog.NewLogLogger(log.Handler(), slog.LevelWarn),
 	}
 	serveErr := make(chan error, 1)
-	go func() { serveErr <- srv.Serve(ln) }()
+	go func() { serveErr <- serve(srv, ln, cert) }()
 
-	adv, err := discovery.Advertise(cfg.Name, id, port, api.Version, api.VersionMin)
+	adv, err := discovery.Advertise(discovery.Service{Name: cfg.Name, ID: id, Port: port,
+		API: api.Version, APIMin: api.VersionMin, TLSHost: tlsHost})
 	if err != nil {
 		log.Warn("mDNS advertisement unavailable", "err", err)
 	}
-	urls := reachableURLs(ln.Addr())
+	urls := reachableURLs(ln.Addr(), tlsHost)
 	if isInteractive && !cfg.LogStderr {
 		fmt.Fprint(os.Stderr, banner(cfg.Name, version, cfg.LogPath(), urls))
 	}
 	log.Info("ply listening", "ffmpeg", ffmpegBin, "version", version, "name", cfg.Name, "id", id, "data", cfg.Data,
-		"log", cfg.LogPath(), "auth", cfg.Token != "", "media", rootPaths(roots))
+		"log", cfg.LogPath(), "auth", cfg.Token != "", "https", tlsHost, "media", rootPaths(roots))
 	for _, u := range urls {
 		log.Info("reachable at", "url", u)
 	}
