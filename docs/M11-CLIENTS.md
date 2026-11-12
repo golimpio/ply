@@ -89,7 +89,8 @@ marked FUTURE is designed here and built later; everything else is the groundwor
   - `stopped`: on purpose, from any device;
   - `expired`: the lease ran out;
   - `error`: the play could not be set up;
-  - `shutdown`: ply is stopping.
+  - `shutdown`: ply is stopping;
+  - `replaced`: the same device asked to play the same item again, and a new play took this one's place.
   
   The server cannot see "finished": a client that needs it compares the position with the duration.
 - **A session names the device that started it**: `device {id, name, kind}`, when the client sent one.
@@ -113,7 +114,21 @@ marked FUTURE is designed here and built later; everything else is the groundwor
   - The client sends heartbeats to it: `POST /api/sessions/{sid}/heartbeat {positionSec, paused, wireless?}`.
   - `wireless: true` says the video plays on another screen (AirPlay). The lease is then the paused one (3 min),
     since the target may buffer for a long time without asking for anything (docs/AIRPLAY.md).
-  - The play records the device that asked for it (from its `X-Ply-Device`).
+  - The play records the device that asked for it (from its `X-Ply-Device`): `{id, name, kind}` as it registered,
+    or, for one that never did, its id and the name of its User-Agent.
+  - A request for the file that carries a `sid` counts for that play. One with a `sid` of a play that has run out
+    since is counted as any request is: by its device, or by address and User-Agent for a client that names none.
+  - A client that names its device is one client for its direct plays, whatever its address or program.
+  - **Asking again replaces.** A `POST /playback` for an item the device already plays directly (another audio
+    track, a retry, a second tab) starts a new play with a new id in the old one's place (it does not count twice
+    against the limit). The old play ends as `replaced`, and its id answers as stopped (410). So a `DELETE` of the
+    old id, which a player sends without waiting when it starts again, can never end the new play.
+  - What the server sees last wins. When one device sends two `POST /playback` for one item at nearly the same
+    moment and the server handles them in the other order, the older attempt's play is the one that stays. A
+    client that gives up an attempt should therefore give it up before it asks again. FUTURE: an attempt number
+    sent with the POST, so the server can keep the newest.
+  - A direct play is held like a session: 30 s after its last heartbeat or request, 3 minutes while its last
+    heartbeat said it is paused.
 - **Cast and AirPlay targets are routes, not devices.** The sender (the phone, the browser) keeps the play's lease
   with its heartbeats. When it can no longer do so, the requests of the target keep the lease alive while it fetches.
 
@@ -189,9 +204,9 @@ marked FUTURE is designed here and built later; everything else is the groundwor
   - **What fails is 1080p over HLS.** The same film plays as a 1080p file and as 720p HLS, but not as 1080p HLS: the
     receiver fetches the playlist, the init segment and the first segment, then answers `LOAD_FAILED` (no detailed
     code).
-  - **So, on this device, a play for a Chromecast is a direct file, or HLS at 720p at most.** ply's `chromecast`
-    profile copies 1080p video into HLS today (a remux), which is the case that fails. This is to be fixed in the
-    profile.
+  - **So, on this device, a play for a Chromecast is a direct file, or HLS at 720p at most.** The `chromecast`
+    profile says so (`maxHlsHeight: 720`, beside `maxHeight: 1080`): a 1080p film it cannot play as a file is
+    transcoded to 720p, not remuxed at 1080p (which is what failed).
   - Newer Chromecasts (Google TV) and newer firmware may block mixed content where this one did not, so the HTTPS
     listener stays the plan for the day one does.
 
@@ -215,19 +230,19 @@ Receiver, ply on `http://192.168.4.196:8420`:
 | ffmpeg fMP4 HLS of the film (copied, muxed or separate audio, re-encoded, 44.1 kHz, 25 fps), 1080p, over HTTP | no | the playlist, the init segment, the first segment, `LOAD_FAILED` |
 | the film re-encoded at 720p, ffmpeg fMP4 HLS over HTTP | yes | |
 
-## Groundwork in this milestone (in commit order)
+## Groundwork, built (2026-11-12)
 1. This contract.
-2. The event hub moves out of `internal/jobs` into `internal/events`, with topics. Jobs, the library, sessions and
-   the tier publish to it. The feed gets its envelope, `?topics` and a snapshot made of sections; `api` and
-   `apiMin` go in the TXT record.
+2. The event hub is `internal/events`, with topics. Jobs, the library, sessions and the tier publish to it. The
+   feed has its envelope, `?topics` and a snapshot made of sections; `api` and `apiMin` are in the TXT record.
 3. `api` and `apiMin` in `/api/info`.
-4. `stream.Manager` reports every play's start, update and end, `started` and `ended` once each (`OnPlayChange`).
-5. `session.*` on the feed. `PlayingEntry` names its device, and the Activity page follows the feed instead of
-   polling.
+4. `stream.Manager` tells every play's start, update and end (`OnPlayChange`, `internal/stream/changes.go`):
+   `started` and `ended` once each, whichever path noticed, under the manager's lock so they keep their order.
+5. `session.*` on the feed (`cmd/ply/main.go` connects the two). `PlayingEntry` names its device. The Activity page
+   follows the feed for what plays, through its reconnects, and polls only when the feed is off.
 6. Devices: migration 014, `PUT` and `GET /api/devices` (private), `X-Ply-Device` allowed by CORS.
-7. A session id for direct plays, carried by the file URL the server builds, with heartbeats; plays record their
-   device.
-8. The web UI makes and registers its device id and sends it with its requests.
-9. The Chromecast result, recorded above.
-
-Steps 3 to 8 touch the files of the AirPlay work (docs/AIRPLAY.md) and wait for it to be committed.
+7. A session id for every direct play (`StartDirect` at `POST /playback`), carried by the file URL the server
+   builds (`DirectByID`). The web player already sends heartbeats to any session id it is given, and ends the play
+   when it lets go of it.
+8. The web UI makes its device id (`web/src/lib/device.ts`), registers it at start, and sends it with its requests
+   and on the feed.
+9. The Chromecast result, recorded above, and the `chromecast` profile's 720p limit on HLS.

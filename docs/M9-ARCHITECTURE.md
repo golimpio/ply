@@ -338,15 +338,11 @@ The aim is a "now playing" that is always right, including a cast to Apple TV or
   a 10 s heartbeat with position and paused, and expiry 30 s after the last heartbeat or request (3 min while
   paused). An HLS session stopped on purpose answers 410, an expired one 404; an expired direct play is simply
   admitted again.
-- **What is missing, in order:**
-  1. Move the event hub out of `internal/jobs` into its own package. Sessions become its third publisher, after
-     jobs and the library.
-  2. Publish `session.started|updated|ended` from `stream.Manager`, with position updates at the heartbeat's
-     pace.
-  3. A stable device id and name, made by the client and sent with the session and its heartbeats.
-  4. A heartbeat for direct plays, which today are known only by item, IP and User-Agent (`directKey`).
-  5. Tests on `testing/synctest`: stop the heartbeats and see `session.ended` after 30 s, having first seen
-     `session.started`.
+- **Built since (docs/M11-CLIENTS.md, the client contract):**
+  - the feed's own package with topics;
+  - `session.started|updated|ended`, once each;
+  - devices with stable ids;
+  - a session id and heartbeats for direct plays.
 - **Devices:** an AirPlay'd Apple TV fetches the HLS itself, so its segment requests keep the lease alive. A
   Chromecast custom Web Receiver is a page served from a registered HTTPS URL, not by ply: whether it may call
   `http://` ply on the LAN must be tried before anything is designed on it, and plain POSTs are the likeliest to
@@ -359,14 +355,10 @@ The aim is a "now playing" that is always right, including a cast to Apple TV or
   - its one real gain, freeing one of the browser's 6 HTTP/1.1 connections per host (plain HTTP, so no
     HTTP/2), is small: a hidden tab already drops its stream.
 
-  WebTransport needs HTTPS and HTTP/3, so it is out. What would change this is remote control (stop, seek or
-  "play this" sent to one player) or a native tvOS app. Then the shape would be:
-  - `github.com/coder/websocket`, not a hand-rolled RFC 6455;
-  - `GET /api/devices/{id}/socket` for player devices only, beside SSE, which the dashboards keep;
-  - JSON `{seq, type, data}` on the hub's sequence, with replay by `?after=` and commands acked by id;
-  - `?token=` auth;
-  - a ping every 10 s with a 20 s deadline, and client backoff from 0.5 to 10 s with jitter;
-  - the POST heartbeat and the lease stay the fallback and the truth.
+  WebTransport needs HTTPS and HTTP/3, so it is out.
+- **Remote control needs no WebSocket either** (decided 2026-11-12, M11 "FUTURE: remote control"). Commands go
+  down the device's own SSE feed and acknowledgements come back as plain requests, so there is one transport for
+  every client, native apps included.
 
 ### As built (2026-11-05)
 - `internal/tier`:
@@ -463,8 +455,8 @@ The aim is a "now playing" that is always right, including a cast to Apple TV or
   few boxes needed.
 - **Hand-roll** the MKV Cues reader (~300 lines of EBML).
 - **Stdlib** for SSE, the queue, the registry and the reaper.
-- **Skip** `x/time/rate` (reuse the existing bucket), WebSocket libraries (until remote control, see "Now playing
-  across devices"), River, goqite and backlite.
+- **Skip** `x/time/rate` (reuse the existing bucket), WebSocket libraries (remote control goes over the SSE feed:
+  docs/M11-CLIENTS.md), River, goqite and backlite.
 - **Refreshed 2026-11-12** (all at their latest):
   - Go: toolchain go1.27.4 (pinned in `go.mod`), fsnotify 1.10.1, x/sys 0.50.0, x/text 0.44.0,
     modernc.org/sqlite 1.62.0. fsnotify 1.10 closes its kqueue watches on Close (#740), so ply's own workaround
