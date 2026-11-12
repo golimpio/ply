@@ -29,14 +29,14 @@ import (
 // direct play has one too, made up by ply, with which it can only be dropped
 // from the count. SessionID is the same value, under the name the 503 uses.
 type PlayingEntry struct {
-	ID          string    `json:"id"`
-	SessionID   string    `json:"sessionId"`
-	ItemID      int64     `json:"itemId"`
-	Title       string    `json:"title"`
-	Kind        string    `json:"kind"` // transcode | remux | direct
-	Client      string    `json:"client"`
-	StartedAt   time.Time `json:"startedAt"`
-	LastSeenAt  time.Time `json:"lastSeenAt"`
+	ID          string     `json:"id"`
+	SessionID   string     `json:"sessionId"`
+	ItemID      int64      `json:"itemId"`
+	Title       string     `json:"title"`
+	Kind        string     `json:"kind"` // transcode | remux | direct
+	Client      string     `json:"client"`
+	StartedAt   time.Time  `json:"startedAt"`
+	LastSeenAt  time.Time  `json:"lastSeenAt"`
 	PositionSec float64    `json:"positionSec"`
 	Paused      bool       `json:"paused"`
 	Device      *DeviceRef `json:"device,omitempty"` // the device that started it, if it said (M11)
@@ -106,8 +106,11 @@ type heartbeatRequest struct {
 // device"}: what a player is told when its session was stopped on purpose (by
 // DELETE). Unlike 404 (unknown, or ended because nothing was heard from it), it
 // does not mean "start another".
-func writeStopped(w http.ResponseWriter) {
-	writeJSON(w, http.StatusGone, map[string]string{"error": "stopped", "stoppedBy": "another device"})
+func writeStopped(w http.ResponseWriter) { writeGone(w, "another device") }
+
+// writeGone answers 410: the play was stopped on purpose, by whom.
+func writeGone(w http.ResponseWriter, by string) {
+	writeJSON(w, http.StatusGone, map[string]string{"error": "stopped", "stoppedBy": by})
 }
 
 // stoppedOnPurpose answers 410 and reports true if the session or direct play id
@@ -210,15 +213,20 @@ func (s *Server) admitDirect(w http.ResponseWriter, r *http.Request, e store.Ent
 // startDirect starts the direct play of e that r asks for (POST /playback), counted
 // from now, and returns its id: the file's URL carries it, and the player sends its
 // heartbeats to it. "" without a session manager (nothing is counted). It reports
-// false after it has answered 503 at the limit.
-func (s *Server) startDirect(w http.ResponseWriter, r *http.Request, e store.Entry, startSec float64) (string, bool) {
+// false after it has answered: 503 at the limit, 410 for an attempt older than one
+// already asked for (the client gave it up).
+func (s *Server) startDirect(w http.ResponseWriter, r *http.Request, e store.Entry, startSec float64, attempt int64) (string, bool) {
 	if s.Streams == nil {
 		return "", true
 	}
-	id, err := s.Streams.StartDirect(directKey(e, r), playTitle(e), clientLabel(r), e.Path, s.playDevice(r), startSec)
+	id, err := s.Streams.StartDirect(directKey(e, r), playTitle(e), clientLabel(r), e.Path, s.playDevice(r), startSec, attempt)
 	var le *stream.LimitError
 	if errors.As(err, &le) {
 		writeLimit(w, r, le)
+		return "", false
+	}
+	if errors.Is(err, stream.ErrStopped) {
+		writeGone(w, "a newer attempt")
 		return "", false
 	}
 	if err != nil {

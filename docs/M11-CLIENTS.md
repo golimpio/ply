@@ -123,10 +123,18 @@ marked FUTURE is designed here and built later; everything else is the groundwor
     track, a retry, a second tab) starts a new play with a new id in the old one's place (it does not count twice
     against the limit). The old play ends as `replaced`, and its id answers as stopped (410). So a `DELETE` of the
     old id, which a player sends without waiting when it starts again, can never end the new play.
-  - What the server sees last wins. When one device sends two `POST /playback` for one item at nearly the same
-    moment and the server handles them in the other order, the older attempt's play is the one that stays. A
-    client that gives up an attempt should therefore give it up before it asks again. FUTURE: an attempt number
-    sent with the POST, so the server can keep the newest.
+  - **The newest attempt wins.** A client sends `attempt` with each `POST /playback`: a whole number from 1 to
+    2^53-1 (anything else is a 400) that it makes larger every time it asks, across restarts and from every
+    window it has. The web UI sends the clock's milliseconds, made to go up even when the clock goes back, kept
+    in localStorage. When one client sends two asks for one item at nearly the same moment and the server handles
+    them in the other order, the older one, arriving last, is answered 410 `{"stoppedBy":"a newer attempt"}`
+    and ends nothing; it is refused too after the newer play was stopped, and at the limit (410, not 503).
+    - It orders direct plays (the only ones an ask replaces). A remux or transcode ask makes a session of its own,
+      which the client deletes when it has moved on.
+    - The client is the device, or for one that names none its address and User-Agent.
+    - The newest attempt is kept 10 minutes (`DirectGrace`) from the last ask that was taken, so a client that
+      starts again from 1 (reinstalled) waits that long at most. Without `attempt`, or with 0, what the server
+      sees last wins, and the newest attempt stays as it was.
   - A direct play is held like a session: 30 s after its last heartbeat or request, 3 minutes while its last
     heartbeat said it is paused.
 - **Cast and AirPlay targets are routes, not devices.** The sender (the phone, the browser) keeps the play's lease

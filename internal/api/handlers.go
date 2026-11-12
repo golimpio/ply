@@ -184,7 +184,14 @@ type playbackRequest struct {
 	AudioIndex    *int              `json:"audioIndex"`
 	SubtitleIndex *int              `json:"subtitleIndex"`
 	SubtitleKey   string            `json:"subtitleKey"`
+	// Attempt is a number the device makes larger each time it asks (docs/M11-CLIENTS.md): of two asks
+	// for one direct play, the larger one wins, whichever the server handles last. 0: no order.
+	Attempt int64 `json:"attempt"`
 }
+
+// maxAttempt is the largest attempt taken: what every client can hold exactly (a JavaScript number).
+// One far above what its clients send would lock a device out of its plays for DirectGrace.
+const maxAttempt = 1<<53 - 1
 
 func (s *Server) handlePlayback(w http.ResponseWriter, r *http.Request) {
 	e, ok := s.loadEntry(w, r)
@@ -200,6 +207,10 @@ func (s *Server) handlePlayback(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.StartSec < 0 || math.IsNaN(req.StartSec) || math.IsInf(req.StartSec, 0) {
 		writeError(w, http.StatusBadRequest, "startSec must be a non-negative number")
+		return
+	}
+	if req.Attempt < 0 || req.Attempt > maxAttempt {
+		writeError(w, http.StatusBadRequest, "attempt must be a whole number from 0 to 2^53-1")
 		return
 	}
 
@@ -260,7 +271,7 @@ func (s *Server) handlePlayback(w http.ResponseWriter, r *http.Request) {
 	pb := s.playbackFrom(e, d, req.StartSec)
 	if d.Method == playback.MethodDirect {
 		// Counted from now, with an id its file's URL carries; a full house is said now, with the list.
-		id, ok := s.startDirect(w, r, e, req.StartSec)
+		id, ok := s.startDirect(w, r, e, req.StartSec, req.Attempt)
 		if !ok {
 			return
 		}

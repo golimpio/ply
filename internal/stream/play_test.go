@@ -231,7 +231,7 @@ func TestDirectPlaysCountAndExpire(t *testing.T) {
 	if _, err := m.Create(ctx, fakeRequest()); !errors.Is(err, ErrTooManySessions) {
 		t.Fatalf("session at the cap with a direct play counted = %v, want ErrTooManySessions", err)
 	}
-	if _, err := m.StartDirect(b, "Movie", "x", "", Device{}, 0); !errors.As(err, &le) {
+	if _, err := m.StartDirect(b, "Movie", "x", "", Device{}, 0, 0); !errors.As(err, &le) {
 		t.Errorf("StartDirect at the cap = %v", err)
 	}
 	if got, err := brief(m, a, "Movie", "10.0.0.2 · Safari", 0); err != nil || got != idA {
@@ -571,7 +571,7 @@ func TestAReturningDirectPlayIsAdmittedAtTheLimit(t *testing.T) {
 	if _, err := brief(m, stranger, "Movie", "10.0.0.3 · Chrome", 0); !errors.Is(err, ErrTooManySessions) {
 		t.Fatalf("a stranger at the limit = %v, want ErrTooManySessions", err)
 	}
-	if _, err := m.StartDirect(paused, "Movie", "10.0.0.2 · Safari", "", Device{}, 0); err != nil {
+	if _, err := m.StartDirect(paused, "Movie", "10.0.0.2 · Safari", "", Device{}, 0, 0); err != nil {
 		t.Errorf("StartDirect for the player that was here %v ago = %v, want it admitted", DirectTTL, err)
 	}
 	id, err := brief(m, paused, "Movie", "10.0.0.2 · Safari", 0)
@@ -591,7 +591,7 @@ func TestAReturningDirectPlayIsAdmittedAtTheLimit(t *testing.T) {
 	if _, err := brief(m, paused, "Movie", "10.0.0.2 · Safari", 0); !errors.Is(err, ErrStopped) {
 		t.Errorf("a play that was stopped on purpose, asking for the file again = %v, want ErrStopped", err)
 	}
-	if _, err := m.StartDirect(paused, "Movie", "10.0.0.2 · Safari", "", Device{}, 0); !errors.Is(err, ErrTooManySessions) {
+	if _, err := m.StartDirect(paused, "Movie", "10.0.0.2 · Safari", "", Device{}, 0, 0); !errors.Is(err, ErrTooManySessions) {
 		t.Errorf("a play that was stopped on purpose, announced again at the limit = %v, want it refused", err)
 	}
 	if _, err := brief(m, paused, "Movie", "10.0.0.2 · Safari", 0); !errors.Is(err, ErrTooManySessions) {
@@ -618,11 +618,11 @@ func TestDirectGraceEnds(t *testing.T) {
 		}
 	}
 	clk.Advance(DirectGrace - DirectTTL - time.Nanosecond)
-	if _, err := m.StartDirect(c, "Movie", "x", "", Device{}, 0); err != nil {
+	if _, err := m.StartDirect(c, "Movie", "x", "", Device{}, 0, 0); err != nil {
 		t.Errorf("just inside DirectGrace: %v, want it admitted", err)
 	}
 	clk.Advance(time.Nanosecond)
-	if _, err := m.StartDirect(d, "Movie", "x", "", Device{}, 0); !errors.Is(err, ErrTooManySessions) {
+	if _, err := m.StartDirect(d, "Movie", "x", "", Device{}, 0, 0); !errors.Is(err, ErrTooManySessions) {
 		t.Errorf("DirectGrace after the last request: %v, want it refused", err)
 	}
 }

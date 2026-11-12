@@ -38,7 +38,35 @@ export function deviceId(): string {
   return id;
 }
 
-/** For tests: forget the id read, as a new page would. */
+const ATTEMPT_KEY = 'ply.attempt';
+let lastAttempt = 0;
+
+/**
+ * The number to send with this device's next POST /playback (docs/M11-CLIENTS.md, "Devices"): larger than any
+ * it sent before, from this tab, another one or before a reload, so that of two asks the server handles out of
+ * order it keeps the newer. The clock's milliseconds, made to go up even when the clock goes back.
+ */
+export function nextAttempt(): number {
+  let stored = 0;
+  try {
+    const s = Number(localStorage.getItem(ATTEMPT_KEY));
+    // Only what the server takes (a whole number below 2^53): anything else would stop every play.
+    if (Number.isSafeInteger(s) && s > 0 && s < Number.MAX_SAFE_INTEGER) stored = s;
+  } catch {
+    // storage unavailable: this page's own count still goes up
+  }
+  const n = Math.max(Date.now(), lastAttempt + 1, stored + 1);
+  lastAttempt = n;
+  try {
+    localStorage.setItem(ATTEMPT_KEY, String(n));
+  } catch {
+    // kept until reload
+  }
+  return n;
+}
+
+/** For tests: forget what was read and counted, as a new page would. */
 export function forgetDeviceForTests(): void {
   cached = '';
+  lastAttempt = 0;
 }

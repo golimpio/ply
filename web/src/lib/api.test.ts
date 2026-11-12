@@ -143,7 +143,13 @@ describe('request headers', () => {
     expect(path).toBe('/api/items/7/playback');
     expect(init.method).toBe('POST');
     expect((init.headers as Record<string, string>)['Content-Type']).toBe('application/json');
-    expect(JSON.parse(init.body as string)).toEqual({ profile: 'browser', startSec: 12 });
+    const body = JSON.parse(init.body as string);
+    expect(body).toEqual({ profile: 'browser', startSec: 12, attempt: expect.any(Number) });
+
+    // Each ask carries a larger attempt than the last (docs/M11-CLIENTS.md: of two that cross, the newer wins).
+    await m.api.playback(7, {});
+    const next = JSON.parse((post.mock.calls[1] as unknown as FetchCall)[1].body as string);
+    expect(next.attempt).toBeGreaterThan(body.attempt);
   });
 
   it('builds query strings from the parameters that are set', async () => {

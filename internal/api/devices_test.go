@@ -105,6 +105,42 @@ func TestADirectPlayHasAnIDThatItsFileURLCarries(t *testing.T) {
 	}
 }
 
+// Two POST /playback of one device for one item, handled in the other order than they
+// were sent: the newer attempt's play stays, and the older is answered as stopped.
+func TestTheNewerAttemptOfAPlayWins(t *testing.T) {
+	e := newEnv(t, "")
+	e.withStreams(fakeFFmpeg(t, "exec sleep 60"), nil)
+	post := func(attempt int) *httptest.ResponseRecorder {
+		t.Helper()
+		return e.do("POST", fmt.Sprintf("/api/items/%d/playback", e.mp4), map[string]string{"User-Agent": safari, DeviceHeader: phoneID},
+			fmt.Sprintf(`{"attempt":%d}`, attempt))
+	}
+	newer := post(2)
+	wantStatus(t, newer, http.StatusOK)
+	id := decode[Playback](t, newer).SessionID
+	if rec := post(1); rec.Code != http.StatusGone || !strings.Contains(rec.Body.String(), `"stoppedBy":"a newer attempt"`) {
+		t.Fatalf("the older attempt, handled last = %d %s, want 410 stopped by a newer attempt", rec.Code, rec.Body)
+	}
+	if got := e.sessions(); len(got) != 1 || got[0].ID != id {
+		t.Fatalf("playing = %+v, want the newer attempt's play %s", got, id)
+	}
+	// Positive control: a newer attempt still replaces it.
+	latest := post(3)
+	wantStatus(t, latest, http.StatusOK)
+	if got, next := e.sessions(), decode[Playback](t, latest).SessionID; next == id || len(got) != 1 || got[0].ID != next {
+		t.Fatalf("attempt 3: playing %+v, want its play %s alone", got, next)
+	}
+	// One no client can hold exactly, or below 0, is refused: it would lock the device out.
+	for _, a := range []string{"-1", "9007199254740992", "1.5"} {
+		rec := e.do("POST", fmt.Sprintf("/api/items/%d/playback", e.mp4), map[string]string{DeviceHeader: phoneID}, `{"attempt":`+a+`}`)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("attempt %s = %d, want 400", a, rec.Code)
+		}
+	}
+	// Positive control: the largest taken.
+	wantStatus(t, e.do("POST", fmt.Sprintf("/api/items/%d/playback", e.mp4), map[string]string{DeviceHeader: phoneID}, `{"attempt":9007199254740991}`), http.StatusOK)
+}
+
 // A client that names its device is one client whatever its address or program: two
 // User-Agents of one device are one play. Without the device they are two.
 func TestPlaysAreKeyedByDevice(t *testing.T) {

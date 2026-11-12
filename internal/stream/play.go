@@ -25,7 +25,8 @@ const DirectTTL = 30 * time.Second
 
 // DirectGrace is how long after it stopped being counted a client that comes back
 // to the same item is admitted even at the limit: a paused or buffered player
-// that asks again is carrying on, not starting another play.
+// that asks again is carrying on, not starting another play. It is also how long
+// the newest attempt a client asked with is kept (StartDirect).
 const DirectGrace = 10 * time.Minute
 
 // StopGrace is how long a session may take to stop before it counts against the
@@ -50,7 +51,8 @@ const (
 const StoppedTTL = 2 * time.Minute
 
 // ErrStopped is what Direct returns for a client whose play was stopped on purpose
-// less than StoppedTTL ago, unless it has asked for a play since (StartDirect).
+// less than StoppedTTL ago, unless it has asked for a play since (StartDirect); and
+// what StartDirect returns for an attempt older than one the client asked with since.
 var ErrStopped = errors.New("stream: stopped on purpose")
 
 // Default limits (Options.MaxSessions, Options.MaxTranscodes).
@@ -181,7 +183,18 @@ func (m *Manager) pruneDirectLocked() time.Time {
 			delete(m.recentDirect, k)
 		}
 	}
+	for k, a := range m.attempts {
+		if now.Sub(a.at) >= DirectGrace {
+			delete(m.attempts, k)
+		}
+	}
 	return now
+}
+
+// attemptSeen is the newest attempt a client asked to play an item directly with (StartDirect), and when.
+type attemptSeen struct {
+	n  int64
+	at time.Time
 }
 
 // pruneStoppedLocked forgets what was stopped on purpose StoppedTTL ago.
@@ -296,13 +309,24 @@ func (m *Manager) DirectFile(k DirectKey, title, client, path string, pos float6
 // what it does with the old id (the DELETE its player sends without waiting, the
 // requests of an attempt it gave up) cannot end the new one. The old play ends as
 // EndReplaced, and its id answers as stopped (Stopped, ErrStopped).
-func (m *Manager) StartDirect(k DirectKey, title, client, path string, dev Device, pos float64) (id string, err error) {
+//
+// attempt, when not 0, is a number the client makes larger each time it asks. An ask
+// with a smaller one than an ask of k already seen (within DirectGrace) is an attempt
+// the client gave up and that arrived late: it is refused with ErrStopped, and the
+// newer play stays, whichever order the two were handled in.
+func (m *Manager) StartDirect(k DirectKey, title, client, path string, dev Device, pos float64, attempt int64) (id string, err error) {
 	m.mu.Lock()
 	defer m.unlock()
 	if m.closed {
 		return "", ErrClosed
 	}
 	now := m.pruneDirectLocked()
+	if attempt != 0 {
+		if last, ok := m.attempts[k]; ok && last.n > attempt {
+			return "", ErrStopped
+		}
+		m.attempts[k] = attemptSeen{n: attempt, at: now}
+	}
 	delete(m.stoppedDirect, k)
 	if old, ok := m.direct[k]; ok {
 		delete(m.direct, k)

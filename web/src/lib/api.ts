@@ -1,5 +1,5 @@
 // Typed client for the ply HTTP API (see docs/DESIGN.md "HTTP API").
-import { DEVICE_HEADER, deviceId } from './device';
+import { DEVICE_HEADER, deviceId, nextAttempt } from './device';
 import { normaliseRating, normaliseRatings, RATING_SOURCES } from './ratings';
 
 export type Kind = 'movie' | 'episode';
@@ -1168,8 +1168,9 @@ export const api = {
     };
   },
 
+  /** Every ask carries the device's next attempt number: of two that cross, the server keeps the newer. */
   async playback(id: number, req: PlaybackRequest): Promise<Playback> {
-    const p = await request<Playback>('POST', `/api/items/${id}/playback`, req);
+    const p = await request<Playback>('POST', `/api/items/${id}/playback`, { ...req, attempt: nextAttempt() });
     return { ...p, reasons: p.reasons ?? [], url: p.url ?? '', startSec: p.startSec ?? 0 };
   },
 

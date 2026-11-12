@@ -260,7 +260,8 @@ type Manager struct {
 	maxStreams         int
 	maxTranscodes      int
 	direct             map[DirectKey]*directPlay
-	recentDirect       map[DirectKey]time.Time // direct plays that stopped being counted, by when they were last seen
+	recentDirect       map[DirectKey]time.Time   // direct plays that stopped being counted, by when they were last seen
+	attempts           map[DirectKey]attemptSeen // the newest attempt each client asked to play an item directly with
 	closed             bool
 	wg                 sync.WaitGroup // session monitors and the housekeeping
 
@@ -335,6 +336,7 @@ func NewManager(o Options) (*Manager, error) {
 		o: o, log: o.Logger, dir: dir, ctx: ctx, cancel: cancel,
 		sessions: map[string]*Session{}, stopping: map[string]stopInfo{}, direct: map[DirectKey]*directPlay{},
 		recentDirect: map[DirectKey]time.Time{}, stoppedIDs: map[string]time.Time{}, stoppedDirect: map[DirectKey]time.Time{},
+		attempts:   map[DirectKey]attemptSeen{},
 		maxStreams: o.MaxSessions, maxTranscodes: o.MaxTranscodes, reg: reg, reservedPaths: map[string]int{},
 		kfCalls: map[string]*kfCall{}, kfDistrust: map[distrustKey]time.Time{}, kfLocks: map[string]*pathLock{}, clock: o.Clock,
 		announced: map[string]PlayInfo{}, endReason: map[string]string{},
@@ -524,7 +526,7 @@ func (m *Manager) Get(id string) (*Session, bool) {
 // lost. For a direct play (see Direct) it only drops it from the count: the client
 // reading the file is not ours to stop, but for StoppedTTL its requests for the
 // file are refused as stopped (ErrStopped), unless it asks for a play again
-// (StartDirect).
+// (StartDirect) with a newer attempt, or none.
 func (m *Manager) Delete(id string) bool { return m.end(id, EndStopped) }
 
 // end is Delete (reason EndStopped), and what ply ends itself: an idle session

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type HlsType from 'hls.js';
-  import { api, mediaUrl, type ItemDetail, type Playback, type Subtitle } from '../lib/api';
+  import { api, ApiError, mediaUrl, type ItemDetail, type Playback, type Subtitle } from '../lib/api';
   import { channelLabel, codecLabel, episodeLabel, languageLabel, methodLabel } from '../lib/format';
   import { observeAirPlay, showAirPlay, supportsAirPlay } from '../lib/airplay';
   import { Heartbeat } from '../lib/heartbeat';
@@ -384,6 +384,8 @@
       if (destroyed || run !== attempt) return;
       const l = limitOf(e);
       if (l) refused(l);
+      // A newer ask of this device (another window) has the play: this one was given up.
+      else if (e instanceof ApiError && e.status === 410) stoppedElsewhere();
       else fail(e instanceof Error ? e.message : String(e));
       return;
     }

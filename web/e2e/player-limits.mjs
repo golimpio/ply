@@ -178,6 +178,7 @@ async function open(browser, opts = {}) {
       if (hold) await sleep(hold);
       const no = opts.refuse?.(n, st);
       if (no) return refusal(route, no);
+      if (opts.post410?.(n)) return json(route, { error: 'stopped', stoppedBy: 'a newer attempt' }, 410);
       const id = `s${n}`;
       if (!opts.hls) return json(route, { method: 'direct', videoAction: 'copy', audioAction: 'copy', audioIndex: 1, reasons: [], url: `/api/items/${ITEM}/file`, startSec: 0 });
       sessions.set(id, { deleted: false, beat404: false, beat410: false, stopped: false, segments404: false });
@@ -504,6 +505,19 @@ try {
     await s.playingAt('the direct play', 5, 15);
   });
 
+  // STOP4: the POST itself answered 410: another window of this browser asked since, and has the
+  // play. The stopped state, nothing started on its own, and Play again asks again.
+  // Mutant: start() without the 410 branch ("Cannot play").
+  await scenario('STOP4 a POST answered 410', { post410: (n) => n === 1 }, async (s) => {
+    await s.go('#/play/1?t=5');
+    await until('the stopped state', async () => (await stoppedShown(s)).includes('Stopped from another device'), 4000);
+    check('STOP4 not an error', !(await s.text('[role=alert]')).includes('Cannot play'));
+    await sleep(1000);
+    check('STOP4 nothing started on its own', s.posts().length === 1);
+    await s.page.getByRole('button', { name: 'Play again' }).click();
+    await s.playingAt('the direct play', 5, 15);
+  });
+
   // ---- races and the paused state ----
 
   // RACE: the countdown holds while a Stop's retry is under way, however long that takes: one retry.
@@ -654,7 +668,7 @@ try {
   // Mutant: restart() going by el.paused whatever the phase.
   await scenario('WANT1 an audio switch while preparing', { hls: true, slowPost: (n) => (n === 1 ? 2000 : 0) }, async (s) => {
     await s.go('#/play/1?t=10');
-    await until('Preparing stream', async () => (await s.text('.overlay.passive')).includes('Preparing'), 3000);
+    await until('the spinner while preparing', async () => (await s.page.locator('.spinner[role=status]').count()) > 0, 3000);
     await sleep(300);
     await pickAudio(s);
     await until('the new playback request', () => s.posts().length === 2, 3000);

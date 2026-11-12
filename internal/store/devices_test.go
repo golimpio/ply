@@ -108,7 +108,7 @@ func TestDevicesRegisterUpdateAndTouch(t *testing.T) {
 func TestValidDeviceID(t *testing.T) {
 	for id, want := range map[string]bool{
 		"0123456789abcdef":                     true,
-		"9f1c2b4e-5d6a-4c3b-8e7f-0a1b2c3d4e5f": true, // a UUID
+		"9f1c2b4e-5d6a-4c3b-8e7f-0a1b2c3d4e5f": true,  // a UUID
 		"abcdefg":                              false, // 7
 		strings.Repeat("x", 64):                true,
 		strings.Repeat("x", 65):                false,
