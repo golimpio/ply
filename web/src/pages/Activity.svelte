@@ -378,11 +378,11 @@
                 <span>{finishedAt(j.finishedAt)}</span>
                 {#if took(j)}<span class="took">{took(j)}</span>{/if}
               </span>
-              <div class="actions">
-                {#if j.state !== 'done' && !isSynthetic(j)}
+              {#if j.state !== 'done' && !isSynthetic(j)}
+                <div class="actions">
                   <button class="btn sm" disabled={busy[j.id]} onclick={() => act(j, 'retry')} aria-label="Retry: {j.title}">Retry</button>
-                {/if}
-              </div>
+                </div>
+              {/if}
             </li>
           {/each}
         </ul>
@@ -464,9 +464,9 @@
     gap: 0.9rem;
   }
   .headline {
-    font-size: var(--fs-xl);
-    font-weight: var(--fw-semibold);
-    letter-spacing: var(--tracking-tight);
+    font-size: var(--fs-base);
+    font-weight: var(--fw-medium-2);
+    letter-spacing: normal;
     text-wrap: pretty;
   }
   .lanes {
@@ -570,7 +570,7 @@
   .what {
     flex: 1;
     display: grid;
-    gap: 0.25rem;
+    gap: 0.35rem;
     min-width: 0;
   }
   .title {
@@ -754,7 +754,7 @@
     opacity: 0.8;
   }
   .past {
-    align-items: flex-start;
+    align-items: center;
   }
   .mark {
     flex: none;
@@ -762,7 +762,6 @@
     place-items: center;
     width: 1.6rem;
     height: 1.6rem;
-    margin-top: -0.05rem;
     border-radius: var(--radius-round);
     color: var(--text-muted);
     background: var(--surface-control);
@@ -793,13 +792,15 @@
     justify-items: end;
     font-size: var(--fs-xs-2);
     line-height: var(--lh-compact);
-    padding-top: 0.1rem;
   }
   .took {
     opacity: 0.75;
   }
   .history .actions {
     min-width: 4.6rem;
+  }
+  .history .actions:empty {
+    display: none;
   }
   .more {
     justify-self: start;

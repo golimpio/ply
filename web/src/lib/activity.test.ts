@@ -235,11 +235,11 @@ describe('describeTiers', () => {
 
   it('says playback has the machine, and how', () => {
     const d = describeTiers(snap({ tier: tier({ Sessions: 1, Active: 1, Transcodes: 1, Software: 1 }, false, true), running: [job(1, { held: 'x' })] }));
-    expect(d.headline).toBe('Playing: 1 video (transcoding on the CPU). Background work waits.');
+    expect(d.headline).toBe('Playing: 1 video - transcoding on the CPU.');
     expect(d.lanes[0]).toMatchObject({ state: 'active', text: '1 video, transcoding on the CPU' });
     expect(d.lanes[2]).toMatchObject({ state: 'waiting', text: '1 waiting their turn' });
-    expect(describeTiers(snap({ tier: tier({ Sessions: 2, Active: 2, Waiting: 1 }, false, true) })).headline).toMatch(/^Playing: 2 videos \(a viewer is waiting for video\)/);
-    expect(describeTiers(snap({ tier: tier({ Sessions: 1, Active: 1 }) })).headline).toMatch(/^Playing: 1 video \(no conversion needed\)\. Light background work continues/);
+    expect(describeTiers(snap({ tier: tier({ Sessions: 2, Active: 2, Waiting: 1 }, false, true) })).headline).toMatch(/^Playing: 2 videos - a viewer is waiting for video/);
+    expect(describeTiers(snap({ tier: tier({ Sessions: 1, Active: 1 }) })).headline).toMatch(/^Playing: 1 video - no conversion needed/);
   });
 
   it('says when someone browses, and when the queue is paused', () => {

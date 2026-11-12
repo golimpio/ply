@@ -190,8 +190,7 @@ export function describeTiers(s: JobsSnapshot): { headline: string; lanes: Lane[
 
   let headline: string;
   if (playing) {
-    const rest = hold.held ? 'Background work waits.' : 'Light background work continues; anything that would compete with it waits.';
-    headline = `Playing: ${videos(p.Sessions)} (${playbackDetail(p)}). ${rest}`;
+    headline = `Playing: ${videos(p.Sessions)} - ${playbackDetail(p)}.`;
   } else if (browsing) {
     headline = hold.held ? 'Someone is browsing. Background work waits a moment.' : 'Someone is browsing. Background work continues.';
   } else if (s.paused) {

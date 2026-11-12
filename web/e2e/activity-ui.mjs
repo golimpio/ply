@@ -362,7 +362,7 @@ const scenarios = {
     await page.goto(`${base}/#/activity`);
     const headline = page.locator('.headline');
     await headline.waitFor();
-    check('playing: the headline', ((await headline.textContent()) ?? '').trim() === 'Playing: 1 video (transcoding on the CPU). Background work waits.', await headline.textContent());
+    check('playing: the headline', ((await headline.textContent()) ?? '').trim() === 'Playing: 1 video - transcoding on the CPU.', await headline.textContent());
     const lanes = await page.locator('.lane').evaluateAll((els) => els.map((e) => `${e.getAttribute('data-lane')}:${e.className.match(/active|waiting|idle/)?.[0]}`));
     check('the lanes in priority order, with their states', lanes.join(' ') === 'playback:active browsing:idle queue:waiting', lanes.join(' '));
     await context.close();
