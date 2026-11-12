@@ -335,9 +335,13 @@
               </dl>
             {/if}
             {#if meta?.collection}
-              <p class="collection">
-                Part of <a class="link" href={href.collection(meta.collection.id)}>{meta.collection.name}</a>
-              </p>
+              <a class="collection-callout" href={href.collection(meta.collection.id)}>
+                <div class="collection-meta">
+                  <span class="collection-kicker">Part of the collection</span>
+                  <span class="collection-name">{meta.collection.name}</span>
+                </div>
+                <span class="collection-arrow" aria-hidden="true">→</span>
+              </a>
             {/if}
           </div>
         {/if}
@@ -516,12 +520,14 @@
     width: fit-content;
   }
   .tagline {
-    margin: -0.2rem 0 0;
+    margin: 0;
     font-family: var(--font-display);
-    font-size: var(--fs-3xl);
+    font-size: var(--fs-xl);
+    line-height: var(--lh-snug);
     font-style: italic;
     color: var(--text-lede);
     text-wrap: balance;
+    max-width: 48rem;
   }
   .rating {
     display: inline-flex;
@@ -583,9 +589,51 @@
     display: inline-flex;
     align-items: center;
   }
-  .collection {
-    margin: 0;
+  .collection-callout {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.85rem 1.15rem;
+    background: var(--surface-panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    backdrop-filter: var(--glass-blur);
+    margin-top: 0.5rem;
+    transition:
+      background var(--motion-hover),
+      border-color var(--motion-hover);
+  }
+  .collection-callout:hover {
+    background: var(--fill-hover);
+    border-color: var(--line-hover);
+  }
+  .collection-meta {
+    display: grid;
+    gap: 0.15rem;
+  }
+  .collection-kicker {
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs-2);
+    letter-spacing: var(--tracking-widest);
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+  .collection-name {
+    font-size: var(--fs-sm-3);
+    font-weight: var(--fw-semibold);
+    color: var(--text);
+  }
+  .collection-arrow {
+    font-size: var(--fs-lg);
     color: var(--text-muted);
+    transition:
+      transform var(--motion-hover),
+      color var(--motion-hover);
+  }
+  .collection-callout:hover .collection-arrow {
+    color: var(--text);
+    transform: translateX(3px);
   }
   .versions h2 {
     margin-bottom: 0.6rem;
@@ -632,8 +680,18 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .playback {
+    background: var(--surface-panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    backdrop-filter: var(--glass-blur);
+    padding: 1.1rem 1.25rem;
+  }
   .playback h2 {
-    margin-bottom: 0.6rem;
+    margin: 0 0 0.6rem;
+    font-size: var(--fs-base);
+    font-family: var(--font-text);
+    font-weight: var(--fw-semibold-2);
   }
   .decision {
     display: flex;
@@ -683,11 +741,16 @@
   .kv {
     display: grid;
     grid-template-columns: max-content 1fr;
-    gap: 0.35rem 1.5rem;
+    gap: 0.45rem 1.75rem;
     margin: 0;
+    font-size: var(--fs-sm-3);
   }
   .kv dt {
     color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    letter-spacing: var(--tracking-wider);
+    text-transform: uppercase;
   }
   .kv dd {
     margin: 0;
