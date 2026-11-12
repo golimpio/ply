@@ -103,7 +103,9 @@ func TestPlaybackLoadCounts(t *testing.T) {
 	checkLoad(t, m, "the software transcode stopped", PlaybackLoad{Sessions: 5, Active: 4, Transcodes: 1,
 		Paths: []string{"/media/a.mkv", "/media/c.mkv", "/nas/d.mkv"}})
 
-	// A direct play is counted for DirectTTL after its last request.
+	// A direct play is counted for DirectTTL after its last request (a paused one for the
+	// paused lease: this one plays again first).
+	m.Heartbeat(did, Beat{Paused: running})
 	done()
 	doneUnknown()
 	clk.Advance(DirectTTL - time.Second)

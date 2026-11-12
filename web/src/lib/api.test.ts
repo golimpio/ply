@@ -30,6 +30,25 @@ const json = (body: unknown, status = 200) =>
 const headersOf = (fn: ReturnType<typeof stubFetch>): Record<string, string> =>
   (fn.mock.calls[0] as unknown as FetchCall)[1].headers as Record<string, string>;
 
+describe('the device', () => {
+  it('goes with every request, and is what the browser keeps', async () => {
+    const fn = stubFetch(json({ id: 'x', name: 'n', version: 'v', authRequired: false, api: 1, apiMin: 1 }));
+    await m.api.info();
+    const id = localStorage.getItem('ply.device');
+    expect(id).toMatch(/^[A-Za-z0-9_-]{8,64}$/);
+    expect(headersOf(fn)['X-Ply-Device']).toBe(id);
+  });
+
+  it('registers as a web device, named by the server', async () => {
+    const fn = stubFetch(new Response(null, { status: 204 }));
+    await m.api.registerDevice();
+    const [path, init] = fn.mock.calls[0] as unknown as FetchCall;
+    expect(path).toBe(`/api/devices/${localStorage.getItem('ply.device')}`);
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(String(init.body))).toEqual({ kind: 'web', app: 'ply-web' });
+  });
+});
+
 describe('mediaUrl', () => {
   it('resolves a server-relative URL against the page origin', () => {
     expect(m.mediaUrl('/api/items/5/file')).toBe(`${location.origin}/api/items/5/file`);

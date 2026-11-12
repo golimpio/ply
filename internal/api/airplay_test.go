@@ -23,9 +23,12 @@ func TestAirPlayUsesOneReceiverIndependentSession(t *testing.T) {
 	e := newEnv(t, "")
 	m := e.withStreams(fakeFFmpeg(t, "exec sleep 60"), nil)
 	local := decode[Playback](t, e.start(e.mp4, "{}", safari))
-	if local.Method != "direct" || local.SessionID != "" {
+	if local.Method != "direct" || !strings.HasPrefix(local.SessionID, "d-") {
 		t.Fatalf("local direct-play control: %+v", local)
 	}
+	// The player lets go of the local play before it asks for the AirPlay one (Player.svelte,
+	// start: release ends the server's play).
+	wantStatus(t, e.do("DELETE", "/api/sessions/"+local.SessionID, nil, ""), http.StatusNoContent)
 	rec := e.start(e.mp4, `{"profile":"airplay","startSec":37,"audioIndex":1}`, safari)
 	wantStatus(t, rec, 200)
 	pb := decode[Playback](t, rec)

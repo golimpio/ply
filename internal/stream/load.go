@@ -83,10 +83,14 @@ func (m *Manager) fireLoadChange() {
 }
 
 // unlock releases m.mu and then, if what plays changed while it was held
-// (loadDirty), calls the hook of OnLoadChange.
+// (loadDirty), calls the hook of OnLoadChange. Before it lets go, it tells
+// OnPlayChange what started and what ended.
 func (m *Manager) unlock() {
 	changed := m.loadDirty
 	m.loadDirty = false
+	if changed {
+		m.reconcileLocked()
+	}
 	m.mu.Unlock()
 	if changed {
 		m.fireLoadChange()

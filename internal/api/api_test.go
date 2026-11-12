@@ -175,7 +175,8 @@ func TestInfo(t *testing.T) {
 		rec := e.get("/api/info") // never needs auth
 		wantStatus(t, rec, 200)
 		got := decode[map[string]any](t, rec)
-		want := map[string]any{"id": "abc123", "name": "Test Server", "version": "9.9.9", "authRequired": token != ""}
+		want := map[string]any{"id": "abc123", "name": "Test Server", "version": "9.9.9", "authRequired": token != "",
+			"api": float64(Version), "apiMin": float64(VersionMin)}
 		for k, v := range want {
 			if got[k] != v {
 				t.Errorf("token %q: info[%s] = %v, want %v", token, k, got[k], v)
@@ -286,7 +287,7 @@ func checkCORSHeaders(t *testing.T, rec *httptest.ResponseRecorder, what string)
 	t.Helper()
 	want := map[string]string{
 		"Access-Control-Allow-Origin":   "*",
-		"Access-Control-Allow-Headers":  "Range, Authorization, Content-Type",
+		"Access-Control-Allow-Headers":  "Range, Authorization, Content-Type, X-Ply-Device",
 		"Access-Control-Allow-Methods":  "GET, POST, PUT, PATCH, DELETE, OPTIONS",
 		"Access-Control-Expose-Headers": "Content-Range, Accept-Ranges, Content-Length, Content-Type",
 	}

@@ -50,6 +50,7 @@ func (s *Server) attachSession(w http.ResponseWriter, r *http.Request, e store.E
 		StartSec:    startSec,
 		Title:       playTitle(e),
 		Client:      clientLabel(r),
+		Device:      s.playDevice(r),
 		Wireless:    profile.Name == "airplay",
 		SubtitleKey: subtitleKey,
 	}
@@ -98,7 +99,7 @@ func (s *Server) videoSpecs(video probe.Stream, d playback.Decision, profile pla
 		HDR:          video.HDR() != "",
 		VideoIndex:   video.Index,
 		BurnSubtitle: d.BurnSubtitle,
-		MaxHeight:    profile.MaxHeight,
+		MaxHeight:    profile.HLSHeight(), // a transcode is played over HLS
 	}
 	spec := info.Plan(hreq)
 	primary = videoSpec(video.Codec, spec)

@@ -7,7 +7,7 @@
   import Icon from '../components/Icon.svelte';
 
   // What ply does in the background and what waits, below playback and browsing. The store
-  // (lib/activity) follows the queue live; this page adds what is playing (polled) and the actions.
+  // (lib/activity) follows the queue and what plays live; this page adds the actions.
 
   const snap = $derived(activity.snap);
   const tiers = $derived(describeTiers(snap));
@@ -19,13 +19,16 @@
     untrack(() => activity.markSeen());
   });
 
-  // ---- playing now: polled every 5 s, and at once when the number of plays changes
+  // ---- playing now: from the feed while it says (session events, through its reconnects);
+  // otherwise polled every 5 s, and at once when the number of plays changes
 
-  let sessions = $state<PlayingSession[] | null>(null);
+  let polled = $state<PlayingSession[] | null>(null);
   let sessionsError = $state('');
+  const live = $derived(activity.sessions !== null);
+  const sessions = $derived(live ? activity.sessions : polled);
   async function loadSessions() {
     try {
-      sessions = await api.sessions();
+      polled = await api.sessions();
       sessionsError = '';
     } catch (e) {
       sessionsError = e instanceof Error ? e.message : String(e);
@@ -33,9 +36,11 @@
   }
   $effect(() => {
     void snap.tier.playback.Sessions;
+    if (live) return;
     untrack(() => void loadSessions());
   });
   $effect(() => {
+    if (live) return;
     const t = setInterval(() => {
       if (document.visibilityState === 'visible') void loadSessions();
     }, 5000);
@@ -96,8 +101,10 @@
     try {
       await api.stopSession(p.id);
       confirming = null;
-      sessions = sessions?.filter((s) => s.id !== p.id) ?? null;
-      void loadSessions();
+      if (!live) {
+        polled = polled?.filter((s) => s.id !== p.id) ?? null;
+        void loadSessions();
+      } // live: the feed says it ended
     } catch (e) {
       stopErrors[p.id] = e instanceof ApiError && e.status === 404 ? 'It had already stopped.' : e instanceof Error ? e.message : String(e);
     } finally {

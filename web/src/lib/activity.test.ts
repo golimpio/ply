@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, normaliseSnapshot, type Job, type JobsSnapshot } from './api';
+import { ApiError, normaliseSnapshot, type Job, type JobsSnapshot, type PlayingSession } from './api';
 import {
   actionError,
   applyEvent,
+  applySessionEvent,
   countText,
   describeTiers,
   FAILURE_WINDOW_MS,
@@ -313,6 +314,43 @@ class FakeEventSource {
   }
 }
 
+const play = (id: string, over: Partial<PlayingSession> = {}): PlayingSession => ({
+  id, sessionId: id, itemId: 1, title: 'Film', kind: 'direct', client: '10.0.0.2 · Safari',
+  startedAt: iso(T0), lastSeenAt: iso(T0), positionSec: 0, paused: false, ...over,
+});
+
+describe('applySessionEvent', () => {
+  it('adds a play that starts, last (the list is oldest first)', () => {
+    const out = applySessionEvent([play('a')], 'session.started', { session: play('b') });
+    expect(out.map((p) => p.id)).toEqual(['a', 'b']);
+  });
+
+  it('updates a play in its place', () => {
+    const out = applySessionEvent([play('a'), play('b')], 'session.updated', { session: play('a', { paused: true, positionSec: 42 }) });
+    expect(out.map((p) => p.id)).toEqual(['a', 'b']);
+    expect(out[0]).toMatchObject({ paused: true, positionSec: 42 });
+  });
+
+  it('adds a play it hears of first by an update (it missed the start)', () => {
+    expect(applySessionEvent([], 'session.updated', { session: play('a') }).map((p) => p.id)).toEqual(['a']);
+  });
+
+  it('takes out a play that ended, and ignores the end of one it does not have', () => {
+    const list = [play('a'), play('b')];
+    expect(applySessionEvent(list, 'session.ended', { session: play('a'), reason: 'stopped' }).map((p) => p.id)).toEqual(['b']);
+    expect(applySessionEvent(list, 'session.ended', { session: play('zzz') })).toBe(list);
+  });
+
+  it('ignores what it does not know, and never changes the list it was given', () => {
+    const list = [play('a')];
+    const copy = structuredClone(list);
+    expect(applySessionEvent(list, 'session.teleported', { session: play('a') })).toBe(list);
+    expect(applySessionEvent(list, 'session.started', {})).toBe(list);
+    applySessionEvent(list, 'session.started', { session: play('b') });
+    expect(list).toEqual(copy);
+  });
+});
+
 describe('openActivity', () => {
   let jobs: ReturnType<typeof vi.fn>;
   let mod: typeof import('./activity.svelte');
@@ -358,6 +396,23 @@ describe('openActivity', () => {
     expect(jobs).not.toHaveBeenCalled();
     close();
     expect(es.readyState).toBe(FakeEventSource.CLOSED);
+  });
+
+  it('follows what plays: the snapshot, then session events; nothing while the feed is closed', () => {
+    const close = mod.openActivity();
+    const es = FakeEventSource.all[0];
+    const device = new URL(es.url).searchParams.get('device');
+    expect(device).toMatch(/^[A-Za-z0-9_-]{8,64}$/);
+    expect(device).toBe(localStorage.getItem('ply.device'));
+    es.open();
+    expect(mod.activity.sessions).toBeNull(); // nothing said yet
+    es.emit('snapshot', { api: 1, jobs: snap(), sessions: [play('a')] });
+    expect(mod.activity.sessions?.map((p) => p.id)).toEqual(['a']);
+    es.emit('session.started', { session: play('b') });
+    es.emit('session.ended', { session: play('a'), reason: 'expired' });
+    expect(mod.activity.sessions?.map((p) => p.id)).toEqual(['b']);
+    close();
+    expect(mod.activity.sessions).toBeNull();
   });
 
   it('makes the pages fetch the library again once a burst of library events has settled', async () => {

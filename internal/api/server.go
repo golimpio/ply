@@ -123,7 +123,8 @@ type Server struct {
 
 	foldersMu sync.Mutex // one change to the folders at a time: the checks and the write are one step
 
-	plays playStarts // the items being set up to play: no frame grab for them
+	plays   playStarts  // the items being set up to play: no frame grab for them
+	devices deviceNames // what the registered devices call themselves (M11)
 	// subsGrace is how long a request for an embedded subtitle waits for the extraction to
 	// finish before it starts to stream what is written so far (a variable for the tests).
 	subsGrace time.Duration
@@ -165,6 +166,8 @@ func New(o Options) *Server {
 	mux.HandleFunc("DELETE /api/sessions/{sid}", s.handleSessionDelete)
 	mux.HandleFunc("GET /api/sessions", s.handleSessions)
 	mux.HandleFunc("POST /api/sessions/{sid}/heartbeat", s.handleSessionHeartbeat)
+	mux.HandleFunc("GET /api/devices", s.handleDevices)
+	mux.HandleFunc("PUT /api/devices/{id}", s.handleDevicePut)
 	mux.HandleFunc("GET /api/people", s.handlePeople)
 	mux.HandleFunc("GET /api/people/{id}", s.handlePerson)
 	mux.HandleFunc("GET /api/genres", s.handleGenres)
@@ -239,7 +242,7 @@ func private(urlPath string) bool {
 	if p == "/api/settings/test" { // it makes the server log in to a provider with a key the page cannot see
 		return true
 	}
-	for _, root := range []string{"/api/folders", "/api/fs", "/api/jobs", "/api/queue", "/api/events"} {
+	for _, root := range []string{"/api/folders", "/api/fs", "/api/jobs", "/api/queue", "/api/events", "/api/devices"} {
 		if p == root || strings.HasPrefix(p, root+"/") {
 			return true
 		}
@@ -382,7 +385,7 @@ func cors(next http.Handler) http.Handler {
 		}
 		h := w.Header()
 		h.Set("Access-Control-Allow-Origin", "*")
-		h.Set("Access-Control-Allow-Headers", "Range, Authorization, Content-Type")
+		h.Set("Access-Control-Allow-Headers", "Range, Authorization, Content-Type, "+DeviceHeader)
 		h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		h.Set("Access-Control-Expose-Headers", "Content-Range, Accept-Ranges, Content-Length, Content-Type")
 		if r.Method == http.MethodOptions {

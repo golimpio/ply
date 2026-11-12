@@ -105,6 +105,7 @@ async function open(browser, opts = {}) {
     const p = new URL(req.url()).pathname;
     const method = req.method();
     const body = req.postData() ? JSON.parse(req.postData()) : null;
+    if (method === 'PUT' && p.startsWith('/api/devices/')) return route.fulfill({ status: 204 }); // the app says who it is (M11)
     if (method === 'GET') gets.push(p);
     else calls.push({ method, path: p, body });
     if (p === '/api/info') return json(route, { id: 'x', name: 'e2e', version: 'dev', authRequired: false });

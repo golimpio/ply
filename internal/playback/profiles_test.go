@@ -48,13 +48,15 @@ func TestBuiltinMatrix(t *testing.T) {
 		"avi mpeg4 mp3":     {"avi", vid("mpeg4", "", 480), aud(1, "mp3", true)},
 		"mp4 h264 10-bit":   {"mp4", func() Stream { v := vid("h264", "avc1", 1080); v.PixFmt = "yuv420p10le"; return v }(), aud(1, "aac", true)},
 	}
+	// A Chromecast plays 1080p as a file, but HLS only to 720p: what it cannot play as a file at
+	// 1080p is a transcode, not a remux (docs/M11-CLIENTS.md, the Chromecast test).
 	want := map[string]map[string]string{ // file -> profile -> method[/audio action]
 		"mp4 h264 aac":      {"avplayer": "direct", "browser": "direct", "chromecast": "direct", "airplay": "remux"},
-		"mp4 h264 ac3":      {"avplayer": "direct", "browser": "remux/transcode", "chromecast": "remux/transcode", "airplay": "remux/transcode"},
+		"mp4 h264 ac3":      {"avplayer": "direct", "browser": "remux/transcode", "chromecast": "transcode", "airplay": "remux/transcode"},
 		"mp4 h264 4k":       {"avplayer": "direct", "browser": "direct", "chromecast": "transcode", "airplay": "transcode"},
 		"mp4 hevc hvc1 aac": {"avplayer": "direct", "browser": "transcode", "chromecast": "transcode", "airplay": "transcode"},
-		"mkv h264 aac":      {"avplayer": "remux", "browser": "remux", "chromecast": "remux", "airplay": "remux"},
-		"mkv h264 eac3":     {"avplayer": "remux", "browser": "remux/transcode", "chromecast": "remux/transcode", "airplay": "remux/transcode"},
+		"mkv h264 aac":      {"avplayer": "remux", "browser": "remux", "chromecast": "transcode", "airplay": "remux"},
+		"mkv h264 eac3":     {"avplayer": "remux", "browser": "remux/transcode", "chromecast": "transcode", "airplay": "remux/transcode"},
 		"mkv hevc eac3":     {"avplayer": "remux", "browser": "transcode", "chromecast": "transcode", "airplay": "transcode"},
 		"webm vp9 opus":     {"avplayer": "transcode", "browser": "direct", "chromecast": "transcode", "airplay": "transcode"},
 		"webm av1 opus":     {"avplayer": "transcode", "browser": "direct", "chromecast": "transcode", "airplay": "transcode"},

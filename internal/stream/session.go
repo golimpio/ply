@@ -170,7 +170,8 @@ func (s *Session) info() PlayInfo {
 		pos = math.Float64frombits(s.estPos.Load())
 	}
 	return PlayInfo{ID: s.ID, ItemID: s.req.ItemID, Title: s.title, Kind: s.kind, Client: s.client,
-		StartedAt: s.started, LastSeenAt: time.Unix(0, s.lastUsed.Load()), PositionSec: pos, Paused: paused}
+		StartedAt: s.started, LastSeenAt: time.Unix(0, s.lastUsed.Load()), PositionSec: pos, Paused: paused,
+		Device: s.req.Device}
 }
 
 // heartbeat is the player saying it is alive: where it is, and whether it is
@@ -524,7 +525,7 @@ func (s *Session) monitor() {
 		}
 		if s.idle() {
 			s.m.log.Info("session idle, stopping", "session", s.ID)
-			s.m.end(s.ID, false) // lost, not stopped by anybody
+			s.m.end(s.ID, EndExpired) // lost, not stopped by anybody
 			return
 		}
 		s.mu.Lock()

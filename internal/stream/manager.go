@@ -216,6 +216,8 @@ type Request struct {
 	// call the item and who asked for it. They have no other use here.
 	Title  string
 	Client string
+	// Device is the device that started the play, for the listing and the live feed.
+	Device Device
 	// Video overrides the default stream copy: a transcode. Its segments are
 	// equal, SegmentSec each, and need no keyframe index.
 	Video *VideoSpec
@@ -263,6 +265,12 @@ type Manager struct {
 	loadDirty bool                   // under mu: the plays changed since the last unlock
 	waiting   atomic.Int32           // requests blocked on ffmpeg right now (see waiter)
 	onLoad    atomic.Pointer[func()] // OnLoadChange
+
+	// What OnPlayChange was told (see reconcileLocked), under mu: the plays told as started,
+	// as they were last seen, and why the ones end has just taken out ended.
+	announced map[string]PlayInfo
+	endReason map[string]string
+	onPlay    atomic.Pointer[func(PlayChange)]
 
 	reg       *registry // nil without Options.RegistryDir
 	reaperExe string    // what is run as the reaper (see reaperLink); empty for none
@@ -326,6 +334,7 @@ func NewManager(o Options) (*Manager, error) {
 		recentDirect: map[DirectKey]time.Time{}, stoppedIDs: map[string]time.Time{}, stoppedDirect: map[DirectKey]time.Time{},
 		maxStreams: o.MaxSessions, maxTranscodes: o.MaxTranscodes, reg: reg, reservedPaths: map[string]int{},
 		kfCalls: map[string]*kfCall{}, kfDistrust: map[distrustKey]time.Time{}, kfLocks: map[string]*pathLock{}, clock: o.Clock,
+		announced: map[string]PlayInfo{}, endReason: map[string]string{},
 	}
 	if reaperWanted && o.Reaper != "" {
 		m.reaperExe = reaperLink(o)
@@ -511,13 +520,14 @@ func (m *Manager) Get(id string) (*Session, bool) {
 // when it asks again, is told that it was stopped and not that the session is
 // lost. For a direct play (see Direct) it only drops it from the count: the client
 // reading the file is not ours to stop, but for StoppedTTL its requests for the
-// file are refused as stopped (ErrStopped), unless it announces a play again
-// (CheckDirect).
-func (m *Manager) Delete(id string) bool { return m.end(id, true) }
+// file are refused as stopped (ErrStopped), unless it asks for a play again
+// (StartDirect).
+func (m *Manager) Delete(id string) bool { return m.end(id, EndStopped) }
 
-// end is Delete, and for a session that ply ends itself (idle, a Create that
-// failed) with onPurpose false: that one is lost, not stopped.
-func (m *Manager) end(id string, onPurpose bool) bool {
+// end is Delete (reason EndStopped), and what ply ends itself: an idle session
+// (EndExpired, lost rather than stopped) or one that could not start (EndError).
+func (m *Manager) end(id, reason string) bool {
+	onPurpose := reason == EndStopped
 	m.mu.Lock()
 	now := m.clock()
 	s, ok := m.sessions[id]
@@ -543,6 +553,9 @@ func (m *Manager) end(id string, onPurpose bool) bool {
 		}
 	}
 	m.pruneStoppedLocked(now)
+	if ok || dropped {
+		m.endReason[id] = reason
+	}
 	m.loadDirty = m.loadDirty || ok || dropped
 	m.unlock()
 	if ok {
@@ -580,6 +593,10 @@ func (m *Manager) Close() {
 		all = append(all, s)
 		delete(m.sessions, id)
 		m.stopping[id] = stopInfo{since: m.clock(), kind: s.kind}
+		m.endReason[id] = EndShutdown
+	}
+	for _, d := range m.direct {
+		m.endReason[d.id] = EndShutdown
 	}
 	m.loadDirty = m.loadDirty || len(all) > 0 || len(m.direct) > 0
 	m.direct = map[DirectKey]*directPlay{}
@@ -709,7 +726,7 @@ func (m *Manager) Create(ctx context.Context, r Request) (*Session, error) {
 	err = s.startRunLocked(plan.Segments[startSeg].First)
 	s.mu.Unlock()
 	if err != nil {
-		m.end(id, false)
+		m.end(id, EndError)
 		return nil, err
 	}
 	return s, nil

@@ -15,7 +15,7 @@ describe('deviceId', () => {
   // the path a browser on another machine takes.
   it('makes a valid, random id without crypto.randomUUID', () => {
     const real = globalThis.crypto;
-    vi.stubGlobal('crypto', { getRandomValues: (a: Uint8Array) => real.getRandomValues(a) });
+    vi.stubGlobal('crypto', { getRandomValues: (a: Uint8Array<ArrayBuffer>) => real.getRandomValues(a) });
     const first = deviceId();
     expect(first).toMatch(VALID);
     expect(first).toMatch(/^[0-9a-f]{32}$/);

@@ -3,7 +3,8 @@
 // lowest tier (after playback and browsing); this page only makes that visible. The same stream says
 // when the library changed ("library": files came, went or moved, titles were matched): every open
 // page then fetches what it shows again.
-import { api, ApiError, mediaUrl, normaliseSnapshot, normaliseTier, type Job, type JobEvent, type JobsSnapshot, type JobState, type TierState } from './api';
+import { api, ApiError, mediaUrl, normaliseSnapshot, normaliseTier, type Job, type JobEvent, type JobsSnapshot, type JobState, type PlayingSession, type TierState } from './api';
+import { deviceId } from './device';
 import { app } from './state.svelte';
 
 export const HISTORY_MAX = 200;
@@ -30,6 +31,26 @@ export const EVENT_TYPES = [
   'queue.resumed',
   'tier',
 ] as const;
+
+/** What plays, on the same stream (docs/M11-CLIENTS.md, "Session events"). */
+export const SESSION_EVENT_TYPES = ['session.started', 'session.updated', 'session.ended'] as const;
+
+/**
+ * What plays after one session event: started and updated put the play in (in its place, or last:
+ * the list is oldest first), ended takes it out; an end of a play not in the list changes nothing.
+ * Pure: the list given is not changed.
+ */
+export function applySessionEvent(list: PlayingSession[], type: string, data: unknown): PlayingSession[] {
+  const s = (data as { session?: PlayingSession } | null)?.session;
+  if (!s?.id) return list;
+  const at = list.findIndex((p) => p.id === s.id);
+  if (type === 'session.ended') return at < 0 ? list : list.filter((p) => p.id !== s.id);
+  if (type !== 'session.started' && type !== 'session.updated') return list;
+  if (at < 0) return [...list, s];
+  const out = list.slice();
+  out[at] = s;
+  return out;
+}
 
 export const isFinished = (s: JobState) => s === 'done' || s === 'failed' || s === 'cancelled';
 
@@ -263,6 +284,8 @@ class Activity {
   loaded = $state(false);
   error = $state('');
   mode = $state<FeedMode>('off');
+  /** What plays, from the feed (kept through its reconnects); null while it does not say (off, or polling). */
+  sessions = $state.raw<PlayingSession[] | null>(null);
   /** Moves on every 30 s while open, for the failure window. */
   now = $state(Date.now());
   seenAt = $state(readSeen());
@@ -272,6 +295,12 @@ class Activity {
     this.snap = applyEvent(this.snap, type, data);
     this.loaded = true;
     this.error = '';
+    const sessions = type === 'snapshot' ? (data as { sessions?: PlayingSession[] | null } | null)?.sessions : undefined;
+    if (sessions !== undefined) this.sessions = sessions ?? [];
+  }
+
+  applySession(type: string, data: unknown) {
+    if (this.sessions) this.sessions = applySessionEvent(this.sessions, type, data);
   }
 
   /** GET /api/jobs into the store. */
@@ -312,10 +341,12 @@ function disconnect() {
   clearTimeout(pollTimer);
   clearInterval(clockTimer);
   activity.mode = 'off';
+  activity.sessions = null;
 }
 
 function poll(gen: number) {
   activity.mode = 'polling';
+  activity.sessions = null;
   const tick = async () => {
     await activity.refresh();
     if (gen === generation) pollTimer = setTimeout(tick, POLL_MS);
@@ -331,7 +362,7 @@ function connect() {
   if (typeof EventSource === 'undefined') return poll(gen);
 
   activity.mode = 'connecting';
-  const es = new EventSource(mediaUrl('/api/events'));
+  const es = new EventSource(mediaUrl(`/api/events?device=${encodeURIComponent(deviceId())}`));
   source = es;
   let failures = 0;
   for (const type of EVENT_TYPES) {
@@ -339,6 +370,16 @@ function connect() {
       if (gen !== generation) return;
       try {
         activity.apply(type, JSON.parse((ev as MessageEvent<string>).data));
+      } catch {
+        // a malformed event: the next snapshot puts it right
+      }
+    });
+  }
+  for (const type of SESSION_EVENT_TYPES) {
+    es.addEventListener(type, (ev) => {
+      if (gen !== generation) return;
+      try {
+        activity.applySession(type, JSON.parse((ev as MessageEvent<string>).data));
       } catch {
         // a malformed event: the next snapshot puts it right
       }

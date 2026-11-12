@@ -66,21 +66,30 @@ const PLAY = { id: 'abc123', sessionId: 'abc123', itemId: 1, title: 'Alien', kin
  *   snapshot   what GET /api/jobs and the event stream say (`st.snapshot` can be changed later)
  *   sessions   what GET /api/sessions lists
  *   events     false: GET /api/events answers 503 (the page must poll)
+ *   feed       [type, data] events sent after the first snapshot only (session.started, ...)
+ *   retry      the stream's retry: ms (default 300)
  *   refuse     { [id]: status } answers for job actions (default 204, retry 200)
- * `calls` holds the non-GET calls; `hits` counts the GETs of each path.
+ * `calls` holds the non-GET calls (not the browser registering itself, which `devices` holds);
+ * `hits` counts the GETs of each path.
  */
 async function open(browser, opts = {}, viewport = { width: 1280, height: 800 }) {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block' });
   const page = await context.newPage();
   const st = { snapshot: opts.snapshot ?? snapshot(), sessions: opts.sessions ?? [] };
   const calls = [];
+  const devices = [];
   const hits = {};
   const errors = [];
+  let feed = opts.feed ?? [];
   page.on('pageerror', (e) => errors.push(e.message));
   const json = (route, body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   await page.route('**/api/**', async (route) => {
     const req = route.request();
     const p = new URL(req.url()).pathname;
+    if (req.method() === 'PUT' && p.startsWith('/api/devices/')) {
+      devices.push(p);
+      return route.fulfill({ status: 204 });
+    }
     if (req.method() !== 'GET') calls.push({ method: req.method(), path: p });
     else hits[p] = (hits[p] ?? 0) + 1;
     if (p === '/api/info') return json(route, { id: 'x', name: 'e2e', version: 'dev', authRequired: false });
@@ -90,7 +99,9 @@ async function open(browser, opts = {}, viewport = { width: 1280, height: 800 })
     if (p === '/api/events') {
       if (opts.events === false) return json(route, { error: 'the background queue is not running' }, 503);
       // One snapshot, then the stream ends: EventSource reconnects after `retry` ms and gets the next.
-      const body = `retry: 300\n\nid: 1\nevent: snapshot\ndata: ${JSON.stringify({ api: 1, jobs: st.snapshot, sessions: st.sessions, tier: st.snapshot.tier })}\n\n`;
+      let body = `retry: ${opts.retry ?? 300}\n\nid: 1\nevent: snapshot\ndata: ${JSON.stringify({ api: 1, jobs: st.snapshot, sessions: st.sessions, tier: st.snapshot.tier })}\n\n`;
+      for (const [i, [type, data]] of feed.entries()) body += `id: ${2 + i}\nevent: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
+      feed = [];
       return route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store' }, body });
     }
     if (p === '/api/sessions') return json(route, st.sessions);
@@ -111,7 +122,7 @@ async function open(browser, opts = {}, viewport = { width: 1280, height: 800 })
     }
     return json(route, { error: `unmocked ${p}` }, 404);
   });
-  return { context, page, st, calls, hits, errors };
+  return { context, page, st, calls, devices, hits, errors };
 }
 
 const indicator = (page) => page.locator('header.bar a[href="#/activity"]');
@@ -326,6 +337,22 @@ const scenarios = {
     check('confirmed: DELETE /api/sessions/abc123', calls.some((c) => c.method === 'DELETE' && c.path === '/api/sessions/abc123'), JSON.stringify(calls));
     const gone = await waitFor(async () => (await page.locator('[data-session="abc123"]').count()) === 0);
     check('it leaves the list', gone);
+    await context.close();
+  },
+
+  // Mutants caught: the page polling GET /api/sessions while the feed is live; session events
+  // not applied (the play would never show: the snapshot has none).
+  async 'Playing now: follows the feed, with no polling'(browser) {
+    // One stream, no reconnection within the test: the play can only come from its event.
+    const { context, page, hits, devices } = await open(browser, { feed: [['session.started', { session: PLAY }]], retry: 600000 });
+    await page.goto(`${base}/#/activity`);
+    const shown = await page.locator('[data-session="abc123"]').waitFor({ timeout: 3000 }).then(() => true, () => false);
+    check('a play told by session.started is listed', shown);
+    await sleep(6000); // longer than the 5 s poll
+    check('the feed was followed', (hits['/api/events'] ?? 0) >= 1, JSON.stringify(hits));
+    // At most the one ask of a page that opens before the feed has said anything; no polling after.
+    check('and GET /api/sessions not polled', (hits['/api/sessions'] ?? 0) <= 1, JSON.stringify(hits));
+    check('the browser registered itself', devices.length >= 1 && /^\/api\/devices\/[A-Za-z0-9_-]{8,64}$/.test(devices[0]), JSON.stringify(devices));
     await context.close();
   },
 

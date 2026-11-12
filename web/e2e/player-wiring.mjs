@@ -169,6 +169,7 @@ async function open(browser, opts = {}) {
     const req = route.request();
     const { pathname: p } = new URL(req.url());
     const m = req.method();
+    if (m === 'PUT' && p.startsWith('/api/devices/')) return route.fulfill({ status: 204 }); // the app says who it is (M11)
     if (m === 'GET' && p === '/api/info') return json(route, { id: 'x', name: 'wiring', version: '0', authRequired: false });
     if (m === 'GET' && p === '/api/scan') return json(route, { running: false, itemCount: 1 });
     if (m === 'GET' && p === '/api/items') return json(route, []); // the item page's neighbours

@@ -71,7 +71,8 @@
     () => item.durationSec,
   );
   /**
-   * Keeps the HLS session alive, paused or not (lib/heartbeat.ts); a direct play has none. A 404
+   * Keeps the play alive, paused or not (lib/heartbeat.ts): an HLS session or a direct play, both have
+   * a session id (docs/M11-CLIENTS.md, "Devices"). A 404
    * means the server lost it (sessionLost); a 410 that someone stopped it (stoppedElsewhere).
    */
   const heartbeat = new Heartbeat({

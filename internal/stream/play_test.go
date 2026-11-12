@@ -231,8 +231,8 @@ func TestDirectPlaysCountAndExpire(t *testing.T) {
 	if _, err := m.Create(ctx, fakeRequest()); !errors.Is(err, ErrTooManySessions) {
 		t.Fatalf("session at the cap with a direct play counted = %v, want ErrTooManySessions", err)
 	}
-	if err := m.CheckDirect(b); !errors.As(err, &le) {
-		t.Errorf("CheckDirect at the cap = %v", err)
+	if _, err := m.StartDirect(b, "Movie", "x", "", Device{}, 0); !errors.As(err, &le) {
+		t.Errorf("StartDirect at the cap = %v", err)
 	}
 	if got, err := brief(m, a, "Movie", "10.0.0.2 · Safari", 0); err != nil || got != idA {
 		t.Errorf("another range request of the same play = %q, %v; want the same id and no refusal at the cap", got, err)
@@ -571,8 +571,8 @@ func TestAReturningDirectPlayIsAdmittedAtTheLimit(t *testing.T) {
 	if _, err := brief(m, stranger, "Movie", "10.0.0.3 · Chrome", 0); !errors.Is(err, ErrTooManySessions) {
 		t.Fatalf("a stranger at the limit = %v, want ErrTooManySessions", err)
 	}
-	if err := m.CheckDirect(paused); err != nil {
-		t.Errorf("CheckDirect for the player that was here %v ago = %v, want it admitted", DirectTTL, err)
+	if _, err := m.StartDirect(paused, "Movie", "10.0.0.2 · Safari", "", Device{}, 0); err != nil {
+		t.Errorf("StartDirect for the player that was here %v ago = %v, want it admitted", DirectTTL, err)
 	}
 	id, err := brief(m, paused, "Movie", "10.0.0.2 · Safari", 0)
 	if err != nil {
@@ -591,7 +591,7 @@ func TestAReturningDirectPlayIsAdmittedAtTheLimit(t *testing.T) {
 	if _, err := brief(m, paused, "Movie", "10.0.0.2 · Safari", 0); !errors.Is(err, ErrStopped) {
 		t.Errorf("a play that was stopped on purpose, asking for the file again = %v, want ErrStopped", err)
 	}
-	if err := m.CheckDirect(paused); !errors.Is(err, ErrTooManySessions) {
+	if _, err := m.StartDirect(paused, "Movie", "10.0.0.2 · Safari", "", Device{}, 0); !errors.Is(err, ErrTooManySessions) {
 		t.Errorf("a play that was stopped on purpose, announced again at the limit = %v, want it refused", err)
 	}
 	if _, err := brief(m, paused, "Movie", "10.0.0.2 · Safari", 0); !errors.Is(err, ErrTooManySessions) {
@@ -618,11 +618,11 @@ func TestDirectGraceEnds(t *testing.T) {
 		}
 	}
 	clk.Advance(DirectGrace - DirectTTL - time.Nanosecond)
-	if err := m.CheckDirect(c); err != nil {
+	if _, err := m.StartDirect(c, "Movie", "x", "", Device{}, 0); err != nil {
 		t.Errorf("just inside DirectGrace: %v, want it admitted", err)
 	}
 	clk.Advance(time.Nanosecond)
-	if err := m.CheckDirect(d); !errors.Is(err, ErrTooManySessions) {
+	if _, err := m.StartDirect(d, "Movie", "x", "", Device{}, 0); !errors.Is(err, ErrTooManySessions) {
 		t.Errorf("DirectGrace after the last request: %v, want it refused", err)
 	}
 }
@@ -770,7 +770,7 @@ func TestASessionStoppedOnPurposeIsRememberedAsStopped(t *testing.T) {
 
 // The same for a direct play dropped by Delete: its next requests for the file are
 // refused as stopped (not counted again), until StoppedTTL has passed or the client
-// announces a play (CheckDirect); one that merely expired is not stopped.
+// asks for a play (StartDirect); one that merely expired is not stopped.
 func TestADirectPlayDroppedOnPurposeIsRefusedAsStopped(t *testing.T) {
 	f := newFake(t)
 	clk := newTestClock()

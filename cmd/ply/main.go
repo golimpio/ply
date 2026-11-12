@@ -136,6 +136,10 @@ func run() error {
 	// The live feed (GET /api/events, docs/M11-CLIENTS.md): the queue, the library,
 	// the plays and the tiers publish to it.
 	feed := events.New(512, time.Now())
+	streams.OnPlayChange(func(c stream.PlayChange) {
+		typ, data := api.SessionEventOf(c)
+		feed.Publish(events.Sessions, typ, data)
+	})
 
 	// The ffmpeg of subtitles and artwork are guarded as the playback ones are: by the kernel
 	// (Linux), or by a reaper each (macOS), the same link the stream manager makes.

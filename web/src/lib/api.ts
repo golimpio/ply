@@ -1,4 +1,5 @@
 // Typed client for the ply HTTP API (see docs/DESIGN.md "HTTP API").
+import { DEVICE_HEADER, deviceId } from './device';
 import { normaliseRating, normaliseRatings, RATING_SOURCES } from './ratings';
 
 export type Kind = 'movie' | 'episode';
@@ -10,6 +11,9 @@ export interface Info {
   name: string;
   version: string;
   authRequired: boolean;
+  /** The API's version, and the oldest it still serves (docs/M11-CLIENTS.md, "Versioning"). */
+  api: number;
+  apiMin: number;
 }
 
 export interface Progress {
@@ -786,6 +790,15 @@ export interface PlayingSession {
   lastSeenAt: string;
   positionSec: number;
   paused: boolean;
+  /** The device that started it, when it said which. */
+  device?: DeviceRef;
+}
+
+/** A device of the household, as a play names it. */
+export interface DeviceRef {
+  id: string;
+  name: string;
+  kind?: string;
 }
 
 /** The tiers with Go's nulls and missing fields filled in. */
@@ -1040,7 +1053,7 @@ export const NO_ANSWER = 'The server didn’t answer.';
  * ApiError(0, NO_ANSWER). The answer's body is read within the same time.
  */
 async function request<T>(method: string, path: string, body?: unknown, keepalive = false, timeoutMs = 0): Promise<T> {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { [DEVICE_HEADER]: deviceId() };
   if (token) headers.Authorization = `Bearer ${token}`;
   if (body !== undefined) headers['Content-Type'] = 'application/json';
 
@@ -1114,6 +1127,9 @@ function qs(params: Record<string, string | undefined>): string {
 export const api = {
   info: () => request<Info>('GET', '/api/info'),
 
+  /** Say who this browser is (docs/M11-CLIENTS.md, "Devices"): the server names it after its User-Agent. */
+  registerDevice: () => request<void>('PUT', `/api/devices/${encodeURIComponent(deviceId())}`, { kind: 'web', app: 'ply-web' }),
+
   // Go encodes nil slices as null; normalise so callers can iterate safely.
   async items(params: { kind?: Kind; show?: string } = {}): Promise<ItemSummary[]> {
     return ((await request<ItemSummary[] | null>('GET', `/api/items${qs(params)}`)) ?? []).map(normaliseRow);
@@ -1170,7 +1186,7 @@ export const api = {
 
   scanStatus: () => request<ScanStatus>('GET', '/api/scan'),
 
-  /** Stop an HLS session. keepalive lets it complete while the page is unloading. */
+  /** Stop a play (an HLS session, or a direct play). keepalive lets it complete while the page is unloading. */
   async deleteSession(sid: string): Promise<void> {
     try {
       await request<void>('DELETE', `/api/sessions/${encodeURIComponent(sid)}`, undefined, true);
@@ -1180,8 +1196,8 @@ export const api = {
   },
 
   /**
-   * Keep an HLS session alive: every 10 s while it is open, paused or not, and at once on pause and
-   * play (lib/heartbeat.ts). ApiError 404: the session is gone, start another.
+   * Keep a play alive (an HLS session, or a direct play): every 10 s while it is open, paused or not,
+   * and at once on pause and play (lib/heartbeat.ts). ApiError 404: the session is gone, start another.
    */
   async heartbeat(sid: string, positionSec: number, paused: boolean, wireless?: boolean): Promise<void> {
     await request<void>('POST', `/api/sessions/${encodeURIComponent(sid)}/heartbeat`, { positionSec, paused, wireless });

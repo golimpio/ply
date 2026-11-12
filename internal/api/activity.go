@@ -12,6 +12,7 @@ import (
 
 	"ply/internal/events"
 	"ply/internal/jobs"
+	"ply/internal/stream"
 	"ply/internal/tier"
 )
 
@@ -116,6 +117,19 @@ func (s *Server) feedSnapshot(topics events.Topics) feedSnapshot {
 	return snap
 }
 
+// SessionEvent is the payload of a session event on the live feed: the play, as GET
+// /api/sessions lists it, and why it ended.
+type SessionEvent struct {
+	Session PlayingEntry `json:"session"`
+	Reason  string       `json:"reason,omitempty"`
+}
+
+// SessionEventOf is the event of the live feed (topic sessions) for a change of
+// what plays: its type (session.started, session.updated, session.ended) and payload.
+func SessionEventOf(c stream.PlayChange) (typ string, data SessionEvent) {
+	return "session." + c.Type, SessionEvent{Session: playingEntry(c.Play), Reason: c.Reason}
+}
+
 // handleEvents streams the live feed, the topics of ?topics= (all without it). The
 // first event is a snapshot, unless the client reconnects with a Last-Event-ID
 // that is still in the replay buffer: then it gets what it missed. The token, for
@@ -218,7 +232,7 @@ func isBrowse(r *http.Request) bool {
 		return false
 	}
 	for _, prefix := range []string{"/api/events", "/api/jobs", "/api/queue", "/api/scan", "/api/metadata/status",
-		"/api/sessions", "/api/info"} {
+		"/api/sessions", "/api/info", "/api/devices"} {
 		if p == prefix || strings.HasPrefix(p, prefix+"/") {
 			return false
 		}

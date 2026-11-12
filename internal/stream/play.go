@@ -50,7 +50,7 @@ const (
 const StoppedTTL = 2 * time.Minute
 
 // ErrStopped is what Direct returns for a client whose play was stopped on purpose
-// less than StoppedTTL ago, unless it has announced a play since (CheckDirect).
+// less than StoppedTTL ago, unless it has asked for a play since (StartDirect).
 var ErrStopped = errors.New("stream: stopped on purpose")
 
 // Default limits (Options.MaxSessions, Options.MaxTranscodes).
@@ -72,6 +72,13 @@ type PlayInfo struct {
 	LastSeenAt  time.Time
 	PositionSec float64
 	Paused      bool
+	Device      Device // the device that started it; zero if it did not say
+}
+
+// Device is the device a play was started from, as the API knows it
+// (docs/M11-CLIENTS.md, "Devices"): told once, when the play starts.
+type Device struct {
+	ID, Name, Kind string
 }
 
 // LimitError is what Create and Direct return when a limit is reached. It
@@ -92,11 +99,13 @@ func (e *LimitError) Error() string {
 
 func (e *LimitError) Is(target error) bool { return target == ErrTooManySessions }
 
-// DirectKey identifies a direct play: one client playing one item.
+// DirectKey identifies a direct play: one client playing one item. A client is a
+// device (Device), or, for one that does not say, an address and a User-Agent.
 type DirectKey struct {
 	ItemID    int64
 	IP        string
 	UserAgent string
+	Device    string
 }
 
 // A direct play is a client reading the original file with range requests. ply
@@ -113,6 +122,7 @@ type directPlay struct {
 	inflight int       // requests being served
 	pos      float64
 	paused   bool
+	device   Device
 }
 
 // stopInfo is a session on its way out: since when, and what it was.
@@ -123,7 +133,7 @@ type stopInfo struct {
 
 func (d *directPlay) info() PlayInfo {
 	return PlayInfo{ID: d.id, ItemID: d.key.ItemID, Title: d.title, Kind: KindDirect, Client: d.client,
-		StartedAt: d.started, LastSeenAt: d.seen, PositionSec: d.pos, Paused: d.paused}
+		StartedAt: d.started, LastSeenAt: d.seen, PositionSec: d.pos, Paused: d.paused, Device: d.device}
 }
 
 // SetLimits changes the limits, at once and for what comes next: plays that are
@@ -149,13 +159,18 @@ func (m *Manager) Limits() (streams, transcodes int) {
 }
 
 // pruneDirectLocked forgets the direct plays that no request is being served for
-// and whose last one ended DirectTTL ago (remembering them for DirectGrace), and
-// returns the time it used.
+// and whose last one ended DirectTTL ago, or Options.PausedBeatTimeout ago for one
+// whose last heartbeat said it is paused (as for a session: a hidden tab beats about
+// once a minute), remembering them for DirectGrace. It returns the time it used.
 func (m *Manager) pruneDirectLocked() time.Time {
 	now := m.clock()
 	m.pruneStoppedLocked(now)
 	for k, d := range m.direct {
-		if d.inflight == 0 && now.Sub(d.seen) >= DirectTTL {
+		ttl := DirectTTL
+		if d.paused {
+			ttl = m.o.PausedBeatTimeout
+		}
+		if d.inflight == 0 && now.Sub(d.seen) >= ttl {
 			delete(m.direct, k)
 			m.recentDirect[k] = d.seen
 			m.loadDirty = true
@@ -235,28 +250,6 @@ func (m *Manager) admitLocked(transcode bool) *LimitError {
 	return nil
 }
 
-// CheckDirect says whether a direct play of k would be admitted now (a
-// *LimitError if not), without counting it: for the answer to a request that
-// only announces a play, whose files are asked for by a client that may not
-// look the same.
-func (m *Manager) CheckDirect(k DirectKey) error {
-	m.mu.Lock()
-	defer m.unlock()
-	m.pruneDirectLocked()
-	// Announcing a play is asking for one: a client that was stopped may play again.
-	delete(m.stoppedDirect, k)
-	if _, ok := m.direct[k]; ok {
-		return nil
-	}
-	if _, ok := m.recentDirect[k]; ok {
-		return nil
-	}
-	if err := m.admitLocked(false); err != nil {
-		return err
-	}
-	return nil
-}
-
 // Direct counts a request for the file of a direct play: it registers the play,
 // or refreshes it if the same client is already playing the same item, and
 // returns its id and the function to call when the request is over (done; it is
@@ -280,21 +273,89 @@ func (m *Manager) DirectFile(k DirectKey, title, client, path string, pos float6
 	if m.closed {
 		return "", nil, ErrClosed
 	}
-	now := m.pruneDirectLocked()
+	m.pruneDirectLocked() // what was stopped StoppedTTL ago may play again
 	if _, stopped := m.stoppedDirect[k]; stopped {
 		return "", nil, ErrStopped
 	}
+	d, err := m.registerDirectLocked(k, title, client, path, Device{}, pos)
+	if err != nil {
+		return "", nil, err
+	}
+	return d.id, m.requestLocked(d), nil
+}
+
+// StartDirect registers a direct play of k when it is asked for (POST /playback),
+// before its file is: the play has its id from the start, for the URL of the file to
+// carry (DirectByID) and for its player's heartbeats. It is counted from now, for
+// DirectTTL unless a request or a heartbeat comes. Asking is starting: a client
+// stopped on purpose may play again, and one that stopped being counted less than
+// DirectGrace ago is admitted at the limit.
+//
+// A client that asks again while its play of the item is counted (another audio
+// track, a retry, a second tab) gets a new play in its place, with an id of its own:
+// what it does with the old id (the DELETE its player sends without waiting, the
+// requests of an attempt it gave up) cannot end the new one. The old play ends as
+// EndReplaced, and its id answers as stopped (Stopped, ErrStopped).
+func (m *Manager) StartDirect(k DirectKey, title, client, path string, dev Device, pos float64) (id string, err error) {
+	m.mu.Lock()
+	defer m.unlock()
+	if m.closed {
+		return "", ErrClosed
+	}
+	now := m.pruneDirectLocked()
+	delete(m.stoppedDirect, k)
+	if old, ok := m.direct[k]; ok {
+		delete(m.direct, k)
+		m.stoppedIDs[old.id] = now
+		m.endReason[old.id] = EndReplaced
+		// The new play takes its place: it is not admitted again, so a limit lowered below
+		// what plays (SetLimits) does not end a play that is running.
+		m.recentDirect[k] = now
+		m.loadDirty = true
+	}
+	d, err := m.registerDirectLocked(k, title, client, path, dev, pos)
+	if err != nil {
+		return "", err
+	}
+	return d.id, nil
+}
+
+// DirectByID counts a request for the file of the direct play id, whoever sends it:
+// its URL carries the id, so the requests of a player the play was handed to (an
+// Apple TV) count for the play that its sender started. ok is false when there is no
+// such play of item now (it ran out): the caller counts the request as Direct does.
+// ErrStopped if it was stopped on purpose.
+func (m *Manager) DirectByID(id string, item int64) (done func(), ok bool, err error) {
+	m.mu.Lock()
+	defer m.unlock()
+	m.pruneDirectLocked()
+	if _, stopped := m.stoppedIDs[id]; stopped {
+		return nil, false, ErrStopped
+	}
+	for _, d := range m.direct {
+		if d.id == id && d.key.ItemID == item {
+			return m.requestLocked(d), true, nil
+		}
+	}
+	return nil, false, nil
+}
+
+// registerDirectLocked returns the play of k, made (counted against the limit) if
+// there is none, and seen now. A play already counted without a path, or a device,
+// takes them.
+func (m *Manager) registerDirectLocked(k DirectKey, title, client, path string, dev Device, pos float64) (*directPlay, error) {
+	now := m.pruneDirectLocked()
 	d, counted := m.direct[k]
 	if !counted {
 		_, returning := m.recentDirect[k]
 		if !returning {
 			if err := m.admitLocked(false); err != nil {
-				return "", nil, err
+				return nil, err
 			}
 		}
 		var b [6]byte
 		if _, err := rand.Read(b[:]); err != nil {
-			return "", nil, err
+			return nil, err
 		}
 		d = &directPlay{id: "d-" + hex.EncodeToString(b[:]), key: k, title: title, client: client, started: now, pos: pos}
 		m.direct[k] = d
@@ -304,10 +365,20 @@ func (m *Manager) DirectFile(k DirectKey, title, client, path string, pos float6
 	if d.path == "" {
 		d.path = path
 	}
+	if d.device.ID == "" {
+		d.device = dev
+	}
 	d.seen = now
+	return d, nil
+}
+
+// requestLocked counts a request being served for d, and returns the function that
+// ends it (safe to call twice).
+func (m *Manager) requestLocked(d *directPlay) (done func()) {
+	d.seen = m.clock()
 	d.inflight++
 	var once sync.Once
-	done = func() {
+	return func() {
 		once.Do(func() {
 			m.mu.Lock()
 			d.inflight--
@@ -315,7 +386,6 @@ func (m *Manager) DirectFile(k DirectKey, title, client, path string, pos float6
 			m.mu.Unlock()
 		})
 	}
-	return d.id, done, nil
 }
 
 // Beat is what a player tells with a heartbeat; nil is not told.
@@ -351,11 +421,15 @@ func (m *Manager) Heartbeat(id string, b Beat) bool {
 			if b.Paused != nil {
 				d.paused = *b.Paused
 			}
+			m.updatedLocked(d.info())
 		}
 	}
 	m.mu.Unlock()
 	if ok {
 		s.heartbeat(b)
+		m.mu.Lock()
+		m.updatedLocked(s.info())
+		m.mu.Unlock()
 	}
 	return ok || d != nil
 }

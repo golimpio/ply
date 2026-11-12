@@ -65,6 +65,13 @@
     message = 'That token was not accepted.';
   });
 
+  /** In: follow a scan that is running, and say who this browser is (best effort). */
+  function started() {
+    phase = 'ready';
+    void attachToRunningScan();
+    api.registerDevice().catch(() => {});
+  }
+
   async function boot() {
     phase = 'loading';
     try {
@@ -79,8 +86,7 @@
         }
         await api.scanStatus(); // any authenticated endpoint; 401 flips to the prompt via onUnauthorized
       }
-      phase = 'ready';
-      void attachToRunningScan();
+      started();
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) return;
       message = e instanceof Error ? e.message : String(e);
@@ -94,8 +100,7 @@
     try {
       await api.scanStatus();
       epoch++;
-      phase = 'ready';
-      void attachToRunningScan();
+      started();
     } catch (e) {
       if (!(e instanceof ApiError && e.status === 401)) message = e instanceof Error ? e.message : String(e);
     } finally {

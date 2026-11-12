@@ -33,8 +33,19 @@ type Profile struct {
 	AudioCodecs []string `json:"audioCodecs"`
 	RequireHVC1 bool     `json:"requireHvc1"` // avplayer: hevc must be tagged hvc1 for direct play
 	MaxHeight   int      `json:"maxHeight"`   // 0 = unlimited
-	HLS         bool     `json:"hls"`         // client can play HLS (all of ours can)
-	TextSubs    []string `json:"textSubs"`    // subtitle formats renderable as sidecar (vtt)
+	// MaxHLSHeight is the tallest video the client plays over HLS, when that is less than
+	// what it plays as a file (MaxHeight); 0 = MaxHeight.
+	MaxHLSHeight int      `json:"maxHlsHeight,omitempty"`
+	HLS          bool     `json:"hls"`      // client can play HLS (all of ours can)
+	TextSubs     []string `json:"textSubs"` // subtitle formats renderable as sidecar (vtt)
+}
+
+// HLSHeight is the tallest video p plays over HLS (a remux or a transcode); 0 = no limit.
+func (p Profile) HLSHeight() int {
+	if p.MaxHLSHeight > 0 && (p.MaxHeight == 0 || p.MaxHLSHeight < p.MaxHeight) {
+		return p.MaxHLSHeight
+	}
+	return p.MaxHeight
 }
 
 // Item is the per-file input to Decide.
@@ -97,16 +108,19 @@ func Browser() Profile {
 }
 
 // Chromecast is a Google Cast receiver. VP9 is left out on purpose: only some
-// models decode it, and a transcode is always safe.
+// models decode it, and a transcode is always safe. It plays a 1080p file, but HLS
+// only up to 720p: the Default Media Receiver answers LOAD_FAILED for 1080p HLS,
+// whatever the audio, frame rate or muxing (measured 2026-11-12, docs/M11-CLIENTS.md).
 func Chromecast() Profile {
 	return Profile{
-		Name:        "chromecast",
-		Containers:  []string{"mp4", "webm"},
-		VideoCodecs: []string{"h264"},
-		AudioCodecs: []string{"aac", "mp3", "opus", "flac"},
-		MaxHeight:   1080,
-		HLS:         true,
-		TextSubs:    []string{"vtt"},
+		Name:         "chromecast",
+		Containers:   []string{"mp4", "webm"},
+		VideoCodecs:  []string{"h264"},
+		AudioCodecs:  []string{"aac", "mp3", "opus", "flac"},
+		MaxHeight:    1080,
+		MaxHLSHeight: 720,
+		HLS:          true,
+		TextSubs:     []string{"vtt"},
 	}
 }
 
@@ -289,6 +303,14 @@ func Decide(item Item, streams []Stream, p Profile, opts Options) Decision {
 		}
 	case containerOK && tagOK && audioCopyable && !otherAudio:
 		d.Method = MethodDirect
+	case hasVideo && p.HLSHeight() > 0 && video.Height > p.HLSHeight():
+		// A remux is HLS, and the video is too tall for the client's HLS.
+		reason("video height %d exceeds %s maximum %d over HLS", video.Height, name, p.HLSHeight())
+		d.Method = MethodTranscode
+		d.VideoAction = ActionTranscode
+		if !audioCopyable {
+			d.AudioAction = ActionTranscode
+		}
 	default:
 		d.Method = MethodRemux
 		if !audioCopyable {

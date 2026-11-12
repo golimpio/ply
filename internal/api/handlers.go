@@ -25,6 +25,8 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		"name":         s.Name,
 		"version":      s.Version,
 		"authRequired": s.Token != "",
+		"api":          Version, // docs/M11-CLIENTS.md, "Versioning"
+		"apiMin":       VersionMin,
 	})
 }
 
@@ -257,9 +259,14 @@ func (s *Server) handlePlayback(w http.ResponseWriter, r *http.Request) {
 	d := decide(e, profile, opts)
 	pb := s.playbackFrom(e, d, req.StartSec)
 	if d.Method == playback.MethodDirect {
-		// Counted when the file is asked for; a full house is said now, with the list.
-		if !s.checkDirect(w, r, e) {
+		// Counted from now, with an id its file's URL carries; a full house is said now, with the list.
+		id, ok := s.startDirect(w, r, e, req.StartSec)
+		if !ok {
 			return
+		}
+		if id != "" {
+			pb.SessionID = id
+			pb.URL = s.withToken(fmt.Sprintf("/api/items/%d/file?sid=%s", e.ID, id))
 		}
 	} else if !s.attachSession(w, r, e, d, profile, req.StartSec, req.SubtitleKey, &pb) {
 		return

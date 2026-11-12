@@ -150,6 +150,7 @@ async function open(browser, opts = {}) {
     const { pathname: p } = new URL(req.url());
     const m = req.method();
     const body = req.postData() ? JSON.parse(req.postData()) : null;
+    if (m === 'PUT' && p.startsWith('/api/devices/')) return route.fulfill({ status: 204 }); // the app says who it is (M11)
     if (m !== 'GET') log.push({ method: m, path: p, body, at: Date.now() });
     if (m === 'GET' && p === '/api/info') return json(route, { id: 'x', name: 'limits', version: '0', authRequired: false });
     if (m === 'GET' && p === '/api/scan') return json(route, { running: false, itemCount: 1 });

@@ -37,15 +37,21 @@ type PlayingEntry struct {
 	Client      string    `json:"client"`
 	StartedAt   time.Time `json:"startedAt"`
 	LastSeenAt  time.Time `json:"lastSeenAt"`
-	PositionSec float64   `json:"positionSec"`
-	Paused      bool      `json:"paused"`
+	PositionSec float64    `json:"positionSec"`
+	Paused      bool       `json:"paused"`
+	Device      *DeviceRef `json:"device,omitempty"` // the device that started it, if it said (M11)
+}
+
+func playingEntry(p stream.PlayInfo) PlayingEntry {
+	return PlayingEntry{ID: p.ID, SessionID: p.ID, ItemID: p.ItemID, Title: p.Title, Kind: p.Kind, Client: p.Client,
+		StartedAt: p.StartedAt.UTC(), LastSeenAt: p.LastSeenAt.UTC(), PositionSec: p.PositionSec, Paused: p.Paused,
+		Device: deviceRef(p.Device)}
 }
 
 func playingEntries(list []stream.PlayInfo) []PlayingEntry {
 	out := make([]PlayingEntry, len(list))
 	for i, p := range list {
-		out[i] = PlayingEntry{ID: p.ID, SessionID: p.ID, ItemID: p.ItemID, Title: p.Title, Kind: p.Kind, Client: p.Client,
-			StartedAt: p.StartedAt.UTC(), LastSeenAt: p.LastSeenAt.UTC(), PositionSec: p.PositionSec, Paused: p.Paused}
+		out[i] = playingEntry(p)
 	}
 	return out
 }
@@ -143,9 +149,12 @@ func (s *Server) handleSessionHeartbeat(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// directKey is who is playing which item directly: the item, the client's
-// address and its User-Agent.
+// directKey is who is playing which item directly: the item and the device, or for
+// a client that names none, its address and its User-Agent.
 func directKey(e store.Entry, r *http.Request) stream.DirectKey {
+	if id := deviceID(r); id != "" {
+		return stream.DirectKey{ItemID: e.ID, Device: id}
+	}
 	return stream.DirectKey{ItemID: e.ID, IP: remoteIP(r), UserAgent: r.UserAgent()}
 }
 
@@ -164,6 +173,19 @@ func (s *Server) admitDirect(w http.ResponseWriter, r *http.Request, e store.Ent
 	nothing := func() {}
 	if s.Streams == nil {
 		return nothing, true
+	}
+	// The URL POST /playback gave carries the play's id: the request counts for that
+	// play whoever sends it (the Apple TV it was handed to). A play that ran out since
+	// is counted as any other request is.
+	if sid := r.URL.Query().Get("sid"); sid != "" {
+		done, found, err := s.Streams.DirectByID(sid, e.ID)
+		if errors.Is(err, stream.ErrStopped) {
+			writeStopped(w)
+			return nothing, false
+		}
+		if found {
+			return done, true
+		}
 	}
 	var pos float64
 	if e.Progress != nil {
@@ -185,18 +207,24 @@ func (s *Server) admitDirect(w http.ResponseWriter, r *http.Request, e store.Ent
 	return done, true
 }
 
-// checkDirect is admitDirect for the request that only announces a direct play
-// (POST /playback): the play is counted when its file is asked for.
-func (s *Server) checkDirect(w http.ResponseWriter, r *http.Request, e store.Entry) bool {
+// startDirect starts the direct play of e that r asks for (POST /playback), counted
+// from now, and returns its id: the file's URL carries it, and the player sends its
+// heartbeats to it. "" without a session manager (nothing is counted). It reports
+// false after it has answered 503 at the limit.
+func (s *Server) startDirect(w http.ResponseWriter, r *http.Request, e store.Entry, startSec float64) (string, bool) {
 	if s.Streams == nil {
-		return true
+		return "", true
 	}
+	id, err := s.Streams.StartDirect(directKey(e, r), playTitle(e), clientLabel(r), e.Path, s.playDevice(r), startSec)
 	var le *stream.LimitError
-	if errors.As(s.Streams.CheckDirect(directKey(e, r)), &le) {
+	if errors.As(err, &le) {
 		writeLimit(w, r, le)
-		return false
+		return "", false
 	}
-	return true
+	if err != nil {
+		return "", true // a manager that is closing: the file is served uncounted
+	}
+	return id, true
 }
 
 // playTitle is what to call an item in the list of what is playing.
