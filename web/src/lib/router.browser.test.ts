@@ -19,6 +19,7 @@ import {
   type LibraryView,
   type Route,
 } from './router.svelte';
+import { landed, open } from './router.testing';
 
 const notfound = { name: 'notfound' };
 
@@ -113,22 +114,13 @@ describe('href', () => {
 
 // ---- Back ----------------------------------------------------------------------------------------
 
-/** A fresh load of the page at hash (a deep link); clear=false keeps what pagehide stored (a reload). */
-function open(hash: string, state: unknown = null, clear = true) {
-  if (clear) sessionStorage.clear();
-  history.replaceState(state, '', `/${hash}`);
-  resetNavigation();
-}
-/** A traversal has landed: popstate, then hashchange, have run. */
-const landed = () =>
-  new Promise<void>((resolve) => window.addEventListener('popstate', () => setTimeout(resolve, 0), { once: true }));
 const frames = (n: number) =>
   new Promise<void>((resolve) => {
     const next = (k: number) => (k ? requestAnimationFrame(() => next(k - 1)) : resolve());
     next(n);
   });
 
-// jsdom has no layout: the scroll position, the page's room and its skeletons are played here.
+// The scroll position, the page's room and its skeletons are played here, whatever the test page's layout.
 let y = 0;
 let room = 0;
 let busy = false;
@@ -320,7 +312,7 @@ describe("the browser's Back", () => {
   });
 });
 
-/** A card link in a fake main, at docTop() on the page (jsdom has no layout). */
+/** A card link in a fake main, at docTop() on the page, whatever the test page's layout. */
 function cardAt(hrefTo: string, docTop: () => number) {
   const main = document.createElement('main');
   const card = Object.assign(document.createElement('a'), { className: 'card' });
@@ -593,20 +585,6 @@ describe('a reload', () => {
     window.dispatchEvent(new Event('pagehide'));
     open('#/item/4', { ply: { key: 'other.1' } }, false);
     expect(router.previous).toBeNull();
-  });
-});
-
-describe('the cap', () => {
-  it('takes back a dropped view at the front when the browser goes back to it', async () => {
-    open('#/');
-    for (let i = 1; i <= 60; i++) navigate(href.item(i));
-    expect(viewStack().hashes[0]).toBe(href.item(11));
-    history.go(-50);
-    await landed();
-    expect(location.hash).toBe(href.item(10));
-    expect(viewStack().at).toBe(0);
-    expect(viewStack().hashes.slice(0, 2)).toEqual([href.item(10), href.item(11)]); // not the list wiped
-    expect(viewStack().length).toBe(MAX_VIEWS);
   });
 });
 

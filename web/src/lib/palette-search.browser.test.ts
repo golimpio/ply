@@ -1,9 +1,9 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { describe, expect, it, vi } from 'vitest';
 import SearchPalette from '../components/SearchPalette.svelte';
-import { api, type GenreCount, type ItemSummary, type MovieCard } from './api';
+import { api, type EpisodeCard, type GenreCount, type MovieCard } from './api';
 import { search } from './fuzzy';
-import { applyProgress, ensureLibrary } from './library.svelte';
+import { applyProgress, ensureLibrary, episodes } from './library.svelte';
 import { palette } from './palette.svelte';
 import { Latest, matchGenres, peopleQuery } from './palette-search';
 
@@ -111,34 +111,18 @@ describe('matchGenres', () => {
 });
 
 describe('SearchPalette', () => {
-  // jsdom has the element and its open attribute, but not its methods. As in a browser, the close
-  // event comes in a later task. Returns the undo.
-  function stubDialog(): () => void {
-    const proto: Partial<Pick<HTMLDialogElement, 'showModal' | 'close'>> = HTMLDialogElement.prototype;
-    const had = { showModal: proto.showModal, close: proto.close };
-    proto.showModal = function (this: HTMLDialogElement) {
-      this.open = true;
-    };
-    proto.close = function (this: HTMLDialogElement) {
-      this.open = false;
-      setTimeout(() => this.dispatchEvent(new Event('close')));
-    };
-    return () => Object.assign(proto, had);
-  }
-
   const dune: MovieCard = {
     id: 1, kind: 'movie', title: 'Dune', sortTitle: 'Dune', addedAt: 0, durationSec: 0, container: 'mkv',
     width: 0, height: 0, art: null, rating: null, watched: false, progress: null, matchState: 'matched', needsReview: false,
   };
-  const pilot: ItemSummary = {
+  const pilot: EpisodeCard = {
     id: 2, kind: 'episode', title: '', show: 'Lost', season: 1, episode: 1, episodeTitle: 'Pilot', durationSec: 0,
-    container: 'mkv', videoCodec: 'h264', audioCodec: 'aac', width: 0, height: 0, addedAt: 0,
+    width: 0, height: 0, addedAt: 0,
   };
 
   it('does no searching once closed, however often a progress report patches the lists', async () => {
-    const unstub = stubDialog();
     vi.spyOn(api, 'movieCards').mockResolvedValue([dune]);
-    vi.spyOn(api, 'items').mockResolvedValue([pilot]);
+    vi.spyOn(api, 'episodeCards').mockResolvedValue([pilot]);
     vi.spyOn(api, 'shows').mockResolvedValue([]);
     vi.spyOn(api, 'genres').mockResolvedValue([]);
     vi.spyOn(api, 'people').mockResolvedValue([]);
@@ -148,6 +132,7 @@ describe('SearchPalette', () => {
       palette.open = true;
       flushSync();
       await ensureLibrary();
+      expect(episodes.get(pilot.id)).toBeDefined(); // positive control: the episode is in the lists
       const input = target.querySelector('input')!;
       input.value = 'dune';
       input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -159,11 +144,17 @@ describe('SearchPalette', () => {
       applyProgress(dune.id, { positionSec: 10, watched: false });
       flushSync();
       expect(searches()).toBeGreaterThan(before); // positive control: open, a patch searches again
+      before = searches();
+      applyProgress(pilot.id, { positionSec: 10, watched: false });
+      flushSync();
+      expect(searches()).toBeGreaterThan(before); // and one of an episode
 
-      // Closed, before the close event: the query is still typed in.
+      // Closed, before the close event (the browser fires it in a later task): the query is still typed in.
+      const dialog = target.querySelector('dialog')!;
+      const closeEvent = new Promise((r) => dialog.addEventListener('close', r, { once: true }));
       palette.open = false;
       flushSync();
-      expect(target.querySelector('dialog')?.hasAttribute('open')).toBe(false);
+      expect(dialog.hasAttribute('open')).toBe(false);
       expect(input.value).toBe('dune');
       before = searches();
       applyProgress(dune.id, { positionSec: 20, watched: false });
@@ -171,7 +162,7 @@ describe('SearchPalette', () => {
       expect(searches()).toBe(before);
 
       // After it, the query is gone too, and still nothing is searched.
-      await new Promise((r) => setTimeout(r));
+      await closeEvent;
       flushSync();
       expect(input.value).toBe('');
       applyProgress(dune.id, { positionSec: 30, watched: false });
@@ -182,7 +173,6 @@ describe('SearchPalette', () => {
       unmount(cmp);
       target.remove();
       palette.open = false;
-      unstub();
     }
   });
 });

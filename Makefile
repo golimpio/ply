@@ -1,7 +1,8 @@
 # ply: common tasks. `make` (or `make help`) lists them.
 #
-# Needs Go, Node/npm and ffmpeg/ffprobe on PATH; the browser checks (e2e) also
-# need Google Chrome. Works with the GNU Make 3.81 that ships with macOS.
+# Needs Go, Node/npm and ffmpeg/ffprobe on PATH; the web unit tests and the
+# browser checks (e2e) also need Google Chrome. Works with the GNU Make 3.81
+# that ships with macOS.
 #
 # Examples:
 #   make build                         web UI + server -> bin/ply
@@ -119,7 +120,7 @@ test-integration: web ## Go integration tests (real ffmpeg, slower)
 	$(GO) test -tags=integration -count=1 ./...
 
 .PHONY: test-web
-test-web: $(WEB_DEPS) ## Web unit tests (vitest)
+test-web: $(WEB_DEPS) ## Web unit tests (vitest: Node, jsdom and Chrome)
 	cd web && $(NPM) test
 
 .PHONY: e2e

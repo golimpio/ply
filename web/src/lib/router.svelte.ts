@@ -307,7 +307,7 @@ export function recall<T>(name: string, initial: T): T {
   return name in views[at].state ? (views[at].state[name] as T) : initial;
 }
 
-/** What the scroll restoration asks of the page; replaceable in tests (jsdom has no layout). */
+/** What the scroll restoration asks of the page; replaceable in tests, whose pages have no layout to speak of. */
 export const page = {
   /** How far the document can scroll now. */
   room: () => document.documentElement.scrollHeight - window.innerHeight,

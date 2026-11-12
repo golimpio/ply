@@ -11,6 +11,7 @@ beforeEach(() => {
   window.matchMedia = ((q: string) => ({ matches: q.includes('reduce') && reduced })) as typeof window.matchMedia;
   history.replaceState(null, '', '/#/');
   resetNavigation();
+  doc.startViewTransition = undefined; // Chrome has one: each test installs its own, or none
 });
 afterEach(() => {
   delete doc.startViewTransition;
@@ -114,31 +115,19 @@ describe('go', () => {
   });
 });
 
-// The promises a transition rejects, seen as the browser would: unhandled rejections (Node's, under
-// jsdom; the web code has no Node types, so only what is used here).
-type Listener = (reason: unknown) => void;
-const node = (globalThis as unknown as {
-  process: {
-    listeners(e: 'unhandledRejection'): Listener[];
-    on(e: 'unhandledRejection', l: Listener): void;
-    removeAllListeners(e: 'unhandledRejection'): void;
-  };
-}).process;
-
+// The promises a transition rejects, seen as the page sees them: unhandledrejection events. A
+// listener of the test's own also keeps vitest from failing the run on purpose.
 describe("a transition's rejections", () => {
   let seen: unknown[] = [];
-  let saved: Listener[] = [];
-  const onRejection = (e: unknown) => seen.push(e);
+  const onRejection = (e: PromiseRejectionEvent) => {
+    e.preventDefault();
+    seen.push(e.reason);
+  };
   beforeEach(() => {
     seen = [];
-    saved = node.listeners('unhandledRejection'); // vitest's own would fail the run on purpose
-    node.removeAllListeners('unhandledRejection');
-    node.on('unhandledRejection', onRejection);
+    window.addEventListener('unhandledrejection', onRejection);
   });
-  afterEach(() => {
-    node.removeAllListeners('unhandledRejection');
-    for (const l of saved) node.on('unhandledRejection', l);
-  });
+  afterEach(() => window.removeEventListener('unhandledrejection', onRejection));
   const settle = () => new Promise((r) => setTimeout(r, 10));
 
   function rejecting(reason: unknown) {

@@ -284,5 +284,5 @@ machine is let off), and a redirect is an error.
   GET of the settings that started before a save can't undo it; the focus stays on the moved row's button (or its
   twin, at the top or bottom) at once; IMDb's notice as the server words it, with its link; and "IMDb ratings updated <date>" or "IMDb ratings not downloaded yet".
 - **Activity**: `ratings.imdb` is "IMDb ratings" and `ratings.mdblist` "Ratings from MDBList".
-- **Tests**: `lib/ratings.test.ts`, the ratings part of `lib/meta-api.test.ts`, `sortCards` in `lib/credits.test.ts`, and
+- **Tests**: `lib/ratings.test.ts`, the ratings part of `lib/meta-api.jsdom.test.ts`, `sortCards` in `lib/credits.browser.test.ts`, and
   `web/e2e/ratings-ui.mjs` (mocked; each scenario names the mutant it kills).

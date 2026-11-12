@@ -1,7 +1,7 @@
 // The Activity page and the header's indicator in a real browser, against a mocked API: the live
 // feed (GET /api/events, answered as a short text/event-stream that EventSource reconnects to), the
 // polling fallback, the tiers strip, and every action (cancel, run next, retry, pause and resume,
-// stopping a play). The unit tests (lib/activity.test.ts) pin the event reducer; this pins the page.
+// stopping a play). The unit tests (lib/activity.jsdom.test.ts) pin the event reducer; this pins the page.
 //
 // Self-contained: serves web/dist (build it first: `npm run build`; PLY_E2E_DIST picks another
 // directory) and answers every /api/ request with page.route. Needs Google Chrome.

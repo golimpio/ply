@@ -472,7 +472,8 @@ The aim is a "now playing" that is always right, including a cast to Apple TV or
   - Go: toolchain go1.27.4 (pinned in `go.mod`), fsnotify 1.10.1, x/sys 0.50.0, x/text 0.44.0,
     modernc.org/sqlite 1.62.0. fsnotify 1.10 closes its kqueue watches on Close (#740), so ply's own workaround
     is gone; `TestFSRunReturnsAndLeavesNothingBehind` fails on 1.9.0 without it.
-  - Web: vite 8.3.8, vitest 5.1.0, jsdom 31, playwright-core 1.65, svelte-check 4.7.8.
+  - Web: vite 8.3.8, vitest 5.1.0 (browser mode with @vitest/browser-playwright 5.1 and playwright 1.65,
+    on Google Chrome), jsdom 31, playwright-core 1.65, svelte-check 4.7.8.
   - TypeScript 7 (`@typescript/native`, aliased) does the checking through `svelte-check --tsgo`. TypeScript 6
     stays installed because svelte2tsx needs its JS API; `npm run check:ts6` is the old check, for comparison.
     The alias owns the `tsc` link: `npx tsc` is TypeScript 7, and `tsserver` (editors) is still 6.

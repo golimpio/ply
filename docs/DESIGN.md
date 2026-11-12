@@ -481,7 +481,7 @@ Svelte 5 (runes) + Vite + TypeScript, hls.js. No UI framework; small hand-writte
   the router leaves the scroll and the focus alone (`refocus` says whether to put it back: not on a reload). A
   reload keeps the views: pagehide writes them to sessionStorage, and the entry left by `navigate()` carries its
   scroll position. Sort and filters are in the hash, so Back returns to them
-  exactly. Tested by `router.test.ts` and `e2e/navigation.mjs`.
+  exactly. Tested by `router.browser.test.ts`, `router-cap.jsdom.test.ts` and `e2e/navigation.mjs`.
 - **Movies and Shows at scale** (`components/VirtualGrid.svelte`, `components/JumpRail.svelte`, `lib/vgrid.ts`,
   `lib/az.ts`): the grid keeps in the page only the rows on screen, about a screen more above and below
   (`nearRows`) and the focused card's row with its neighbours, each row absolutely placed at row x pitch; 5,000
@@ -570,7 +570,7 @@ Svelte 5 (runes) + Vite + TypeScript, hls.js. No UI framework; small hand-writte
   show's counts from before its first change are kept). Continue watching drops an item whose own file is watched,
   not its film (a film seen in one version and being watched again in another stays). Card lines say the same
   distinct-episode count as the badge.
-  Tested by `lib/watched.test.ts`, `lib/library.test.ts` and `e2e/watched-ui.mjs`.
+  Tested by `lib/watched.test.ts`, `lib/library.jsdom.test.ts` and `e2e/watched-ui.mjs`.
 - **Library cache** (`lib/library.svelte.ts` on `lib/rowstore.svelte.ts`, `lib/details.svelte.ts`): two lists, each
   loaded once per library version. `movies` holds the movie cards (`GET /api/items?kind=movie&fields=card`) and
   `episodes` the episode cards (`GET /api/items?kind=episode&fields=card`), with `/api/shows` alongside (a failed
@@ -580,9 +580,10 @@ Svelte 5 (runes) + Vite + TypeScript, hls.js. No UI framework; small hand-writte
   loading is applied again when it lands. A page that needs a film's full item (Item, Home's hero) asks
   `detail(id)`: shared in flight, 32 kept, cleared on a scan; it paints the cached copy at once and always
   refetches, and Item's playback decision reads only the fresh one. Watch state comes from the list row, never the
-  detail. Search runs over both lists only while the palette is open. Tested by `lib/rowstore.svelte.test.ts`,
-  `lib/details.test.ts`, `lib/library.test.ts`, `lib/palette-search.test.ts` and `e2e/library-ui.mjs` (a Movies
-  revisit sends only the card request, then a 304).
+  detail. Search runs over both lists only while the palette is open. Tested by
+  `lib/rowstore.svelte.browser.test.ts`, `lib/details.test.ts`, `lib/library.jsdom.test.ts`,
+  `lib/palette-search.browser.test.ts` and `e2e/library-ui.mjs` (a Movies revisit sends only the card request, then a
+  304).
 - **Trailers** (`components/TrailerButton.svelte`, `lib/trailers.ts`): a film's page (not an episode's: its
   title is the show's) and a show's have a Trailer button in the hero, after Play, once
   `GET /api/titles/{id}/trailers` has one that can be played (none, an error, lookups off: no button). It opens
