@@ -16,6 +16,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { eventStream, jobsSnapshot as snapshot, tierState as tier } from './mock-feed.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = process.env.PLY_E2E_DIST ?? join(here, '..', 'dist');
@@ -53,12 +54,6 @@ const job = (id, over = {}) => ({
 const running = (id, over = {}) => job(id, { state: 'running', startedAt: ago(65), ...over });
 const finished = (id, state, over = {}) => job(id, { state, startedAt: ago(400), finishedAt: ago(300), ...over });
 const SYNTHETIC = { ...job(-1, { kind: 'scan.folders', title: 'Read library folders', state: 'running', priority: 0 }), startedAt: ago(20) };
-const tier = (playback = {}, browsing = false, hold = { held: false }) => ({
-  playback: { Sessions: 0, Active: 0, Transcodes: 0, Software: 0, Waiting: 0, Paths: null, ...playback },
-  browsing,
-  hold,
-});
-const snapshot = (over = {}) => ({ paused: false, running: [], queued: [], history: [], tier: tier(), ...over });
 const PLAY = { id: 'abc123', sessionId: 'abc123', itemId: 1, title: 'Alien', kind: 'transcode', client: 'Safari on Mac', startedAt: ago(900), lastSeenAt: ago(2), positionSec: 754, paused: false };
 
 /**
@@ -99,10 +94,9 @@ async function open(browser, opts = {}, viewport = { width: 1280, height: 800 })
     if (p === '/api/events') {
       if (opts.events === false) return json(route, { error: 'the background queue is not running' }, 503);
       // One snapshot, then the stream ends: EventSource reconnects after `retry` ms and gets the next.
-      let body = `retry: ${opts.retry ?? 300}\n\nid: 1\nevent: snapshot\ndata: ${JSON.stringify({ api: 1, jobs: st.snapshot, sessions: st.sessions, tier: st.snapshot.tier })}\n\n`;
-      for (const [i, [type, data]] of feed.entries()) body += `id: ${2 + i}\nevent: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
+      const answer = eventStream({ jobs: st.snapshot, sessions: st.sessions, retry: opts.retry ?? 300, events: feed });
       feed = [];
-      return route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store' }, body });
+      return route.fulfill(answer);
     }
     if (p === '/api/sessions') return json(route, st.sessions);
     if (req.method() === 'DELETE' && p.startsWith('/api/sessions/')) {

@@ -22,6 +22,7 @@ import { tmpdir } from 'node:os';
 import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { eventStream, jobsSnapshot } from './mock-feed.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = process.env.PLY_E2E_DIST ?? join(here, '..', 'dist');
@@ -155,10 +156,9 @@ async function open(browser, opts = {}) {
     if (m === 'GET' && p === '/api/info') return json(route, { id: 'x', name: 'limits', version: '0', authRequired: false });
     if (m === 'GET' && p === '/api/scan') return json(route, { running: false, itemCount: 1 });
     if (m === 'GET' && ['/api/items', '/api/shows', '/api/continue', '/api/upcoming', '/api/genres', '/api/folders'].includes(p)) return json(route, []);
-    const idleQueue = { paused: false, running: [], queued: [], history: [], tier: { playback: {}, browsing: false, hold: { held: false } } };
-    if (m === 'GET' && p === '/api/jobs') return json(route, idleQueue);
+    if (m === 'GET' && p === '/api/jobs') return json(route, jobsSnapshot());
     if (m === 'GET' && p === '/api/events')
-      return route.fulfill({ contentType: 'text/event-stream', body: `retry: 5000\n\nevent: snapshot\ndata: ${JSON.stringify(idleQueue)}\n\n` });
+      return route.fulfill(eventStream());
     if (m === 'GET' && p === '/api/settings') return json(route, st.settings, opts.settingsStatus ?? 200);
     if (m === 'PUT' && p === '/api/settings') {
       st.maxPutsInFlight = Math.max(st.maxPutsInFlight, ++st.putsInFlight);

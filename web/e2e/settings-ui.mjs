@@ -17,6 +17,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { eventStream, jobsSnapshot } from './mock-feed.mjs';
 import { routeItems } from './mock-items.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -76,7 +77,7 @@ function view(st) {
   };
 }
 
-const snapshot = { paused: false, running: [], queued: [], history: [], tier: { playback: { Sessions: 0, Active: 0, Transcodes: 0, Software: 0, Waiting: 0, Paths: null }, browsing: false, hold: { held: false } } };
+const snapshot = jobsSnapshot();
 
 /**
  * A fresh page on the mocked server.
@@ -118,10 +119,7 @@ async function open(browser, opts = {}) {
       return json(route, { enabled: true, keySet: true, tvdbKeySet: true, running: false, pending: 0, unmatched: 0, needsReview: 0, lastError: '', showsLine: 'Shows: TVDB', ...opts.status });
     if (p === '/api/metadata/search' && opts.search) return json(route, opts.search[1], opts.search[0]);
     if (p === '/api/jobs') return json(route, snapshot);
-    if (p === '/api/events') {
-      const sse = `retry: 300\n\nid: 1\nevent: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`;
-      return route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store' }, body: sse });
-    }
+    if (p === '/api/events') return route.fulfill(eventStream({ jobs: snapshot, retry: 300 }));
     if (p === '/api/settings' && method === 'GET') return opts.settingsFail ? json(route, { error: 'settings are not available' }, 500) : json(route, view(st));
     if (p === '/api/settings') {
       // As the server: "" removes a stored key; a new one is checked, and that check is a test.

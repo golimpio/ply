@@ -25,6 +25,7 @@ import { tmpdir } from 'node:os';
 import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { eventStream, tierState } from './mock-feed.mjs';
 import { routeItems } from './mock-items.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -265,7 +266,7 @@ const SNAPSHOT = {
     job(1, { title: 'Match Dune (2021)', state: 'failed', attempts: 3, error: 'TMDB could not be reached: dial tcp: i/o timeout', startedAt: ago(5000), finishedAt: ago(4990) }),
     job(0, { title: 'Match Alien (1979)', state: 'cancelled', startedAt: ago(6000), finishedAt: ago(5990) }),
   ],
-  tier: { playback: { Sessions: 1, Active: 1, Transcodes: 1, Software: 0, Waiting: 0, Paths: null }, browsing: false, hold: { held: true, reason: 'playback' } },
+  tier: tierState({ Sessions: 1, Active: 1, Transcodes: 1 }, false, { held: true, reason: 'playback' }),
 };
 const CAP = {
   error: '2 of 2 plays in use', limit: 'streams', max: 2, inUse: 2,
@@ -333,7 +334,7 @@ async function open(browser, width, opts = {}) {
     }
     if (p === '/api/jobs') return json(route, SNAPSHOT);
     // One snapshot, and no reconnection while the shot is taken.
-    if (p === '/api/events') return route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store' }, body: `retry: 600000\n\nid: 1\nevent: snapshot\ndata: ${JSON.stringify({ api: 1, jobs: SNAPSHOT, sessions: [PLAY], tier: SNAPSHOT.tier })}\n\n` });
+    if (p === '/api/events') return route.fulfill(eventStream({ jobs: SNAPSHOT, sessions: [PLAY], retry: 600000 }));
     if (p === '/api/sessions') return json(route, [PLAY]);
     if (p === '/api/shows/Lost') return json(route, LOST_DETAIL);
     if (p === '/api/items/1') return json(route, opts.player ? PLAYER_DETAIL : HEAT_DETAIL);

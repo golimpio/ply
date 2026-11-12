@@ -20,6 +20,7 @@ import { tmpdir } from 'node:os';
 import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { eventStream, jobsSnapshot } from './mock-feed.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = process.env.PLY_E2E_DIST ?? join(here, '..', 'dist');
@@ -170,10 +171,9 @@ async function open(browser, opts = {}) {
     if (m === 'GET' && p === '/api/scan') return json(route, { running: false, itemCount: 1 });
     if (m === 'GET' && p === '/api/items') return json(route, []);
     if (m === 'GET' && p === '/api/shows') return json(route, []);
-    const idleQueue = { paused: false, running: [], queued: [], history: [], tier: { playback: {}, browsing: false, hold: { held: false } } };
-    if (m === 'GET' && p === '/api/jobs') return json(route, idleQueue);
+    if (m === 'GET' && p === '/api/jobs') return json(route, jobsSnapshot());
     if (m === 'GET' && p === '/api/events')
-      return route.fulfill({ contentType: 'text/event-stream', body: `retry: 5000\n\nevent: snapshot\ndata: ${JSON.stringify(idleQueue)}\n\n` });
+      return route.fulfill(eventStream());
     if (m === 'GET' && p === `/api/items/${ITEM}` && opts.hangItem) return new Promise(() => {}); // never answered
     if (m === 'GET' && p === `/api/items/${ITEM}` && opts.itemStatus) return json(route, { error: 'the server failed' }, opts.itemStatus);
     if (m === 'GET' && p === `/api/items/${ITEM}`) return json(route, detail(opts));
