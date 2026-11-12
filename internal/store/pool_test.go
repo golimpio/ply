@@ -162,9 +162,7 @@ func TestEveryConnectionHasThePragmas(t *testing.T) {
 		)
 		holding.Add(n)
 		for i := range n {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				c, err := pool.db.Conn(ctx)
 				holding.Done()
 				if err != nil {
@@ -187,7 +185,7 @@ func TestEveryConnectionHasThePragmas(t *testing.T) {
 						mu.Unlock()
 					}
 				}
-			}()
+			})
 		}
 		wg.Wait()
 		if len(bad) > 0 {
@@ -490,8 +488,8 @@ func TestEveryStoreMethodIsRouted(t *testing.T) {
 		known[strings.SplitN(w.name, " ", 2)[0]] = true
 	}
 	typ := reflect.TypeFor[*Store]()
-	for i := range typ.NumMethod() {
-		if name := typ.Method(i).Name; !known[name] {
+	for method := range typ.Methods() {
+		if name := method.Name; !known[name] {
 			t.Errorf("Store.%s is neither in reads() nor in writes() of pool_test.go: decide which pool it uses, and add it", name)
 		}
 	}
@@ -530,15 +528,13 @@ func TestReadsDoNotWaitForTheWriter(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for _, r := range reads() {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 			if err := r.call(rctx, s); err != nil {
 				t.Errorf("%s while the writer is busy: %v", r.name, err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	// The uncommitted write is not visible to them.
@@ -566,13 +562,11 @@ func TestWritesTakeTheWriterInTheirClass(t *testing.T) {
 		} else {
 			wantLow++
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if err := w.call(ctx, s); err != nil {
 				t.Errorf("%s: %v", w.name, err)
 			}
-		}()
+		})
 	}
 	waitFor(t, fmt.Sprintf("%d high and %d low writes to wait", wantHigh, wantLow), func() bool {
 		h, l := s.wl.waiting()
@@ -603,9 +597,7 @@ func TestWriterLockOrder(t *testing.T) {
 		)
 		ask := func(name string, p prio) {
 			want++
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				if err := l.lock(ctx, p); err != nil {
 					t.Errorf("%s: %v", name, err)
 					return
@@ -614,7 +606,7 @@ func TestWriterLockOrder(t *testing.T) {
 				order = append(order, name)
 				mu.Unlock()
 				l.unlock()
-			}()
+			})
 			waitFor(t, name+" to queue", func() bool { h, lo := l.waiting(); return h+lo == want })
 		}
 		ask("low1", prioLow)

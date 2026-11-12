@@ -143,7 +143,7 @@ func summarize(e store.Entry) ItemSummary {
 		DurationSec: e.DurationSec,
 		Container:   e.Container,
 		AddedAt:     e.AddedAt,
-		MetaFields:  MetaFields{MatchState: e.MatchState, NeedsReview: e.NeedsReview},
+		MatchState:  e.MatchState, NeedsReview: e.NeedsReview,
 	}
 	if e.Year > 0 {
 		s.Year = &e.Year

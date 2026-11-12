@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -33,9 +34,7 @@ func TestCrossSiteWritesAreRefused(t *testing.T) {
 		m := newMetaEnv(t, "") // no token
 		patch := func() *httptest.ResponseRecorder {
 			hdr := map[string]string{"Origin": tc.origin}
-			for k, v := range tc.hdr {
-				hdr[k] = v
-			}
+			maps.Copy(hdr, tc.hdr)
 			if tc.origin == "" {
 				delete(hdr, "Origin")
 			}

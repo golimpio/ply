@@ -184,7 +184,7 @@ func TestUpcomingFollowsTheClock(t *testing.T) {
 
 func TestUpcomingListsAtMostFifty(t *testing.T) {
 	m := newUpcomingEnv(t, "")
-	for i := 0; i < 55; i++ {
+	for i := range 55 {
 		// 55 distinct days, the last ones the latest.
 		day := upcomingNow.AddDate(0, 0, i).Format("2006-01-02")
 		m.addAiring(fmt.Sprintf("Show %02d", i), int64(1000+i), day, nil)

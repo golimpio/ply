@@ -152,7 +152,7 @@ seg00003.m4s
 	}
 
 	withToken := p.Playlist("?token=a%26b")
-	for _, line := range strings.Split(strings.TrimSpace(withToken), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(withToken), "\n") {
 		isURI := !strings.HasPrefix(line, "#") || strings.HasPrefix(line, "#EXT-X-MAP")
 		if isURI && !strings.Contains(line, "?token=a%26b") {
 			t.Errorf("URI line without token: %q", line)
@@ -171,7 +171,7 @@ func TestPlaylistFromSaysWhereToStart(t *testing.T) {
 	p, _ := NewPlan(evenKeyframes(15, 2), 30, 6)
 	startTag := func(pl string) []string {
 		var tags []string
-		for _, line := range strings.Split(pl, "\n") {
+		for line := range strings.SplitSeq(pl, "\n") {
 			if strings.HasPrefix(line, "#EXT-X-START") {
 				tags = append(tags, line)
 			}

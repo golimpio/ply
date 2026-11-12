@@ -103,13 +103,13 @@ func TestManagerRescan(t *testing.T) {
 		err    error
 	}
 	out := make(chan result, 3)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		go func() {
 			kf, source, err := m.keyframes(context.Background(), req, true)
 			out <- result{kf, source, err}
 		}()
 	}
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		select {
 		case r := <-out:
 			if r.err != nil || r.source != sourceScan || !equalTimes(r.kf, every(30, 0, 4)) {

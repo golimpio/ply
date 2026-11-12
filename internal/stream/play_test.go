@@ -24,8 +24,6 @@ func newTestClock() *testClock {
 func (c *testClock) Now() time.Time          { return time.Unix(0, c.ns.Load()).UTC() }
 func (c *testClock) Advance(d time.Duration) { c.ns.Add(int64(d)) }
 
-func ptrTo[T any](v T) *T { return &v }
-
 // brief counts a request for a direct play that ends at once (a short range
 // request), and returns the play's id.
 func brief(m *Manager, k DirectKey, title, client string, pos float64) (string, error) {
@@ -109,7 +107,7 @@ func TestTranscodesAreCappedSeparately(t *testing.T) {
 	}
 
 	// Remuxes are not held back by it, up to the cap on all plays.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if _, err := m.Create(ctx, fakeRequest()); err != nil {
 			t.Fatalf("remux %d beside a transcode: %v", i+1, err)
 		}
@@ -133,10 +131,8 @@ func TestConcurrentTranscodesRespectTheirLimit(t *testing.T) {
 	m := fakeManager(t, f, func(o *Options) { o.MaxSessions = 10; o.MaxTranscodes = 2 })
 	var wg sync.WaitGroup
 	var ok, full atomic.Int32
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 8 {
+		wg.Go(func() {
 			_, err := m.Create(context.Background(), transcodeRequest())
 			switch {
 			case err == nil:
@@ -146,7 +142,7 @@ func TestConcurrentTranscodesRespectTheirLimit(t *testing.T) {
 			default:
 				t.Error(err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if ok.Load() != 2 || full.Load() != 6 {
@@ -268,7 +264,7 @@ func TestDirectPlayListingAndDrop(t *testing.T) {
 		t.Fatalf("Direct = %q, %v", id, err)
 	}
 	clk.Advance(5 * time.Second)
-	if !m.Heartbeat(id, Beat{Position: ptrTo(75.5), Paused: ptrTo(true)}) {
+	if !m.Heartbeat(id, Beat{Position: new(75.5), Paused: new(true)}) {
 		t.Fatal("a direct play cannot be beaten")
 	}
 	got := m.Playing()
@@ -334,7 +330,7 @@ func TestPlayingListsWhatIsPlaying(t *testing.T) {
 
 	// Then it is what the player says, and a beat is a sign of life.
 	clk.Advance(4 * time.Second)
-	if !m.Heartbeat(rs.ID, Beat{Position: ptrTo(1234.5), Paused: ptrTo(true)}) {
+	if !m.Heartbeat(rs.ID, Beat{Position: new(1234.5), Paused: new(true)}) {
 		t.Fatal("heartbeat refused")
 	}
 	p := m.Playing()[0]
@@ -342,7 +338,7 @@ func TestPlayingListsWhatIsPlaying(t *testing.T) {
 		t.Errorf("after a heartbeat: %+v", p)
 	}
 	// A beat that says only where leaves the rest; a bad position is not believed.
-	m.Heartbeat(rs.ID, Beat{Position: ptrTo(-5.0)})
+	m.Heartbeat(rs.ID, Beat{Position: new(-5.0)})
 	if p := m.Playing()[0]; p.PositionSec != 0 || !p.Paused {
 		t.Errorf("after a heartbeat with a negative position: %+v", p)
 	}
@@ -389,9 +385,9 @@ func TestHeartbeatKeepsAPausedSessionAlive(t *testing.T) {
 	waitUntil(t, "both ffmpeg running", 5*time.Second, func() bool { return len(f.procs(t)) == 2 })
 
 	paused := true
-	for i := 0; i < 18; i++ { // three minutes of a paused player, beating every 10 s
+	for i := range 18 { // three minutes of a paused player, beating every 10 s
 		clk.Advance(10 * time.Second)
-		if !m.Heartbeat(beaten.ID, Beat{Position: ptrTo(600.0), Paused: &paused}) {
+		if !m.Heartbeat(beaten.ID, Beat{Position: new(600.0), Paused: &paused}) {
 			t.Fatalf("after %d s the session of the paused player is gone although it beats", 10*(i+1))
 		}
 		settle(m)
@@ -612,7 +608,7 @@ func TestDirectGraceEnds(t *testing.T) {
 		}
 	}
 	clk.Advance(DirectTTL)
-	for i := 0; i < 3; i++ { // the limit is full
+	for range 3 { // the limit is full
 		if _, err := m.Create(ctx, fakeRequest()); err != nil {
 			t.Fatal(err)
 		}
@@ -641,7 +637,7 @@ func TestSessionsThatWillNotStopCountAgainstTheLimits(t *testing.T) {
 	ctx := context.Background()
 
 	var stuck []string
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		s, err := m.Create(ctx, fakeRequest())
 		if err != nil {
 			t.Fatalf("session %d, each stopped (not yet for long) before the next: %v", i+1, err)
@@ -839,7 +835,7 @@ func TestAPausedPlayerHasThreeMinutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.Heartbeat(s.ID, Beat{Paused: ptrTo(true)})
+	m.Heartbeat(s.ID, Beat{Paused: new(true)})
 	clk.Advance(DefaultPausedBeatTimeout)
 	settle(m)
 	if _, ok := m.Get(s.ID); !ok {
@@ -866,10 +862,10 @@ func TestThePausedWindowEndsWithARequestOrAnUnpausedBeat(t *testing.T) {
 			seg.Close()
 		}, false},
 		{"a heartbeat that says it plays", func(t *testing.T, m *Manager, s *Session) {
-			m.Heartbeat(s.ID, Beat{Paused: ptrTo(false)})
+			m.Heartbeat(s.ID, Beat{Paused: new(false)})
 		}, false},
 		{"a heartbeat that says nothing of it", func(t *testing.T, m *Manager, s *Session) {
-			m.Heartbeat(s.ID, Beat{Position: ptrTo(5.0)})
+			m.Heartbeat(s.ID, Beat{Position: new(5.0)})
 		}, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -880,7 +876,7 @@ func TestThePausedWindowEndsWithARequestOrAnUnpausedBeat(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			m.Heartbeat(s.ID, Beat{Paused: ptrTo(true)})
+			m.Heartbeat(s.ID, Beat{Paused: new(true)})
 			clk.Advance(100 * time.Second) // well past 30 s, inside 3 minutes
 			settle(m)
 			if _, ok := m.Get(s.ID); !ok {
@@ -912,7 +908,7 @@ func TestThePausedWindowHasACeiling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.Heartbeat(s.ID, Beat{Paused: ptrTo(true)})
+	m.Heartbeat(s.ID, Beat{Paused: new(true)})
 	clk.Advance(MaxPausedBeatTimeout)
 	settle(m)
 	if _, ok := m.Get(s.ID); !ok {

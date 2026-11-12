@@ -306,7 +306,7 @@ func TestKeyframeIndexInTheManager(t *testing.T) {
 				t.Errorf("the log does not say the index was confirmed:\n%s", logs.String())
 			}
 			line := ""
-			for _, l := range strings.Split(logs.String(), "\n") {
+			for l := range strings.SplitSeq(logs.String(), "\n") {
 				if strings.Contains(l, c.log) {
 					line = l
 				}

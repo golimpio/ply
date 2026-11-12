@@ -469,7 +469,7 @@ func hiddenPath(p string, exempt []string) bool {
 	if rel == "." {
 		return false
 	}
-	for _, part := range strings.Split(rel, sep) {
+	for part := range strings.SplitSeq(rel, sep) {
 		if strings.HasPrefix(part, ".") {
 			return true
 		}

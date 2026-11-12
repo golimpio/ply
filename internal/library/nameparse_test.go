@@ -345,14 +345,14 @@ func TestParseNameInWithoutAKindIsParseName(t *testing.T) {
 func TestGuessKind(t *testing.T) {
 	episodes := func(n int) []string {
 		var p []string
-		for i := 0; i < n; i++ {
+		for i := range n {
 			p = append(p, fmt.Sprintf("/x/Show S01E%02d.mkv", i+1))
 		}
 		return p
 	}
 	movies := func(n int) []string {
 		var p []string
-		for i := 0; i < n; i++ {
+		for i := range n {
 			p = append(p, fmt.Sprintf("/x/Movie %d (%d).mkv", i, 2000+i))
 		}
 		return p

@@ -1242,7 +1242,7 @@ func (p *pass) spelled(path, root string) bool {
 		return p.nameIn(filepath.Dir(path), filepath.Base(path))
 	}
 	dir := root
-	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+	for part := range strings.SplitSeq(rel, string(filepath.Separator)) {
 		if !p.nameIn(dir, part) {
 			return false
 		}
@@ -1480,9 +1480,7 @@ func (p *pass) indexAll(ctx context.Context) []error {
 		failures = map[string]*failure{} // root -> probe failures
 	)
 	for range p.s.workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for j := range jobs {
 				if p.s.rootRetired(j.root) {
 					mu.Lock()
@@ -1510,7 +1508,7 @@ func (p *pass) indexAll(ctx context.Context) []error {
 				}
 				mu.Unlock()
 			}
-		}()
+		})
 	}
 feed:
 	for i, j := range p.work {

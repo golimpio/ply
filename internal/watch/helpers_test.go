@@ -86,7 +86,7 @@ func (l *logBuf) String() string {
 // count returns how many log lines contain all of subs.
 func (l *logBuf) count(subs ...string) int {
 	n := 0
-	for _, line := range strings.Split(l.String(), "\n") {
+	for line := range strings.SplitSeq(l.String(), "\n") {
 		if line != "" && !slices.ContainsFunc(subs, func(s string) bool { return !strings.Contains(line, s) }) {
 			n++
 		}

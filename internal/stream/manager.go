@@ -344,8 +344,7 @@ func NewManager(o Options) (*Manager, error) {
 	if reaperWanted && o.Reaper != "" {
 		m.reaperExe = reaperLink(o)
 	}
-	m.wg.Add(1)
-	go func() { defer m.wg.Done(); m.housekeeping() }()
+	m.wg.Go(func() { m.housekeeping() })
 	return m, nil
 }
 

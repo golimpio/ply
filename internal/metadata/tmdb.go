@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -333,9 +334,7 @@ func (c *Client) redact(s string) string {
 func (c *Client) get(ctx context.Context, path string, q url.Values, out any) error {
 	op := "GET " + path
 	params := url.Values{}
-	for k, v := range q {
-		params[k] = v
-	}
+	maps.Copy(params, q)
 	if params.Get("language") == "" {
 		params.Set("language", c.lang)
 	}
@@ -352,8 +351,7 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, out any) er
 		}
 		release, err := c.acquire(ctx)
 		if err != nil {
-			var rl *Error
-			if errors.As(err, &rl) {
+			if rl, ok := errors.AsType[*Error](err); ok {
 				rl.Op = op
 				return rl
 			}
@@ -430,8 +428,7 @@ func (c *Client) failure(ctx context.Context, op string, err error) error {
 	if ctx.Err() != nil {
 		return fmt.Errorf("tmdb %s: %w", op, ctx.Err())
 	}
-	var ue *url.Error
-	if errors.As(err, &ue) {
+	if ue, ok := errors.AsType[*url.Error](err); ok {
 		err = ue.Err
 	}
 	msg := c.redact(err.Error())

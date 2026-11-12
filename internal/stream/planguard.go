@@ -291,16 +291,14 @@ func (s *Session) confirmLocked() {
 	s.m.log.Info("keyframe index confirmed by the first fragments", "session", s.ID, "path", filepath.Base(s.req.Path))
 	g.finish(nil)
 	if s.m.o.Cache != nil && g.itemID > 0 {
-		s.m.wg.Add(1) // the caller is a monitor or a waiter of a live session: the count is not zero
-		go func() {
-			defer s.m.wg.Done()
+		s.m.wg.Go(func() { // the caller is a monitor or a waiter of a live session: the count is not zero
 			ctx, cancel := context.WithTimeout(s.m.ctx, 30*time.Second)
 			defer cancel()
 			defer s.m.lockIndexCache(s.req.Path)() // against the drop by whichever session finds it wrong
 			if !s.m.indexDistrusted(s.req.Path) {  // found wrong since, by this session or another
 				s.m.cacheKeyframes(ctx, g.itemID, g.kf)
 			}
-		}()
+		})
 	}
 }
 
@@ -320,11 +318,9 @@ func (s *Session) refuteLocked(gop int, why string) {
 	}
 	s.clearFromLocked(0) // the fragments of the old numbering are of no use to the new
 	s.pruned = 0
-	s.m.wg.Add(1)
-	go func() {
-		defer s.m.wg.Done()
+	s.m.wg.Go(func() {
 		g.finish(s.rebuildPlan())
-	}()
+	})
 }
 
 // failLocked handles a fragment that is not where the plan says after the plan
@@ -339,14 +335,12 @@ func (s *Session) failLocked(gop int, why string) {
 	s.failure = fmt.Errorf("%w: %s", ErrIndex, why)
 	s.stopRunLocked() // (if the session is being stopped meanwhile, shutdown is what waits for the run)
 	if s.m.o.Cache != nil && g.itemID > 0 {
-		s.m.wg.Add(1)
-		go func() {
-			defer s.m.wg.Done()
+		s.m.wg.Go(func() {
 			ctx, cancel := context.WithTimeout(s.m.ctx, 30*time.Second)
 			defer cancel()
 			defer s.m.lockIndexCache(s.req.Path)() // after the write of the index, if that is under way
 			s.m.cacheKeyframes(ctx, g.itemID, nil)
-		}()
+		})
 	}
 }
 
@@ -664,7 +658,7 @@ func parseTrun(b []byte, defaultDur int64, haveDefault bool) (offset, dur int64,
 		if int64(len(b)-at)/int64(stride) < count {
 			return offset, 0, false // the samples are cut off
 		}
-		for i := int64(0); i < count; i++ {
+		for i := range count {
 			dur += int64(binary.BigEndian.Uint32(b[at+int(i)*stride+durAt:]))
 		}
 		return offset, dur, true

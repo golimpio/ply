@@ -449,7 +449,7 @@ func TestTVDBReLoginsOnceOnA401(t *testing.T) {
 		t.Errorf("%d logins and %d requests; want 2 and 2 (the first, and one retry after a new login)", f2.logins(), f2.count("/series/81189/extended"))
 	}
 	// And it is remembered: the calls after it do not log in and ask again each time.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if _, err := c2.SeriesExtended(ctx, 81189); !IsUnauthorized(err) || IsTransient(err) || !strings.Contains(err.Error(), tvdbRejected) {
 			t.Fatalf("call %d after the refusal: %v", i+2, err)
 		}
@@ -507,14 +507,12 @@ func TestTVDBConcurrentCallsLogInOnce(t *testing.T) {
 	c := testTVDBClient(t, f)
 	run := func() {
 		var wg sync.WaitGroup
-		for i := 0; i < 8; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+		for range 8 {
+			wg.Go(func() {
 				if _, err := c.SeriesExtended(ctx, 81189); err != nil {
 					t.Error(err)
 				}
-			}()
+			})
 		}
 		wg.Wait()
 	}
@@ -560,7 +558,7 @@ func TestTVDBBadPIN(t *testing.T) {
 	}
 
 	// Later calls are refused at once, without asking TVDB again for every show.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if _, err := c.SeriesExtended(ctx, 81189); !IsUnauthorized(err) || IsTransient(err) || !strings.Contains(err.Error(), tvdbRejected) {
 			t.Fatalf("call %d: err = %v", i+1, err)
 		}
@@ -1189,7 +1187,7 @@ func TestTVDBCancelledCallsDuringAPauseReleaseTheirSlot(t *testing.T) {
 	f.on("/series/81189/extended", tvdbExt, "series_81189_extended.json")
 	c := testTVDBClient(t, f, func(o *TVDBOptions) { o.MaxInFlight = 1; o.MaxWait = 20 * time.Second })
 	c.pause(10 * time.Second) // within MaxWait: calls sleep it out
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
 		_, err := c.SeriesExtended(ctx, 81189)
 		cancel()
@@ -1221,7 +1219,7 @@ func TestTVDBPacesRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := clk.now()
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		if _, err := c.Person(t.Context(), 296140); err != nil {
 			t.Fatal(err)
 		}
@@ -1256,14 +1254,12 @@ func TestTVDBLimitsRequestsInFlight(t *testing.T) {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 8 {
+		wg.Go(func() {
 			if _, err := c.Person(t.Context(), 296140); err != nil {
 				t.Error(err)
 			}
-		}()
+		})
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for cur.Load() < 2 && time.Now().Before(deadline) {
@@ -1706,7 +1702,7 @@ func TestTVDBEndlessListsAreCutOff(t *testing.T) {
 	feed := func(path string, total int, query func(page int) string, body func(page int) string) *tvdbFake {
 		f := newTVDBFake(t)
 		pages.Store(0)
-		for p := 0; p < maxTVDBPages+5; p++ {
+		for p := range maxTVDBPages + 5 {
 			f.handle(path, query(p), func(w http.ResponseWriter, r *http.Request) {
 				pages.Add(1)
 				next := `"https://api4.thetvdb.com/v4/next"`
@@ -2023,8 +2019,7 @@ func TestTVDBSecretsNeverAppearInErrorsOrLogs(t *testing.T) {
 		for u := errors.Unwrap(err); u != nil; u = errors.Unwrap(u) {
 			texts = append(texts, u.Error(), fmt.Sprintf("%#v", u))
 		}
-		var e *Error // as the TMDB helpers see it
-		if errors.As(err, &e) {
+		if e, ok := errors.AsType[*Error](err); ok { // as the TMDB helpers see it
 			texts = append(texts, e.Error(), e.Message, fmt.Sprintf("%#v", e))
 		}
 	}
@@ -2128,7 +2123,7 @@ func shown(eps *TVDBEpisodes) string {
 
 // lineWith is the first line of text that has sub in it.
 func lineWith(text, sub string) string {
-	for _, l := range strings.Split(text, "\n") {
+	for l := range strings.SplitSeq(text, "\n") {
 		if strings.Contains(l, sub) {
 			return l
 		}

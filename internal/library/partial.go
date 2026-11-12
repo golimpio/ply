@@ -282,7 +282,7 @@ func reaches(root, path string) bool {
 		return false
 	}
 	rel, _ := filepath.Rel(root, path)
-	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+	for part := range strings.SplitSeq(rel, string(filepath.Separator)) {
 		if strings.HasPrefix(part, ".") {
 			return false
 		}

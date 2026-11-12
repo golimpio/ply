@@ -233,7 +233,7 @@ func (z zone) reply(q dnsmessage.Message, src *net.UDPAddr, addrs []net.IP) (m d
 	if len(answers) == 0 {
 		return m, nil, false
 	}
-	m = dnsmessage.Message{Header: dnsmessage.Header{Response: true, Authoritative: true}, Answers: answers, Additionals: extra}
+	m = dnsmessage.Message{Response: true, Authoritative: true, Answers: answers, Additionals: extra}
 	if src != nil && src.Port != mdnsPort {
 		m.Header.ID = q.Header.ID
 		m.Questions = q.Questions
@@ -528,7 +528,7 @@ func (r *responder) claim(base string) {
 		default:
 		}
 		r.everywhere(func(addrs []net.IP) dnsmessage.Message {
-			return dnsmessage.Message{Header: dnsmessage.Header{Response: true, Authoritative: true}, Answers: z.announcement(addrs)}
+			return dnsmessage.Message{Response: true, Authoritative: true, Answers: z.announcement(addrs)}
 		})
 		if i == 0 && !r.sleep(announceGap) {
 			return
@@ -567,7 +567,7 @@ func (r *responder) shutdown() {
 		r.mu.Unlock()
 		if announced {
 			r.everywhere(func([]net.IP) dnsmessage.Message {
-				return dnsmessage.Message{Header: dnsmessage.Header{Response: true, Authoritative: true}, Answers: z.goodbye()}
+				return dnsmessage.Message{Response: true, Authoritative: true, Answers: z.goodbye()}
 			})
 		}
 		r.pc.Close()

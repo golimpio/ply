@@ -46,7 +46,7 @@ func (s *Server) ratingsSettings(ctx context.Context, v *SettingsView) {
 	v.RatingsAvailable = s.Settings.RatingsAvailable(ctx)
 	if s.Ratings != nil {
 		if t, ok := s.Ratings.IMDbDatasetUpdatedAt(ctx); ok {
-			v.IMDbDatasetUpdatedAt = ptr(t.UTC().Format(time.RFC3339))
+			v.IMDbDatasetUpdatedAt = new(t.UTC().Format(time.RFC3339))
 		}
 	}
 }
@@ -71,7 +71,7 @@ type RatingEntry struct {
 func ratingEntry(r store.Rating) RatingEntry {
 	e := RatingEntry{Source: r.Source, Value: r.Value, Scale: r.Scale, Score100: r.Score100(), State: r.State, URL: r.URL}
 	if r.Votes > 0 {
-		e.Votes = ptr(r.Votes)
+		e.Votes = new(r.Votes)
 	}
 	if r.FetchedAt > 0 {
 		e.FetchedAt = time.Unix(r.FetchedAt, 0).UTC().Format(time.RFC3339)

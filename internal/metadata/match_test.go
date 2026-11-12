@@ -439,7 +439,7 @@ func TestScoreFormulaAndBoundaries(t *testing.T) {
 
 func TestScoreCandidatesUsesOnlyTheTopTen(t *testing.T) {
 	var cands []Candidate
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		cands = append(cands, Candidate{ID: int64(i + 1), Title: fmt.Sprintf("Other %d", i), Year: 1900, Popularity: float64(i)})
 	}
 	cands[10] = Candidate{ID: 999, Title: "Perfect", Year: 2000, Popularity: 100} // the 11th

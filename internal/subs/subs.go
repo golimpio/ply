@@ -501,11 +501,9 @@ func (g *Generator) begin(batch []Source, waiter bool, pace Pace, note func(stri
 	for _, s := range run {
 		g.inflight[cacheName(s)] = c
 	}
-	g.wg.Add(1)
-	go func() {
-		defer g.wg.Done()
+	g.wg.Go(func() {
 		g.fill(ctx, c, run)
-	}()
+	})
 	return c, nil
 }
 

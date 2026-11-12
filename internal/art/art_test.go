@@ -153,13 +153,11 @@ func TestConcurrentRequestsShareOneRun(t *testing.T) {
 	var wg sync.WaitGroup
 	var failures atomic.Int32
 	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if _, err := g.Path(context.Background(), src(1, 10), Thumb); err != nil {
 				failures.Add(1)
 			}
-		}()
+		})
 	}
 	waitFor(t, func() bool { a, _ := s.snapshot(); return a == 1 })
 	close(s.block)
@@ -178,11 +176,9 @@ func TestConcurrencyIsCapped(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for id := range int64(6) {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			g.Path(context.Background(), src(id+1, 10), Thumb)
-		}()
+		})
 	}
 	// Positive control: the cap is actually reached...
 	waitFor(t, func() bool { a, _ := s.snapshot(); return a == 2 })

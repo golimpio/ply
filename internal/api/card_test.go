@@ -438,13 +438,13 @@ func TestEpisodeCardMapsTheRow(t *testing.T) {
 	c := episodeCard(ItemSummary{
 		ID: 7, Kind: store.KindEpisode, Title: "Pilot", Year: &year, Show: "Cool Show", Season: &season, Episode: &episode,
 		EpisodeTitle: "Pilot, part one", DurationSec: 2400, Width: 3840, Height: 2160, HDR: "hdr10", AddedAt: 5,
-		Progress:   &Progress{PositionSec: 10},
-		Art:        &ArtURLs{Thumb: "/api/items/7/art/thumb", Color: "#112233"},
-		WatchState: WatchState{Watched: true, WatchedAt: &watched, PlayCount: 2},
+		Progress: &Progress{PositionSec: 10},
+		Art:      &ArtURLs{Thumb: "/api/items/7/art/thumb", Color: "#112233"},
+		Watched:  true, WatchedAt: &watched, PlayCount: 2,
 		// The show's rating goes in and is not carried: a card has an episode's own ratings only.
-		MetaFields: MetaFields{Rating: &RatingEntry{Source: "imdb", Value: 8, Scale: 10, Score100: 80}},
-		Still:      still,
-		Ratings:    []RatingEntry{{Source: "imdb", Value: 8, Scale: 10, Score100: 80}, {Source: "tomatoes", Value: 88, Scale: 100, Score100: 88}},
+		Rating:  &RatingEntry{Source: "imdb", Value: 8, Scale: 10, Score100: 80},
+		Still:   still,
+		Ratings: []RatingEntry{{Source: "imdb", Value: 8, Scale: 10, Score100: 80}, {Source: "tomatoes", Value: 88, Scale: 100, Score100: 88}},
 	})
 	if c.ID != 7 || c.Kind != store.KindEpisode || c.Title != "Pilot" || c.Show != "Cool Show" || c.EpisodeTitle != "Pilot, part one" ||
 		c.Still != still || c.Width != 3840 || c.Height != 2160 || c.HDR != "hdr10" ||

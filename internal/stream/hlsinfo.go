@@ -373,7 +373,7 @@ func parseMPEGTSHLSInfo(data []byte) (HLSInfo, error) {
 // ffprobe prints extradata as offset-prefixed hex groups followed by ASCII.
 func probeHexData(dump string) ([]byte, error) {
 	var data []byte
-	for _, line := range strings.Split(strings.TrimSpace(dump), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(dump), "\n") {
 		offset, body, ok := strings.Cut(line, ":")
 		n, err := strconv.ParseUint(strings.TrimSpace(offset), 16, 32)
 		if !ok || err != nil || n != uint64(len(data)) {

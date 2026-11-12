@@ -513,7 +513,7 @@ func TestClientHonoursRetryAfter(t *testing.T) {
 func TestBucketIsATokenBucket(t *testing.T) {
 	clk := newFakeClock()
 	b := newBucket(20, 20, clk.now)
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		if w := b.take(); w != 0 {
 			t.Fatalf("take %d waits %v; the first 20 are free", i+1, w)
 		}
@@ -528,7 +528,7 @@ func TestBucketIsATokenBucket(t *testing.T) {
 		t.Errorf("after a second: wait %v", w)
 	}
 	clk.advance(time.Hour) // refills only up to the burst
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		if w := b.take(); w != 0 {
 			t.Fatalf("after an hour, take %d waits %v", i+1, w)
 		}
@@ -544,7 +544,7 @@ func TestClientPacesRequestsAt20PerSecond(t *testing.T) {
 	c := testClient(t, f, func(o *Options) { o.Rate = 20 })
 	useClock(c, clk, 20, 20)
 	start := clk.now()
-	for i := 0; i < 45; i++ {
+	for range 45 {
 		if _, err := c.Configuration(t.Context()); err != nil {
 			t.Fatal(err)
 		}
@@ -588,14 +588,12 @@ func TestClientLimitsRequestsInFlight(t *testing.T) {
 		c := testClient(t, f, func(o *Options) { o.MaxInFlight = tc.setting })
 
 		var wg sync.WaitGroup
-		for i := 0; i < 12; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+		for range 12 {
+			wg.Go(func() {
 				if _, err := c.Configuration(t.Context()); err != nil {
 					t.Error(err)
 				}
-			}()
+			})
 		}
 		deadline := time.Now().Add(5 * time.Second)
 		for int(cur.Load()) < tc.want && time.Now().Before(deadline) {
@@ -878,7 +876,7 @@ func TestClientDefaults(t *testing.T) {
 		t.Error("the documented defaults changed")
 	}
 	// The bucket starts full: 20 requests at once, the 21st waits.
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		if w := c.bucket.take(); w != 0 {
 			t.Fatalf("request %d waits %v", i+1, w)
 		}
@@ -900,7 +898,7 @@ func TestCancelledCallsDuringAPauseReleaseTheirSlot(t *testing.T) {
 	f.on("/configuration", "", "configuration.json")
 	c := testClient(t, f, func(o *Options) { o.MaxInFlight = 1; o.MaxWait = 20 * time.Second })
 	c.pause(10 * time.Second) // within MaxWait: calls sleep it out
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
 		_, err := c.Configuration(ctx)
 		cancel()

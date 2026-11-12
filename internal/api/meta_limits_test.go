@@ -13,7 +13,7 @@ func TestPeopleSearchIsLimitedToTwenty(t *testing.T) {
 	m := newMetaEnv(t, apiToken)
 	ctx := context.Background()
 	in := &store.TitleInput{Title: store.Title{Kind: store.KindMovie, TMDBID: 7001, Title: "Crowded", Year: 2020, Source: store.SourceTMDB}}
-	for i := 0; i < 25; i++ {
+	for i := range 25 {
 		in.Credits = append(in.Credits, store.Credit{Person: store.Person{TMDBID: int64(9000 + i), Name: fmt.Sprintf("Extra %02d", i)},
 			Kind: store.CreditCast, Order: i})
 	}

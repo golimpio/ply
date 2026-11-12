@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -136,7 +137,7 @@ func TestHeartbeatHoldsAPausedSessionPastTheIdleTimeout(t *testing.T) {
 	beaten := e.startSession("", `{}`).SessionID
 	silent := e.startSession("", `{}`).SessionID
 
-	for i := 0; i < 18; i++ { // the player beats every 10 s
+	for i := range 18 { // the player beats every 10 s
 		clk.Advance(10 * time.Second)
 		wantStatus(t, e.post("/api/sessions/"+beaten+"/heartbeat", `{"positionSec": 90, "paused": true}`, nil), 204)
 		time.Sleep(60 * time.Millisecond) // the monitors tick every 20 ms
@@ -412,7 +413,7 @@ func TestStopThenStartAtTheCapOverHTTP(t *testing.T) {
 	e.withStreams(fakeFFmpeg(t, "exec sleep 60"), func(o *stream.Options) { o.MaxSessions = 1 })
 	first := e.startSession("", `{}`)
 	wantStatus(t, e.start(e.mkv, `{}`, safari), 503) // positive control: it is full
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		wantStatus(t, e.do("DELETE", "/api/sessions/"+first.SessionID, nil, ""), 204)
 		first = e.startSession("", `{"startSec": 30}`)
 	}
@@ -679,9 +680,7 @@ func TestSessionsEndpointsAreForTheServersOwnPagesOnly(t *testing.T) {
 		}
 		// Nor may it hold a session, or stop it.
 		withBody := map[string]string{}
-		for k, v := range hdr {
-			withBody[k] = v
-		}
+		maps.Copy(withBody, hdr)
 		wantJSONError(t, e.post(beat, `{"positionSec": 99}`, withBody), 403)
 		wantJSONError(t, e.do("DELETE", "/api/sessions/"+sid, hdr, ""), 403)
 		if _, ok := m.Get(sid); !ok {

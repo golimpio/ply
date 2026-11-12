@@ -335,11 +335,9 @@ func TestImageFlingLeavesNoGoroutinesBehind(t *testing.T) {
 	ctx, leave := context.WithCancel(t.Context())
 	var wg sync.WaitGroup
 	for i := range fling {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			c.TMDB(ctx, "w342", fmt.Sprintf("fling%d.jpg", i))
-		}()
+		})
 	}
 	recv(t, up.started, "request at the image server") // some are downloading, the rest queue
 	waitFor(t, "every image of the fling to have a run", func() bool { return c.running() == fling })

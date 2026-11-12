@@ -262,7 +262,7 @@ func TestLocalImages(t *testing.T) {
 func escSpaces(s string) string { return strings.ReplaceAll(s, " ", "%20") }
 
 func TestImageURLsFromRefs(t *testing.T) {
-	s := &Server{Options: Options{Token: "a b"}}
+	s := &Server{Token: "a b"}
 	for ref, want := range map[string]string{
 		"tmdb:/abc.jpg":        "/api/images/tmdb/w342/abc.jpg?token=a+b",
 		"local:item:12:poster": "/api/images/local/item/12/poster?token=a+b",

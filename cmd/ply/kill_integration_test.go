@@ -333,7 +333,7 @@ func TestRegistrySweepFindsAnOrphanFromAnotherTmpdir(t *testing.T) {
 			episode = it
 		}
 	}
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		c.startSession(episode.ID, `{"profile": "avplayer"}`, bearer, "remux")
 	}
 

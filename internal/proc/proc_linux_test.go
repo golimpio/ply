@@ -76,13 +76,11 @@ func TestHelperStartsAProcessLikeASession(t *testing.T) {
 	for {
 		runtime.GC()
 		var wg sync.WaitGroup
-		for i := 0; i < 8; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+		for range 8 {
+			wg.Go(func() {
 				runtime.LockOSThread() // never unlocked: the thread ends with the goroutine
 				time.Sleep(time.Millisecond)
-			}()
+			})
 		}
 		wg.Wait()
 		time.Sleep(5 * time.Millisecond)

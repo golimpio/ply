@@ -300,7 +300,7 @@ func TestParseNFOLimits(t *testing.T) {
 	// Lists are capped and nothing blows up on deep nesting or a huge file.
 	var b strings.Builder
 	b.WriteString("<movie>")
-	for i := 0; i < 3*maxList; i++ {
+	for i := range 3 * maxList {
 		b.WriteString("<genre>g" + strings.Repeat("x", i%5) + string(rune('A'+i%26)) + string(rune('a'+i/26%26)) + string(rune('a'+i/676)) + "</genre>")
 		b.WriteString("<actor><name>actor " + string(rune('A'+i%26)) + string(rune('a'+i/26%26)) + string(rune('a'+i/676)) + "</name></actor>")
 	}

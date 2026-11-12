@@ -351,11 +351,9 @@ func (w *Watcher) Run(ctx context.Context) {
 	w.use(be)
 
 	var scans sync.WaitGroup
-	scans.Add(1)
-	go func() {
-		defer scans.Done()
+	scans.Go(func() {
 		w.scanLoop(ctx)
-	}()
+	})
 	defer func() {
 		be.close()
 		scans.Wait()

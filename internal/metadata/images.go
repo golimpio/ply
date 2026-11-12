@@ -509,8 +509,7 @@ func looksLike(ext string, head []byte) bool {
 // redactURL drops the URL net/http puts in its errors (an image URL is not
 // secret, but there is no reason to log it either).
 func redactURL(err error) error {
-	var ue *url.Error
-	if errors.As(err, &ue) {
+	if ue, ok := errors.AsType[*url.Error](err); ok {
 		return ue.Err
 	}
 	return err

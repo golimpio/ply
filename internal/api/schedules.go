@@ -73,8 +73,7 @@ func (s *Server) handleRunSchedule(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, schedule.ErrBusy):
 		writeError(w, http.StatusConflict, "that task is already queued or running")
 	default:
-		var refused *schedule.Refused
-		if errors.As(err, &refused) {
+		if refused, ok := errors.AsType[*schedule.Refused](err); ok {
 			// The key it needs is missing, or online lookups are off: the page says so, and its
 			// "Run now" button is shown disabled with this reason.
 			writeError(w, http.StatusConflict, refused.Reason)

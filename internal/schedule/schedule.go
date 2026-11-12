@@ -199,7 +199,7 @@ func isoWeekday(d time.Weekday) int {
 
 // nextAt is the first occurrence of at on one of ds strictly after after. No ds is every day.
 func nextAt(after time.Time, at Clock, ds []int) time.Time {
-	for i := 0; i < 8; i++ { // eight days find the next one, however late the days are
+	for i := range 8 { // eight days find the next one, however late the days are
 		day := after.AddDate(0, 0, i)
 		when := time.Date(day.Year(), day.Month(), day.Day(), int(at)/60, int(at)%60, 0, 0, after.Location())
 		if !when.After(after) {
@@ -416,12 +416,7 @@ func (s *Scheduler) tick(ctx context.Context) {
 
 // afterBusy reports whether a kind that a never-run task waits for is queued or running.
 func (s *Scheduler) afterBusy(t Task) bool {
-	for _, kind := range t.After {
-		if s.o.Queue.Busy(kind) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(t.After, s.o.Queue.Busy)
 }
 
 // blocked reports whether the task could not run at the last look.

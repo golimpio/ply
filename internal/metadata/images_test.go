@@ -190,11 +190,9 @@ func TestImageIsFetchedOnceAndShared(t *testing.T) {
 	paths := make([]string, 12)
 	errs := make([]error, 12)
 	for i := range paths {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			paths[i], errs[i] = c.TMDB(t.Context(), "w342", "same.jpg")
-		}()
+		})
 	}
 	// Everyone is waiting on one download.
 	deadline := time.Now().Add(5 * time.Second)
@@ -323,7 +321,7 @@ func TestImageFailuresAreNotCachedForLongOrWrittenToDisk(t *testing.T) {
 	clock := newFakeClock()
 	c := newCache(t, srv, func(o *ImageOptions) { o.Now = clock.now })
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if _, err := c.TMDB(t.Context(), "w342", "gone.jpg"); !errors.Is(err, ErrImageUnavailable) {
 			t.Fatalf("attempt %d: %v", i, err)
 		}
@@ -387,15 +385,13 @@ func TestImageDownloadsRunAFewAtATime(t *testing.T) {
 	const images = 12
 	var wg sync.WaitGroup
 	errs := make(chan error, images)
-	for i := 0; i < images; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for i := range images {
+		wg.Go(func() {
 			_, err := c.TMDB(t.Context(), "w342", "img"+string(rune('a'+i))+".jpg")
 			errs <- err
-		}()
+		})
 	}
-	for i := 0; i < maxDownloads; i++ {
+	for i := range maxDownloads {
 		select {
 		case <-started:
 		case <-time.After(5 * time.Second):
@@ -437,7 +433,7 @@ func TestImageFailureMemoryIsBounded(t *testing.T) {
 		defer c.mu.Unlock()
 		return len(c.failed)
 	}
-	for i := 0; i < maxFailedImages+50; i++ {
+	for i := range maxFailedImages + 50 {
 		c.TMDB(t.Context(), "w342", fmt.Sprintf("f%d.jpg", i))
 		if n := failedLen(); n > maxFailedImages {
 			t.Fatalf("after %d failures %d are remembered, the limit is %d", i+1, n, maxFailedImages)

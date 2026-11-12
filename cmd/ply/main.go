@@ -295,11 +295,9 @@ func run() error {
 	var bg sync.WaitGroup // the queue, its schedules, the watcher, the match restorer, the lookups check, the ratings wake and the subtitle feeder
 	bg.Add(5)
 	if subsFeed != nil {
-		bg.Add(1)
-		go func() {
-			defer bg.Done()
+		bg.Go(func() {
 			subsFeed.Run(ctx)
-		}()
+		})
 	}
 	go func() {
 		defer bg.Done()
@@ -334,11 +332,9 @@ func run() error {
 	var watcher *watch.Watcher
 	if cfg.Watch {
 		watcher = watch.NewSpecs(queuedScanner{queue}, rootSpecs(roots), log)
-		bg.Add(1)
-		go func() {
-			defer bg.Done()
+		bg.Go(func() {
 			watcher.Run(ctx)
-		}()
+		})
 	}
 	// Called by the API after every change to the folders, with its lock held: it
 	// must not block. The scanner scans a new folder and reads a changed one again
@@ -510,8 +506,7 @@ func run() error {
 					}
 				},
 			} {
-				wg.Add(1)
-				go func() { defer wg.Done(); closeFn() }()
+				wg.Go(closeFn)
 			}
 			wg.Wait()
 		}},

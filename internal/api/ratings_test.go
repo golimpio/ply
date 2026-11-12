@@ -858,4 +858,3 @@ func TestPrimaryRatingPrefersRottenTomatoesWhenAvailable(t *testing.T) {
 		t.Fatalf("expected letterboxd, got %+v", gotOther)
 	}
 }
-

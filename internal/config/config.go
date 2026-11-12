@@ -317,7 +317,7 @@ func Parse(args []string, out io.Writer) (Config, error) {
 		return Config{}, err
 	}
 	if len(c.AllowHosts) == 0 {
-		for _, h := range strings.Split(os.Getenv(AllowHostsEnv), ",") {
+		for h := range strings.SplitSeq(os.Getenv(AllowHostsEnv), ",") {
 			if h = strings.TrimSpace(h); h != "" {
 				c.AllowHosts = append(c.AllowHosts, h)
 			}

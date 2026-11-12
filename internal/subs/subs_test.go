@@ -115,12 +115,10 @@ func TestPathSharesConcurrentRuns(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make(chan error, 3)
 	for range 3 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, err := g.Path(t.Context(), src)
 			errs <- err
-		}()
+		})
 	}
 	<-f.started // the one conversion is running, the others are waiting for it
 	time.Sleep(50 * time.Millisecond)

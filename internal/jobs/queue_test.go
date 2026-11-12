@@ -517,11 +517,9 @@ func TestConcurrentEnqueuesOfAKeyMakeOneJob(t *testing.T) {
 	_ = q.SetPaused(context.Background(), true)
 	var wg sync.WaitGroup
 	for range 20 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			q.Enqueue(context.Background(), "match", Opt{Key: "match"})
-		}()
+		})
 	}
 	wg.Wait()
 	if n := len(q.Snapshot().Queued); n != 1 {

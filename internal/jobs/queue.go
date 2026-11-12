@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -233,8 +234,8 @@ func (q *Queue) enqueue(ctx context.Context, kind string, o Opt, waiter chan out
 	}
 	q.mu.Unlock()
 
-	e := &entry{Job: Job{Kind: kind, Key: o.Key, Title: spec.title(payload), Priority: prio, State: Queued, User: o.User,
-		Payload: payload, CreatedAt: q.o.Now()}, spec: spec}
+	e := &entry{Kind: kind, Key: o.Key, Title: spec.title(payload), Priority: prio, State: Queued, User: o.User,
+		Payload: payload, CreatedAt: q.o.Now(), spec: spec}
 	if o.Attempts > 0 {
 		s := *spec
 		s.MaxAttempts = o.Attempts
@@ -338,11 +339,9 @@ func (q *Queue) Run(ctx context.Context) {
 				q.armTimer(wait)
 				break
 			}
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				q.work(runCtx, e)
-			}()
+			})
 		}
 		// A job the gate holds is looked at again when playback changes, or at
 		// the gate's poll (browsing ends with no event).
@@ -923,13 +922,14 @@ func (q *Queue) publishTier() {
 	if q.o.Extra != nil {
 		// Work outside the queue has no events of its own: a change of what it is
 		// makes the clients reload the snapshot.
-		sig := ""
+		var sig strings.Builder
 		for _, j := range q.o.Extra(q.snapshot().Running) {
-			sig += fmt.Sprintf("%d|%s|%s|%d/%d;", j.ID, j.Title, j.State, j.Done, j.Total)
+			fmt.Fprintf(&sig, "%d|%s|%s|%d/%d;", j.ID, j.Title, j.State, j.Done, j.Total)
 		}
 		q.mu.Lock()
-		changed := sig != q.lastExtra
-		q.lastExtra = sig
+		extra := sig.String()
+		changed := extra != q.lastExtra
+		q.lastExtra = extra
 		q.mu.Unlock()
 		if changed {
 			q.publish("snapshot", nil)

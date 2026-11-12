@@ -616,8 +616,7 @@ func (c *TVDBClient) exchange(ctx context.Context, op, method, path string, q ur
 		}
 		release, err := c.acquire(ctx)
 		if err != nil {
-			var rl *TVDBError
-			if errors.As(err, &rl) {
+			if rl, ok := errors.AsType[*TVDBError](err); ok {
 				rl.Op = op
 				return 0, nil, rl
 			}
@@ -713,8 +712,7 @@ func (c *TVDBClient) decode(op string, status int, body []byte, out any, links *
 // again will not help.
 func (c *TVDBClient) unreadable(op string, status int, err error) error {
 	cause := causeOf(err, c.redact(err.Error()))
-	var shape *json.UnmarshalTypeError
-	if errors.As(err, &shape) {
+	if _, ok := errors.AsType[*json.UnmarshalTypeError](err); ok {
 		return &TVDBError{Op: op, Status: status, Message: "unexpected response shape", Err: cause}
 	}
 	return &TVDBError{Op: op, Status: status, Transient: true, Message: "malformed response", Err: cause}
@@ -740,8 +738,7 @@ func (c *TVDBClient) failure(ctx context.Context, op string, err error) error {
 	if ctx.Err() != nil {
 		return fmt.Errorf("tvdb %s: %w", op, ctx.Err())
 	}
-	var ue *url.Error
-	if errors.As(err, &ue) {
+	if ue, ok := errors.AsType[*url.Error](err); ok {
 		err = ue.Err
 	}
 	msg := tidyMessage(c.redact(err.Error()), maxTVDBMessage)
@@ -1015,7 +1012,7 @@ func TVDBImagePath(ref string) (path string, ok bool) {
 		}
 		return "", false
 	}
-	for _, seg := range strings.Split(p[1:], "/") {
+	for seg := range strings.SplitSeq(p[1:], "/") {
 		if seg == "" || seg == "." {
 			return "", false
 		}

@@ -151,7 +151,7 @@ func (v *metaView) apply(sum *ItemSummary, e store.Entry) {
 		sum.SortTitle = sortTitleOf(b, titleID != 0 && ok, e.Title)
 	}
 	if titleID != 0 && ok {
-		sum.TitleID = ptr(titleID)
+		sum.TitleID = new(titleID)
 		sum.Logo = s.imageURL(b.Logo, logoSize)
 		sum.Rating = primaryRating(b.Ratings, v.primary)
 		sum.Certification = b.Certification

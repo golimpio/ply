@@ -195,8 +195,7 @@ func (s *Server) admitDirect(w http.ResponseWriter, r *http.Request, e store.Ent
 		pos = e.Progress.PositionSec
 	}
 	_, done, err := s.Streams.DirectFile(directKey(e, r), playTitle(e), clientLabel(r), e.Path, pos)
-	var le *stream.LimitError
-	if errors.As(err, &le) {
+	if le, ok := errors.AsType[*stream.LimitError](err); ok {
 		writeLimit(w, r, le)
 		return nothing, false
 	}
@@ -220,8 +219,7 @@ func (s *Server) startDirect(w http.ResponseWriter, r *http.Request, e store.Ent
 		return "", true
 	}
 	id, err := s.Streams.StartDirect(directKey(e, r), playTitle(e), clientLabel(r), e.Path, s.playDevice(r), startSec, attempt)
-	var le *stream.LimitError
-	if errors.As(err, &le) {
+	if le, ok := errors.AsType[*stream.LimitError](err); ok {
 		writeLimit(w, r, le)
 		return "", false
 	}

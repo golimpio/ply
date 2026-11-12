@@ -230,8 +230,8 @@ func TestAPausedDirectPlayIsKeptForThePausedLease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.Heartbeat(playing, Beat{Paused: ptrTo(false)})
-	m.Heartbeat(paused, Beat{Paused: ptrTo(true)})
+	m.Heartbeat(playing, Beat{Paused: new(false)})
+	m.Heartbeat(paused, Beat{Paused: new(true)})
 	clk.Advance(2 * time.Minute)
 	ids := func() []string {
 		var out []string

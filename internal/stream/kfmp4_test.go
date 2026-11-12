@@ -59,7 +59,7 @@ func (t mp4Trak) bytes() []byte {
 			return isoFull(typ, ver, raw)
 		}
 		parts := [][]byte{u32(uint32(count))}
-		for i := 0; i < count; i++ {
+		for i := range count {
 			parts = append(parts, entries(i))
 		}
 		return isoFull(typ, ver, parts...)
@@ -120,7 +120,7 @@ var ftyp = isoBox("ftyp", []byte("isom"), u32(512), []byte("isomiso2avc1mp41"))
 // ...) in a 12288 Hz timescale, and a matching audio track.
 func goodVideo() mp4Trak {
 	var syncs []uint32
-	for k := 0; k < 30; k++ {
+	for k := range 30 {
 		syncs = append(syncs, uint32(k*48+1))
 	}
 	return mp4Trak{handler: "vide", scale: 12288, stts: [][2]uint32{{1440, 512}}, stss: syncs, table: 4 * 1440}
@@ -143,7 +143,7 @@ func goodMP4(mod func(v, a *mp4Trak)) []byte {
 // keyframe is shown two frames after it is decoded.
 func bframes(v *mp4Trak) {
 	v.ctts = nil
-	for k := 0; k < 30; k++ {
+	for range 30 {
 		v.ctts = append(v.ctts, [2]int32{1, 1024}, [2]int32{47, 512})
 	}
 }
@@ -181,7 +181,7 @@ func TestMP4SampleTables(t *testing.T) {
 		{"ctts version 1, negative offsets elsewhere", func(v, a *mp4Trak) {
 			v.cttsVer = 1
 			v.ctts = nil
-			for k := 0; k < 30; k++ {
+			for range 30 {
 				v.ctts = append(v.ctts, [2]int32{1, 1024}, [2]int32{47, -512})
 			}
 		}, every(30, 2*frame, 2)},

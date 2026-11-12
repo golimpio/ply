@@ -120,13 +120,11 @@ func TestConcurrentJoinAndLeave(t *testing.T) {
 	c.Join() // the owner's
 	var wg sync.WaitGroup
 	for range 64 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if c.Join() {
 				c.Leave()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	live(t, c)

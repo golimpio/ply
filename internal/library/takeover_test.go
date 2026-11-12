@@ -680,8 +680,7 @@ func TestDropRootGivesUpWithPassesQueuedAheadOfIt(t *testing.T) {
 	}
 	<-queued
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() { defer wg.Done(); e.s.ScanDirs(ctx, []Dir{{Path: root, Recursive: true}}) }() // a partial one
+	wg.Go(func() { e.s.ScanDirs(ctx, []Dir{{Path: root, Recursive: true}}) }) // a partial one
 	<-queued
 
 	start := time.Now()
@@ -1007,15 +1006,13 @@ func TestBackgroundWorkRacingAShutdown(t *testing.T) {
 	s := NewScanner(ctx, e.st, e.fp, []string{root}, nil)
 	var wg sync.WaitGroup
 	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 50 {
 				s.putBack(root, &takenRoot{Root: movies(root)})
 				s.Trigger()
 				s.SetRoots([]Root{movies(filepath.Join(root, "x"))})
 			}
-		}()
+		})
 	}
 	time.Sleep(2 * time.Millisecond)
 	cancel()

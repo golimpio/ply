@@ -185,8 +185,7 @@ func TestACopyOfAFileCutShortFails(t *testing.T) {
 		t.Fatalf("a whole file: %d, %v", n, err) // positive control
 	}
 	n, err := copyChunks(io.Discard, bytes.NewReader(make([]byte, size-100)), size)
-	var short *shortFileError
-	if !errors.As(err, &short) {
+	if _, ok := errors.AsType[*shortFileError](err); !ok {
 		t.Fatalf("a file cut short: %d bytes, %v; want a *shortFileError", n, err)
 	}
 	if want := "the file ended at 786332 of 786432 bytes"; err.Error() != want {

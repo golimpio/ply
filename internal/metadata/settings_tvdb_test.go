@@ -166,7 +166,7 @@ func TestTVDBUpdateChecksTheKeyBeforeItStoresAnything(t *testing.T) {
 	// A key TVDB refuses is not stored, and neither is anything else in the request.
 	env.checked = nil
 	check = &TVDBError{Op: "POST /login", Status: 401, Message: tvdbRejected}
-	err := s.Update(ctx, Update{TVDBKey: str("badkey"), Language: str("de-DE"), Enabled: ptrBool(false)})
+	err := s.Update(ctx, Update{TVDBKey: str("badkey"), Language: str("de-DE"), Enabled: new(false)})
 	if !errors.Is(err, ErrTVDBRejected) {
 		t.Fatalf("err = %v, want ErrTVDBRejected", err)
 	}
@@ -241,8 +241,6 @@ func TestTVDBUpdateChecksTheKeyBeforeItStoresAnything(t *testing.T) {
 		t.Errorf("removing the PIN: %v, checked %q", err, env.checked)
 	}
 }
-
-func ptrBool(b bool) *bool { return &b }
 
 func TestTVDBUpdateRefusesMalformedKeysAndPINs(t *testing.T) {
 	ctx := context.Background()

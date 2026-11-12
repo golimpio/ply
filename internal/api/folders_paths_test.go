@@ -114,7 +114,7 @@ func TestAddFolderCaseVariant(t *testing.T) {
 func dotFreeTempDir(t *testing.T) string {
 	t.Helper()
 	dotted := func(p string) bool {
-		for _, part := range strings.Split(p, string(filepath.Separator)) {
+		for part := range strings.SplitSeq(p, string(filepath.Separator)) {
 			if strings.HasPrefix(part, ".") {
 				return true
 			}

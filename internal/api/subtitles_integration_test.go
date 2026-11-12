@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -387,9 +388,7 @@ func TestImageSubtitleIsScaledToTheVideo(t *testing.T) {
 	soft := detected.SoftwareOnly()
 	older := soft // the same ffmpeg, as if its scale filter took no reference input
 	older.Filters = map[string]bool{}
-	for k, v := range soft.Filters {
-		older.Filters[k] = v
-	}
+	maps.Copy(older.Filters, soft.Filters)
 	delete(older.Filters, hwaccel.RefScale)
 	variants := []struct {
 		name string

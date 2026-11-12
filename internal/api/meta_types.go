@@ -370,8 +370,6 @@ func (s *Server) imageURL(ref, size string) string {
 	return ""
 }
 
-func ptr[T any](v T) *T { return &v }
-
 // sortTitleOf is the name a movie or a show is sorted by in a list. When it is matched to a title
 // (matched, with its brief b) it is the one GET /api/titles is ordered by: the title's sort title,
 // which a person can edit, or else its title. Without a title it is the name from the files, with
@@ -405,10 +403,10 @@ func (s *Server) titleCard(c store.TitleCard, primary string) TitleCard {
 		Backdrop: s.imageURL(c.Backdrop, backdropSize), Rating: primaryRating(c.Ratings, primary), Show: c.Show,
 		NextAirDate: c.NextAirDate, Watched: c.Watched}
 	if c.ItemID != 0 {
-		out.ItemID = ptr(c.ItemID)
+		out.ItemID = new(c.ItemID)
 	}
 	if c.Episodes != nil {
-		out.EpisodeCounts = ptr(episodeCounts(*c.Episodes))
+		out.EpisodeCounts = new(episodeCounts(*c.Episodes))
 	}
 	return out
 }

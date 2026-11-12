@@ -81,7 +81,7 @@ func (f fake) procs(t *testing.T) []string {
 		t.Fatal(err)
 	}
 	var found []string
-	for _, l := range strings.Split(string(out), "\n") {
+	for l := range strings.SplitSeq(string(out), "\n") {
 		if strings.Contains(l, f.ffmpeg) {
 			found = append(found, strings.TrimSpace(l))
 		}
@@ -259,7 +259,7 @@ func TestSessionLimit(t *testing.T) {
 	f := newFake(t)
 	m := fakeManager(t, f, func(o *Options) { o.MaxSessions = 2 })
 	var ids []string
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		s, err := m.Create(context.Background(), fakeRequest())
 		if err != nil {
 			t.Fatal(err)
@@ -286,10 +286,8 @@ func TestConcurrentCreateRespectsLimit(t *testing.T) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	ok, full := 0, 0
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 10 {
+		wg.Go(func() {
 			_, err := m.Create(context.Background(), fakeRequest())
 			mu.Lock()
 			defer mu.Unlock()
@@ -301,7 +299,7 @@ func TestConcurrentCreateRespectsLimit(t *testing.T) {
 			default:
 				t.Error(err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if ok != 3 || full != 7 {
@@ -386,7 +384,7 @@ func TestCloseKillsEverything(t *testing.T) {
 	f := newFake(t)
 	m := fakeManager(t, f, nil)
 	var dirs []string
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		s, err := m.Create(context.Background(), fakeRequest())
 		if err != nil {
 			t.Fatal(err)

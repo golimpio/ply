@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -124,7 +125,7 @@ func TestCloseBoundsItsWait(t *testing.T) {
 
 	var sessions []*Session
 	var leaders []int
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		s, err := m.Create(context.Background(), fakeRequest())
 		if err != nil {
 			t.Fatal(err)
@@ -143,12 +144,7 @@ func TestCloseBoundsItsWait(t *testing.T) {
 
 	// All of them are killed at once, while Close is still waiting for the first.
 	waitUntil(t, "every ffmpeg to be killed", wait/2, func() bool {
-		for _, pid := range leaders {
-			if pidAlive(pid) {
-				return false
-			}
-		}
-		return true
+		return !slices.ContainsFunc(leaders, pidAlive)
 	})
 	select {
 	case d := <-closed:
@@ -195,7 +191,7 @@ func TestCloseWaitsForExitsThatComeInTime(t *testing.T) {
 	f := newFake(t)
 	m := fakeManager(t, f, func(o *Options) { o.MaxSessions = 3 })
 	var dirs []string
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		s, err := m.Create(context.Background(), fakeRequest())
 		if err != nil {
 			t.Fatal(err)

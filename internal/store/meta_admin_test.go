@@ -384,20 +384,16 @@ func TestConcurrentTitleWritesAndReads(t *testing.T) {
 	end := time.Now().Add(600 * time.Millisecond)
 	var wg sync.WaitGroup
 	errs := make(chan error, 16)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for gen := 1; time.Now().Before(end); gen++ {
 			if _, err := s.UpsertTitle(ctx, in(gen)); err != nil {
 				errs <- err
 				return
 			}
 		}
-	}()
+	})
 	for range 3 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for time.Now().Before(end) {
 				d, err := s.GetTitleDetail(ctx, id)
 				if err != nil {
@@ -409,7 +405,7 @@ func TestConcurrentTitleWritesAndReads(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)

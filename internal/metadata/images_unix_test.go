@@ -61,14 +61,12 @@ func TestEmbeddedCoverIsExtractedOnceAndRefreshedWhenTheFileChanges(t *testing.T
 	var wg sync.WaitGroup
 	paths := make([]string, 12)
 	for i := range paths {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			var err error
 			if paths[i], err = c.Embedded(t.Context(), 7, media, 4); err != nil {
 				t.Error(err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	want := filepath.Join(c.dir, "embedded", "7.jpg")
@@ -110,7 +108,7 @@ func TestEmbeddedCoverFailures(t *testing.T) {
 	if err := os.WriteFile(media, []byte("video"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if got, err := c.Embedded(t.Context(), 1, media, 9); !errors.Is(err, ErrImageUnavailable) || got != "" {
 			t.Fatalf("attempt %d: %q, %v", i, got, err)
 		}
@@ -151,18 +149,16 @@ func TestEmbeddedCoverRunsAFewAtATime(t *testing.T) {
 	os.WriteFile(media, []byte("v"), 0o644)
 	var wg sync.WaitGroup
 	for id := int64(1); id <= 8; id++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if _, err := c.Embedded(t.Context(), id, media, 0); err != nil {
 				t.Error(err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	b, _ := os.ReadFile(filepath.Join(dir, "peak"))
 	peak := 0
-	for _, f := range strings.Fields(string(b)) {
+	for f := range strings.FieldsSeq(string(b)) {
 		n, _ := strconv.Atoi(f)
 		peak = max(peak, n)
 	}

@@ -138,9 +138,7 @@ func TestPruneCannotTakeATitleThatIsBeingLinked(t *testing.T) {
 	stop := make(chan struct{})
 	var pruners sync.WaitGroup
 	for range 2 {
-		pruners.Add(1)
-		go func() {
-			defer pruners.Done()
+		pruners.Go(func() {
 			for {
 				select {
 				case <-stop:
@@ -152,14 +150,12 @@ func TestPruneCannotTakeATitleThatIsBeingLinked(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 	var linkers sync.WaitGroup
 	for w := range 4 {
-		linkers.Add(1)
-		go func() {
-			defer linkers.Done()
-			for round := 0; round < 25; round++ {
+		linkers.Go(func() {
+			for round := range 25 {
 				i := (w*7 + round) % items
 				in := tmdbMovie(int64(1000+w*100+round), fmt.Sprintf("T%d-%d", w, round), 2000)
 				if _, _, err := s.LinkItemTitle(ctx, ids[i], in, Match{State: MatchMatched}, ""); err != nil {
@@ -167,7 +163,7 @@ func TestPruneCannotTakeATitleThatIsBeingLinked(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 	linkers.Wait()
 	close(stop)

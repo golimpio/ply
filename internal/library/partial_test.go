@@ -527,13 +527,11 @@ func TestPartialAndFullScansTakeTurns(t *testing.T) {
 	fp.entered = make(chan struct{}, 1)
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		if _, err := s.ScanDirs(context.Background(), []Dir{{Path: root}}); err != nil {
 			t.Errorf("ScanDirs: %v", err)
 		}
-	}()
+	})
 	<-fp.entered // the partial scan is probing
 	if !s.Trigger() {
 		t.Fatal("Trigger during a partial scan = false, want it queued")

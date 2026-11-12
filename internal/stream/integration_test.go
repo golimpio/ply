@@ -119,7 +119,7 @@ func probeSpan(t *testing.T, init, seg []byte) (video, audio timing) {
 			t.Fatalf("ffprobe %s: %v", sel, err)
 		}
 		tm := timing{first: math.Inf(1), end: math.Inf(-1)}
-		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 			f := strings.Split(strings.TrimRight(line, ","), ",")
 			if len(f) < 2 {
 				continue
@@ -300,7 +300,7 @@ func ffmpegProcs(t *testing.T, dir string) []string {
 		t.Fatal(err)
 	}
 	var found []string
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		if strings.Contains(line, "ffmpeg") && strings.Contains(line, dir) {
 			found = append(found, strings.TrimSpace(line))
 		}
@@ -393,7 +393,7 @@ func TestNoOrphanFFmpeg(t *testing.T) {
 	t.Run("close", func(t *testing.T) {
 		m := newManager(t, opts)
 		var dirs []string
-		for i := 0; i < 2; i++ {
+		for range 2 {
 			s, err := m.Create(context.Background(), req)
 			if err != nil {
 				t.Fatal(err)

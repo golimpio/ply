@@ -218,7 +218,7 @@ func TestRatingsMDBListJobYieldsToAStalledViewer(t *testing.T) {
 	r := newRatingsRig(t, nil, nil)
 	r.addMovies(3)
 	var once sync.Once
-	r.mdbOver.Store(ptr(func(w http.ResponseWriter, req *http.Request) bool {
+	r.mdbOver.Store(new(func(w http.ResponseWriter, req *http.Request) bool {
 		if strings.HasPrefix(req.URL.Path, "/tmdb/movie/") {
 			once.Do(func() { pb.set(1) }) // a viewer stalls as the first title is asked for
 		}
@@ -320,7 +320,7 @@ func TestRatingsMDBListJobRatesEveryDueTitle(t *testing.T) {
 func TestRatingsMDBListJobStopsWhenTheBudgetIsSpent(t *testing.T) {
 	r := newRatingsRig(t, nil, nil)
 	r.addMovies(40)
-	r.mdbOver.Store(ptr(func(w http.ResponseWriter, req *http.Request) bool {
+	r.mdbOver.Store(new(func(w http.ResponseWriter, req *http.Request) bool {
 		if req.URL.Path == "/user" {
 			fmt.Fprint(w, `{"api_requests": 30, "api_requests_count": 0}`) // 27 for ply
 			return true
@@ -343,7 +343,7 @@ func TestRatingsMDBListJobStopsWhenTheBudgetIsSpent(t *testing.T) {
 func TestRatingsMDBListJobGoesOnPastARefusedTitle(t *testing.T) {
 	r := newRatingsRig(t, nil, nil)
 	r.addMovies(5)
-	r.mdbOver.Store(ptr(func(w http.ResponseWriter, req *http.Request) bool {
+	r.mdbOver.Store(new(func(w http.ResponseWriter, req *http.Request) bool {
 		if req.URL.Path == "/tmdb/movie/2" {
 			w.WriteHeader(422)
 			fmt.Fprint(w, `{"error": "cannot process"}`)
@@ -369,7 +369,7 @@ func TestRatingsMDBListJobGoesOnPastARefusedTitle(t *testing.T) {
 func TestRatingsMDBListJobGoesOnPastATitleThatFails(t *testing.T) {
 	r := newRatingsRig(t, nil, nil)
 	r.addMovies(5)
-	r.mdbOver.Store(ptr(func(w http.ResponseWriter, req *http.Request) bool {
+	r.mdbOver.Store(new(func(w http.ResponseWriter, req *http.Request) bool {
 		if req.URL.Path == "/tmdb/movie/2" {
 			w.WriteHeader(500)
 			return true
@@ -390,8 +390,6 @@ func TestRatingsMDBListJobGoesOnPastATitleThatFails(t *testing.T) {
 		t.Errorf("a third run: %v, %d requests; the failing title was given up on in the second", err, r.mdb.Load()-before)
 	}
 }
-
-func ptr[T any](v T) *T { return &v }
 
 // A file that is not IMDb's dataset, or is far less of it, is a final failure of the job (asking again
 // at once gets the same file), and nothing is stored from it.

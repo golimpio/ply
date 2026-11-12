@@ -66,7 +66,7 @@ func TestPlayChangesOfADirectPlay(t *testing.T) {
 	if got := c.of(id); !slices.Equal(got, []string{PlayStarted}) {
 		t.Fatalf("after two requests: %v, want started once", got)
 	}
-	m.Heartbeat(id, Beat{Position: ptrTo(42.0), Paused: ptrTo(true)})
+	m.Heartbeat(id, Beat{Position: new(42.0), Paused: new(true)})
 	c.mu.Lock()
 	last := c.got[len(c.got)-1]
 	c.mu.Unlock()
@@ -93,7 +93,7 @@ func TestPlayChangesOfADirectPlay(t *testing.T) {
 		t.Fatalf("after another play started, the ended one: %v, want its three changes still", got)
 	}
 	// A beat for a play that has ended does not bring it back.
-	m.Heartbeat(id, Beat{Position: ptrTo(50.0)})
+	m.Heartbeat(id, Beat{Position: new(50.0)})
 	if got := c.of(id); len(got) != 3 {
 		t.Fatalf("a beat after the end was told: %v", got)
 	}

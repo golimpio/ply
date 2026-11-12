@@ -86,8 +86,8 @@ func dirStem(name string) string {
 // of it ("1917" alone is a title, not a year).
 func parseMovie(stem string) (title string, year int) {
 	runs := reDigits.FindAllStringIndex(stem, -1)
-	for i := len(runs) - 1; i >= 0; i-- {
-		start, end := runs[i][0], runs[i][1]
+	for _, run := range slices.Backward(runs) {
+		start, end := run[0], run[1]
 		if end-start != 4 {
 			continue
 		}
@@ -213,7 +213,7 @@ func dirsBelow(root, path string) (dirs []string, ok bool) {
 		}
 		return strings.Split(rel, string(filepath.Separator)), true
 	}
-	for _, d := range strings.Split(dir, string(filepath.Separator)) {
+	for d := range strings.SplitSeq(dir, string(filepath.Separator)) {
 		if d != "" {
 			dirs = append(dirs, d)
 		}
@@ -229,8 +229,8 @@ func parseMovieIn(root, path string) Parsed {
 		return Parsed{Kind: store.KindMovie, Title: title, Year: year}
 	}
 	dirs, _ := dirsBelow(root, path)
-	for i := len(dirs) - 1; i >= 0; i-- {
-		stem := dirStem(dirs[i])
+	for _, dir := range slices.Backward(dirs) {
+		stem := dirStem(dir)
 		if clean(stem) == "" || reNoTitle.MatchString(clean(stem)) {
 			continue
 		}
@@ -284,8 +284,8 @@ func parseEpisodeIn(root, path string) Parsed {
 		NeedsReview: !found && !slices.ContainsFunc(dirs, isExtrasDir)}
 	if !em.hasSeason {
 		p.Season = 1
-		for i := len(dirs) - 1; i >= 0; i-- {
-			if n, ok := seasonOfDir(dirs[i]); ok {
+		for _, dir := range slices.Backward(dirs) {
+			if n, ok := seasonOfDir(dir); ok {
 				p.Season = n
 				break
 			}

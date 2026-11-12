@@ -485,7 +485,7 @@ func listProcs(t *testing.T) []procInfo {
 		t.Fatalf("ps: %v", err)
 	}
 	var procs []procInfo
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		f := strings.Fields(line)
 		if len(f) < 4 {
 			continue

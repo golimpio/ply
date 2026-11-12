@@ -139,11 +139,11 @@ func TestProviderMovieCollectionFailures(t *testing.T) {
 
 func TestMovieInputCapsAndOrdersCast(t *testing.T) {
 	d := &MovieDetails{ID: 1, Title: "Big Cast", ReleaseDate: "2020-05-05"}
-	for i := 0; i < 45; i++ { // listed in reverse billing order
+	for i := range 45 { // listed in reverse billing order
 		n := 44 - i
 		d.Credits.Cast = append(d.Credits.Cast, CastCredit{ID: int64(1000 + n), Name: fmt.Sprintf("Actor %02d", n), Character: fmt.Sprintf("Role %d", n), Order: n})
 	}
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		d.Credits.Crew = append(d.Credits.Crew, CrewCredit{ID: int64(2000 + i), Name: fmt.Sprintf("Producer %d", i), Job: "Producer"})
 	}
 	in := movieInput(d, nil, "en", "US")

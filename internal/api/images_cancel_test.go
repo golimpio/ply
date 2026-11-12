@@ -83,16 +83,14 @@ func TestTMDBImagesTheBrowserAbortedAreAbandonedUpstream(t *testing.T) {
 	ctx, abort := context.WithCancel(t.Context())
 	var wg sync.WaitGroup
 	for i := range images {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/images/tmdb/w342/fling%d.jpg", ts.URL, i), nil)
 			req.Header.Set("Authorization", "Bearer "+apiToken)
 			if resp, err := http.DefaultClient.Do(req); err == nil {
 				resp.Body.Close()
 				t.Errorf("image %d: status %d, want the request aborted", i, resp.StatusCode)
 			}
-		}()
+		})
 	}
 	recvPath(t, up.started, "request at the image server") // positive control: the downloads are under way
 	time.Sleep(200 * time.Millisecond)                     // the rest wait for a slot

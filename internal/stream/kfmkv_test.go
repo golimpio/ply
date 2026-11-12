@@ -598,7 +598,7 @@ func TestMatroskaVideoTrackSelection(t *testing.T) {
 	data := goodMKV(func(f *mkvFile) {
 		f.tracks = []mkvTrack{{5, trackTypeVideo}, {6, trackTypeAudio}, {9, trackTypeVideo}}
 		f.cues = nil
-		for k := 0; k < 60; k++ {
+		for k := range 60 {
 			ts := uint64(k) * 2000
 			f.clusters[k].blocks = []mkvBlk{{track: 5, key: true, size: 100}, {track: 6, size: 100}, {track: 9, key: k%3 == 0, size: 100}}
 			f.cues = append(f.cues, mkvCue{ts, 5})
@@ -878,7 +878,7 @@ func TestMatroskaMalformed(t *testing.T) {
 					t.Fatalf("%s: a file cut at %d of %d bytes gave an index", name, n, len(data))
 				}
 			}
-			for n := 0; n < 3000; n++ {
+			for n := range 3000 {
 				cut(n)
 			}
 			for n := 3000; n < len(data)-700; n += 200011 {
@@ -1021,7 +1021,7 @@ func TestMatroskaBigCuesAreOneRead(t *testing.T) {
 	data := goodMKV(func(f *mkvFile) {
 		f.cues = f.cues[:0]
 		f.duration = 172800 * 1000
-		for s := uint64(0); s < 172800; s++ {
+		for s := range uint64(172800) {
 			f.cues = append(f.cues, mkvCue{s * 1000, 2})
 		}
 		// One cluster with one video block, that all the cues point at: nothing of

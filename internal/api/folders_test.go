@@ -371,16 +371,14 @@ func TestAddFolderRefusals(t *testing.T) {
 
 // Two requests at once for folders that overlap: one wins.
 func TestAddFolderOverlapIsCheckedUnderALock(t *testing.T) {
-	for round := 0; round < 20; round++ {
+	for round := range 20 {
 		f := newFolderEnv(t, "")
 		var wg sync.WaitGroup
 		codes := make([]int, 2)
 		for i, p := range []string{f.path("movies"), f.path("movies/extras")} {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				codes[i] = f.post(p, "movies").Code
-			}()
+			})
 		}
 		wg.Wait()
 		created := 0

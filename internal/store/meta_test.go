@@ -211,7 +211,7 @@ func TestUpsertTitleIsOneTransaction(t *testing.T) {
 			t.Errorf("%s has %d rows, want %d", table, n, want)
 		}
 	}
-	if _, err := s.UpsertTitle(ctx, &TitleInput{Title: Title{Kind: "album"}}); err == nil {
+	if _, err := s.UpsertTitle(ctx, &TitleInput{Kind: "album"}); err == nil {
 		t.Error("UpsertTitle accepted kind album")
 	}
 }

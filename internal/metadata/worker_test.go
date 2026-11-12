@@ -1615,7 +1615,7 @@ func TestWorkerEnsurePersonRemembersFailures(t *testing.T) {
 	asked := func() int { return e.fake.Count("Person(") }
 
 	// Not found: once a day.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := e.w.EnsurePerson(e.ctx, keanu); !metadata.IsNotFound(err) {
 			t.Fatalf("EnsurePerson %d = %v, want TMDB's 404", i+1, err)
 		}
@@ -1746,7 +1746,7 @@ func TestWorkerEnsurePersonFailuresAreLimitedTo1024(t *testing.T) {
 	e.withMatrix()
 	m := matrix()
 	m.Credits = nil
-	for i := 0; i < limit+1; i++ {
+	for i := range limit + 1 {
 		m.Credits = append(m.Credits, store.Credit{Person: store.Person{TMDBID: int64(100000 + i), Name: fmt.Sprintf("Extra %04d", i)},
 			Kind: store.CreditCast, Character: "Extra", Order: i})
 	}
@@ -1902,7 +1902,7 @@ func settle(t *testing.T, base int) int {
 	t.Helper()
 	http.DefaultTransport.(*http.Transport).CloseIdleConnections()
 	var n int
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		runtime.GC()
 		n = runtime.NumGoroutine()
 		if base > 0 && n <= base {
@@ -1960,7 +1960,7 @@ func backgroundGoroutines() (int, string) {
 		buf = make([]byte, 2*len(buf))
 	}
 	count := 0
-	for _, g := range strings.Split(string(buf), "\n\n") {
+	for g := range strings.SplitSeq(string(buf), "\n\n") {
 		if strings.Contains(g, "(*Worker).background") {
 			count++
 		}

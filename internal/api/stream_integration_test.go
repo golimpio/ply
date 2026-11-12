@@ -150,7 +150,7 @@ func videoSpan(t *testing.T, init, seg []byte) (first, end float64) {
 		t.Fatal(err)
 	}
 	first, end = math.Inf(1), math.Inf(-1)
-	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for l := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		f := strings.Split(strings.TrimRight(l, ","), ",")
 		pts, e1 := strconv.ParseFloat(f[0], 64)
 		dur, e2 := 0.0, error(nil)
@@ -172,7 +172,7 @@ func ffmpegRunning(t *testing.T, path string) []string {
 		t.Fatal(err)
 	}
 	var found []string
-	for _, l := range strings.Split(string(out), "\n") {
+	for l := range strings.SplitSeq(string(out), "\n") {
 		if strings.Contains(l, "ffmpeg") && strings.Contains(l, path) {
 			found = append(found, strings.TrimSpace(l))
 		}

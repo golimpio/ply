@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"math/bits"
+	"slices"
 	"sort"
 )
 
@@ -993,7 +994,7 @@ func crossCheck(c mkvCluster, video uint64, cues []cueEntry) error {
 	if !any {
 		return nil
 	}
-	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	slices.Sort(keys)
 	for _, k := range keys {
 		if i := sort.Search(len(cues), func(i int) bool { return cues[i].time >= k-1 }); i == len(cues) || cues[i].time > k+1 {
 			return fmt.Errorf("matroska: the keyframe at tick %d has no cue", k)

@@ -43,9 +43,9 @@ func TestRootItems(t *testing.T) {
 		}
 		got[i].AddedAt = 0
 	}
-	wantA := RootItem{Path: "/lib/a.mp4", Root: "/lib", ParsedRow: ParsedRow{ID: ids["/lib/a.mp4"], Kind: KindMovie, Title: "A", Year: 1999}}
-	wantB := RootItem{Path: "/lib/Show/S01E02.mkv", Root: "/lib", ParsedRow: ParsedRow{ID: ids["/lib/Show/S01E02.mkv"], Kind: KindEpisode,
-		Title: "Ep", Show: "Show", Season: 1, Episode: 2, NeedsReview: true}}
+	wantA := RootItem{Path: "/lib/a.mp4", Root: "/lib", ID: ids["/lib/a.mp4"], Kind: KindMovie, Title: "A", Year: 1999}
+	wantB := RootItem{Path: "/lib/Show/S01E02.mkv", Root: "/lib", ID: ids["/lib/Show/S01E02.mkv"], Kind: KindEpisode,
+		Title: "Ep", Show: "Show", Season: 1, Episode: 2, NeedsReview: true}
 	if got[0] != wantA || got[1] != wantB {
 		t.Errorf("RootItems(/lib) = %+v, want %+v and %+v", got, wantA, wantB)
 	}

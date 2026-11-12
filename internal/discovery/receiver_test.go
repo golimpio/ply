@@ -42,7 +42,7 @@ func aRecord(host dnsmessage.Name, ip string, ttl uint32) dnsmessage.Resource {
 
 // response is a message that answers a query, with rs as its answers.
 func response(rs ...dnsmessage.Resource) dnsmessage.Message {
-	return dnsmessage.Message{Header: dnsmessage.Header{Response: true}, Answers: rs}
+	return dnsmessage.Message{Response: true, Answers: rs}
 }
 
 // newTestBrowser is a Browser with no socket: observe and sweep are all a test drives.

@@ -73,7 +73,7 @@ func neverCompressed(p string) bool {
 // acceptsGzip reads Accept-Encoding: gzip is there, and its q is not 0.
 func acceptsGzip(r *http.Request) bool {
 	for _, v := range r.Header.Values("Accept-Encoding") {
-		for _, part := range strings.Split(v, ",") {
+		for part := range strings.SplitSeq(v, ",") {
 			name, params, _ := strings.Cut(strings.TrimSpace(part), ";")
 			if !strings.EqualFold(strings.TrimSpace(name), "gzip") {
 				continue

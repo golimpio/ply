@@ -70,7 +70,7 @@ func writeList(w http.ResponseWriter, etag string, v any, degraded bool) {
 func etagMatches(headers []string, etag string) bool {
 	etag = strings.TrimPrefix(etag, "W/")
 	for _, h := range headers {
-		for _, tag := range strings.Split(h, ",") {
+		for tag := range strings.SplitSeq(h, ",") {
 			tag = strings.TrimSpace(tag)
 			if tag == "*" || strings.TrimPrefix(tag, "W/") == etag {
 				return true

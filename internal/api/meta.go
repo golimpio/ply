@@ -53,8 +53,7 @@ func (s *Server) metadataOff(w http.ResponseWriter) bool {
 
 // providerName is whose error err is: TVDB's (a *metadata.TVDBError) or TMDB's.
 func providerName(err error) string {
-	var te *metadata.TVDBError
-	if errors.As(err, &te) {
+	if _, ok := errors.AsType[*metadata.TVDBError](err); ok {
 		return "TVDB"
 	}
 	return "TMDB"
@@ -121,8 +120,8 @@ func (s *Server) handlePerson(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := Person{
-		PersonCard: PersonCard{ID: d.ID, Name: d.Name, Profile: s.imageURL(d.Profile, profileSize), KnownFor: d.KnownFor},
-		Biography:  d.Biography, Birthday: d.Birthday, Deathday: d.Deathday, PlaceOfBirth: d.PlaceOfBirth, IMDbID: d.IMDbID,
+		ID: d.ID, Name: d.Name, Profile: s.imageURL(d.Profile, profileSize), KnownFor: d.KnownFor,
+		Biography: d.Biography, Birthday: d.Birthday, Deathday: d.Deathday, PlaceOfBirth: d.PlaceOfBirth, IMDbID: d.IMDbID,
 		TMDBID: d.TMDBID, TVDBID: d.TVDBID, Credits: []PersonCredit{},
 	}
 	primary := s.ratingsPrimary(r.Context())
@@ -317,7 +316,7 @@ func (s *Server) showMeta(name string, sm store.SeriesMatch, hasRow bool, b stor
 	var year *int
 	var overview string
 	if hasBrief {
-		m.TitleID = ptr(b.ID)
+		m.TitleID = new(b.ID)
 		m.Logo = s.imageURL(b.Logo, logoSize)
 		m.Rating = primaryRating(b.Ratings, primary)
 		m.Certification = b.Certification
@@ -784,7 +783,7 @@ func (s *Server) handleReview(w http.ResponseWriter, r *http.Request) {
 		out[i] = ReviewEntry{Kind: e.Kind, Show: e.Show, Title: e.Title, Year: e.Year, MatchState: e.MatchState,
 			NeedsReview: e.NeedsReview, Score: e.Score}
 		if e.ItemID != 0 {
-			out[i].ItemID = ptr(e.ItemID)
+			out[i].ItemID = new(e.ItemID)
 		}
 		for _, ep := range e.Episodes {
 			out[i].Episodes = append(out[i].Episodes, ReviewEpisode{ID: ep.ID, Path: ep.Path})
@@ -957,15 +956,15 @@ func (s *Server) handlePatchSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	view := s.settingsView(r.Context())
 	if req.TMDBKey != nil && strings.TrimSpace(*req.TMDBKey) != "" {
-		view.TMDBKeyChecked = ptr(!view.MetadataForcedOff)
+		view.TMDBKeyChecked = new(!view.MetadataForcedOff)
 	}
 	// The key, not the PIN: a PIN alone is checked against the key that is there, but it is
 	// the answer about a key that tvdbKeyChecked gives.
 	if req.TVDBKey != nil && strings.TrimSpace(*req.TVDBKey) != "" {
-		view.TVDBKeyChecked = ptr(!view.MetadataForcedOff)
+		view.TVDBKeyChecked = new(!view.MetadataForcedOff)
 	}
 	if req.MDBListKey != nil && strings.TrimSpace(*req.MDBListKey) != "" {
-		view.MDBListKeyChecked = ptr(!view.MetadataForcedOff)
+		view.MDBListKeyChecked = new(!view.MetadataForcedOff)
 	}
 	writeJSON(w, http.StatusOK, view)
 }

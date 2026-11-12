@@ -52,9 +52,7 @@ func TestConcurrentUseKeepsEveryWriteAtomic(t *testing.T) {
 	end := time.Now().Add(700 * time.Millisecond)
 
 	for w := range nWriters {
-		writers.Add(1)
-		go func() {
-			defer writers.Done()
+		writers.Go(func() {
 			for i := 0; time.Now().Before(end); i++ {
 				n := (w + i) % nItems
 				subs := subsA
@@ -90,13 +88,11 @@ func TestConcurrentUseKeepsEveryWriteAtomic(t *testing.T) {
 					}
 				}
 			}
-		}()
+		})
 	}
 
 	for r := range 6 {
-		readers.Add(1)
-		go func() {
-			defer readers.Done()
+		readers.Go(func() {
 			for i := 0; ; i++ {
 				select {
 				case <-stop:
@@ -143,7 +139,7 @@ func TestConcurrentUseKeepsEveryWriteAtomic(t *testing.T) {
 					t.Errorf("Shows: %v", err)
 				}
 			}
-		}()
+		})
 	}
 
 	done := make(chan struct{})

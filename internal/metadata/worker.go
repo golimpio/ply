@@ -576,7 +576,7 @@ func (w *Worker) prefetchLater(in *store.TitleInput) {
 	if w.o.Images == nil {
 		return
 	}
-	refs := &store.TitleInput{Title: store.Title{Poster: in.Poster, Backdrop: in.Backdrop}}
+	refs := &store.TitleInput{Poster: in.Poster, Backdrop: in.Backdrop}
 	w.background(func(ctx context.Context) { w.prefetch(ctx, refs) })
 }
 

@@ -257,11 +257,7 @@ func splitTconst(line []byte) (tconst, rest []byte, ok bool) {
 
 // cutField cuts the text before the first tab from the text after it; ok is false without a tab.
 func cutField(b []byte) (field, rest []byte, ok bool) {
-	tab := bytes.IndexByte(b, '\t')
-	if tab < 0 {
-		return b, nil, false
-	}
-	return b[:tab], b[tab+1:], true
+	return bytes.Cut(b, []byte{'\t'})
 }
 
 // parseRating reads "9.3\t3135040" (and any columns after). \N, a rating outside (0, 10] and a
@@ -331,8 +327,7 @@ func fetchIMDb(ctx context.Context, client *http.Client, src, dest, header strin
 	}
 	resp, err := c.Do(req)
 	if err != nil {
-		var ue *url.Error
-		if errors.As(err, &ue) {
+		if ue, ok := errors.AsType[*url.Error](err); ok {
 			err = ue.Err
 		}
 		return imdbFetch{}, fmt.Errorf("imdb dataset: %w", err)
@@ -385,7 +380,7 @@ func fetchIMDb(ctx context.Context, client *http.Client, src, dest, header strin
 	if err := os.Rename(tmp.Name(), dest); err != nil {
 		return imdbFetch{}, err
 	}
-	return imdbFetch{imdbValidators: imdbValidators{ETag: resp.Header.Get("ETag"), LastModified: resp.Header.Get("Last-Modified")},
+	return imdbFetch{ETag: resp.Header.Get("ETag"), LastModified: resp.Header.Get("Last-Modified"),
 		Bytes: n, Rows: stats.Rows}, nil
 }
 

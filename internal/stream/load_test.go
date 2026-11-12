@@ -89,10 +89,10 @@ func TestPlaybackLoadCounts(t *testing.T) {
 	checkLoad(t, m, "everything running", PlaybackLoad{Sessions: 6, Active: 6, Transcodes: 2, Software: 1, Paths: all})
 
 	// Paused is what the player says; one that says nothing else is not paused.
-	paused, running := ptrTo(true), ptrTo(false)
+	paused, running := new(true), new(false)
 	m.Heartbeat(hw.ID, Beat{Paused: paused})
 	m.Heartbeat(did, Beat{Paused: paused})
-	m.Heartbeat(a.ID, Beat{Position: ptrTo(30.0)})
+	m.Heartbeat(a.ID, Beat{Position: new(30.0)})
 	checkLoad(t, m, "two paused", PlaybackLoad{Sessions: 6, Active: 4, Transcodes: 2, Software: 1, Paths: all})
 	m.Heartbeat(hw.ID, Beat{Paused: running})
 	checkLoad(t, m, "one resumed", PlaybackLoad{Sessions: 6, Active: 5, Transcodes: 2, Software: 1, Paths: all})
@@ -175,8 +175,7 @@ func TestPlaybackLoadWaiting(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make(chan error, 3)
 	request := func(f func() error) {
-		wg.Add(1)
-		go func() { defer wg.Done(); errs <- f() }()
+		wg.Go(func() { errs <- f() })
 	}
 	segment := func() error { _, err := s.OpenSegment(ctx, 0); return err }
 	request(segment)
@@ -317,7 +316,7 @@ func TestLoadHookFiresWhenPlaysStartAndEnd(t *testing.T) {
 	}
 	done()
 	done2()
-	m.Heartbeat(s.ID, Beat{Paused: ptrTo(true)})
+	m.Heartbeat(s.ID, Beat{Paused: new(true)})
 	calls("more requests of a play already counted, and a heartbeat", 3)
 
 	if !m.Delete(s.ID) {

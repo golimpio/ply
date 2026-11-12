@@ -162,7 +162,7 @@ func TestWhereTheReplyGoes(t *testing.T) {
 // has it; a probe of another host for it, or a response about another name, does not.
 func TestClaims(t *testing.T) {
 	z := testZone(t)
-	other := dnsmessage.Message{Header: dnsmessage.Header{Response: true}, Answers: []dnsmessage.Resource{z.srv(hostTTL)}}
+	other := dnsmessage.Message{Response: true, Answers: []dnsmessage.Resource{z.srv(hostTTL)}}
 	if !z.claims(other) {
 		t.Error("a response with our instance's SRV is not a conflict")
 	}
@@ -174,12 +174,12 @@ func TestClaims(t *testing.T) {
 	if z.claims(known) {
 		t.Error("a query listing our SRV as a known answer was taken for a conflict")
 	}
-	bye := dnsmessage.Message{Header: dnsmessage.Header{Response: true}, Answers: []dnsmessage.Resource{z.srv(0)}}
+	bye := dnsmessage.Message{Response: true, Answers: []dnsmessage.Resource{z.srv(0)}}
 	if z.claims(bye) {
 		t.Error("a goodbye for the name (an older instance leaving) was taken for a conflict")
 	}
 	k, _ := newZone("Kitchen", "pc", 8420, nil)
-	if z.claims(dnsmessage.Message{Header: dnsmessage.Header{Response: true}, Answers: []dnsmessage.Resource{k.srv(hostTTL)}}) {
+	if z.claims(dnsmessage.Message{Response: true, Answers: []dnsmessage.Resource{k.srv(hostTTL)}}) {
 		t.Error("a response about another instance was taken for a conflict")
 	}
 	if got := renamed("Living room", 2); got != "Living room (2)" {

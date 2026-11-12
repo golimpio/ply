@@ -584,7 +584,7 @@ func TestWithToken(t *testing.T) {
 		{"a b&c=d", "/api/x?v=1", "/api/x?v=1&token=a+b%26c%3Dd"},
 	}
 	for _, tt := range tests {
-		s := &Server{Options: Options{Token: tt.token}}
+		s := &Server{Token: tt.token}
 		if got := s.withToken(tt.in); got != tt.want {
 			t.Errorf("withToken(%q) with token %q = %q, want %q", tt.in, tt.token, got, tt.want)
 		}

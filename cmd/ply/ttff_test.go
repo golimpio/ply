@@ -505,7 +505,7 @@ func TestFeederSweepQueuesOnlyWhatIsBeingWatched(t *testing.T) {
 // episodes' ids, whatever order the map of shows is walked in, and the show watched later comes first.
 func TestNextEpisodesTiesGoByID(t *testing.T) {
 	ep := func(id int64, show string, n int, p *store.Progress) store.Entry {
-		return store.Entry{Item: store.Item{ID: id, Kind: store.KindEpisode, Show: show, Season: 1, Episode: n}, Progress: p}
+		return store.Entry{ID: id, Kind: store.KindEpisode, Show: show, Season: 1, Episode: n, Progress: p}
 	}
 	seen := func(at int64) *store.Progress {
 		return &store.Progress{PositionSec: 100, DurationSec: 600, UpdatedAt: at}

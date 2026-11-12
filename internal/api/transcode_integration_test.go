@@ -142,7 +142,7 @@ func probeSegment(t *testing.T, init, seg []byte) (streams []streamInfo, first, 
 		t.Fatal(err)
 	}
 	first, end = math.Inf(1), math.Inf(-1)
-	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for l := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		f := strings.Split(strings.TrimRight(l, ","), ",")
 		if len(f) < 3 {
 			continue

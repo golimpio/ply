@@ -54,9 +54,7 @@ func BenchmarkListItemsReaders(b *testing.B) {
 				ds []time.Duration
 			)
 			for range readers {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+				wg.Go(func() {
 					var mine []time.Duration
 					for range max(b.N, 10) {
 						t := time.Now()
@@ -69,7 +67,7 @@ func BenchmarkListItemsReaders(b *testing.B) {
 					mu.Lock()
 					ds = append(ds, mine...)
 					mu.Unlock()
-				}()
+				})
 			}
 			wg.Wait()
 			slices.Sort(ds)
@@ -124,9 +122,7 @@ func browseDuringBulk(b *testing.B, mode string) {
 			listed           atomic.Int64
 		)
 		for range 2 {
-			readers.Add(1)
-			go func() {
-				defer readers.Done()
+			readers.Go(func() {
 				var mine []time.Duration
 				defer func() {
 					mu.Lock()
@@ -149,11 +145,9 @@ func browseDuringBulk(b *testing.B, mode string) {
 					listed.Store(int64(len(es)))
 					mine = append(mine, d)
 				}
-			}()
+			})
 		}
-		writers.Add(1)
-		go func() {
-			defer writers.Done()
+		writers.Go(func() {
 			var mine []time.Duration
 			defer func() {
 				mu.Lock()
@@ -175,7 +169,7 @@ func browseDuringBulk(b *testing.B, mode string) {
 				}
 				mine = append(mine, time.Since(t))
 			}
-		}()
+		})
 
 		time.Sleep(100 * time.Millisecond) // readers and the progress writer are going
 		start := time.Now()
@@ -188,9 +182,7 @@ func browseDuringBulk(b *testing.B, mode string) {
 			var next atomic.Int64
 			var wg sync.WaitGroup
 			for range 4 {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+				wg.Go(func() {
 					for {
 						i := int(next.Add(1)) - 1
 						if i >= victims {
@@ -201,7 +193,7 @@ func browseDuringBulk(b *testing.B, mode string) {
 							return
 						}
 					}
-				}()
+				})
 			}
 			wg.Wait()
 		}

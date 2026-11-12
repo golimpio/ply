@@ -311,7 +311,7 @@ func (n *NFO) element(f *frame, text string) {
 	case "mpaa":
 		n.MPAA = first(n.MPAA, text)
 	case "genre":
-		for _, g := range strings.Split(text, " / ") {
+		for g := range strings.SplitSeq(text, " / ") {
 			n.Genres = addUnique(n.Genres, g)
 		}
 	case "studio":

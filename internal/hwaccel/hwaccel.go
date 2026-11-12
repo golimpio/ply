@@ -256,7 +256,7 @@ func (o *Options) output(ctx context.Context, opts ...string) []byte {
 // "=" in the name column.
 func parseNames(out []byte) map[string]bool {
 	names := map[string]bool{}
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		f := strings.Fields(line)
 		if len(f) < 2 || f[1] == "=" || strings.Trim(f[0], "-") == "" {
 			continue
@@ -269,7 +269,7 @@ func parseNames(out []byte) map[string]bool {
 // parseHWAccels reads "-hwaccels": a header, then one method per line.
 func parseHWAccels(out []byte) map[string]bool {
 	m := map[string]bool{}
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasSuffix(line, ":") {
 			continue
@@ -280,7 +280,7 @@ func parseHWAccels(out []byte) map[string]bool {
 }
 
 func firstLine(out []byte, err error) string {
-	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for l := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		if l = strings.TrimSpace(l); l != "" {
 			return l
 		}
