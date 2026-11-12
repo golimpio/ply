@@ -7,8 +7,6 @@ import (
 	"net"
 	"sort"
 	"strings"
-
-	"github.com/grandcat/zeroconf"
 )
 
 // ServiceType is the DNS-SD service type clients browse for.
@@ -16,20 +14,27 @@ const ServiceType = "_ply._tcp"
 
 // Advertiser is a registered mDNS service.
 type Advertiser struct {
-	srv *zeroconf.Server
+	r *responder
 }
 
 // Advertise registers a _ply._tcp service on port with the TXT records of
 // txtRecords. api and apiMin are the versions of the API the server serves
-// (docs/M11-CLIENTS.md, "Versioning").
+// (docs/M11-CLIENTS.md, "Versioning"). It returns once the socket is open; the
+// name is probed for and announced in the background, and taken as "name (2)"
+// (and so on) while another responder has it.
 func Advertise(name, id string, port, api, apiMin int) (*Advertiser, error) {
-	// A dot would split the instance name into extra labels.
-	instance := strings.ReplaceAll(name, ".", "-")
-	srv, err := zeroconf.Register(instance, ServiceType, "local.", port, txtRecords(name, id, api, apiMin), nil)
+	// A dot would split the instance name into extra labels; and it is one label at most.
+	instance := fitLabel(strings.ReplaceAll(name, ".", "-"), "")
+	z, err := newZone(instance, hostLabel(), port, txtRecords(name, id, api, apiMin))
 	if err != nil {
 		return nil, fmt.Errorf("mdns register: %w", err)
 	}
-	return &Advertiser{srv: srv}, nil
+	r, err := newResponder(z)
+	if err != nil {
+		return nil, fmt.Errorf("mdns register: %w", err)
+	}
+	r.start(instance)
+	return &Advertiser{r: r}, nil
 }
 
 // txtRecords are what a client learns before it connects: the server's id and
@@ -40,10 +45,11 @@ func txtRecords(name, id string, api, apiMin int) []string {
 	return []string{"id=" + id, "v=1", "name=" + name, fmt.Sprintf("api=%d", api), fmt.Sprintf("apiMin=%d", apiMin)}
 }
 
-// Shutdown un-registers the service. It is safe on a nil Advertiser.
+// Shutdown says goodbye and closes the responder. It is safe on a nil Advertiser,
+// and to call twice.
 func (a *Advertiser) Shutdown() {
-	if a != nil && a.srv != nil {
-		a.srv.Shutdown()
+	if a != nil && a.r != nil {
+		a.r.shutdown()
 	}
 }
 

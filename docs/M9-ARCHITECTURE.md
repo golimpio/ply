@@ -466,9 +466,16 @@ The aim is a "now playing" that is always right, including a cast to Apple TV or
     stays installed because svelte2tsx needs its JS API; `npm run check:ts6` is the old check, for comparison.
     The alias owns the `tsc` link: `npx tsc` is TypeScript 7, and `tsserver` (editors) is still 6.
   - Kept: modernc.org/sqlite (pure Go; ncruces/go-sqlite3 runs SQLite as wasm), mattn/go-isatty.
-  - grandcat/zeroconf (no release since 2020) stays until it is replaced by an advertise-only responder on
-    `x/net/dns/dnsmessage` or by `brutella/dnssd`. Not hashicorp/mdns: it has no probing, conflict handling or
-    goodbye packets.
+  - grandcat/zeroconf (no release since 2020) was replaced (2026-11-12) by an advertise-only responder of ply's own
+    on `x/net/dns/dnsmessage` and `x/net/ipv4` (`internal/discovery/mdns.go`): it probes for its name (taking
+    "name (2)" when another responder has it), announces, answers on the network a query came from (with that
+    network's addresses), suppresses known answers, answers legacy unicast queries and says goodbye. IPv4 only, as
+    the URLs are. It shares port 5353 with the system's responder (macOS, Linux, the BSDs; elsewhere it fails while another
+    responder holds the port, and ply runs unadvertised); checked with `dns-sd -B` and `dns-sd -L`. Limits, as with
+    zeroconf: the interfaces are those up at start (a network that comes later is not joined until ply restarts);
+    the host name is not probed (the system's responder owns it); a conflict after the name was announced is not
+    handled; when every name up to "(15)" is taken, nothing is announced. Not
+    hashicorp/mdns: it has no probing, conflict handling or goodbye packets.
 
 ## What to keep
 - The HLS fragment design (`docs/NOTES.md` M3/M4).
