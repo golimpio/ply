@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
-	"syscall"
 )
 
 // StartReaper starts `exe --reap <pgid> <our pid>`: detached (a session of its
@@ -18,7 +17,7 @@ func StartReaper(exe string, pgid int) (*exec.Cmd, error) {
 	cmd := exec.Command(exe, "--reap", strconv.Itoa(pgid), strconv.Itoa(os.Getpid()))
 	cmd.Dir = "/"
 	cmd.Env = []string{}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	OwnSession(cmd)
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}

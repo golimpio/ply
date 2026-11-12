@@ -52,8 +52,6 @@ const (
 	closeConcurrency = 32
 )
 
-var errBackendClosed = errors.New("watch backend closed")
-
 func newKqueue() (backend, error) {
 	b, err := openKqueue()
 	if err != nil {

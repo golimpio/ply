@@ -31,6 +31,9 @@ type event struct {
 // events: anything may have changed.
 var errOverflow = errors.New("file event queue overflowed")
 
+// errBackendClosed is what a backend's add answers once it is closed.
+var errBackendClosed = errors.New("watch backend closed")
+
 // backend delivers change notifications for a set of directories. Its channels
 // are closed after close returns or when it breaks for good.
 type backend interface {

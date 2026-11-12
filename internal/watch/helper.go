@@ -11,6 +11,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"ply/internal/proc"
 )
 
 // The watch helper is `ply --watch`: a process of its own that holds the
@@ -179,7 +181,7 @@ func startHelper() (backend, error) {
 const helperQuit = 5 * time.Second
 
 func startHelperCmd(cmd *exec.Cmd) (backend, error) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // not in the terminal's job, nor sent its Ctrl-C
+	proc.OwnSession(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("watch helper: %w", err)

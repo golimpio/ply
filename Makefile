@@ -33,6 +33,9 @@ ARGS  ?=
 
 # Release builds: `make dist` cross-compiles each of these (no cgo needed).
 PLATFORMS ?= darwin/arm64 darwin/amd64 linux/amd64 linux/arm64
+# `make cross` type-checks these as well (code and tests, with and without the
+# integration tag), so a file that builds on only one of them is seen at once.
+CROSS ?= $(PLATFORMS) windows/amd64
 
 WEB_SRC := $(shell find web/src web/public -type f 2>/dev/null) \
 	web/index.html web/package.json web/vite.config.ts web/svelte.config.js web/tsconfig.json
@@ -136,12 +139,20 @@ e2e-player: build ## Browser checks of the player against a real ply (throwaway 
 	PLY_BIN=$(CURDIR)/$(BIN) sh scripts/e2e-player.sh
 
 .PHONY: check
-check: vet fmt-check check-web ## Static checks: go vet, gofmt, svelte-check
+check: vet cross fmt-check check-web ## Static checks: go vet, cross-compile, gofmt, svelte-check
 
 .PHONY: vet
 vet:
 	$(GO) vet ./...
 	$(GO) vet -tags=integration ./...
+
+.PHONY: cross
+cross: ## Vet every package, tests included, for each of CROSS ("os/arch ...")
+	@set -e; for p in $(CROSS); do \
+		echo "vet $$p"; \
+		CGO_ENABLED=0 GOOS=$${p%/*} GOARCH=$${p#*/} $(GO) vet ./...; \
+		CGO_ENABLED=0 GOOS=$${p%/*} GOARCH=$${p#*/} $(GO) vet -tags=integration ./...; \
+	done
 
 .PHONY: fmt-check
 fmt-check:
