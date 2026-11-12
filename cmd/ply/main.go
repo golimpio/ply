@@ -81,6 +81,10 @@ func run() error {
 	if err := os.MkdirAll(cfg.Data, 0o700); err != nil {
 		return fmt.Errorf("create data dir: %w", err)
 	}
+	urlKey, err := config.URLKey(cfg.Data)
+	if err != nil {
+		return fmt.Errorf("url key: %w", err)
+	}
 	id, err := config.ServerID(cfg.Data)
 	if err != nil {
 		return fmt.Errorf("server id: %w", err)
@@ -380,6 +384,7 @@ func run() error {
 		// A play is routed only to an address this server listens on.
 		ListenAddr: ln.Addr(),
 		TLSHost:    tlsHost,
+		URLKey:     urlKey,
 
 		FlagFolders: flagRoots,
 		SetRoots:    setRoots,

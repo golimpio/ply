@@ -161,7 +161,7 @@ func (s *Server) handleItem(w http.ResponseWriter, r *http.Request) {
 // built-in profile target.
 func (s *Server) writeDetail(w http.ResponseWriter, r *http.Request, e store.Entry, target string) {
 	profile, _ := playback.Builtin(target)
-	pb := s.playbackFor(e, profile, playback.NoOptions, 0)
+	pb := s.playbackFor(r, e, profile, playback.NoOptions, 0)
 	d := s.detail(e, pb)
 	d.Art = s.artOf(e)
 	v := s.newMetaView(r.Context(), []store.Entry{e})
@@ -282,7 +282,7 @@ func (s *Server) handlePlayback(w http.ResponseWriter, r *http.Request) {
 	defer func() { endPlay(started) }()
 
 	d := decide(e, profile, opts)
-	pb := s.playbackFrom(e, d, req.StartSec)
+	pb := s.playbackFrom(r, e, d, req.StartSec)
 	if d.Method == playback.MethodDirect {
 		// Counted from now, with an id its file's URL carries; a full house is said now, with the list.
 		id, ok := s.startDirect(w, r, e, req.StartSec, req.Attempt)
@@ -291,7 +291,7 @@ func (s *Server) handlePlayback(w http.ResponseWriter, r *http.Request) {
 		}
 		if id != "" {
 			pb.SessionID = id
-			pb.URL = s.withToken(fmt.Sprintf("/api/items/%d/file?sid=%s", e.ID, id))
+			pb.URL = s.mediaURL(r, fmt.Sprintf("/api/items/%d/file?sid=%s", e.ID, id))
 		}
 	} else if !s.attachSession(w, r, e, d, profile, req.StartSec, req.SubtitleKey, &pb) {
 		return
@@ -319,9 +319,9 @@ func decide(e store.Entry, p playback.Profile, opts playback.Options) playback.D
 // playbackFor describes how e would be delivered to p. Only direct play has a
 // URL: a remux or transcode needs a session, which only POST /playback
 // creates.
-func (s *Server) playbackFor(e store.Entry, p playback.Profile, opts playback.Options, startSec float64) Playback {
+func (s *Server) playbackFor(r *http.Request, e store.Entry, p playback.Profile, opts playback.Options, startSec float64) Playback {
 	d := decide(e, p, opts)
-	pb := s.playbackFrom(e, d, startSec)
+	pb := s.playbackFrom(r, e, d, startSec)
 	if v, ok := playback.VideoStream(e.Streams); ok && d.Method == playback.MethodTranscode {
 		_, _, reasons := s.videoSpecs(v, d, p)
 		pb.Reasons = append(pb.Reasons, reasons...)
@@ -329,7 +329,7 @@ func (s *Server) playbackFor(e store.Entry, p playback.Profile, opts playback.Op
 	return pb
 }
 
-func (s *Server) playbackFrom(e store.Entry, d playback.Decision, startSec float64) Playback {
+func (s *Server) playbackFrom(r *http.Request, e store.Entry, d playback.Decision, startSec float64) Playback {
 	pb := Playback{
 		Method:      d.Method,
 		VideoAction: d.VideoAction,
@@ -341,7 +341,7 @@ func (s *Server) playbackFrom(e store.Entry, d playback.Decision, startSec float
 	if d.Method == playback.MethodDirect {
 		// The file is served whole: stream time 0 is file time 0, and the client seeks to startSec
 		// itself. startSec stays what was asked for (DESIGN.md: "echoes the requested resume position").
-		pb.URL = s.withToken(fmt.Sprintf("/api/items/%d/file", e.ID))
+		pb.URL = s.mediaURL(r, fmt.Sprintf("/api/items/%d/file", e.ID))
 	}
 	return pb
 }

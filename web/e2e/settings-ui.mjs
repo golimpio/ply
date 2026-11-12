@@ -1,8 +1,9 @@
 // Settings in tabs, in a real browser, against a mocked API: the tabs (click, keyboard, ARIA), the
 // tab in the URL (each tab's deep link, the player's older ?s=playback link, no history entries on
 // a switch), only the open tab's requests, the API keys (a set key is a mask, never in the page; an
-// empty save keeps the key; Remove; Test and its "last tested" line), and Settings and Activity
-// centred on a wide screen. lib/settings-tabs.test.ts pins the parsing; this pins the page.
+// empty save keeps the key; Remove; Test and its "last tested" line), the devices (a code to pair
+// with, Revoke), and Settings and Activity centred on a wide screen. lib/settings-tabs.test.ts pins
+// the parsing; this pins the page.
 //
 // Self-contained: serves web/dist (build it first: `npm run build`; PLY_E2E_DIST picks another
 // directory) and answers every /api/ request with page.route. Needs Google Chrome.
@@ -79,6 +80,15 @@ function view(st) {
 
 const snapshot = jobsSnapshot();
 
+/** The devices of Settings → Devices: this browser, never paired, and a paired iPad. */
+const devicesView = () => {
+  const seen = new Date(Date.now() - 5 * 60_000).toISOString();
+  return [
+    { id: 'browser-0001', name: 'Chrome', kind: 'web', app: 'ply-web', version: '', firstSeen: seen, lastSeen: seen, paired: false },
+    { id: 'ipad-000001', name: 'Kitchen iPad', kind: 'ipados', app: 'ply', version: '1.2', firstSeen: seen, lastSeen: seen, paired: true, pairedAt: seen },
+  ];
+};
+
 /** The schedules of Settings → Schedules: one of every kind, one of them missing its key. */
 const schedulesView = () => {
   const tomorrow = new Date();
@@ -113,7 +123,8 @@ const schedulesView = () => {
 async function open(browser, opts = {}) {
   const context = await browser.newContext({ viewport: { width: opts.width ?? 1280, height: 900 }, serviceWorkers: 'block' });
   const page = await context.newPage();
-  const st = { keys: opts.keys ?? { tmdb: TMDB_KEY, tvdb: TVDB_KEY, mdblist: '' }, tested: { tmdb: { at: now() - 300, ok: true } }, schedules: opts.schedules ?? schedulesView() };
+  const st = { keys: opts.keys ?? { tmdb: TMDB_KEY, tvdb: TVDB_KEY, mdblist: '' }, tested: { tmdb: { at: now() - 300, ok: true } }, schedules: opts.schedules ?? schedulesView(),
+    devices: opts.devices ?? devicesView(), codes: 0 };
   const calls = [];
   const gets = [];
   const errors = [];
@@ -154,6 +165,19 @@ async function open(browser, opts = {}) {
       const s = st.schedules.find((x) => x.task === task);
       if (!s) return json(route, { error: 'no such scheduled task' }, 404);
       if (s.blocked) return json(route, { error: s.blocked }, 409);
+      return route.fulfill({ status: 204 });
+    }
+    if (p === '/api/devices' && method === 'GET') return json(route, st.devices);
+    if (p === '/api/pairing' && method === 'POST') {
+      st.codes++;
+      // expiresAt by a server clock an hour behind the page's: the page counts from expiresIn.
+      return json(route, { code: st.codes === 1 ? '042137' : '519006', expiresAt: new Date(Date.now() - 3_300_000).toISOString(), expiresIn: 300 });
+    }
+    if (method === 'DELETE' && p.startsWith('/api/devices/') && p.endsWith('/token')) {
+      const d = st.devices.find((x) => x.id === decodeURIComponent(p.slice('/api/devices/'.length, -'/token'.length)));
+      if (!d?.paired) return json(route, { error: 'no paired device' }, 404);
+      d.paired = false;
+      delete d.pairedAt;
       return route.fulfill({ status: 204 });
     }
     if (p === '/api/events') return route.fulfill(eventStream({ jobs: snapshot, retry: 300 }));
@@ -202,11 +226,54 @@ const TABS = {
   details: { heading: '#meta-h', own: ['/api/settings', '/api/metadata/status'] },
   ratings: { heading: '#ratings-h', own: ['/api/settings'] },
   playback: { heading: '#playback-h', own: ['/api/settings'] },
+  devices: { heading: '#devices-h', own: ['/api/devices'] },
   keys: { heading: '#keys-h', own: ['/api/settings', '/api/metadata/status'] },
 };
-const TAB_PATHS = ['/api/settings', '/api/metadata/status', '/api/metadata/review', '/api/folders', '/api/schedules'];
+const TAB_PATHS = ['/api/settings', '/api/metadata/status', '/api/metadata/review', '/api/folders', '/api/schedules', '/api/devices'];
 
 const scenarios = {
+  // Mutants caught: the code not shown; Revoke left on a device that is not paired; the list not read
+  // again after a revoke (the badge stays); the countdown on the page's clock; a spent code kept.
+  async 'Devices: a code to pair with, and Revoke'(browser) {
+    const { context, page, st, calls, errors } = await open(browser);
+    await page.goto(`${base}/#/settings?tab=devices`);
+    await page.locator(TABS.devices.heading).waitFor();
+    const rows = page.locator('ul[aria-label="Devices"] > li');
+    await rows.first().waitFor();
+    check('both devices listed', (await rows.count()) === 2);
+    const ipad = rows.filter({ hasText: 'Kitchen iPad' });
+    check('the iPad is paired', (await text(ipad)).includes('Paired') && (await text(ipad)).includes('iPad · ply 1.2 · seen 5 minutes ago'), await text(ipad));
+    check('Revoke on the paired device alone', (await ipad.getByRole('button', { name: 'Revoke' }).count()) === 1 &&
+      (await rows.filter({ hasText: 'Chrome' }).getByRole('button').count()) === 0);
+
+    // Revoke, with no code shown (the list is then not read again on a timer).
+    await ipad.getByRole('button', { name: 'Revoke' }).click();
+    check('Revoke asks the server', await until(async () => calls.some((c) => c.method === 'DELETE' && c.path === '/api/devices/ipad-000001/token')));
+    check('the iPad is no longer paired', await until(async () => !(await text(ipad)).includes('Paired')), await text(ipad));
+    check('and says so', (await text(page.locator('[role="status"]').last())).includes('Kitchen iPad can no longer use ply'));
+
+    await page.getByRole('button', { name: 'Show a code' }).click();
+    const code = page.locator('.code');
+    check('the code is shown', (await text(code)) === '042137', await text(code));
+    check('with what it has left', /for [45]:\d\d\./.test(await text(page.locator('[aria-labelledby="pair-h"]'))), await text(page.locator('[aria-labelledby="pair-h"]')));
+    await page.getByRole('button', { name: 'New code' }).click();
+    check('a new code replaces it', await until(async () => (await text(code)) === '519006'), await text(code));
+
+    // A device pairs while the code is shown: the list is read again, and it appears.
+    st.devices.push({ id: 'tv-0000001', name: 'Living room', kind: 'tvos', app: 'ply', version: '1.0', firstSeen: new Date().toISOString(), lastSeen: new Date().toISOString(), paired: true, pairedAt: new Date().toISOString() });
+    check('a device paired meanwhile appears', await until(async () => (await rows.count()) === 3, 6000));
+    check('and the code it spent goes', await until(async () => (await code.count()) === 0), await text(code));
+    check('saying who paired', (await text(page.locator('[role="status"]').last())).includes('Living room is paired.'));
+
+    // A device paired before pairs again with a new code: that spends it too.
+    await page.getByRole('button', { name: 'Show a code' }).click();
+    check('a new code is shown', await until(async () => (await code.count()) === 1));
+    st.devices.find((d) => d.id === 'tv-0000001').pairedAt = new Date(Date.now() + 1000).toISOString();
+    check('a device paired again spends it as well', await until(async () => (await code.count()) === 0, 6000), await text(code));
+    check('no page error', errors.length === 0, errors.join('; '));
+    await context.close();
+  },
+
   // Mutant caught: aria-selected or the roving tabindex left on the first tab; aria-controls
   // pointing at a panel that isn't there.
   async 'Tabs: roles, the selected tab, and its panel'(browser) {
@@ -214,9 +281,9 @@ const scenarios = {
     await page.goto(`${base}/#/settings?tab=ratings`);
     await page.locator(TABS.ratings.heading).waitFor();
     const tabs = page.locator('[role="tablist"] [role="tab"]');
-    check('a tablist named Settings, with six tabs', (await page.locator('[role="tablist"][aria-label="Settings"]').count()) === 1 && (await tabs.count()) === 6);
+    check('a tablist named Settings, with seven tabs', (await page.locator('[role="tablist"][aria-label="Settings"]').count()) === 1 && (await tabs.count()) === 7);
     const names = await tabs.allTextContents();
-    check('the tabs, in order', names.map((n) => n.trim()).join('|') === 'Library|Schedules|Details|Ratings|Playback|API keys', names.join('|'));
+    check('the tabs, in order', names.map((n) => n.trim()).join('|') === 'Library|Schedules|Details|Ratings|Playback|Devices|API keys', names.join('|'));
     const state = await tabs.evaluateAll((ts) => ts.map((t) => [t.id, t.getAttribute('aria-selected'), t.getAttribute('tabindex'), t.getAttribute('aria-controls')]));
     const sel = state.filter(([, s]) => s === 'true');
     check('one tab selected: Ratings', sel.length === 1 && sel[0][0] === 'settings-tab-ratings', JSON.stringify(state));

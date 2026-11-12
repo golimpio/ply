@@ -353,19 +353,19 @@ func (s *Server) imageURL(ref, size string) string {
 	switch {
 	case strings.HasPrefix(ref, "tmdb:/"):
 		file := strings.TrimPrefix(ref, "tmdb:/")
-		return s.withToken(fmt.Sprintf("/api/images/tmdb/%s/%s", size, file))
+		return s.pictureURL(fmt.Sprintf("/api/images/tmdb/%s/%s", size, file))
 	case strings.HasPrefix(ref, "tvdb:/"):
 		p, ok := metadata.TVDBFile(ref)
 		if !ok {
 			return ""
 		}
-		return s.withToken(fmt.Sprintf("/api/images/tvdb/%s%s", size, p))
+		return s.pictureURL(fmt.Sprintf("/api/images/tvdb/%s%s", size, p))
 	case strings.HasPrefix(ref, "local:"):
 		parts := strings.Split(ref, ":")
 		if len(parts) != 4 {
 			return ""
 		}
-		return s.withToken(fmt.Sprintf("/api/images/local/%s/%s/%s", parts[1], parts[2], parts[3]))
+		return s.pictureURL(fmt.Sprintf("/api/images/local/%s/%s/%s", parts[1], parts[2], parts[3]))
 	}
 	return ""
 }

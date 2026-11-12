@@ -45,7 +45,7 @@
   {:else if tasks.length === 0}
     <p class="muted">This server has no scheduled tasks.</p>
   {:else}
-    <ul class="schedules">
+    <ul class="settings-list">
       {#each tasks as task (task.task)}
         <ScheduleCard {task} {onkeys} onupdate={replace} />
       {/each}
@@ -53,12 +53,3 @@
   {/if}
 </section>
 
-<style>
-  .schedules {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: grid;
-    gap: 0.75rem;
-  }
-</style>

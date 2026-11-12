@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"os"
@@ -233,7 +234,7 @@ func TestServerID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !validID(id) {
+	if !hexOf(id, 16) {
 		t.Fatalf("id %q is not 16 hex bytes", id)
 	}
 	again, err := ServerID(dir)
@@ -246,8 +247,30 @@ func TestServerID(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixed, err := ServerID(dir)
-	if err != nil || !validID(fixed) || fixed == "garbage" {
+	if err != nil || !hexOf(fixed, 16) || fixed == "garbage" {
 		t.Errorf("after corruption = %q, %v", fixed, err)
+	}
+}
+
+func hexOf(s string, n int) bool {
+	b, err := hex.DecodeString(s)
+	return err == nil && len(b) == n
+}
+
+// The URL tokens' secret is 32 random bytes, kept from one start to the next.
+func TestURLKey(t *testing.T) {
+	dir := t.TempDir()
+	key, err := URLKey(dir)
+	if err != nil || len(key) != 32 {
+		t.Fatalf("key = %x, %v; want 32 bytes", key, err)
+	}
+	again, err := URLKey(dir)
+	if err != nil || !bytes.Equal(again, key) {
+		t.Errorf("second call = %x, %v; want the persisted %x", again, err, key)
+	}
+	id, _ := ServerID(dir)
+	if strings.Contains(hex.EncodeToString(key), id) {
+		t.Error("the key is the server id")
 	}
 }
 

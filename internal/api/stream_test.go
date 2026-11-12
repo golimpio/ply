@@ -91,9 +91,11 @@ func TestRemuxCreatesSession(t *testing.T) {
 			}
 			want := "/api/sessions/" + pb.SessionID + "/index.m3u8"
 			if token != "" {
-				want += "?token=" + token
+				urlTokenOf(t, pb.URL, token)
+			} else if pb.URL != want {
+				t.Errorf("url = %q, want %q with nothing added: no token is configured", pb.URL, want)
 			}
-			if pb.URL != want {
+			if withoutToken(pb.URL) != want {
 				t.Errorf("url = %q, want %q", pb.URL, want)
 			}
 			if m.Count() != 1 {
@@ -132,7 +134,11 @@ func TestSessionPlaylist(t *testing.T) {
 
 			suffix := ""
 			if token != "" {
-				suffix = "?token=s3+cret%26x"
+				suffix = tokenSuffixIn(t, body)
+				if strings.Contains(body, "s3+cret") {
+					t.Error("the playlist carries the shared token")
+				}
+				wantStatus(t, e.get(pb.URL), 200) // the playlist by its own URL token, as a player asks
 			}
 			if !strings.Contains(body, `#EXT-X-MAP:URI="init.mp4`+suffix+`"`) {
 				t.Errorf("init URI wrong (suffix %q) in:\n%.300s", suffix, body)
@@ -572,21 +578,4 @@ func TestItemDetailDescribesTranscode(t *testing.T) {
 		}
 	}
 	wantJSONError(t, e.get(fmt.Sprintf("/api/items/%d?target=nope", e.mkv)), 400)
-}
-
-func TestWithToken(t *testing.T) {
-	tests := []struct{ token, in, want string }{
-		{"", "/api/x", "/api/x"},
-		{"", "/api/x?v=1", "/api/x?v=1"},
-		{"t", "/api/x", "/api/x?token=t"},
-		{"t", "/api/x?v=123", "/api/x?v=123&token=t"},
-		{"a b&c=d", "/api/x", "/api/x?token=a+b%26c%3Dd"},
-		{"a b&c=d", "/api/x?v=1", "/api/x?v=1&token=a+b%26c%3Dd"},
-	}
-	for _, tt := range tests {
-		s := &Server{Token: tt.token}
-		if got := s.withToken(tt.in); got != tt.want {
-			t.Errorf("withToken(%q) with token %q = %q, want %q", tt.in, tt.token, got, tt.want)
-		}
-	}
 }

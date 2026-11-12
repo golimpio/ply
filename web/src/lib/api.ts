@@ -885,6 +885,24 @@ export interface DeviceRef {
   kind?: string;
 }
 
+/** A device as GET /api/devices lists it (docs/M11-CLIENTS.md, "Devices" and "Pairing"). */
+export interface Device extends Required<DeviceRef> {
+  app: string;
+  version: string;
+  firstSeen: string;
+  lastSeen: string;
+  /** It has a token of its own, since pairedAt. */
+  paired: boolean;
+  pairedAt?: string;
+}
+
+/** A code a device may pair with, once, until expiresAt: expiresIn seconds from the answer. */
+export interface PairingCode {
+  code: string;
+  expiresAt: string;
+  expiresIn: number;
+}
+
 /** The tiers with Go's nulls and missing fields filled in. */
 export function normaliseTier(t: Partial<TierState> | null | undefined): TierState {
   const p: Partial<PlaybackLoad> = t?.playback ?? {};
@@ -1216,6 +1234,15 @@ export const api = {
 
   /** Say who this browser is (docs/M11-CLIENTS.md, "Devices"): the server names it after its User-Agent. */
   registerDevice: () => request<void>('PUT', `/api/devices/${encodeURIComponent(deviceId())}`, { kind: 'web', app: 'ply-web' }),
+
+  /** The household's devices, the most recently seen first. */
+  async devices(): Promise<Device[]> {
+    return (await request<Device[] | null>('GET', '/api/devices')) ?? [];
+  },
+  /** A new code to pair a device with (the owner's): it replaces any shown before. */
+  pairingCode: () => request<PairingCode>('POST', '/api/pairing'),
+  /** Take a device's token away (the owner's): it and the URLs made for it stop at once. */
+  revokeDevice: (id: string) => request<void>('DELETE', `/api/devices/${encodeURIComponent(id)}/token`),
 
   /**
    * The AirPlay targets found on the LAN (docs/AIRPLAY.md), with the base URL of this server on each

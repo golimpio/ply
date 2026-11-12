@@ -35,6 +35,23 @@ func TestServerIDMakesAPrivateDir(t *testing.T) {
 	}
 }
 
+// The URL tokens' secret is the owner's to read, like the database.
+func TestURLKeyIsPrivate(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := URLKey(dir); err != nil {
+		t.Fatal(err)
+	}
+	if m := dirMode(t, filepath.Join(dir, "url-key")); m != 0o600 {
+		t.Errorf("url-key mode = %v, want 0600", m)
+	}
+	if _, err := ServerID(dir); err != nil {
+		t.Fatal(err)
+	}
+	if m := dirMode(t, filepath.Join(dir, "server-id")); m != 0o644 { // control: the id is not secret
+		t.Errorf("server-id mode = %v, want 0644", m)
+	}
+}
+
 func dirMode(t *testing.T, path string) os.FileMode {
 	t.Helper()
 	fi, err := os.Stat(path)

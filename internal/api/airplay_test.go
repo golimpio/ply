@@ -65,19 +65,23 @@ func TestAirPlayTextSubtitleRendition(t *testing.T) {
 	if pb.Method != "transcode" || !strings.Contains(pb.URL, "master.m3u8") {
 		t.Fatalf("playback: %+v", pb)
 	}
-	master := e.get(pb.URL)
+	urlTokenOf(t, pb.URL, token)
+	master := e.get(pb.URL) // its URL token alone, as a TV sends it
 	wantStatus(t, master, 200)
+	suffix := tokenSuffixIn(t, master.Body.String())
 	for _, want := range []string{
 		`TYPE=SUBTITLES,GROUP-ID="subs",NAME="Portuguese"`,
 		`DEFAULT=YES,AUTOSELECT=YES,LANGUAGE="pt"`,
 		`CODECS="avc1.640028,mp4a.40.2",RESOLUTION=640x360`, "#EXT-X-VERSION:4",
-		`SUBTITLES="subs"`, "subtitles.m3u8?token=s3+cret%26x", "index.m3u8?token=s3+cret%26x",
+		`SUBTITLES="subs"`, "subtitles.m3u8" + suffix, "index.m3u8" + suffix,
 	} {
 		if !strings.Contains(master.Body.String(), want) {
 			t.Errorf("master lacks %q: %s", want, master.Body.String())
 		}
 	}
-	suffix := "?token=" + url.QueryEscape(token)
+	if strings.Contains(master.Body.String(), url.QueryEscape(token)) {
+		t.Errorf("the master playlist carries the shared token: %s", master.Body.String())
+	}
 	playlist := e.get(root + "subtitles.m3u8" + suffix)
 	wantStatus(t, playlist, 200)
 	for _, want := range []string{"#EXT-X-TARGETDURATION:2400", "#EXTINF:2400.000,", "#EXT-X-ENDLIST", "subtitles.vtt" + suffix} {

@@ -79,14 +79,15 @@ func FuzzSessionFileName(f *testing.F) {
 			}
 			return // what the session makes of it is for the session tests
 		}
-		if rec.Code != http.StatusNotFound && !redirected(rec) {
+		if rec.Code != http.StatusNotFound && rec.Code != http.StatusBadRequest && !redirected(rec) {
 			t.Fatalf("name %q was let through: %d %.200s", name, rec.Code, rec.Body)
 		}
 	})
 }
 
 // redirected: the router sends a client that asked for a dot segment to the
-// cleaned path (a 3xx), which then is its own request.
+// cleaned path (a 3xx), which then is its own request. (A dot segment that comes
+// to an /api path is a 400 before that: requireAuth.)
 func redirected(rec *httptest.ResponseRecorder) bool { return rec.Code/100 == 3 }
 
 // served is the whole grammar of names under a session (index.m3u8 has its

@@ -392,6 +392,14 @@ code {
 .settings-panel p {
   margin: 0;
 }
+/* A list of settings panels (the schedules, the devices). */
+.settings-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--settings-list-gap);
+}
 .settings-panel h3 {
   margin: 0 0 0.15rem;
   font-size: var(--fs-base);

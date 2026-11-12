@@ -3,8 +3,6 @@ package api
 
 import (
 	"context"
-	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -136,6 +134,10 @@ type Options struct {
 	// "HTTPS"); empty for plain HTTP. The URLs a receiver fetches then name it, on the network
 	// it resolves to.
 	TLSHost string
+
+	// URLKey is the server's secret for the URL tokens (docs/M11-CLIENTS.md, "URL tokens"), kept
+	// in the data directory so that the URLs it made outlive a restart. nil makes one for this run.
+	URLKey []byte
 }
 
 // Server is the HTTP handler for the whole application.
@@ -155,6 +157,12 @@ type Server struct {
 	localIPFor func(net.IP) (net.IP, bool)
 	// hostIPs are the addresses TLSHost resolves to.
 	hostIPs *hostCache
+
+	// Pairing (docs/M11-CLIENTS.md, "Auth"): the paired devices' tokens, the code a device may
+	// pair with now, and the key of the URL tokens.
+	pairs   pairedTokens
+	pairing pairingCode
+	urls    *urlSigner
 }
 
 // New builds the server. The returned value is an http.Handler.
@@ -162,7 +170,8 @@ func New(o Options) *Server {
 	if o.Logger == nil {
 		o.Logger = slog.New(slog.DiscardHandler)
 	}
-	s := &Server{Options: o, subsGrace: time.Second, localIPFor: discovery.LocalIPFor, hostIPs: &hostCache{resolve: resolveHost}}
+	s := &Server{Options: o, subsGrace: time.Second, localIPFor: discovery.LocalIPFor, hostIPs: &hostCache{resolve: resolveHost},
+		urls: newURLSigner(o.URLKey, o.Token)}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/info", s.handleInfo)
@@ -199,6 +208,9 @@ func New(o Options) *Server {
 	mux.HandleFunc("POST /api/sessions/{sid}/heartbeat", s.handleSessionHeartbeat)
 	mux.HandleFunc("GET /api/devices", s.handleDevices)
 	mux.HandleFunc("PUT /api/devices/{id}", s.handleDevicePut)
+	mux.HandleFunc("DELETE /api/devices/{id}/token", s.handleDeviceRevoke)
+	mux.HandleFunc("POST /api/pairing", s.handlePairingCode)
+	mux.HandleFunc("POST /api/pair", s.handlePair)
 	mux.HandleFunc("GET /api/receivers", s.handleReceivers)
 	mux.HandleFunc("GET /api/people", s.handlePeople)
 	mux.HandleFunc("GET /api/people/{id}", s.handlePerson)
@@ -245,7 +257,7 @@ func New(o Options) *Server {
 	if o.Governor != nil {
 		inner = o.Governor.Track(isBrowse)(inner) // browsing holds the background queue
 	}
-	s.handler = middleware(inner, o.Token, o.AllowedHosts)
+	s.handler = s.middleware(inner)
 	return s
 }
 
@@ -255,13 +267,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.handler.S
 // middleware applies CORS to everything but the private endpoints, answers only
 // names this server is known by, keeps other sites from changing anything,
 // keeps them from touching the private endpoints at all and, when token is set,
-// requires it for /api/* except /api/info.
+// requires a credential for /api/* except /api/info and /api/pair (requireAuth).
 //
 // No layer of it wraps the ResponseWriter, so http.ServeContent still sees the
 // server's own writer (io.ReaderFrom for sendfile, http.Flusher). The one layer
 // that does, compress, is inside it and never wraps the media (see compress).
-func middleware(next http.Handler, token string, hosts []string) http.Handler {
-	return cors(knownHosts(sameOriginWrites(sameSiteOnly(requireToken(next, token)), token), hosts))
+func (s *Server) middleware(next http.Handler) http.Handler {
+	return cors(knownHosts(sameOriginWrites(sameSiteOnly(s.requireAuth(next)), s.Token), s.AllowedHosts))
 }
 
 // private reports whether the path is one of the endpoints that show or change
@@ -276,7 +288,9 @@ func middleware(next http.Handler, token string, hosts []string) http.Handler {
 // Cast and AirPlay receivers fetch them from another origin.
 func private(urlPath string) bool {
 	p := path.Clean(urlPath)
-	if p == "/api/settings/test" { // it makes the server log in to a provider with a key the page cannot see
+	// /api/settings/test makes the server log in to a provider with a key the page cannot see; the
+	// pairing pair: a code for the owner's page, a token for a native app.
+	if p == "/api/settings/test" || p == "/api/pair" || p == "/api/pairing" {
 		return true
 	}
 	for _, root := range []string{"/api/folders", "/api/fs", "/api/jobs", "/api/queue", "/api/schedules", "/api/events", "/api/devices", "/api/receivers"} {
@@ -312,7 +326,7 @@ func crossSite(r *http.Request) bool {
 // it from causing it, and from trying a token it found.
 func sameSiteOnly(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if private(r.URL.Path) {
+		if private(routedPathOf(r)) {
 			if strings.EqualFold(r.Header.Get("Sec-Fetch-Site"), "cross-site") {
 				writeError(w, http.StatusForbidden, "cross-site request refused (Sec-Fetch-Site: cross-site)")
 				return
@@ -416,7 +430,7 @@ func sameOrigin(origin string, r *http.Request) bool {
 // use them.
 func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if private(r.URL.Path) {
+		if private(routedPathOf(r)) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -434,50 +448,36 @@ func cors(next http.Handler) http.Handler {
 	})
 }
 
-func requireToken(next http.Handler, token string) http.Handler {
-	if token == "" {
-		return next
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if needsAuth(r.URL.Path) && !validToken(r, token) {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+// The relative URLs the server builds carry a URL token when a token is configured
+// (docs/M11-CLIENTS.md, "URL tokens"): what plays is made for r's device; a picture or a subtitle
+// track, part of what describes an item and the same for every device, for none.
+
+// mediaURL is u with a token for r's device, good for u's path.
+func (s *Server) mediaURL(r *http.Request, u string) string {
+	return s.signedURL(u, pathScope, principalOf(r).device)
 }
 
-func needsAuth(path string) bool {
-	return (path == "/api" || strings.HasPrefix(path, "/api/")) && path != "/api/info"
+// playlistURL is u with a token for r's device, good for the playlist's directory: its segments
+// and the playlists it names.
+func (s *Server) playlistURL(r *http.Request, u string) string {
+	return s.signedURL(u, dirScope, principalOf(r).device)
 }
 
-// validToken accepts "Authorization: Bearer <t>" or "?token=<t>".
-func validToken(r *http.Request, want string) bool {
-	candidates := []string{r.URL.Query().Get("token")}
-	if h := r.Header.Get("Authorization"); len(h) > 7 && strings.EqualFold(h[:7], "bearer ") {
-		candidates = append(candidates, strings.TrimSpace(h[7:]))
-	}
-	// Hash first so the comparison time does not depend on the length.
-	w := sha256.Sum256([]byte(want))
-	ok := 0
-	for _, c := range candidates {
-		g := sha256.Sum256([]byte(c))
-		ok |= subtle.ConstantTimeCompare(g[:], w[:])
-	}
-	return ok == 1
-}
+// pictureURL is u with a token for no device, good for u's path.
+func (s *Server) pictureURL(u string) string { return s.signedURL(u, pathScope, "") }
 
-// withToken adds the token to a relative URL when one is configured: as the
-// first query parameter, or after the existing ones ("...?v=1&token=...").
-func (s *Server) withToken(u string) string {
+// signedURL adds the token as the first query parameter, or after the existing ones
+// ("...?v=1&token=...").
+func (s *Server) signedURL(u string, scope func(string) string, device string) string {
 	if s.Token == "" {
 		return u
 	}
+	p, _, hasQuery := strings.Cut(u, "?")
 	sep := "?"
-	if strings.Contains(u, "?") {
+	if hasQuery {
 		sep = "&"
 	}
-	return u + sep + "token=" + url.QueryEscape(s.Token)
+	return u + sep + "token=" + url.QueryEscape(s.urls.sign(scope(p), device))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

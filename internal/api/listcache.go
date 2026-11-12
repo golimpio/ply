@@ -17,8 +17,10 @@ import (
 // The generation is the store's (Store.Generation): it changes after every write a list can
 // show, and starts at a new number on every run. The colours are the artwork generator's
 // (art.Generator.ColourVersion), because the list carries the colour of each picture and that
-// is not in the database; "n" when the server has no artwork. The ETag does not depend on the
-// rest of the query: the browser keeps the validator of each URL apart.
+// is not in the database; "n" when the server has no artwork. With a token, the expiry of the URL
+// tokens the list's pictures carry comes last (".t<expiry>"): it changes once a day, and a list
+// kept from before must not be said to be current with tokens that will run out. The ETag does not
+// depend on the rest of the query: the browser keeps the validator of each URL apart.
 
 // libraryETag is the validator of a list asked for now; key names the shape of the answer when it is
 // not the full list ("card", "episode-card") and carries the limit when the list was cut ("limit20",
@@ -34,6 +36,9 @@ func (s *Server) libraryETag(projection string) string {
 	tag := strconv.FormatUint(s.Store.Generation(), 36) + "." + colours
 	if projection != "" {
 		tag += "." + projection
+	}
+	if s.Token != "" {
+		tag += ".t" + strconv.FormatInt(s.urls.expires(), 36)
 	}
 	return `"` + tag + `"`
 }

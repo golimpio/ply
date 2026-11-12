@@ -58,7 +58,7 @@ func (s *Server) handleAirPlayMaster(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, err := sess.Playlist(r.Context(), s.uriSuffix()); err != nil {
+	if _, err := sess.Playlist(r.Context(), s.uriSuffix(r)); err != nil {
 		s.streamError(w, r, err, "playlist")
 		return
 	}
@@ -85,7 +85,7 @@ func (s *Server) handleAirPlayMaster(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	w.Header().Set("Cache-Control", "no-cache")
 	fmt.Fprintf(w, "#EXTM3U\n#EXT-X-VERSION:%d\n#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=\"%s\",DEFAULT=YES,AUTOSELECT=YES,LANGUAGE=\"%s\",URI=\"subtitles.m3u8%s\"\n#EXT-X-STREAM-INF:BANDWIDTH=%d,CODECS=%q,RESOLUTION=%dx%d,SUBTITLES=\"subs\"\nindex.m3u8%s\n",
-		version, name, lang.String(), s.uriSuffix(), max(e.Bitrate, 12000000), info.Codecs, info.Width, info.Height, s.uriSuffix())
+		version, name, lang.String(), s.uriSuffix(r), max(e.Bitrate, 12000000), info.Codecs, info.Width, info.Height, s.uriSuffix(r))
 }
 
 func (s *Server) handleAirPlaySubtitles(w http.ResponseWriter, r *http.Request) {
@@ -93,7 +93,7 @@ func (s *Server) handleAirPlaySubtitles(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	if _, err := sess.Playlist(r.Context(), s.uriSuffix()); err != nil {
+	if _, err := sess.Playlist(r.Context(), s.uriSuffix(r)); err != nil {
 		s.streamError(w, r, err, "playlist")
 		return
 	}
@@ -107,7 +107,7 @@ func (s *Server) handleAirPlaySubtitles(w http.ResponseWriter, r *http.Request) 
 	// A single WebVTT segment covers the complete file timeline, including
 	// resumed playback. Cue timestamps are never rebased to the seek position.
 	fmt.Fprintf(w, "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:%.0f\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXTINF:%.3f,\nsubtitles.vtt%s\n#EXT-X-ENDLIST\n",
-		math.Ceil(duration), duration, s.uriSuffix())
+		math.Ceil(duration), duration, s.uriSuffix(r))
 }
 
 func (s *Server) handleAirPlayVTT(w http.ResponseWriter, r *http.Request) {

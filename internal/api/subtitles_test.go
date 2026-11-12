@@ -118,15 +118,14 @@ func TestSubtitleURLsCarryTheToken(t *testing.T) {
 	auth := map[string]string{"Authorization": "Bearer s3cret"}
 
 	d := e.detailOf(e.mkv, auth)
-	want := fmt.Sprintf("/api/items/%d/subtitles/3.vtt?token=s3cret", e.mkv)
-	if got := d.Subtitles[1].URL; got != want {
-		t.Errorf("embedded url = %q, want %q", got, want)
+	want := d.Subtitles[1].URL
+	if base := fmt.Sprintf("/api/items/%d/subtitles/3.vtt", e.mkv); withoutToken(want) != base {
+		t.Errorf("embedded url = %q, want %q with a URL token", want, base)
 	}
+	urlTokenOf(t, want, "s3cret")
 	d = e.detailOf(e.mp4, auth)
 	for _, s := range d.Subtitles {
-		if !strings.HasSuffix(s.URL, "?token=s3cret") {
-			t.Errorf("sidecar %s url = %q has no token", s.Key, s.URL)
-		}
+		urlTokenOf(t, s.URL, "s3cret")
 	}
 
 	// The url works as it is (a <track> cannot send headers), and not without the token.
@@ -135,7 +134,7 @@ func TestSubtitleURLsCarryTheToken(t *testing.T) {
 	if !strings.HasPrefix(rec.Body.String(), "WEBVTT") {
 		t.Errorf("body = %q", rec.Body.String())
 	}
-	wantJSONError(t, e.get(strings.TrimSuffix(want, "?token=s3cret")), 401)
+	wantJSONError(t, e.get(withoutToken(want)), 401)
 }
 
 func TestSubtitleServing(t *testing.T) {

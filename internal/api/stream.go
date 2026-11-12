@@ -6,7 +6,6 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -85,7 +84,7 @@ func (s *Server) attachSession(w http.ResponseWriter, r *http.Request, e store.E
 	if subtitleKey != "" {
 		playlist = "master.m3u8"
 	}
-	pb.URL = s.withToken("/api/sessions/" + sess.ID + "/" + playlist)
+	pb.URL = s.playlistURL(r, "/api/sessions/"+sess.ID+"/"+playlist)
 	pb.SessionID = sess.ID
 	pb.StartSec = startSec
 	return true
@@ -139,13 +138,11 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) (*stream.Sessio
 	return nil, false
 }
 
-// uriSuffix is appended to the URIs inside a playlist: players that cannot
-// send headers (AirPlay, Cast receivers) need the token on every request.
-func (s *Server) uriSuffix() string {
-	if s.Token == "" {
-		return ""
-	}
-	return "?token=" + url.QueryEscape(s.Token)
+// uriSuffix is appended to the URIs inside the playlist r asks for: players that cannot send
+// headers (AirPlay, Cast receivers) need a token on every request. It is good for the playlist's
+// directory, and made for r's device.
+func (s *Server) uriSuffix(r *http.Request) string {
+	return s.playlistURL(r, r.URL.Path)[len(r.URL.Path):]
 }
 
 func (s *Server) handleSessionPlaylist(w http.ResponseWriter, r *http.Request) {
@@ -155,7 +152,7 @@ func (s *Server) handleSessionPlaylist(w http.ResponseWriter, r *http.Request) {
 	}
 	// The playlist waits for the plan to be settled (it can take a scan of the
 	// file), so it can fail: the status says how, before any of it is written.
-	playlist, err := sess.Playlist(r.Context(), s.uriSuffix())
+	playlist, err := sess.Playlist(r.Context(), s.uriSuffix(r))
 	if err != nil {
 		s.streamError(w, r, err, "playlist")
 		return

@@ -79,11 +79,15 @@ func TestArtLinks(t *testing.T) {
 			base := fmt.Sprintf("/api/items/%d/art/", e.mp4)
 			v := fmt.Sprintf("?v=%d", entry.MTime)
 			wantBackdrop, wantThumb := base+"backdrop"+v, base+"thumb"+v
-			if token != "" { // the token joins the existing query with "&"
-				wantBackdrop += "&token=" + token
-				wantThumb += "&token=" + token
+			if token != "" { // a URL token joins the existing query with "&"
+				for _, u := range []string{got.Backdrop, got.Thumb} {
+					urlTokenOf(t, u, token)
+					if !strings.Contains(u, v+"&token=") {
+						t.Errorf("%q: want the token after the query", u)
+					}
+				}
 			}
-			if got.Backdrop != wantBackdrop || got.Thumb != wantThumb {
+			if withoutToken(got.Backdrop) != wantBackdrop || withoutToken(got.Thumb) != wantThumb {
 				t.Errorf("art = %+v, want backdrop %q thumb %q", got, wantBackdrop, wantThumb)
 			}
 			if strings.Count(got.Thumb, "?") != 1 {

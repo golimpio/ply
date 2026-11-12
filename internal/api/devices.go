@@ -20,15 +20,19 @@ import (
 //	PUT /api/devices/{id}   a device registers, or says new things of itself: {name, kind, app, version}
 //	GET /api/devices        the devices, the most recently seen first
 //
-// Both are private (see private): they are the household's list of devices.
+// Both are private (see private): they are the household's list of devices. Pairing is in
+// pairing.go.
 
 // DeviceHeader carries the id of the device a request comes from, on the app's own
 // requests. A browser's EventSource, which cannot set headers, sends ?device=.
 const DeviceHeader = "X-Ply-Device"
 
-// deviceID is the device a request says it comes from; "" for none, or for anything
-// that is not a device id.
+// deviceID is the device a request comes from: a paired device's own, whatever it says, else
+// the one it says; "" for none, or for anything that is not a device id.
 func deviceID(r *http.Request) string {
+	if p := principalOf(r); !p.owner() {
+		return p.device
+	}
 	id := r.Header.Get(DeviceHeader)
 	if id == "" {
 		id = r.URL.Query().Get("device")
@@ -62,6 +66,9 @@ type Device struct {
 	Version   string    `json:"version"`
 	FirstSeen time.Time `json:"firstSeen"`
 	LastSeen  time.Time `json:"lastSeen"`
+	// Paired says the device has a token of its own (docs/M11-CLIENTS.md, "Pairing"), since PairedAt.
+	Paired   bool       `json:"paired"`
+	PairedAt *time.Time `json:"pairedAt,omitempty"`
 }
 
 type deviceRequest struct {
@@ -149,23 +156,34 @@ func (s *Server) handleDevicePut(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "a device id is 8 to 64 letters, digits, - or _")
 		return
 	}
+	if p := principalOf(r); !p.owner() && p.device != id {
+		writeError(w, http.StatusForbidden, "a paired device registers only itself")
+		return
+	}
 	var req deviceRequest
 	body := http.MaxBytesReader(w, r.Body, 1<<14)
 	if err := json.NewDecoder(body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	d := store.Device{ID: id, Name: deviceField(req.Name), Kind: deviceField(req.Kind), App: deviceField(req.App),
-		Version: deviceField(req.Version)}
-	if d.Name == "" {
-		d.Name = userAgentName(r.UserAgent())
-	}
+	d := deviceFrom(r, id, req)
 	if err := s.Store.PutDevice(r.Context(), d, time.Now().Unix()); err != nil {
 		s.internalError(w, r, err)
 		return
 	}
 	s.devices.put(stream.Device{ID: d.ID, Name: d.Name, Kind: d.Kind})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// deviceFrom is the device id says it is, as kept: the fields cut to size, and a device that sends
+// no name named after its User-Agent ("Safari").
+func deviceFrom(r *http.Request, id string, req deviceRequest) store.Device {
+	d := store.Device{ID: id, Name: deviceField(req.Name), Kind: deviceField(req.Kind), App: deviceField(req.App),
+		Version: deviceField(req.Version)}
+	if d.Name == "" {
+		d.Name = userAgentName(r.UserAgent())
+	}
+	return d
 }
 
 // handleDevices is GET /api/devices.
@@ -178,7 +196,10 @@ func (s *Server) handleDevices(w http.ResponseWriter, r *http.Request) {
 	out := make([]Device, len(list))
 	for i, d := range list {
 		out[i] = Device{ID: d.ID, Name: d.Name, Kind: d.Kind, App: d.App, Version: d.Version,
-			FirstSeen: time.Unix(d.CreatedAt, 0).UTC(), LastSeen: time.Unix(d.LastSeen, 0).UTC()}
+			FirstSeen: time.Unix(d.CreatedAt, 0).UTC(), LastSeen: time.Unix(d.LastSeen, 0).UTC(), Paired: d.PairedAt != 0}
+		if d.PairedAt != 0 {
+			out[i].PairedAt = new(time.Unix(d.PairedAt, 0).UTC())
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
 }

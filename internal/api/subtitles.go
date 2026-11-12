@@ -26,7 +26,7 @@ import (
 func extKey(n int) string { return "ext" + strconv.Itoa(n) }
 
 func (s *Server) subtitleURL(itemID int64, key string) string {
-	return s.withToken(fmt.Sprintf("/api/items/%d/subtitles/%s.vtt", itemID, key))
+	return s.pictureURL(fmt.Sprintf("/api/items/%d/subtitles/%s.vtt", itemID, key))
 }
 
 // canonicalIndex parses a non-negative decimal without sign or leading zeros,

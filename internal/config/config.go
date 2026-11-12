@@ -497,33 +497,37 @@ func logDir(goos, home, xdgState, override string) (string, error) {
 // ServerID returns the persistent server id stored in dir/server-id (16 random
 // bytes, hex), creating it on first use. A malformed file is replaced.
 func ServerID(dir string) (string, error) {
-	path := filepath.Join(dir, "server-id")
-	if b, err := os.ReadFile(path); err == nil {
-		if id := strings.TrimSpace(string(b)); validID(id) {
-			return id, nil
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", err
-	}
-
-	raw := make([]byte, 16)
-	if _, err := rand.Read(raw); err != nil {
-		return "", err
-	}
-	id := hex.EncodeToString(raw)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(path, []byte(id+"\n"), 0o644); err != nil {
-		return "", err
-	}
-	return id, nil
+	id, err := persistentRandom(dir, "server-id", 16, 0o644)
+	return hex.EncodeToString(id), err
 }
 
-func validID(s string) bool {
-	if len(s) != 32 {
-		return false
+// URLKey returns the secret of the URL tokens (docs/M11-CLIENTS.md, "URL tokens") stored in
+// dir/url-key (32 random bytes, hex, readable by the owner alone), creating it on first use.
+func URLKey(dir string) ([]byte, error) {
+	return persistentRandom(dir, "url-key", 32, 0o600)
+}
+
+// persistentRandom returns the n random bytes kept in hex in dir/name, made with perm on first
+// use. A malformed file is replaced.
+func persistentRandom(dir, name string, n int, perm os.FileMode) ([]byte, error) {
+	path := filepath.Join(dir, name)
+	if b, err := os.ReadFile(path); err == nil {
+		if raw, err := hex.DecodeString(strings.TrimSpace(string(b))); err == nil && len(raw) == n {
+			return raw, nil
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
 	}
-	_, err := hex.DecodeString(s)
-	return err == nil
+
+	raw := make([]byte, n)
+	if _, err := rand.Read(raw); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(path, []byte(hex.EncodeToString(raw)+"\n"), perm); err != nil {
+		return nil, err
+	}
+	return raw, nil
 }

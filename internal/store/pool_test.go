@@ -305,6 +305,7 @@ func reads() []routed {
 		{name: "GetPerson", call: func(ctx context.Context, s *Store) error { _, err := s.GetPerson(ctx, 1); return nf(err) }},
 		{name: "GetTitleVideos", call: func(ctx context.Context, s *Store) error { _, err := s.GetTitleVideos(ctx, 1); return nf(err) }},
 		{name: "Devices", call: func(ctx context.Context, s *Store) error { _, err := s.Devices(ctx); return err }},
+		{name: "DeviceTokens", call: func(ctx context.Context, s *Store) error { _, err := s.DeviceTokens(ctx); return err }},
 		{name: "Schedules", call: func(ctx context.Context, s *Store) error { _, err := s.Schedules(ctx); return err }},
 		{name: "SearchPeople", call: func(ctx context.Context, s *Store) error { _, err := s.SearchPeople(ctx, "x", 10); return err }},
 		{name: "ReviewList", call: func(ctx context.Context, s *Store) error { _, err := s.ReviewList(ctx); return err }},
@@ -385,6 +386,10 @@ func writes() []routed {
 		{name: "SetTitleVideos", prio: prioHigh, call: func(ctx context.Context, s *Store) error { return e(s.SetTitleVideos(ctx, 1, "tmdb:1", nil, 1)) }},
 		{name: "PutDevice", prio: prioHigh, call: func(ctx context.Context, s *Store) error { return s.PutDevice(ctx, Device{ID: "device-01"}, 1) }},
 		{name: "TouchDevice", prio: prioLow, call: func(ctx context.Context, s *Store) error { return s.TouchDevice(ctx, "device-01", 2) }},
+		{name: "PairDevice", prio: prioHigh, call: func(ctx context.Context, s *Store) error {
+			return s.PairDevice(ctx, Device{ID: "device-01"}, "hash", 3)
+		}},
+		{name: "RevokeDevice", prio: prioHigh, call: func(ctx context.Context, s *Store) error { _, err := s.RevokeDevice(ctx, "device-01"); return err }},
 		{name: "PutSchedule", prio: prioHigh, call: func(ctx context.Context, s *Store) error {
 			return s.PutSchedule(ctx, ScheduleRecord{Task: "scan.full", Enabled: true, AtMinute: 60})
 		}},

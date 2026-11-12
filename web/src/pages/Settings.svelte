@@ -5,6 +5,7 @@
   import BackButton from '../components/BackButton.svelte';
   import Tabs from '../components/Tabs.svelte';
   import DetailsTab from './settings/DetailsTab.svelte';
+  import DevicesTab from './settings/DevicesTab.svelte';
   import KeysTab from './settings/KeysTab.svelte';
   import LibraryTab from './settings/LibraryTab.svelte';
   import PlaybackTab from './settings/PlaybackTab.svelte';
@@ -50,6 +51,8 @@
           <RatingsTab onkeys={openKeys} />
         {:else if t === 'playback'}
           <PlaybackTab />
+        {:else if t === 'devices'}
+          <DevicesTab />
         {:else}
           <KeysTab />
         {/if}

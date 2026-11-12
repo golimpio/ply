@@ -164,17 +164,66 @@ marked FUTURE is designed here and built later; everything else is the groundwor
   AirPlay opening sends it there. Safari's picker needs the person's click, so those two cannot be one.
 
 ## Auth
-- **Today:** one token (`-token`). An empty token means none is required. `/api/info` says whether one is
+- **The owner's credential is the shared token** (`-token`). An empty token means none is required, and then
+  nothing below applies: every request is the owner's and URLs carry nothing. `/api/info` says whether one is
   (`authRequired`).
-  - Native clients send it as `Authorization: Bearer`.
-  - `?token=` is only for what cannot send headers: a browser's EventSource and media elements. The server puts it
-    in the media URLs it builds.
-- **FUTURE: pairing.**
-  - A new device asks to pair. The server shows a short code in the web UI.
-  - The person types it into the app, and the device gets its own token, stored hashed in `devices`.
-  - From then on the device is the token's, not the header's.
-  - A device can be revoked without changing anyone else's.
-  - The shared token stays for the browser and for scripts.
+  - Native clients send a credential as `Authorization: Bearer`.
+  - `?token=` is only for what cannot send headers: a browser's EventSource and media elements.
+- **Three kinds of credential:**
+  - **the shared token**, the owner's: the browser and scripts, as Bearer or `?token=`;
+  - **a device token**, one per paired device, as Bearer only (never in a URL). The request is the device's: its
+    `X-Ply-Device` is the token's, whatever the header says;
+  - **a URL token**, which the server puts in the URLs it builds, only as `?token=`, only for a GET or HEAD.
+- **What only the owner may do** (403 for a device token): pair and revoke, register another device, change the
+  server (writes to `/api/settings`, `/api/folders`, `/api/queue`, `/api/jobs`, `/api/schedules`, `/api/scan` and
+  `/api/metadata`; anything under `/api/fs`; `/api/settings/test`), and curate the library (a match, a refresh of
+  an item's or a show's metadata, `PATCH /api/titles/{id}`, a subtitle file added or removed). A device may do the
+  rest: browse, play, its plays and their heartbeats, progress and watched state, a subtitle downloaded, its own
+  registration and the feed.
+- **The checks read the path as the router matches it**: each segment unescaped (`%73ettings` is `settings`), a
+  slash inside a segment kept as `%2F` (a show named "AC/DC" is one segment), so a URL token, the owner-only list
+  and the private endpoints cannot be read one way and routed another. An `/api` path with an invalid escape or a
+  `.` or `..` segment, encoded or not, is a 400.
+
+### Pairing
+- **The owner asks for a code:** Settings › Devices › Pair a device, `POST /api/pairing` →
+  `{code, expiresAt, expiresIn}`. Six digits, good for 5 minutes (`expiresIn` seconds as the server answers, which a
+  page counts down from, whatever its own clock says) and once. There is one at a time: asking again replaces it.
+  The page reads the list again while it shows a code, and drops the code once a device has paired with it.
+- **The person types it into the app**, which sends `POST /api/pair {code, id, name, kind, app, version}` without
+  a credential. It answers `{token}` once, and registers the device as `PUT /api/devices/{id}` does. A wrong or
+  expired code is a 403; after 5 wrong codes the code is spent, so guessing has 5 tries in a million.
+- **The token is kept hashed** (SHA-256) in `devices`. Pairing a device again gives it a new token in place of the
+  old one. `GET /api/devices` says which are paired (`paired`, additive).
+- **Revoking** is the owner's `DELETE /api/devices/{id}/token` (Settings › Devices › Revoke). The device's token
+  and every URL token made for it answer 401 at once, and what it has open ends (its feed); a file already being
+  sent finishes. The device stays in the list, unpaired, and anyone else's credential is untouched.
+
+### URL tokens
+The URLs the server builds (playback, playlists and their segments, direct files, subtitles, art and images) are
+followed by players that send no headers: a `<video>`, AVPlayer, a Chromecast or an Apple TV the play was handed to.
+They used to carry the shared token, so revoking a device revoked nothing, and a URL handed to a TV held the
+owner's credential for good. Two ways were weighed:
+- (a) the requesting device's own token in its URLs: revoking works, but a URL that lands on a TV, in a receiver's
+  state or in a log is still a long-lived credential;
+- **(b), chosen: short-lived signed tokens.** A URL carries `token=u1.<device>.<expires>.<mac>`, never a secret:
+  - `mac` is an HMAC-SHA256 (16 bytes, base64url) of the URL's scope, the device and the expiry, with a key made
+    from a random secret in the data directory (`url-key`) and the shared token, so changing `-token` voids every
+    URL token too;
+  - the scope is the URL's own path, or for a playlist the directory it is in (`/api/sessions/<sid>/`: its
+    segments and the playlists it names), told apart in the MAC: a token opens what its URL is for, nothing else;
+  - it expires at the start of the UTC day after next, between 24 and 48 hours away, so that a URL stays the same
+    all day (the browser's cache, the lists' ETags, which change with the day);
+  - `<device>` is the device the URL was made for, empty for the owner. A token for a device that is no longer
+    paired answers 401;
+  - what plays (the playback URL, playlists and their segments, the file) is made for the requesting device.
+    What describes an item (art, images, subtitle tracks) is made for no device: a list is the same for every
+    device, and such a token opens that one picture or track alone, until it expires.
+  A player that holds a URL for longer than that (a film paused for two days) gets a 401, and its client asks for
+  the play again. A playlist fetched again signs its URIs anew, so a play that is followed renews its segments'
+  tokens for as long as its session lives.
+- **The web UI** keeps the shared token for its own requests (Bearer, and `?token=` on its EventSource) and follows
+  the URLs the server gave it; `mediaUrl` adds the shared token only to a URL that has none.
 
 ## FUTURE: remote control
 - **Commands go down the device's own feed:**
@@ -310,3 +359,6 @@ Receiver, ply on `http://192.168.4.196:8420`:
 11. HTTPS (above): `-tls-cert`, `-tls-key` and `-tls-host`, the certificate read again when it changes
     (`internal/tlscert`), HTTP/2, `tls=1` and `host=` in the TXT record, and receiver URLs on the certificate's
     name.
+12. Pairing and URL tokens (Auth, above): migration 016 (`devices.token_hash`, `paired_at`), `POST /api/pairing`,
+    `POST /api/pair`, `DELETE /api/devices/{id}/token`, the owner-only endpoints, URL tokens in every URL the
+    server builds (`internal/api/auth.go`, the secret in `<data>/url-key`), and Settings › Devices.

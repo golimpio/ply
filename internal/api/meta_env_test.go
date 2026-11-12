@@ -153,7 +153,7 @@ func newMetaEnvWith(t *testing.T, token string, hook func(*menv, *Options)) *men
 
 	logger := slog.New(slog.NewTextHandler(m.logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	o := Options{Store: e.store, Scanner: e.scanner, UI: testUI, ID: "abc123", Name: "Test Server", Version: "9.9.9", Token: token,
-		Logger: logger, Metadata: m.worker, Images: m.images}
+		Logger: logger, Metadata: m.worker, Images: m.images, URLKey: testURLKey}
 	hook(m, &o)
 	m.srv = New(o)
 	return m
@@ -195,12 +195,13 @@ func (m *menv) writeFile(rel, content string) string {
 	return p
 }
 
-// withToken is how the server writes URLs when a token is configured.
+// testURLKey is the URL tokens' secret of the metadata env, so that the URL of a picture is known
+// ahead (a picture's token is the same for every device, and all day).
+var testURLKey = []byte("a test secret for the url tokens")
+
+// withTok is how the server writes the URL of a picture when a token is configured.
 func withTok(u string) string {
-	if strings.Contains(u, "?") {
-		return u + "&token=" + apiToken
-	}
-	return u + "?token=" + apiToken
+	return (&Server{Options: Options{Token: apiToken}, urls: newURLSigner(testURLKey, apiToken)}).pictureURL(u)
 }
 
 var _ = fmt.Sprint

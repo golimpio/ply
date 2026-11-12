@@ -622,9 +622,11 @@ func TestItemDetail(t *testing.T) {
 		e := newEnv(t, "s3cret")
 		rec := e.do("GET", fmt.Sprintf("/api/items/%d", e.mp4), map[string]string{"Authorization": "Bearer s3cret"}, "")
 		d := decode[ItemDetail](t, rec)
-		if want := fmt.Sprintf("/api/items/%d/file?token=s3cret", e.mp4); d.Playback.URL != want {
-			t.Errorf("url = %q, want %q", d.Playback.URL, want)
+		if want := fmt.Sprintf("/api/items/%d/file", e.mp4); withoutToken(d.Playback.URL) != want {
+			t.Errorf("url = %q, want %q with a URL token", d.Playback.URL, want)
 		}
+		urlTokenOf(t, d.Playback.URL, "s3cret")
+		wantStatus(t, e.get(d.Playback.URL), 200) // with its URL token alone, as a <video> asks
 	})
 
 	t.Run("remux has reasons and no url yet", func(t *testing.T) {
@@ -756,9 +758,12 @@ func TestPlaybackPost(t *testing.T) {
 	t.Run("token on direct url", func(t *testing.T) {
 		te := newEnv(t, "tok")
 		rec := te.do("POST", fmt.Sprintf("/api/items/%d/playback?token=tok", te.mp4), nil, "{}")
-		if pb := decode[Playback](t, rec); !strings.HasSuffix(pb.URL, "/file?token=tok") {
+		pb := decode[Playback](t, rec)
+		if !strings.HasSuffix(withoutToken(pb.URL), "/file") {
 			t.Errorf("url = %q", pb.URL)
 		}
+		urlTokenOf(t, pb.URL, "tok")
+		wantStatus(t, te.get(pb.URL), 200)
 	})
 
 	for name, tt := range map[string]string{
@@ -1005,7 +1010,7 @@ func TestMiddlewareKeepsZeroCopyInterfaces(t *testing.T) {
 		innerCh <- describe(w)
 		io.WriteString(w, "ok")
 	})
-	chain := middleware(probe, "tok", nil)
+	chain := New(Options{Token: "tok"}).middleware(probe)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		outerCh <- describe(w)
 		chain.ServeHTTP(w, r)

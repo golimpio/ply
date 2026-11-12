@@ -140,11 +140,11 @@ func TestEndToEnd(t *testing.T) {
 		t.Errorf("episode = %+v", episode)
 	}
 
-	// Direct play: the movie's file URL carries the token and honours Range.
+	// Direct play: the movie's file URL carries a URL token and honours Range.
 	var det detail
 	resp, body = c.do("GET", fmt.Sprintf("/api/items/%d", movie.ID), "", bearer)
 	mustJSON(t, body, &det)
-	if det.Playback.Method != "direct" || !strings.Contains(det.Playback.URL, "token="+e2eToken) {
+	if det.Playback.Method != "direct" || !carriesURLToken(det.Playback.URL) {
 		t.Fatalf("movie playback = %+v", det.Playback)
 	}
 	moviePath := filepath.Join(media, movieRel)
@@ -176,7 +176,7 @@ func TestEndToEnd(t *testing.T) {
 			sub = &det.Subtitles[i]
 		}
 	}
-	if sub == nil || sub.Language != "en" || sub.Format != "srt" || !strings.Contains(sub.URL, "token="+e2eToken) {
+	if sub == nil || sub.Language != "en" || sub.Format != "srt" || !carriesURLToken(sub.URL) {
 		t.Fatalf("episode subtitles = %+v", det.Subtitles)
 	}
 	resp, body = c.do("GET", sub.URL, "", nil)
@@ -582,10 +582,16 @@ func (c *client) startSession(id int64, body string, hdr map[string]string, meth
 	var pb playbackResp
 	mustJSON(c.t, b, &pb)
 	if resp.StatusCode != 200 || pb.Method != method || pb.SessionID == "" ||
-		pb.URL != "/api/sessions/"+pb.SessionID+"/index.m3u8?token="+e2eToken {
+		!strings.HasPrefix(pb.URL, "/api/sessions/"+pb.SessionID+"/index.m3u8?") || !carriesURLToken(pb.URL) {
 		c.t.Fatalf("POST playback (%s) = %d %s", method, resp.StatusCode, b)
 	}
 	return pb
+}
+
+// carriesURLToken reports whether a URL the server built carries a URL token, and not the shared
+// token (docs/M11-CLIENTS.md, "URL tokens").
+func carriesURLToken(u string) bool {
+	return strings.Contains(u, "token=u1.") && !strings.Contains(u, e2eToken)
 }
 
 type playlist struct {
@@ -611,8 +617,8 @@ func (c *client) getPlaylist(pb playbackResp) playlist {
 	}
 	baseURL, _ := url.Parse(pb.URL)
 	resolve := func(ref string) string {
-		if !strings.Contains(ref, "token="+e2eToken) {
-			c.t.Errorf("playlist URI %q carries no token", ref)
+		if !carriesURLToken(ref) {
+			c.t.Errorf("playlist URI %q carries no URL token", ref)
 		}
 		u, err := baseURL.Parse(ref)
 		if err != nil {

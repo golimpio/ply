@@ -262,19 +262,23 @@ func TestLocalImages(t *testing.T) {
 func escSpaces(s string) string { return strings.ReplaceAll(s, " ", "%20") }
 
 func TestImageURLsFromRefs(t *testing.T) {
-	s := &Server{Token: "a b"}
+	s := New(Options{Token: "a b"})
 	for ref, want := range map[string]string{
-		"tmdb:/abc.jpg":        "/api/images/tmdb/w342/abc.jpg?token=a+b",
-		"local:item:12:poster": "/api/images/local/item/12/poster?token=a+b",
-		"local:series:3:thumb": "/api/images/local/series/3/thumb?token=a+b",
+		"tmdb:/abc.jpg":        "/api/images/tmdb/w342/abc.jpg",
+		"local:item:12:poster": "/api/images/local/item/12/poster",
+		"local:series:3:thumb": "/api/images/local/series/3/thumb",
 		"":                     "",
 		"http://evil/x.jpg":    "",
 		"embedded:3":           "",
 		"local:item:1":         "",
 		"local:a:b:c:d":        "",
 	} {
-		if got := s.imageURL(ref, "w342"); got != want {
-			t.Errorf("imageURL(%q) = %q, want %q", ref, got, want)
+		got := s.imageURL(ref, "w342")
+		if withoutToken(got) != want {
+			t.Errorf("imageURL(%q) = %q, want %q and a URL token", ref, got, want)
+		}
+		if want != "" {
+			urlTokenOf(t, got, "a b")
 		}
 	}
 	open := &Server{}

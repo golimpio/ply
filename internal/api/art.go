@@ -41,7 +41,7 @@ func (s *Server) artOf(e store.Entry) *ArtURLs {
 		return nil
 	}
 	u := func(k art.Kind) string {
-		return s.withToken(fmt.Sprintf("/api/items/%d/art/%s?v=%d", e.ID, k, e.MTime))
+		return s.pictureURL(fmt.Sprintf("/api/items/%d/art/%s?v=%d", e.ID, k, e.MTime))
 	}
 	a := &ArtURLs{Backdrop: u(art.Backdrop), Thumb: u(art.Thumb)}
 	a.Color, _ = s.Art.Colour(artSource(e))

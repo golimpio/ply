@@ -156,10 +156,13 @@ Table-test heavily.
 
 ## HTTP API (Go 1.22 mux, JSON camelCase, errors `{"error": "..."}`)
 All URLs returned are RELATIVE (clients build absolute LAN URLs). When a token is configured, every returned
-stream/file/subtitle URL carries `?token=<t>` (AirPlay/Cast receivers can't send headers).
-Auth: if `-token` set, all `/api/*` except `/api/info` need `Authorization: Bearer <t>` or `?token=<t>`
-(constant-time compare). SPA assets are public. CORS middleware on everything: `Access-Control-Allow-Origin: *`,
-allow headers `Range, Authorization, Content-Type`, methods `GET, POST, PUT, PATCH, DELETE, OPTIONS`, expose
+stream/file/subtitle/art URL carries `?token=<URL token>`, a short-lived signed token, never the shared one
+(AirPlay/Cast receivers can't send headers; docs/M11-CLIENTS.md, "URL tokens").
+Auth: if `-token` set, all `/api/*` except `/api/info` and `/api/pair` need `Authorization: Bearer <t>` or
+`?token=<t>` (constant-time compare), a paired device's own token as Bearer, or a URL token on a GET or HEAD;
+a device's token cannot do what only the owner may (docs/M11-CLIENTS.md, "Auth" and "Pairing"). SPA assets are
+public. CORS middleware on everything: `Access-Control-Allow-Origin: *`, allow headers
+`Range, Authorization, Content-Type`, methods `GET, POST, PUT, PATCH, DELETE, OPTIONS`, expose
 `Content-Range, Accept-Ranges, Content-Length, Content-Type`; OPTIONS → 204.
 Cross-site writes: a request that is not GET, HEAD or OPTIONS and has an `Origin` other than its own `scheme://host`
 (`X-Forwarded-Proto: https` counts as https) is refused with 403 unless it carries the valid token; native clients send

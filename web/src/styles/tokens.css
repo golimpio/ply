@@ -398,6 +398,8 @@
   --bar-h: 3.5rem;
   --bar-pad-y: 0.625rem; /* vertical breathing room inside the header bar (10px) */
   --shelf-pad-y: 2.25rem; /* vertical padding between a shelf and its divider line */
+  --settings-list-gap: var(--space-5); /* between the panels of a list in Settings */
+  --settings-row-gap: var(--space-8); /* between what a settings panel says and its button */
   --volume-w: 5.5rem; /* the player's volume slider, open */
   --chip-h: 2rem; /* a rating chip */
   --chip-pad: 0.2rem 0.7rem;
