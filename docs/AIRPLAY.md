@@ -29,7 +29,8 @@ The compatibility target is Apple TV 3rd generation and newer. The older 2nd gen
 limit and is not covered by this 1080p profile; the original silver 2007 model is also out of scope.
 [Apple TV 3 specifications](https://support.apple.com/en-ca/112429) define its H.264 and audio limits.
 The previous fMP4-only implementation was insufficient for an AppleTV3,2 on software 8.4.4 that
-reported a load error. [FFmpeg HLS documentation](https://ffmpeg.org/ffmpeg-formats.html#hls-2)
+reported a load error; MPEG-TS playback was subsequently confirmed on that receiver.
+[FFmpeg HLS documentation](https://ffmpeg.org/ffmpeg-formats.html#hls-2)
 notes that MPEG-TS works with all HLS versions, while fMP4 requires HLS version 7. Modern macOS
 AVPlayer playback of the previous output did not establish compatibility with that older receiver.
 
@@ -77,9 +78,13 @@ suspended may lag the TV; receiver segment positions provide activity, not exact
 ## Network setup
 
 Open ply using an address reachable by both Safari and the TV, on a network that permits AirPlay
-discovery and media access. A server's localhost or 127.0.0.1 address is local to each device and is
-not a usable TV media address. The TV must also trust any HTTPS certificate in use. Ply does not
-discover or configure the home network, install certificates, or expose the server to the internet.
+discovery and media access. The browser and the TV must agree on the address: AirPlay sends the TV a
+media URL relative to the page, so a page served on one subnet tells a TV on another to fetch an
+address it cannot reach. A Mac with more than one network (Wi-Fi and Ethernet, Internet Sharing, a
+VPN) advertises several addresses; use the interface on the TV's subnet, not a bridge or tunnel
+address. A server's localhost or 127.0.0.1 address is local to each device and is not a usable TV
+media address. The TV must also trust any HTTPS certificate in use. Ply does not discover or
+configure the home network, install certificates, or expose the server to the internet.
 
 ## Verification and device acceptance
 
@@ -93,7 +98,9 @@ cover receiver identity, authentication, subtitle manifests/timing and bounded l
 Emulated events are not evidence of Apple's discovery, firmware or rendering behavior. Before
 release, run this hardware checklist in Safari on macOS and iPhone/iPad with an actual Apple TV:
 
-1. Open the server's LAN URL; select a TV and confirm receiver-side media requests in server logs.
+1. Open the server's address on the TV's subnet; select a TV and confirm the TV renders the media.
+   The Activity page and `GET /api/sessions` show the active play and its last activity; individual
+   media requests are not access-logged by default.
 2. Play H.264/AAC, HEVC/4K conversion, multichannel-to-stereo audio and an alternate audio track.
    Include an Apple TV 3rd generation receiver; modern macOS AVPlayer alone is not an acceptance test.
 3. Resume, seek forward/backward, pause/resume and verify reported progress.
