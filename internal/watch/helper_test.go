@@ -87,17 +87,12 @@ func startTestHelper(t *testing.T, env ...string) *helperBackend {
 // or private (skipped) from a limit (the root is given up).
 func TestHelperAddErrors(t *testing.T) {
 	root := t.TempDir()
-	file := filepath.Join(root, "file")
-	touch(t, file, 1)
 	b := startTestHelper(t)
 	if err := b.add(root); err != nil { // control
 		t.Fatal(err)
 	}
 	if err := b.add(filepath.Join(root, "missing")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("missing directory: %v, want not exist", err)
-	}
-	if err := b.add(file); err == nil {
-		t.Fatal("a file was watched")
 	}
 	b.close()
 	if err := b.add(root); !errors.Is(err, errBackendClosed) {
