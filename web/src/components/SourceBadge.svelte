@@ -13,4 +13,4 @@
   const label = $derived(source ? LABELS[source] : undefined);
 </script>
 
-{#if label}<span class="badge source" title={label[1]}>{label[0]}</span>{/if}
+{#if label}<span class="badge source sr-only" title={label[1]}>{label[0]}</span>{/if}
