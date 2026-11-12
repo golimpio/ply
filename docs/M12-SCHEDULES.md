@@ -35,6 +35,11 @@ the server's own local clock: ply runs where its library is, and the browser is 
 - **A run missed while ply was off is caught up** at the first look: the next occurrence after `last_run` is in the
   past, so the task runs now, and `last_run` becomes that moment. Not the occurrence's own time: a schedule that was
   due long ago would otherwise be queued again at every look until `last_run` caught up.
+- **A first run waits for what it needs.** `ratings.imdb` and `ratings.mdblist` declare `After` `scan.full` and
+  `meta.match`: while those are queued or running, a ratings task that has never run is not queued. On a first start,
+  the scan and the matching run first, and the ratings then rate a library that has titles; without this, the
+  ratings jobs would see an empty library, end at once, and wait a night. Only a first run waits; a scheduled run at
+  its time does not.
 - **A task that is already queued or running is not queued twice**; the look is still recorded, so it is not tried
   again every 30 s.
 - **Turned off**, a task stores no run and queues nothing. Its settings stay.
@@ -120,14 +125,17 @@ provider: the ratings jobs do that when they run, and a look of an empty schedul
 
 ## As built (2026-11-12)
 
-- **Store:** `migrations/015_schedules.sql`, `store/schedules.go` (`Schedules`, `PutSchedule`,
+- **The first ratings runs wait for the scan and match** (`Task.After`): on a first start the ratings tasks are
+  queued after `scan.full` and `meta.match` have left the queue, so they rate a library with titles rather than an
+  empty one. A scheduled run at its time does not.
+- **The store:** `migrations/015_schedules.sql`, `store/schedules.go` (`Schedules`, `PutSchedule`,
   `MarkScheduleRun`; days as ISO weekdays; high-priority write for a person's change, low for `last_run`; no list
   Generation change). Tested by `store/schedules_test.go`, the migration test included.
 - **`internal/schedule`:** `Clock` (HH:MM in JSON), `nextAt`/`due`/`nextRun`, the catalog types, `Scheduler`
   (`Run`, `Wake`, `List`, `Set`, `RunNow`), `Status`/`Refused`/`ErrBusy`/`ErrInvalid`/`ErrUnknownTask`. Tests:
   `schedule_test.go` (the clock and its JSON, the next weekday, due and next, the tick once and after a restart, a
-  blocked task logged once and run when unblocked, busy, a failed enqueue, off, Set/List/RunNow, Run with a wake,
-  a bad catalog).
+  blocked task logged once and run when unblocked, a first run waiting for its scan, busy, a failed enqueue, off,
+  Set/List/RunNow, Run with a wake, a bad catalog).
 - **`cmd/ply`:** `schedules.go` (catalog, checker, the ratings wake watcher); `main.go` builds the scheduler after
   the queue, serves `GET/PUT/POST` through `api.Options.Schedules`, and the old `schedule()` and `scheduleRatings()`
   tickers are gone. `-scan-interval` is still read (an old unit file starts) and warns that the scan now runs on its

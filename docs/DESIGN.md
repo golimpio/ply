@@ -39,7 +39,7 @@ CGO_ENABLED=0 must build for darwin/linux × amd64/arm64.
 ## Config
 Flags: `-media` (repeatable roots), `-addr` (default `:8420`, `:0` allowed), `-data`, `-token`, `-name`
 (default hostname), `-scan-interval` (accepted and ignored since M12: the full scan runs on its schedule in
-Settings → Schedules; a value other than the old default logs where to set it), `-ffprobe`, `-ffmpeg` (default from PATH).
+Settings → Schedules, and giving the flag at all logs where to set it), `-ffprobe`, `-ffmpeg` (default from PATH).
 M6 (metadata, live library):
 - `-watch` (default true): watch the media folders and pick up changes within seconds (`internal/watch`).
 - `-allow-host <name>` (repeatable; env `PLY_ALLOW_HOSTS`, comma-separated; `.example.org` allows every name under it):

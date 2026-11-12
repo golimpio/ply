@@ -28,11 +28,13 @@ func scheduleTasks() []schedule.Task {
 			ID: kindRatingsMDBList, Key: keyRatingsMDBList, Title: "Fill in Rotten Tomatoes and other ratings",
 			Detail:         "Asks MDBList for the Rotten Tomatoes, Metacritic, Letterboxd and Trakt ratings of the titles that lack one or are due.",
 			DefaultEnabled: true, DefaultAt: schedule.MustClock("03:30"),
+			After: []string{kindScanFull, kindMetaMatch},
 		},
 		{
 			ID: kindRatingsIMDb, Key: keyRatingsIMDb, Title: "Download IMDb ratings",
 			Detail:         "Downloads IMDb's datasets and fills in the IMDb ratings of movies, shows and episodes. IMDb refreshes them daily, so a weekly run is enough.",
 			DefaultEnabled: true, DefaultAt: schedule.MustClock("04:00"), DefaultDays: []time.Weekday{time.Sunday},
+			After: []string{kindScanFull, kindMetaMatch},
 		},
 	}
 }

@@ -51,11 +51,12 @@ func TestScheduleCatalog(t *testing.T) {
 	want := []struct {
 		id, key, at string
 		days        []time.Weekday
+		after       []string
 	}{
-		{kindScanFull, "full", "02:30", nil},
-		{kindMetaMatch, "match", "03:00", nil},
-		{kindRatingsMDBList, keyRatingsMDBList, "03:30", nil},
-		{kindRatingsIMDb, keyRatingsIMDb, "04:00", []time.Weekday{time.Sunday}},
+		{kindScanFull, "full", "02:30", nil, nil},
+		{kindMetaMatch, "match", "03:00", nil, nil},
+		{kindRatingsMDBList, keyRatingsMDBList, "03:30", nil, []string{kindScanFull, kindMetaMatch}},
+		{kindRatingsIMDb, keyRatingsIMDb, "04:00", []time.Weekday{time.Sunday}, []string{kindScanFull, kindMetaMatch}},
 	}
 	if len(tasks) != len(want) {
 		t.Fatalf("the catalog has %d tasks, want %d", len(tasks), len(want))
@@ -67,6 +68,9 @@ func TestScheduleCatalog(t *testing.T) {
 		}
 		if !slices.Equal(got.DefaultDays, w.days) {
 			t.Errorf("task %s runs on %v, want %v", w.id, got.DefaultDays, w.days)
+		}
+		if !slices.Equal(got.After, w.after) {
+			t.Errorf("task %s waits for %v, want %v", w.id, got.After, w.after)
 		}
 		if got.Title == "" || got.Detail == "" {
 			t.Errorf("task %s has no title or detail for the page", w.id)

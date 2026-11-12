@@ -290,6 +290,26 @@ func TestBlockedTaskIsSkippedLoggedOnceAndRunsWhenUnblocked(t *testing.T) {
 	}
 }
 
+// A task that has never run waits for the kinds it needs: the first ratings pass is queued after the
+// first scan and match, so it rates the library rather than the empty library of a first start.
+func TestFirstRunWaitsForItsPrerequisites(t *testing.T) {
+	now := time.Date(2026, 11, 9, 9, 0, 0, 0, time.UTC)
+	st, q := newMemStore(), newMemQueue()
+	q.busy["scan.full"] = true
+	task := Task{ID: "ratings.mdblist", Key: "mdblist", Title: "Ratings", DefaultEnabled: true, DefaultAt: MustClock("03:30"),
+		After: []string{"scan.full"}}
+	s, _ := newScheduler(t, st, q, &now, nil, task)
+	s.tick(context.Background())
+	if got := q.kinds(); len(got) != 0 {
+		t.Fatalf("the ratings ran before the scan: %v", got)
+	}
+	q.busy["scan.full"] = false
+	s.tick(context.Background())
+	if got := q.kinds(); !slices.Equal(got, []string{"ratings.mdblist"}) {
+		t.Fatalf("after the scan queued %v, want the ratings", got)
+	}
+}
+
 // A task whose job is already queued or running is not queued again, and the look is recorded.
 func TestBusyTaskIsNotQueuedAgain(t *testing.T) {
 	now := time.Date(2026, 11, 9, 9, 0, 0, 0, time.UTC)

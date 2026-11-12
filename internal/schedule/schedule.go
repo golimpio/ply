@@ -115,6 +115,9 @@ type Task struct {
 	DefaultEnabled bool
 	DefaultAt      Clock
 	DefaultDays    []time.Weekday // empty is every day
+	// After are kinds that must not be queued or running when a task that has never run starts:
+	// the first ratings pass waits for the first scan and match, so that it sees the library.
+	After []string
 }
 
 // Status is what a task can do right now. Blocked says why it cannot run ("" it can); Missing names
@@ -384,6 +387,11 @@ func (s *Scheduler) tick(ctx context.Context) {
 			continue
 		}
 		s.clearSkipped(t.ID)
+		if rec.LastRun == 0 && s.afterBusy(t) {
+			// A first run waits for the scan and the match it needs: an empty library has nothing
+			// to fill, and the next look (with the library there) is the one that counts.
+			continue
+		}
 		if blockedBefore && rec.Enabled {
 			// It could not run when it was due and now it can: fill in at once, then keep its time.
 			if s.queue(ctx, t, now) {
@@ -404,6 +412,16 @@ func (s *Scheduler) tick(ctx context.Context) {
 			s.mark(ctx, rec, now)
 		}
 	}
+}
+
+// afterBusy reports whether a kind that a never-run task waits for is queued or running.
+func (s *Scheduler) afterBusy(t Task) bool {
+	for _, kind := range t.After {
+		if s.o.Queue.Busy(kind) {
+			return true
+		}
+	}
+	return false
 }
 
 // blocked reports whether the task could not run at the last look.
