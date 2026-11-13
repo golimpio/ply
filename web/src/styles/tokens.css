@@ -322,6 +322,7 @@
   --scrim-hero-narrow-mid: var(--velvet-950-a55);
   --progress-track: var(--black-a50);
   --mask-opaque: var(--black); /* the opaque end of a mask-image */
+  --dim-loading-art: 0.45; /* the item's own art, under a stream that is being prepared */
 
   /* Shadows and rings. */
   --shadow-dialog: 0 30px 80px var(--black-a55);
@@ -405,6 +406,8 @@
   --chip-pad: 0.2rem 0.7rem;
   --chip-gap: 0.4rem;
   --page-max: 68rem;
+  /* The centred column of a film's or a series' page. */
+  --detail-max: 72rem;
   --side-nav-w: 11rem;
   --fade-edge: 2rem;
   --mask-solid: var(--black);

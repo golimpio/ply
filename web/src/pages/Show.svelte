@@ -418,7 +418,8 @@
 <style>
   .body {
     padding: 1.25rem var(--gutter) 0;
-    max-width: 72rem;
+    max-width: var(--detail-max);
+    margin-inline: auto; /* the detail column sits centred on a wide screen */
     display: grid;
     gap: 2rem;
   }
