@@ -187,3 +187,24 @@ func TestAirPlayConservativeConversion(t *testing.T) {
 		t.Fatalf("silent video invented audio: %+v", got)
 	}
 }
+
+// Chrome's demuxer (native HLS and Media Source alike) refuses 8-channel AAC, and the browser
+// profile has no way to measure what a mix it does not have yet: it caps at 5.1. The video is
+// still copied, only the audio is downmixed; a native player keeps the track.
+func TestBrowsersDownmixMoreThanFivePointOne(t *testing.T) {
+	sevenOne := streams(vid("h264", "avc1", 1080), audCh(1, "aac", 8, true))
+	got := Decide(Item{Container: "mp4"}, sevenOne, Browser(), NoOptions)
+	if got.Method != MethodRemux || got.VideoAction != ActionCopy || got.AudioAction != ActionTranscode {
+		t.Fatalf("browser: %+v, want the video copied and the 7.1 audio downmixed", got)
+	}
+	if !strings.Contains(strings.Join(got.Reasons, " "), "audio has 8 channels") {
+		t.Errorf("reasons = %q", got.Reasons)
+	}
+	if cc := Chromecast(); cc.MaxAudioChannels != 6 {
+		t.Errorf("chromecast maxAudioChannels = %d, want 6", cc.MaxAudioChannels)
+	}
+	// Positive control: AVPlayer decodes 7.1 itself, so the same track is copied.
+	if av := Decide(Item{Container: "mp4"}, sevenOne, AVPlayer(), NoOptions); av.Method != MethodDirect || av.AudioAction != ActionCopy {
+		t.Errorf("avplayer: %+v, want the track copied", av)
+	}
+}

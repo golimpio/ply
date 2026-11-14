@@ -51,6 +51,7 @@ describe('browserProfile', () => {
       audioCodecs: ['aac', 'mp3', 'opus', 'flac'],
       requireHvc1: false,
       maxHeight: 0,
+      maxAudioChannels: 6,
       hls: true,
       textSubs: ['vtt'],
     });
@@ -62,6 +63,11 @@ describe('browserProfile', () => {
     expect(p.audioCodecs).toEqual(['aac', 'mp3', 'opus', 'flac', 'ac3', 'eac3']);
     expect(p.containers).toEqual(['mp4', 'webm', 'mov']);
     expect(p.requireHvc1).toBe(true);
+  });
+
+  it('claims 5.1 audio at most: a demuxer refuses 7.1 AAC, and no API answers for a mix it has not met', async () => {
+    expect((await profileOf({ mse: everything, canPlay: everything })).maxAudioChannels).toBe(6);
+    expect((await profileOf({})).maxAudioChannels).toBe(6); // still sent when nothing is claimed
   });
 
   it('asks for hevc as hvc1, the only form AVPlayer direct-plays', async () => {

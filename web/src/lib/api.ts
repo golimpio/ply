@@ -671,6 +671,8 @@ export interface Profile {
   audioCodecs: string[];
   requireHvc1: boolean;
   maxHeight: number;
+  /** The most audio channels the browser decodes: 0 is no limit (see profile.ts). */
+  maxAudioChannels: number;
   hls: boolean;
   textSubs: string[];
 }

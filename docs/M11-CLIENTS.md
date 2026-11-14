@@ -315,6 +315,10 @@ over HTTPS, and a fetch from it to `http://` is then refused (Platforms, Chromec
   - Doze ends connections: reconnect with `Last-Event-ID`.
   - Newer Android versions add a local-network permission. Check it against the current documentation when the
     app is built.
+- **Browser:** the web client measures its own profile and sends it whole, audio channels included: it says
+  `maxAudioChannels: 6`, because Chrome's demuxer refuses an 8-channel (7.1) AAC stream while its capability
+  APIs claim it plays (measured 2026-11-13, Chrome 157, macOS: native HLS and Media Source both fail the
+  segment). The server then copies the video and downmixes the audio to stereo; a native player keeps 7.1.
 - **AirPlay** (docs/AIRPLAY.md): the Apple TV fetches MPEG-TS HLS itself over plain HTTP. No HTTPS is needed.
   The default browser profile targets Apple TV 3rd generation and newer with H.264 High level 4.0,
   up to 1080p/30 fps and AAC-LC stereo 48 kHz. It re-encodes both selected streams because Safari

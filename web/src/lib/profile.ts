@@ -26,6 +26,16 @@ const CONTAINERS: Record<string, string> = {
 
 type MediaSourceLike = { isTypeSupported(type: string): boolean };
 
+/**
+ * The most audio channels a browser decodes. Chrome's demuxer refuses an 8-channel (7.1) AAC
+ * stream: native playback and Media Source Extensions both fail the segment, while
+ * MediaCapabilities and isTypeSupported claim it plays (measured 2026-11-13, Chrome 157, macOS).
+ * Nothing in a browser measures a mix it has not met yet, so this is a known limit rather than a
+ * probe: a browser that could play 7.1 gets a stereo downmix instead. The server downmixes what is
+ * more (internal/playback, MaxAudioChannels).
+ */
+const MAX_AUDIO_CHANNELS = 6;
+
 let cached: Profile | undefined;
 
 /** The Profile describing what this browser can decode, measured once and cached. */
@@ -57,6 +67,7 @@ export function browserProfile(): Profile {
     // Safari only direct-plays hevc tagged hvc1; harmless to ask for elsewhere.
     requireHvc1: videoCodecs.includes('hevc'),
     maxHeight: 0,
+    maxAudioChannels: MAX_AUDIO_CHANNELS,
     hls: true,
     textSubs: ['vtt'],
   };

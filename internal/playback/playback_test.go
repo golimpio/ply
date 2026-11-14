@@ -11,7 +11,11 @@ func vid(codec, tag string, height int) Stream {
 }
 
 func aud(index int, codec string, def bool) Stream {
-	return Stream{Index: index, Type: "audio", Codec: codec, Channels: 2, Default: def}
+	return audCh(index, codec, 2, def)
+}
+
+func audCh(index int, codec string, channels int, def bool) Stream {
+	return Stream{Index: index, Type: "audio", Codec: codec, Channels: channels, Default: def}
 }
 
 func sub(index int, codec string) Stream {
@@ -278,6 +282,13 @@ func TestDecideCustomProfiles(t *testing.T) {
 		VideoCodecs: []string{"hevc", "h264"},
 		AudioCodecs: []string{"aac"},
 	}
+	fiveOne := Profile{ // every codec it wants, but 5.1 at most (a browser)
+		Name:             "five-one",
+		Containers:       []string{"mp4"},
+		VideoCodecs:      []string{"h264"},
+		AudioCodecs:      []string{"aac"},
+		MaxAudioChannels: 6,
+	}
 
 	tests := []struct {
 		name      string
@@ -302,6 +313,15 @@ func TestDecideCustomProfiles(t *testing.T) {
 		{"hvc1 not required when RequireHVC1 is false", mkvPlayer, "mp4", streams(vid("hevc", "hev1", 1080), aud(1, "aac", true)),
 			"direct", "copy", "copy", nil},
 		{"mkv played directly when the profile allows it", mkvPlayer, "mkv", streams(vid("hevc", "", 1080), aud(1, "aac", true)),
+			"direct", "copy", "copy", nil},
+		// A 7.1 track is the one thing the codec list cannot say: the codec is fine and the mix is not,
+		// so the video is still copied and only the audio is downmixed (a browser: Chrome refuses 8-channel
+		// AAC, docs/M11-CLIENTS.md).
+		{"7.1 audio downmixed for a 5.1 profile", fiveOne, "mp4", streams(vid("h264", "avc1", 1080), audCh(1, "aac", 8, true)),
+			"remux", "copy", "transcode", []string{"audio has 8 channels, five-one plays at most 6"}},
+		{"5.1 audio copied when it fits", fiveOne, "mp4", streams(vid("h264", "avc1", 1080), audCh(1, "aac", 6, true)),
+			"direct", "copy", "copy", nil},
+		{"an audio stream with no channel count is copied", fiveOne, "mp4", streams(vid("h264", "avc1", 1080), audCh(1, "aac", 0, true)),
 			"direct", "copy", "copy", nil},
 		{"empty profile transcodes everything", Profile{}, "mp4", streams(vid("h264", "avc1", 1080), aud(1, "aac", true)),
 			"transcode", "transcode", "transcode", []string{"video codec h264 not supported by profile", "audio codec aac", "container mp4"}},

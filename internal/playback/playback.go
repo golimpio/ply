@@ -35,10 +35,14 @@ type Profile struct {
 	MaxHeight   int      `json:"maxHeight"`   // 0 = unlimited
 	// MaxHLSHeight is the tallest video the client plays over HLS, when that is less than
 	// what it plays as a file (MaxHeight); 0 = MaxHeight.
-	MaxHLSHeight   int      `json:"maxHlsHeight,omitempty"`
-	ForceTranscode bool     `json:"forceTranscode,omitempty"` // always re-encode video and the selected audio
-	HLS            bool     `json:"hls"`                      // client can play HLS (all of ours can)
-	TextSubs       []string `json:"textSubs"`                 // subtitle formats renderable as sidecar (vtt)
+	MaxHLSHeight int `json:"maxHlsHeight,omitempty"`
+	// MaxAudioChannels is the most channels the client decodes; a track with more is
+	// downmixed rather than copied. 0 = no limit. Chrome's demuxer refuses 8-channel AAC
+	// (measured 2026-11-13, docs/M11-CLIENTS.md), so the browser profile caps at 6.
+	MaxAudioChannels int      `json:"maxAudioChannels,omitempty"`
+	ForceTranscode   bool     `json:"forceTranscode,omitempty"` // always re-encode video and the selected audio
+	HLS              bool     `json:"hls"`                      // client can play HLS (all of ours can)
+	TextSubs         []string `json:"textSubs"`                 // subtitle formats renderable as sidecar (vtt)
 }
 
 // HLSHeight is the tallest video p plays over HLS (a remux or a transcode); 0 = no limit.
@@ -99,12 +103,13 @@ func Builtin(name string) (Profile, bool) {
 // default for other callers.
 func Browser() Profile {
 	return Profile{
-		Name:        "browser",
-		Containers:  []string{"mp4", "webm"},
-		VideoCodecs: []string{"h264", "vp9", "av1"},
-		AudioCodecs: []string{"aac", "mp3", "opus", "flac"},
-		HLS:         true,
-		TextSubs:    []string{"vtt"},
+		Name:             "browser",
+		Containers:       []string{"mp4", "webm"},
+		VideoCodecs:      []string{"h264", "vp9", "av1"},
+		AudioCodecs:      []string{"aac", "mp3", "opus", "flac"},
+		MaxAudioChannels: 6,
+		HLS:              true,
+		TextSubs:         []string{"vtt"},
 	}
 }
 
@@ -114,14 +119,15 @@ func Browser() Profile {
 // whatever the audio, frame rate or muxing (measured 2026-11-12, docs/M11-CLIENTS.md).
 func Chromecast() Profile {
 	return Profile{
-		Name:         "chromecast",
-		Containers:   []string{"mp4", "webm"},
-		VideoCodecs:  []string{"h264"},
-		AudioCodecs:  []string{"aac", "mp3", "opus", "flac"},
-		MaxHeight:    1080,
-		MaxHLSHeight: 720,
-		HLS:          true,
-		TextSubs:     []string{"vtt"},
+		Name:             "chromecast",
+		Containers:       []string{"mp4", "webm"},
+		VideoCodecs:      []string{"h264"},
+		AudioCodecs:      []string{"aac", "mp3", "opus", "flac"},
+		MaxHeight:        1080,
+		MaxHLSHeight:     720,
+		MaxAudioChannels: 6,
+		HLS:              true,
+		TextSubs:         []string{"vtt"},
 	}
 }
 
@@ -267,6 +273,10 @@ func Decide(item Item, streams []Stream, p Profile, opts Options) Decision {
 		} else if !contains(p.AudioCodecs, audio.Codec) {
 			audioCopyable = false
 			reason("audio codec %s not supported by %s", audio.Codec, name)
+		} else if p.MaxAudioChannels > 0 && audio.Channels > p.MaxAudioChannels {
+			// The codec is fine, the mix is not: a copy would fail to decode on the client.
+			audioCopyable = false
+			reason("audio has %d channels, %s plays at most %d", audio.Channels, name, p.MaxAudioChannels)
 		}
 	}
 

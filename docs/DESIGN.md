@@ -126,6 +126,8 @@ type Profile struct {
     Name string; Containers, VideoCodecs, AudioCodecs []string
     RequireHVC1 bool          // avplayer: hevc must be tagged hvc1 for direct play
     MaxHeight int             // 0 = unlimited
+    MaxHLSHeight int          // 0 = MaxHeight; a receiver may play HLS lower than a file
+    MaxAudioChannels int      // 0 = unlimited; a wider mix is downmixed, not copied (browser: 6)
     HLS bool                  // client can play HLS (all of ours can)
     TextSubs []string         // subtitle formats renderable as sidecar (vtt)
 }
@@ -138,13 +140,16 @@ type Decision struct {
 }
 func Decide(item Item, streams []Stream, p Profile, opts Options) Decision // Options{AudioIndex, SubtitleIndex}
 ```
-Rules: direct iff container ∈ profile, video codec ok (+hvc1 rule), chosen audio ok, height ≤ MaxHeight, no burn-in.
+Rules: direct iff container ∈ profile, video codec ok (+hvc1 rule), chosen audio ok as it is (codec, and at most
+MaxAudioChannels channels), height ≤ MaxHeight, no burn-in.
 Otherwise remux (copy video, copy or transcode audio→aac) iff video ok; otherwise transcode (h264, aac).
 Selecting an image subtitle (pgs/dvd_subtitle/dvb_subtitle) forces transcode with burn-in.
 Built-ins (M1: avplayer; M4: browser, chromecast; browser AirPlay: airplay):
-- `avplayer`: containers mp4 mov m4v; video h264 hevc(hvc1); audio aac ac3 eac3 alac mp3.
-- `chromecast`: containers mp4 webm; video h264 (vp9 omitted — conservative); audio aac mp3 opus flac; MaxHeight 1080.
-- `browser`: mp4 webm; h264 vp9 av1; aac mp3 opus flac. Web client normally POSTs its own measured profile.
+- `avplayer`: containers mp4 mov m4v; video h264 hevc(hvc1); audio aac ac3 eac3 alac mp3 (7.1 kept).
+- `chromecast`: containers mp4 webm; video h264 (vp9 omitted — conservative); audio aac mp3 opus flac; MaxHeight 1080;
+  at most 5.1.
+- `browser`: mp4 webm; h264 vp9 av1; aac mp3 opus flac; at most 5.1 (Chrome's demuxer refuses 8-channel AAC,
+  docs/M11-CLIENTS.md). Web client normally POSTs its own measured profile, `maxAudioChannels: 6` included.
 - `airplay`: native MPEG-TS HLS, H.264 High level 4.0 up to 1080p/30 fps and AAC-LC stereo 48 kHz.
   `ForceTranscode` re-encodes video and selected audio, including an MP4, because Safari cannot identify
   the receiver or its limits. This targets Apple TV 3rd generation and newer; the ordinary fMP4 path
