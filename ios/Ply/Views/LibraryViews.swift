@@ -34,7 +34,7 @@ struct HomeView: View {
                                 NavigationLink(value: Route.item(movie.id)) {
                                     PosterCard(title: movie.title, caption: movie.year.map(String.init), image: movie.poster,
                                                watched: movie.isWatched, fraction: movie.fraction)
-                                        .frame(width: 120)
+                                        .frame(width: shelfCardWidth)
                                 }
                                 .buttonStyle(.plain)
                             }

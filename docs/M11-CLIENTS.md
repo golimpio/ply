@@ -428,7 +428,10 @@ checks both.
   resumed with `Last-Event-ID`. Remote-control commands are acted on once and acked; the newest seq is remembered
   across launches, so one performed but not acked is not performed again.
 - **Apple TV:** the same core, feed, player and pages as the phone, with the TV's focus navigation (`AppShell.swift`
-  and the shared views); `make tv-run` installs it on a tvOS simulator. Picture in Picture is iPhone/iPad only.
+  and the shared views). The cards are a 10-foot size (`posterColumns`, `shelfCardWidth`, `genreTileWidth` and
+  `shelfSpacing` in `Components.swift`: 220 pt posters, 240 pt shelf cards at a 28 pt gap), and both card kinds carry
+  the focus effect (`hoverEffect`); the phone keeps its own sizes. `make tv-run` installs it on a tvOS simulator.
+  Picture in Picture is iPhone/iPad only.
 - **Tests and CI:** `make test` runs the Foundation-only core on this Mac as a macOS logic test: no simulator, no
   test host, so it works where Xcode 27's simulator test launch does not. It covers the SSE and WebVTT parsers, RFC
   3339 and path handling, the API client's requests and answers (with a URLProtocol stub), the models the server

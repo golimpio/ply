@@ -10,8 +10,42 @@ enum Route: Hashable {
     case collection(Int64, String)
 }
 
-/// The poster grid of the library and browse pages.
-let posterColumns = [GridItem(.adaptive(minimum: 105), spacing: 12, alignment: .top)]
+/// The poster grid of the library and browse pages: a phone's cards, or the TV's, watched from across
+/// a room.
+let posterColumns: [GridItem] = {
+    #if os(tvOS)
+    [GridItem(.adaptive(minimum: 220), spacing: 28, alignment: .top)]
+    #else
+    [GridItem(.adaptive(minimum: 105), spacing: 12, alignment: .top)]
+    #endif
+}()
+
+/// One card of a shelf: the poster grid's size, one at a time.
+let shelfCardWidth: CGFloat = {
+    #if os(tvOS)
+    240
+    #else
+    120
+    #endif
+}()
+
+/// The space between the cards of a shelf.
+let shelfSpacing: CGFloat = {
+    #if os(tvOS)
+    28
+    #else
+    12
+    #endif
+}()
+
+/// A genre's tile: an adaptive grid of them, with room for a name at 10 feet.
+let genreTileWidth: CGFloat = {
+    #if os(tvOS)
+    220
+    #else
+    150
+    #endif
+}()
 
 extension View {
     /// The pages a Route opens.
@@ -164,6 +198,8 @@ struct PosterCard: View {
             }
         }
         .contentShape(.rect)
+        // The TV's focus effect: a card that lifts and highlights as the focus engine reaches it.
+        .hoverEffect()
     }
 }
 
@@ -183,6 +219,7 @@ struct LandscapeCard: View {
                 .font(.caption).foregroundStyle(.secondary).lineLimit(1)
         }
         .contentShape(.rect)
+        .hoverEffect()
     }
 }
 
@@ -200,7 +237,7 @@ struct Shelf<Content: View>: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title).font(.title3.bold()).padding(.horizontal)
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 12) { content }
+                LazyHStack(alignment: .top, spacing: shelfSpacing) { content }
                     .padding(.horizontal)
             }
         }

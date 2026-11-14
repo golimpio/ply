@@ -112,7 +112,7 @@ struct BrowseView: View {
                             PosterCard(title: collection.name,
                                        caption: collection.count == 1 ? "1 title" : "\(collection.count) titles",
                                        image: collection.poster)
-                                .frame(width: 120)
+                                .frame(width: shelfCardWidth)
                         }
                         .buttonStyle(.plain)
                     }
@@ -139,7 +139,7 @@ struct BrowseView: View {
             if !browse.genres.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Genres").font(.title3.bold()).padding(.horizontal)
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8)], spacing: 8) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: genreTileWidth), spacing: 8)], spacing: 8) {
                         ForEach(browse.genres) { genre in
                             NavigationLink(value: Route.genre(genre.id, genre.name)) {
                                 HStack {
@@ -428,7 +428,7 @@ struct PersonView: View {
         HStack(alignment: .top, spacing: 16) {
             RemoteImage(path: person.profile, placeholder: "person.fill")
                 .aspectRatio(2 / 3, contentMode: .fit)
-                .frame(width: 120)
+                .frame(width: shelfCardWidth)
                 .clipShape(.rect(cornerRadius: 8))
             VStack(alignment: .leading, spacing: 6) {
                 Text(person.name).font(.title.bold())
@@ -537,7 +537,7 @@ struct FilmographyCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             PosterCard(title: entry.title, caption: entry.yearText, image: entry.poster)
-                .frame(width: 120)
+                .frame(width: shelfCardWidth)
             if let desc = entry.roleDescription {
                 Text(desc).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
