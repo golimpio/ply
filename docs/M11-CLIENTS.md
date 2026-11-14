@@ -430,8 +430,10 @@ checks both.
 - **Apple TV:** the same core, feed, player and pages as the phone, with the TV's focus navigation (`AppShell.swift`
   and the shared views). The cards are a 10-foot size (`posterColumns`, `shelfCardWidth`, `genreTileWidth` and
   `shelfSpacing` in `Components.swift`: 220 pt posters, 240 pt shelf cards at a 28 pt gap), and both card kinds carry
-  the focus effect (`hoverEffect`); the phone keeps its own sizes. `make tv-run` installs it on a tvOS simulator.
-  Picture in Picture is iPhone/iPad only.
+  the focus effect (`hoverEffect`); the phone keeps its own sizes. Its icon is a layered `AppIcon.brandassets`
+  (`PlyTV/Assets.xcassets`): a drawn background gradient behind a drawn front play mark and wordmark, so it
+  parallaxes without a design tool, with `Top Shelf Image` and `Top Shelf Image Wide` beside it. `make tv-run`
+  installs it on a tvOS simulator. Picture in Picture is iPhone/iPad only.
 - **Tests and CI:** `make test` runs the Foundation-only core on this Mac as a macOS logic test: no simulator, no
   test host, so it works where Xcode 27's simulator test launch does not. It covers the SSE and WebVTT parsers, RFC
   3339 and path handling, the API client's requests and answers (with a URLProtocol stub), the models the server
@@ -443,4 +445,4 @@ checks both.
 - **Not in the apps:** owner-only administration (pair/revoke, settings, folders, queue/jobs, scanning, metadata
   editing/matching, subtitle search/download) stays in the web UI; a paired device's token gets 403 by this
   contract. Chromecast, Android, watchOS and visionOS are separate clients, not this app.
-- **Not yet:** a layered tvOS app icon; AirPlay and Picture in Picture on real hardware.
+- **Not yet:** AirPlay and Picture in Picture on real hardware.
