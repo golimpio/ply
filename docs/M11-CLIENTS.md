@@ -389,3 +389,42 @@ Receiver, ply on `http://192.168.4.196:8420`:
 13. Remote control (above): addressed events and the `commands` topic in `internal/events` (pending commands kept
     apart from the ring, replayed by seq), `POST /api/devices/{id}/commands` and `.../commands/{seq}/ack`, and the
     `commands` section of the snapshot.
+
+## The apps (`ios/`, 2026-11-12; iPhone, iPad and Apple TV)
+The first native clients: SwiftUI, iOS 17 and tvOS 17 and later. Everything they need to build is in `ios/`
+(XcodeGen's `project.yml` and a Makefile: `make`, `make test`, `make run`, `make tv`, `make tv-run`,
+`make device TEAM=<team id>`), so they can move to a repository of their own. The generated
+`Ply.xcodeproj` is not committed. Xcode 26 or newer (Swift 6.2) and XcodeGen are required; the Makefile
+checks both.
+- **Connecting:** `NWBrowser` for `_ply._tcp`, then the IPv4 address mDNS resolves (`https://<host>` with `tls=1`),
+  or an address typed (`http` or `https`, port 8420 when none is given). `api` and `apiMin` of `/api/info` are
+  checked first: a server to update and an app to update are told apart, and only an unreachable one has "try again".
+  A service seen on several interfaces is listed once.
+- **Pairing:** when `authRequired`, the six-digit code; the device token is kept in the Keychain by server id, and a
+  401 goes back to pairing. The app registers as `kind` `ios`, `ipados` or `tvos`, `app` `ply-ios` or `ply-tvos`.
+- **Browsing:** Home (Continue Watching, the newest films), Movies, Shows (by season), and Browse: a search over
+  films, shows, episodes, people, genres and collections, the collections and genres themselves, a title's page, a
+  person's page (their credits grouped), a genre's and a collection's titles, a show's page; watched state.
+- **Playing:** the `avplayer` profile in AVKit's own player, with `attempt`, a heartbeat every 10 s (`wireless`
+  while AirPlay is on), progress once the stream has reached where it starts, a new session where it was after a
+  404, and an end after a 410. The audio track can be chosen; a text subtitle is drawn from its WebVTT, a bitmap one
+  burned in (`subtitleIndex`). A text subtitle still downloading says so, and one that failed says that.
+- **AirPlay:** the targets of `GET /api/receivers` whose `base` is set are offered as "Play on Apple TV". Such a
+  play asks for the `airplay` profile (MPEG-TS HLS, which older Apple TVs play) with `receiver`, and a text subtitle
+  as `subtitleKey` so the TV shows it; the person then picks that TV in the player's AirPlay button. The player's own
+  AirPlay button on a locally started play keeps the stream it was given (the `avplayer` profile): start with "Play on
+  Apple TV" when a text subtitle must be on the TV.
+- **Picture in Picture:** on iOS. The player leaving the screen for the PiP window is not a close; restoring brings it
+  back, and closing the PiP window ends the play. (Compiled, not exercised here: it needs a device.)
+- **The feed:** `library` and `commands`, parsed byte by byte off the main actor; closed in the background and
+  resumed with `Last-Event-ID`. Remote-control commands are acted on once and acked; the newest seq is remembered
+  across launches, so one performed but not acked is not performed again.
+- **Apple TV:** the same core, feed, player and pages as the phone, with the TV's focus navigation (`AppShell.swift`
+  and the shared views); `make tv-run` installs it on a tvOS simulator. Picture in Picture is iPhone/iPad only.
+- **Tests:** `make test` runs the Foundation-only core on this Mac as a macOS logic test: no simulator, no test
+  host, so it works where Xcode 27's simulator test launch does not. It covers the SSE and WebVTT parsers, RFC 3339
+  and path handling, the API client's requests and answers (with a URLProtocol stub), the models the server sends,
+  the AirPlay play plan, connect-failure classification, command history and discovery dedupe. The app-hosted XCTest
+  target is not used: on this machine it launches the host suspended and never attaches.
+- **Not yet:** switching the profile automatically when the player's own AirPlay button starts external playback
+  (a restart while external playback is on does use the `airplay` profile); a layered tvOS app icon.
