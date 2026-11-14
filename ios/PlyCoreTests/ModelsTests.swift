@@ -63,6 +63,7 @@ private func decode<T: Decodable>(_ json: String) throws -> T {
            "tagline":"Welcome to the real world.","runtimeMin":136,"certification":"R",
            "rating":{"source":"imdb","value":8.7,"scale":10},"genres":[{"id":28,"name":"Action"}],
            "cast":[{"personId":7,"name":"Keanu Reeves","character":"Neo","profile":"/api/images/p.jpg"}],
+           "crew":[{"personId":9,"name":"Lana Wachowski","job":"Director","profile":"/api/images/w.jpg"}],
            "collection":{"id":5,"name":"The Matrix Collection"},
            "collections":[{"id":5,"name":"The Matrix Collection"},{"id":9,"name":"The Wachowskis"}]},
          "episodeInfo":null,
@@ -80,6 +81,8 @@ private func decode<T: Decodable>(_ json: String) throws -> T {
         #expect(detail.meta?.collections?.last?.name == "The Wachowskis")
         #expect(detail.meta?.genres?.first?.name == "Action")
         #expect(detail.meta?.cast?.first?.personId == 7)
+        #expect(detail.meta?.crew?.first?.name == "Lana Wachowski")
+        #expect(detail.meta?.crew?.first?.job == "Director")
     }
 
     @Test func anEpisodesDetailPrefersItsOwnOverview() throws {
@@ -119,6 +122,7 @@ private func decode<T: Decodable>(_ json: String) throws -> T {
         #expect(film.isSeries == false)
         #expect(film.yearText == "1999")
         #expect(film.rating?.source == "imdb")
+        #expect(film.rating?.score == 87)
         #expect(film.isWatched, "a film watched in any version")
 
         let series: TitleCard = try decode(#"""
@@ -141,6 +145,15 @@ private func decode<T: Decodable>(_ json: String) throws -> T {
          "show":"No Episodes","watched":false,"episodeCount":0}
         """#)
         #expect(empty.isWatched == false)
+    }
+
+    @Test func aRatingWithoutScore100FallsBackToItsScale() throws {
+        let imdb: Rating = try decode(#"{"source":"imdb","value":8.7,"scale":10}"#)
+        #expect(imdb.score == 87)
+        let critics: Rating = try decode(#"{"source":"rt_critics","value":92,"scale":100}"#)
+        #expect(critics.score == 92)
+        let noScale: Rating = try decode(#"{"source":"x","value":1,"scale":0}"#)
+        #expect(noScale.score == 0)
     }
 
     @Test func aPersonHasTheirCredits() throws {
@@ -216,5 +229,57 @@ private func decode<T: Decodable>(_ json: String) throws -> T {
         #expect(playback.url == "")
         #expect(playback.sessionId == nil)
         #expect(playback.reasons?.last == "this item cannot be played here")
+    }
+}
+
+@Suite struct NewFeaturesModelTests {
+    @Test func trailersDecodeAndHaveLabels() throws {
+        let trailers: [Trailer] = try decode(#"""
+        [{"site":"youtube","key":"vKQi3bBA1y8","name":"Official Trailer","type":"trailer","official":true},
+         {"site":"vimeo","key":"123456","name":"","type":"teaser","official":false}]
+        """#)
+        #expect(trailers.count == 2)
+        #expect(trailers[0].embedURL?.absoluteString == "https://www.youtube-nocookie.com/embed/vKQi3bBA1y8?autoplay=1&rel=0&playsinline=1")
+        #expect(trailers[0].label(in: trailers) == "Official Trailer")
+        #expect(trailers[1].embedURL?.absoluteString == "https://player.vimeo.com/video/123456?autoplay=1&dnt=1")
+        #expect(trailers[1].label(in: trailers) == "Teaser")
+    }
+
+    @Test func upcomingShowsDecodeWithNextEpisode() throws {
+        let upcoming: [UpcomingShow] = try decode(#"""
+        [{"titleId":78,"show":"Dark","poster":"/api/p.jpg","backdrop":"/api/b.jpg",
+          "nextAirDate":"2026-11-20","nextEpisode":{"season":2,"episode":1,"name":"Beginnings"}}]
+        """#)
+        #expect(upcoming.count == 1)
+        #expect(upcoming[0].show == "Dark")
+        #expect(upcoming[0].nextAirDate == "2026-11-20")
+        #expect(upcoming[0].nextEpisode?.season == 2)
+        #expect(upcoming[0].nextEpisode?.episode == 1)
+        #expect(upcoming[0].nextEpisode?.name == "Beginnings")
+    }
+
+    @Test func personFilmographyDecodes() throws {
+        let entries: [PersonFilmographyEntry] = try decode(#"""
+        [{"kind":"movie","tmdbId":603,"title":"The Matrix","year":1999,"character":"Neo","creditKind":"cast","rating":8.7,"inLibrary":true},
+         {"kind":"series","tmdbId":1399,"title":"Game of Thrones","year":2011,"job":"Executive Producer","creditKind":"crew","inLibrary":false}]
+        """#)
+        #expect(entries.count == 2)
+        #expect(entries[0].title == "The Matrix")
+        #expect(entries[0].isSeries == false)
+        #expect(entries[0].yearText == "1999")
+        #expect(entries[0].roleDescription == "Neo")
+        #expect(entries[0].isExternal == false)
+        #expect(entries[1].isSeries)
+        #expect(entries[1].roleDescription == "Executive Producer")
+        #expect(entries[1].isExternal)
+    }
+
+    @Test func movieVersionLabelAndSpecs() throws {
+        let item: Item = try decode(#"""
+        {"id":12,"kind":"movie","title":"The Matrix","container":"mkv","width":3840,"height":2160,"hdr":"hdr10","durationSec":7200}
+        """#)
+        #expect(item.is4K)
+        #expect(item.isHDR)
+        #expect(item.versionLabel == "4K HDR10, MKV")
     }
 }

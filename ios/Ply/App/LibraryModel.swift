@@ -6,6 +6,7 @@ import Observation
     private(set) var movies: [Item] = []
     private(set) var shows: [ShowSummary] = []
     private(set) var continueWatching: [Item] = []
+    private(set) var upcoming: [UpcomingShow] = []
     private(set) var loaded = false
     private(set) var error: String?
     /// Goes up on every reload, so that open pages can fetch their own data again.
@@ -28,10 +29,12 @@ import Observation
             async let movies = api.movies()
             async let shows = api.shows()
             async let continueWatching = api.continueWatching()
+            async let upcoming = api.upcoming()
             let byTitle: (String, String) -> Bool = { $0.localizedStandardCompare($1) == .orderedAscending }
             self.movies = try await movies.sorted { byTitle($0.sortTitle ?? $0.title, $1.sortTitle ?? $1.title) }
             self.shows = try await shows.sorted { byTitle($0.sortTitle ?? $0.show, $1.sortTitle ?? $1.show) }
             self.continueWatching = try await continueWatching
+            self.upcoming = (try? await upcoming) ?? []
             error = nil
         } catch is CancellationError {
             return

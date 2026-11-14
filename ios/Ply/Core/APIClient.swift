@@ -204,6 +204,24 @@ final class APIClient {
         _ = try await data("PUT", "/api/items/\(id)/watched", body: Body(watched: watched))
     }
 
+    /// Every version of a film, or every episode of a series by its title id.
+    func setTitleWatched(_ id: Int64, _ watched: Bool) async throws {
+        struct Body: Encodable { let watched: Bool }
+        _ = try await data("PUT", "/api/titles/\(id)/watched", body: Body(watched: watched))
+    }
+
+    /// Every episode of a show, matched or not.
+    func setShowWatched(_ name: String, _ watched: Bool) async throws {
+        struct Body: Encodable { let watched: Bool }
+        _ = try await data("PUT", "/api/shows/\(Path.segment(name))/watched", body: Body(watched: watched))
+    }
+
+    /// Every episode of a season of a show.
+    func setSeasonWatched(_ name: String, season: Int, _ watched: Bool) async throws {
+        struct Body: Encodable { let watched: Bool }
+        _ = try await data("PUT", "/api/shows/\(Path.segment(name))/seasons/\(season)/watched", body: Body(watched: watched))
+    }
+
     /// Answers a command this device was sent.
     func ack(_ seq: Int64, ok: Bool, error: String?) async throws {
         struct Body: Encodable { let ok: Bool; let error: String? }
@@ -257,6 +275,21 @@ final class APIClient {
     func collections() async throws -> [CollectionCard] { try await list("/api/collections") }
 
     func collection(_ id: Int64) async throws -> CollectionDetail { try await get("/api/collections/\(id)") }
+
+    /// External filmography for a person; [] when none or online lookups are off.
+    func personFilmography(_ id: Int64) async throws -> [PersonFilmographyEntry] {
+        try await list("/api/people/\(id)/filmography")
+    }
+
+    /// A title's trailers, best first; [] when it has none or online lookups are off.
+    func trailers(titleId: Int64) async throws -> [Trailer] {
+        try await list("/api/titles/\(titleId)/trailers")
+    }
+
+    /// Shows with upcoming episodes airing today or later (GET /api/upcoming).
+    func upcoming() async throws -> [UpcomingShow] {
+        try await list("/api/upcoming")
+    }
 
     /// Every episode, for search. The server answers the whole list when no limit is given.
     func allEpisodes() async throws -> [Item] {

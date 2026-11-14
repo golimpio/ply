@@ -273,7 +273,16 @@ struct PersonView: View {
     let id: Int64
     @Environment(Connection.self) private var connection
     @State private var person: Person?
+    @State private var filmography: [PersonFilmographyEntry] = []
     @State private var error: String?
+
+    private var externalFilms: [PersonFilmographyEntry] {
+        filmography.filter { !$0.isSeries && $0.isExternal }
+    }
+
+    private var externalSeries: [PersonFilmographyEntry] {
+        filmography.filter { $0.isSeries && $0.isExternal }
+    }
 
     var body: some View {
         ScrollView {
@@ -287,7 +296,21 @@ struct PersonView: View {
                             }
                         }
                     }
-                    if person.credits.isEmpty {
+                    if !externalFilms.isEmpty {
+                        Shelf("Other Films") {
+                            ForEach(externalFilms) { entry in
+                                FilmographyCard(entry: entry)
+                            }
+                        }
+                    }
+                    if !externalSeries.isEmpty {
+                        Shelf("Other Series") {
+                            ForEach(externalSeries) { entry in
+                                FilmographyCard(entry: entry)
+                            }
+                        }
+                    }
+                    if person.credits.isEmpty && externalFilms.isEmpty && externalSeries.isEmpty {
                         Text("None of their work is in the library right now.")
                             .font(.callout).foregroundStyle(.secondary).padding(.horizontal)
                     }
@@ -340,7 +363,10 @@ struct PersonView: View {
 
     private func load() async {
         do {
-            person = try await connection.api.person(id)
+            async let p = connection.api.person(id)
+            async let f = connection.api.personFilmography(id)
+            self.person = try await p
+            self.filmography = (try? await f) ?? []
             error = nil
         } catch is CancellationError {
         } catch {
@@ -407,6 +433,20 @@ struct CreditCard: View {
             TitlePoster(card: entry.card, caption: entry.card.yearText, width: 120)
             if !entry.detail.isEmpty {
                 Text(entry.detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+    }
+}
+
+struct FilmographyCard: View {
+    let entry: PersonFilmographyEntry
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            PosterCard(title: entry.title, caption: entry.yearText, image: entry.poster)
+                .frame(width: 120)
+            if let desc = entry.roleDescription {
+                Text(desc).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
         }
     }

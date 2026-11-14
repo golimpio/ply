@@ -88,7 +88,7 @@ private func makeClient(token: String? = "secret", device: DeviceContext = .test
                      session: URLSession(configuration: config))
 }
 
-private func object(_ body: Data?) -> [String: Any]? {
+nonisolated private func object(_ body: Data?) -> [String: Any]? {
     guard let body, let o = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else { return nil }
     return o
 }
@@ -251,5 +251,55 @@ struct APIClientTests {
         }
         #expect(events == [SSEEvent(id: "7", type: "library", data: "{}")])
         #expect(parser.retry == 3000)
+    }
+
+    @Test func trailersFetchesTitleTrailers() async throws {
+        StubURL.reset { req in
+            #expect(req.url?.path == "/api/titles/42/trailers")
+            return .json(#"[{"site":"youtube","key":"abc12345678","name":"Trailer","type":"trailer"}]"#)
+        }
+        let trailers = try await makeClient().trailers(titleId: 42)
+        #expect(trailers.count == 1)
+        #expect(trailers[0].key == "abc12345678")
+    }
+
+    @Test func upcomingFetchesUpcomingShows() async throws {
+        StubURL.reset { req in
+            #expect(req.url?.path == "/api/upcoming")
+            return .json(#"[{"titleId":10,"show":"Dark","nextAirDate":"2026-11-20"}]"#)
+        }
+        let upcoming = try await makeClient().upcoming()
+        #expect(upcoming.count == 1)
+        #expect(upcoming[0].show == "Dark")
+    }
+
+    @Test func personFilmographyFetchesExternalCredits() async throws {
+        StubURL.reset { req in
+            #expect(req.url?.path == "/api/people/7/filmography")
+            return .json(#"[{"kind":"movie","title":"John Wick","year":2014}]"#)
+        }
+        let filmography = try await makeClient().personFilmography(7)
+        #expect(filmography.count == 1)
+        #expect(filmography[0].title == "John Wick")
+    }
+
+    @Test func markWatchedEndpointsSendExpectedBodies() async throws {
+        StubURL.reset { _ in StubURL.Reply(status: 200, body: Data(#"{"watched":true,"items":[]}"#.utf8)) }
+        let client = makeClient()
+
+        try await client.setTitleWatched(5, true)
+        #expect(StubURL.recorder.requests.last?.url?.path == "/api/titles/5/watched")
+        let titleBody = try #require(object(StubURL.recorder.bodies.last ?? nil))
+        #expect(titleBody["watched"] as? Bool == true)
+
+        try await client.setShowWatched("The Matrix", true)
+        #expect(StubURL.recorder.requests.last?.url?.path == "/api/shows/The Matrix/watched")
+        let showBody = try #require(object(StubURL.recorder.bodies.last ?? nil))
+        #expect(showBody["watched"] as? Bool == true)
+
+        try await client.setSeasonWatched("The Matrix", season: 2, true)
+        #expect(StubURL.recorder.requests.last?.url?.path == "/api/shows/The Matrix/seasons/2/watched")
+        let seasonBody = try #require(object(StubURL.recorder.bodies.last ?? nil))
+        #expect(seasonBody["watched"] as? Bool == true)
     }
 }

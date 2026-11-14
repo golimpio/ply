@@ -5,7 +5,7 @@ import UIKit
 /// Shows a play full screen in AVKit's own player, modally from the top of the app, so that it has
 /// AVKit's close button, AirPlay route picker and gestures. Text subtitles are drawn on its content
 /// overlay.
-final class PlayerPresenter: NSObject, AVPlayerViewControllerDelegate {
+final class PlayerPresenter: NSObject, AVPlayerViewControllerDelegate, UIAdaptivePresentationControllerDelegate {
     private var current: AVPlayerViewController?
     private var overlay: UIViewController?
     private var onDismiss: (() -> Void)?
@@ -22,7 +22,8 @@ final class PlayerPresenter: NSObject, AVPlayerViewControllerDelegate {
         vc.modalPresentationStyle = .fullScreen
         #if os(iOS)
         vc.allowsPictureInPicturePlayback = true
-        vc.updatesNowPlayingInfoCenter = true
+        vc.canStartPictureInPictureAutomaticallyFromInline = true
+        vc.updatesNowPlayingInfoCenter = false
         #endif
         pipActive = false
         pipRestoring = false
@@ -58,8 +59,10 @@ final class PlayerPresenter: NSObject, AVPlayerViewControllerDelegate {
         self.onDismiss = onDismiss
         let show = { [weak self] in
             Self.afterTransitions {
-                guard let self, self.current === vc else { return }
-                Self.top()?.present(vc, animated: true)
+                guard let self, self.current === vc, let top = Self.top() else { return }
+                top.present(vc, animated: true) { [weak self] in
+                    vc.presentationController?.delegate = self
+                }
             }
         }
         if let old, old.presentingViewController != nil {
@@ -116,7 +119,10 @@ final class PlayerPresenter: NSObject, AVPlayerViewControllerDelegate {
         }
         pipRestoring = true
         if playerViewController.presentingViewController == nil, let top = Self.top(), !playerViewController.isBeingPresented {
-            top.present(playerViewController, animated: true) { completionHandler(true) }
+            top.present(playerViewController, animated: true) { [weak self, weak playerViewController] in
+                playerViewController?.presentationController?.delegate = self
+                completionHandler(true)
+            }
         } else if playerViewController.presentingViewController != nil {
             completionHandler(true)
         } else {
@@ -151,6 +157,12 @@ final class PlayerPresenter: NSObject, AVPlayerViewControllerDelegate {
         overlay = nil
         onDismiss = nil
         done?()
+    }
+
+    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+        if let vc = presentationController.presentedViewController as? AVPlayerViewController {
+            closed(vc)
+        }
     }
 
     private static var root: UIViewController? {

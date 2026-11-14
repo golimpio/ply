@@ -78,6 +78,15 @@ nonisolated struct Rating: Decodable, Sendable, Hashable {
     let source: String
     let value: Double
     let scale: Double
+    /// The same rating on a 0-100 scale, as the lists sort by (the server's `score100`).
+    let score100: Int?
+
+    /// The rating on a 0-100 scale: the server's, or the value on the source's own scale.
+    var score: Int {
+        if let score100 { return score100 }
+        guard scale > 0 else { return 0 }
+        return Int((value / scale * 100).rounded())
+    }
 
     var label: String {
         let name = switch source {
@@ -119,9 +128,25 @@ nonisolated struct Item: Decodable, Sendable, Hashable, Identifiable {
     let progress: Progress?
     let watched: Bool?
     let genres: [String]?
+    let container: String?
+    let width: Int?
+    let height: Int?
+    let hdr: String?
 
     var isEpisode: Bool { kind == "episode" }
     var isWatched: Bool { watched ?? progress?.watched ?? false }
+
+    var is4K: Bool { (height ?? 0) >= 2000 || (width ?? 0) >= 3800 }
+    var isHDR: Bool { !(hdr ?? "").isEmpty }
+
+    /// A short label telling versions apart: "4K HDR, MKV", "1080p, MP4".
+    var versionLabel: String {
+        let h = height ?? 0
+        let res = h >= 2000 ? "4K" : h >= 1400 ? "1440p" : h >= 1000 ? "1080p" : h >= 700 ? "720p" : h > 0 ? "\(h)p" : ""
+        let hdrText = (hdr ?? "").isEmpty ? "" : (hdr?.uppercased() ?? "HDR")
+        let picture = [res, hdrText].filter { !$0.isEmpty }.joined(separator: " ")
+        return [picture, container?.uppercased()].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: ", ")
+    }
 
     /// Where a play resumes: the position of a file started and not watched to the end.
     var resumeSec: Double {
@@ -199,6 +224,13 @@ nonisolated struct CastMember: Decodable, Sendable, Hashable {
     let profile: String?
 }
 
+nonisolated struct CrewMember: Decodable, Sendable, Hashable {
+    let personId: Int64
+    let name: String
+    let job: String
+    let profile: String?
+}
+
 /// A movie's title, or a show's (GET /api/items/{id} meta, GET /api/shows/{name} meta).
 nonisolated struct TitleDetail: Decodable, Sendable {
     let id: Int64
@@ -218,6 +250,7 @@ nonisolated struct TitleDetail: Decodable, Sendable {
     let collections: [CollectionRef]?
     let genres: [Genre]?
     let cast: [CastMember]?
+    let crew: [CrewMember]?
 }
 
 nonisolated struct EpisodeInfo: Decodable, Sendable {
@@ -314,4 +347,65 @@ nonisolated struct CommandEvent: Decodable, Sendable {
 nonisolated struct Snapshot: Decodable, Sendable {
     let api: Int?
     let commands: [Command]?
+}
+
+/// A trailer or teaser for a title (GET /api/titles/{id}/trailers).
+nonisolated struct Trailer: Decodable, Sendable, Hashable, Identifiable {
+    let site: String
+    let key: String
+    let name: String?
+    let type: String?
+    let official: Bool?
+
+    var id: String { "\(site):\(key)" }
+
+    var embedURL: URL? {
+        if site == "youtube" {
+            return URL(string: "https://www.youtube-nocookie.com/embed/\(key)?autoplay=1&rel=0&playsinline=1")
+        }
+        if site == "vimeo" {
+            return URL(string: "https://player.vimeo.com/video/\(key)?autoplay=1&dnt=1")
+        }
+        return nil
+    }
+
+    var webURL: URL? {
+        if site == "youtube" {
+            return URL(string: "https://www.youtube.com/watch?v=\(key)")
+        }
+        if site == "vimeo" {
+            return URL(string: "https://vimeo.com/\(key)")
+        }
+        return nil
+    }
+
+    func label(in all: [Trailer]) -> String {
+        let cleanName = (name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleanName.isEmpty { return cleanName }
+        let kind = type == "teaser" ? "Teaser" : "Trailer"
+        let same = all.filter { ($0.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && ($0.type == "teaser") == (type == "teaser") }
+        if same.count > 1, let idx = same.firstIndex(where: { $0.id == id }) {
+            return "\(kind) \(idx + 1)"
+        }
+        return kind
+    }
+}
+
+/// The next episode of a show that airs (GET /api/upcoming).
+nonisolated struct NextEpisode: Decodable, Sendable, Hashable {
+    let season: Int
+    let episode: Int
+    let name: String?
+}
+
+/// A show in the library with an upcoming episode (GET /api/upcoming).
+nonisolated struct UpcomingShow: Decodable, Sendable, Hashable, Identifiable {
+    let titleId: Int64
+    let show: String
+    let poster: String?
+    let backdrop: String?
+    let nextAirDate: String
+    let nextEpisode: NextEpisode?
+
+    var id: Int64 { titleId }
 }

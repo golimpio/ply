@@ -88,6 +88,7 @@ final class EventFeed {
     private let api: APIClient
     private let topics: String
     private let onEvent: (SSEEvent) -> Void
+    private let session: URLSession
     private var task: Task<Void, Never>?
     private var lastEventID: String?
 
@@ -100,9 +101,10 @@ final class EventFeed {
         return URLSession(configuration: config)
     }()
 
-    init(api: APIClient, topics: [String], onEvent: @escaping (SSEEvent) -> Void) {
+    init(api: APIClient, topics: [String], session: URLSession? = nil, onEvent: @escaping (SSEEvent) -> Void) {
         self.api = api
         self.topics = topics.joined(separator: ",")
+        self.session = session ?? Self.session
         self.onEvent = onEvent
     }
 
@@ -147,7 +149,7 @@ final class EventFeed {
         var req = api.urlRequest("GET", "/api/events" + Path.query([("topics", topics)]))
         req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         if let lastEventID { req.setValue(lastEventID, forHTTPHeaderField: "Last-Event-ID") }
-        let parser = try await Self.read(try await api.bytes(req, session: Self.session)) { [weak self] event in
+        let parser = try await Self.read(try await api.bytes(req, session: session)) { [weak self] event in
             guard let self else { return }
             self.lastEventID = event.id ?? self.lastEventID
             self.onEvent(event)

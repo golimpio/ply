@@ -1,6 +1,8 @@
 import AVFoundation
 import Foundation
+import MediaPlayer
 import Observation
+import UIKit
 
 enum PlaybackEnd {
     /// Played to the end.
@@ -33,6 +35,7 @@ enum PlaybackEnd {
     private let api: APIClient
     private var request: PlayRequest
     private var item: ItemDetail?
+    var itemDetail: ItemDetail? { item }
     private var sessionID: String?
     /// Position the current stream was asked to start at, and the last that counted.
     private var resumeAt = 0.0
@@ -52,10 +55,14 @@ enum PlaybackEnd {
     private var subtitleTask: Task<Void, Never>?
     private var timeObserver: Any?
     private var statusObservation: NSKeyValueObservation?
+    private var externalPlaybackObservation: NSKeyValueObservation?
     /// The wait for the current item to be ready, and what it watches.
     private var readiness: Once<Void>?
     private var readinessObservation: NSKeyValueObservation?
     private var notifications: [any NSObjectProtocol] = []
+    private var activeProfile: String = "avplayer"
+    private var nowPlayingArtwork: MPMediaItemArtwork?
+    private var remoteCommandTargets: [(command: MPRemoteCommand, target: Any)] = []
 
     /// A heartbeat every 10 s, paused or not: a paused player asks for nothing, and without beats the
     /// server would take the play for an abandoned one. Progress goes with it.
@@ -76,6 +83,8 @@ enum PlaybackEnd {
             let item = try await api.item(request.itemId)
             guard !closed else { return }
             self.item = item
+            setupRemoteCommands()
+            loadArtwork(for: item)
             let plan = PlaybackPlanning.plan(subtitle: request.subtitle, receiver: request.receiver,
                                             externalPlayback: player.isExternalPlaybackActive)
             if plan.drawsSubtitles, case let .text(_, url) = request.subtitle {
@@ -105,7 +114,10 @@ enum PlaybackEnd {
             return
         }
         player.seek(to: CMTime(seconds: max(0, seconds), preferredTimescale: 600)) { [weak self] _ in
-            Task { @MainActor in self?.beat() }
+            Task { @MainActor in
+                self?.updateNowPlayingInfo()
+                self?.beat()
+            }
         }
     }
 
@@ -121,6 +133,9 @@ enum PlaybackEnd {
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         timeObserver = nil
         statusObservation = nil
+        externalPlaybackObservation = nil
+        clearRemoteCommands()
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         notifications.forEach(NotificationCenter.default.removeObserver)
         notifications = []
         player.pause()
@@ -146,6 +161,7 @@ enum PlaybackEnd {
             // drawn here. A play that is already on AirPlay when it is restarted keeps that profile.
             let plan = PlaybackPlanning.plan(subtitle: request.subtitle, receiver: request.receiver,
                                             externalPlayback: player.isExternalPlaybackActive)
+            activeProfile = plan.profile
             if !plan.drawsSubtitles {
                 subtitleTask?.cancel()
                 subtitleTask = nil
@@ -165,9 +181,13 @@ enum PlaybackEnd {
             }
             sessionID = pb.sessionId
             let playerItem = AVPlayerItem(url: url)
+            if let d = item {
+                configureExternalMetadata(for: playerItem, detail: d)
+            }
             player.replaceCurrentItem(with: playerItem)
             startTicker()
             try await ready(playerItem)
+            updateNowPlayingInfo()
             // A file starts at 0; an HLS stream already starts at `start` on the file's timeline.
             let target = pendingSeek ?? start
             pendingSeek = nil
@@ -327,7 +347,30 @@ enum PlaybackEnd {
                     if status == .paused { self.wantsPlay = false }
                 }
                 if status == .paused { self.report() }
+                self.updateNowPlayingInfo()
                 self.beat()
+            }
+        }
+        externalPlaybackObservation = player.observe(\.isExternalPlaybackActive, options: [.old, .new]) { [weak self] player, change in
+            Task { @MainActor in
+                guard let self, !self.closed else { return }
+                let isExternal = player.isExternalPlaybackActive
+                let wasExternal = change.oldValue ?? false
+                guard isExternal != wasExternal else { return }
+                let plan = PlaybackPlanning.plan(subtitle: self.request.subtitle, receiver: self.request.receiver,
+                                                externalPlayback: isExternal)
+                if plan.profile != self.activeProfile {
+                    if plan.drawsSubtitles, case let .text(_, url) = self.request.subtitle {
+                        if self.subtitleTask == nil {
+                            self.subtitleTask = Task { [weak self] in await self?.loadSubtitles(url) }
+                        }
+                    } else if !plan.drawsSubtitles {
+                        self.subtitleTask?.cancel()
+                        self.subtitleTask = nil
+                        self.subtitleText = nil
+                    }
+                    await self.open(at: self.position)
+                }
             }
         }
         let center = NotificationCenter.default
@@ -424,5 +467,125 @@ enum PlaybackEnd {
         guard !startReported else { return }
         startReported = true
         onStart?(failure)
+    }
+
+    // MARK: now playing & remote commands
+
+    private func configureExternalMetadata(for playerItem: AVPlayerItem, detail: ItemDetail) {
+        let item = detail.item
+        var metadata: [AVMetadataItem] = []
+
+        let titleItem = AVMutableMetadataItem()
+        titleItem.identifier = .commonIdentifierTitle
+        titleItem.value = (item.isEpisode ? (item.episodeTitle ?? item.title) : item.title) as (NSCopying & NSObjectProtocol)
+        metadata.append(titleItem)
+
+        let artistItem = AVMutableMetadataItem()
+        artistItem.identifier = .commonIdentifierArtist
+        artistItem.value = (item.isEpisode ? (item.show ?? "") : item.year.map(String.init) ?? "") as (NSCopying & NSObjectProtocol)
+        metadata.append(artistItem)
+
+        playerItem.externalMetadata = metadata
+    }
+
+    private func updateNowPlayingInfo() {
+        guard let detail = item else { return }
+        let item = detail.item
+        var info = [String: Any]()
+        info[MPMediaItemPropertyTitle] = item.isEpisode ? (item.episodeTitle ?? item.title) : item.title
+        if item.isEpisode {
+            info[MPMediaItemPropertyArtist] = item.show ?? ""
+            if let code = item.episodeCode {
+                info[MPMediaItemPropertyAlbumTitle] = code
+            }
+        } else if let year = item.year {
+            info[MPMediaItemPropertyArtist] = String(year)
+        }
+        let dur = item.durationSec > 0 ? item.durationSec : (player.currentItem?.duration.seconds ?? 0)
+        if dur > 0 && dur.isFinite {
+            info[MPMediaItemPropertyPlaybackDuration] = dur
+        }
+        let pos = player.currentTime().seconds
+        if pos.isFinite {
+            info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = pos
+        }
+        info[MPNowPlayingInfoPropertyPlaybackRate] = player.rate
+        if let art = nowPlayingArtwork {
+            info[MPMediaItemPropertyArtwork] = art
+        }
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+    }
+
+    private func loadArtwork(for detail: ItemDetail) {
+        let item = detail.item
+        guard let artPath = item.landscapeImage ?? item.poster,
+              let url = api.url(artPath) else { return }
+        Task { [weak self] in
+            guard let (data, _) = try? await URLSession.shared.data(from: url),
+                  let image = UIImage(data: data) else { return }
+            await MainActor.run { [weak self] in
+                guard let self, !self.closed else { return }
+                self.nowPlayingArtwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+                self.updateNowPlayingInfo()
+            }
+        }
+    }
+
+    private func clearRemoteCommands() {
+        for entry in remoteCommandTargets {
+            entry.command.removeTarget(entry.target)
+        }
+        remoteCommandTargets.removeAll()
+    }
+
+    private func setupRemoteCommands() {
+        clearRemoteCommands()
+        let center = MPRemoteCommandCenter.shared()
+
+        let playTarget = center.playCommand.addTarget { [weak self] _ in
+            self?.resume()
+            return .success
+        }
+        remoteCommandTargets.append((center.playCommand, playTarget))
+
+        let pauseTarget = center.pauseCommand.addTarget { [weak self] _ in
+            self?.pause()
+            return .success
+        }
+        remoteCommandTargets.append((center.pauseCommand, pauseTarget))
+
+        let toggleTarget = center.togglePlayPauseCommand.addTarget { [weak self] _ in
+            guard let self else { return .commandFailed }
+            if self.player.timeControlStatus == .playing {
+                self.pause()
+            } else {
+                self.resume()
+            }
+            return .success
+        }
+        remoteCommandTargets.append((center.togglePlayPauseCommand, toggleTarget))
+
+        let seekTarget = center.changePlaybackPositionCommand.addTarget { [weak self] event in
+            guard let self, let posEvent = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
+            self.seek(to: posEvent.positionTime)
+            return .success
+        }
+        remoteCommandTargets.append((center.changePlaybackPositionCommand, seekTarget))
+
+        center.skipForwardCommand.preferredIntervals = [15]
+        let fwdTarget = center.skipForwardCommand.addTarget { [weak self] _ in
+            guard let self else { return .commandFailed }
+            self.seek(to: self.position + 15)
+            return .success
+        }
+        remoteCommandTargets.append((center.skipForwardCommand, fwdTarget))
+
+        center.skipBackwardCommand.preferredIntervals = [15]
+        let backTarget = center.skipBackwardCommand.addTarget { [weak self] _ in
+            guard let self else { return .commandFailed }
+            self.seek(to: max(0, self.position - 15))
+            return .success
+        }
+        remoteCommandTargets.append((center.skipBackwardCommand, backTarget))
     }
 }

@@ -80,6 +80,19 @@ enum Format {
     static func facts(_ parts: String?...) -> String {
         parts.compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · ")
     }
+
+    /// "Today", "Tomorrow", "Nov 20", or the date string.
+    static func airDate(_ s: String) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        guard let date = f.date(from: s) else { return s }
+        if Calendar.current.isDateInToday(date) { return "Today" }
+        if Calendar.current.isDateInTomorrow(date) { return "Tomorrow" }
+        let out = DateFormatter()
+        out.dateFormat = "MMM d"
+        return out.string(from: date)
+    }
 }
 
 /// An image the server links to (with its URL token when it needs one), filling its frame.

@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(WebKit)
+import WebKit
+#endif
 
 /// A movie or an episode: what it is, and how to play it.
 struct ItemDetailView: View {
@@ -10,6 +13,8 @@ struct ItemDetailView: View {
     @State private var audioIndex: Int?
     @State private var subtitle: SubtitleChoice?
     @State private var receivers: [Receiver] = []
+    @State private var trailers: [Trailer] = []
+    @State private var selectedTrailer: Trailer?
 
     private var routableReceivers: [Receiver] { receivers.filter(\.canRoute) }
 
@@ -28,6 +33,9 @@ struct ItemDetailView: View {
         #if os(iOS)
         .task { await loadReceivers() }
         #endif
+        .sheet(item: $selectedTrailer) { trailer in
+            TrailerSheet(trailer: $selectedTrailer, all: trailers)
+        }
     }
 
     private func content(_ d: ItemDetail) -> some View {
@@ -62,6 +70,14 @@ struct ItemDetailView: View {
                 .padding(.horizontal)
 
                 playButtons(item).padding(.horizontal)
+
+                if !item.isEpisode, let titleId = item.titleId {
+                    let versions = connection.library.movies.filter { $0.titleId == titleId }
+                    if versions.count > 1 {
+                        versionsSection(versions, currentId: item.id)
+                    }
+                }
+
                 tracks(d).padding(.horizontal)
                 #if os(iOS)
                 airplay(item).padding(.horizontal)
@@ -90,6 +106,17 @@ struct ItemDetailView: View {
                         }
                     }
                 }
+
+                if let crew = d.meta?.crew, !crew.isEmpty {
+                    Shelf("Crew") {
+                        ForEach(crew.prefix(20), id: \.self) { member in
+                            NavigationLink(value: Route.person(member.personId)) {
+                                CrewCard(member: member)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
             }
             .padding(.bottom)
         }
@@ -113,6 +140,12 @@ struct ItemDetailView: View {
                         Label("Play", systemImage: "play.fill").frame(minWidth: 120)
                     }
                     .buttonStyle(.borderedProminent)
+                }
+                if !trailers.isEmpty {
+                    Button { selectedTrailer = trailers.first } label: {
+                        Label("Trailer", systemImage: "film")
+                    }
+                    .buttonStyle(.bordered)
                 }
             }
             .controlSize(.large)
@@ -188,6 +221,38 @@ struct ItemDetailView: View {
         return s.url.map { SubtitleChoice.text(key: s.key, url: $0) }
     }
 
+    @ViewBuilder
+    private func versionsSection(_ versions: [Item], currentId: Int64) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Versions").font(.headline)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(versions) { v in
+                        let label = v.versionLabel.isEmpty ? (v.id == currentId ? "Current" : "Version \(v.id)") : v.versionLabel
+                        if v.id == currentId {
+                            Text(label)
+                                .font(.subheadline.weight(.semibold))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(.tint, in: .capsule)
+                                .foregroundStyle(.white)
+                        } else {
+                            NavigationLink(value: Route.item(v.id)) {
+                                Text(label)
+                                    .font(.subheadline)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(.quaternary, in: .capsule)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal)
+    }
+
     private func play(from start: Double, receiver: Receiver? = nil) {
         model.play(PlayRequest(itemId: id, startSec: start, audioIndex: audioIndex, subtitle: subtitle, receiver: receiver))
     }
@@ -195,7 +260,11 @@ struct ItemDetailView: View {
     private func setWatched(_ watched: Bool) {
         Task {
             do {
-                try await connection.api.setWatched(id, watched)
+                if let item = detail?.item, !item.isEpisode, let titleId = item.titleId {
+                    try await connection.api.setTitleWatched(titleId, watched)
+                } else {
+                    try await connection.api.setWatched(id, watched)
+                }
                 connection.library.scheduleReload()
             } catch {
                 model.alert = error.localizedDescription
@@ -215,9 +284,112 @@ struct ItemDetailView: View {
             if audioIndex == nil, d.audioStreams.count > 1 {
                 audioIndex = d.audioStreams.first { $0.default == true }?.index
             }
+            if let titleId = d.meta?.id ?? d.item.titleId {
+                trailers = (try? await connection.api.trailers(titleId: titleId)) ?? []
+            }
         } catch is CancellationError {
         } catch {
             self.error = error.localizedDescription
+        }
+    }
+}
+
+struct CrewCard: View {
+    let member: CrewMember
+
+    var body: some View {
+        VStack(spacing: 4) {
+            RemoteImage(path: member.profile, placeholder: "person.fill")
+                .frame(width: 80, height: 80)
+                .clipShape(.circle)
+            Text(member.name).font(.caption.weight(.medium)).lineLimit(1)
+            Text(member.job).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .frame(width: 90)
+    }
+}
+
+#if canImport(WebKit)
+struct WebTrailerView: UIViewRepresentable {
+    let url: URL
+
+    func makeUIView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        config.allowsInlineMediaPlayback = true
+        config.mediaTypesRequiringUserActionForPlayback = []
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.isOpaque = false
+        webView.backgroundColor = .black
+        webView.scrollView.isScrollEnabled = false
+        webView.load(URLRequest(url: url))
+        return webView
+    }
+
+    func updateUIView(_ uiView: WKWebView, context: Context) {
+        if uiView.url != url {
+            uiView.load(URLRequest(url: url))
+        }
+    }
+}
+#endif
+
+struct TrailerSheet: View {
+    @Binding var trailer: Trailer?
+    let all: [Trailer]
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                if let t = trailer, let url = t.embedURL {
+                    #if canImport(WebKit)
+                    WebTrailerView(url: url)
+                        .aspectRatio(16 / 9, contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .padding(.horizontal)
+                    #else
+                    Text(t.label(in: all)).font(.headline)
+                    #endif
+                }
+                if all.count > 1 {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(all) { t in
+                                Button {
+                                    trailer = t
+                                } label: {
+                                    if t.id == trailer?.id {
+                                        Text(t.label(in: all))
+                                            .font(.subheadline)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 6)
+                                            .background(.tint, in: .capsule)
+                                            .foregroundStyle(.white)
+                                    } else {
+                                        Text(t.label(in: all))
+                                            .font(.subheadline)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 6)
+                                            .background(.quaternary, in: .capsule)
+                                            .foregroundStyle(.primary)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
+                }
+                Spacer()
+            }
+            .padding(.top)
+            .navigationTitle(trailer?.label(in: all) ?? "Trailer")
+            .plyInlineTitle()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
         }
     }
 }

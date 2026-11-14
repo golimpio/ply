@@ -271,6 +271,7 @@ struct PlayRequest {
     private func endPlayback(_ end: PlaybackEnd) {
         guard let p = playback else { return }
         playback = nil
+        let detail = p.itemDetail
         p.close()
         connection?.library.scheduleReload() // its progress, Continue Watching
         let message: String? = switch end {
@@ -279,7 +280,25 @@ struct PlayRequest {
         case .finished, .closed: nil
         }
         presenter.dismiss { [weak self] in
-            if let message { self?.alert = message }
+            if let message {
+                self?.alert = message
+            } else if case .finished = end, let detail, detail.item.isEpisode {
+                self?.autoplayNextEpisode(after: detail)
+            }
+        }
+    }
+
+    private func autoplayNextEpisode(after current: ItemDetail) {
+        guard let show = current.item.show, !show.isEmpty, let c = connection else { return }
+        Task { @MainActor [weak self] in
+            guard let self, self.connection === c else { return }
+            do {
+                let episodes = try await c.api.episodes(show: show)
+                guard let next = NextEpisodeSelection.after(current.item, in: episodes) else { return }
+                self.play(PlayRequest(itemId: next.id, startSec: 0))
+            } catch {
+                // If the next episode cannot be fetched, stay on the current page.
+            }
         }
     }
 }

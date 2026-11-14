@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  server-web:
+    name: Server and Web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Check Go format and vet
+        run: |
+          make fmt-check
+          make vet
+
+      - name: Test Go
+        run: make test-go
+
+      - name: Build and test web
+        run: |
+          make deps
+          make check-web
+          make test-web
+
+  apple-clients:
+    name: iOS & tvOS
+    # The project needs Xcode 26+ (Swift 6.2: SWIFT_DEFAULT_ACTOR_ISOLATION and `nonisolated` types).
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select the newest Xcode
+        run: |
+          xcode=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Core unit tests
+        run: cd ios && make test
+
+      - name: Simulator builds (iOS & tvOS)
+        run: cd ios && make ci-build tv

@@ -53,6 +53,7 @@ targets:
       - path: Ply/Core/PlaybackPlan.swift
       - path: Ply/Core/ConnectFailure.swift
       - path: Ply/Core/CommandHistory.swift
+      - path: Ply/Core/NextEpisode.swift
       - path: Ply/Core/Discovery.swift
       - path: PlyCoreTests
     settings:

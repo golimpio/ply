@@ -35,7 +35,7 @@ SIMID   := $(shell xcrun simctl list devices available | grep -F -e "    $(SIM) 
 SIMDEST := -destination 'id=$(SIMID)'
 TVSIMID := $(shell xcrun simctl list devices available | grep -F -e "    $(TVSIM) $(lp)" -e "$(lp)$(TVSIM)$(rp)" | grep -oE '[0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12}' | head -1)
 
-.PHONY: all project build test run tv tv-run device open clean simulator toolchain
+.PHONY: all project build test ci-build run tv tv-run device open clean simulator toolchain
 
 all: build
 
@@ -58,6 +58,10 @@ simulator:
 
 build: Ply.xcodeproj simulator toolchain
 	$(XCB) $(SIMDEST) build
+
+# CI has no simulator to boot: a generic destination compiles the app for the simulator platform.
+ci-build: Ply.xcodeproj toolchain
+	$(XCB) -destination 'generic/platform=iOS Simulator' build
 
 # The core tests are a macOS unit-test bundle: no simulator, no test host, no debugger.
 test: Ply.xcodeproj toolchain

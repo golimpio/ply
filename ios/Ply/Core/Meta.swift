@@ -54,6 +54,43 @@ nonisolated struct PersonCredit: Decodable, Sendable, Hashable {
     let title: TitleCard
 }
 
+/// An entry of GET /api/people/{id}/filmography: a title from TMDB/TVDB.
+nonisolated struct PersonFilmographyEntry: Decodable, Sendable, Hashable, Identifiable {
+    let kind: String
+    let tmdbId: Int64?
+    let tvdbId: Int64?
+    let imdbId: String?
+    let title: String
+    let originalTitle: String?
+    let year: Int?
+    let releaseDate: String?
+    let character: String?
+    let job: String?
+    let department: String?
+    let creditKind: String?
+    let poster: String?
+    let backdrop: String?
+    let rating: Double?
+    let voteCount: Int?
+    let popularity: Double?
+    let episodeCount: Int?
+    /// Whether the title is in the library (the server says; the id fields are external ids).
+    let inLibrary: Bool?
+
+    var id: String { "\(kind):\(tmdbId ?? 0):\(title):\(job ?? ""):\(character ?? "")" }
+    var isSeries: Bool { kind == "series" }
+    /// A title the library does not have, so there is no page to open.
+    var isExternal: Bool { inLibrary != true }
+    var yearText: String? { (year ?? 0) > 0 ? String(year!) : nil }
+    var roleDescription: String? {
+        let cleanChar = (character ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleanChar.isEmpty { return cleanChar }
+        let cleanJob = (job ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleanJob.isEmpty { return cleanJob }
+        return nil
+    }
+}
+
 /// GET /api/people/{id}.
 nonisolated struct Person: Decodable, Sendable {
     let id: Int64
