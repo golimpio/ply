@@ -571,3 +571,23 @@ func TestParseLogStderr(t *testing.T) {
 		t.Errorf("invalid PLY_LOG_STDERR did not error")
 	}
 }
+
+func TestParseStop(t *testing.T) {
+	dir := t.TempDir()
+	c, err := Parse([]string{"-data", dir}, &bytes.Buffer{})
+	if err != nil || c.Stop || c.Force {
+		t.Fatalf("no flag: stop %v, force %v, err %v; want neither", c.Stop, c.Force, err)
+	}
+	for _, args := range [][]string{{"-stop"}, {"--stop"}, {"--stop", "--force"}, {"-force", "-stop"}} {
+		c, err := Parse(append([]string{"-data", dir}, args...), &bytes.Buffer{})
+		if err != nil || !c.Stop {
+			t.Errorf("%v: stop %v, err %v; want a stop", args, c.Stop, err)
+		}
+		if force := len(args) == 2; c.Force != force {
+			t.Errorf("%v: force %v, want %v", args, c.Force, force)
+		}
+	}
+	if _, err := Parse([]string{"-data", dir, "-force"}, &bytes.Buffer{}); err == nil {
+		t.Error("-force without -stop was accepted")
+	}
+}

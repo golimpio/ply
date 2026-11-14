@@ -1,5 +1,6 @@
 <script lang="ts">
   import { ApiError, api, type FolderKind, type LibraryFolder } from '../lib/api';
+  import { plural } from '../lib/format';
   import { resource } from '../lib/resource.svelte';
   import { app, attachToRunningScan, rescan, rescanFolder, scan } from '../lib/state.svelte';
   import Dialog from './Dialog.svelte';
@@ -23,7 +24,6 @@
   const KIND_IN_TEXT: Record<FolderKind, string> = { movies: 'movies', shows: 'TV shows' };
   const KINDS: FolderKind[] = ['movies', 'shows'];
   const baseName = (p: string) => p.split('/').filter(Boolean).pop() ?? p;
-  const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
   const when = (unix: number) =>
     new Date(unix * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   const whenIso = (iso?: string | null) => (iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '');

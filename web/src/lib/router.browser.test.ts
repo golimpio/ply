@@ -31,6 +31,8 @@ describe('parseRoute', () => {
     ['#/movies?sort=added&f=4k,hdr,bogus', { name: 'movies', sort: 'added', filters: ['4k', 'hdr'], minRating: 0 }],
     ['#/movies?sort=nonsense', { name: 'movies', sort: 'title', filters: [], minRating: 0 }],
     ['#/shows?sort=added', { name: 'shows', sort: 'added', filters: [], minRating: 0 }],
+    ['#/collections', { name: 'collections' }],
+    ['#/collections/9', notfound],
     ['#/movies?sort=rating&min=70', { name: 'movies', sort: 'rating', filters: [], minRating: 70 }],
     ['#/shows?sort=rating&min=80', { name: 'shows', sort: 'rating', filters: [], minRating: 80 }],
     ['#/movies?min=101', { name: 'movies', sort: 'title', filters: [], minRating: 0 }],
@@ -106,6 +108,7 @@ describe('href', () => {
     expect(parseRoute(href.person(7))).toEqual({ name: 'person', id: 7 });
     expect(parseRoute(href.genre(18))).toEqual({ name: 'genre', id: 18 });
     expect(parseRoute(href.collection(9))).toEqual({ name: 'collection', id: 9 });
+    expect(parseRoute(href.collections)).toEqual({ name: 'collections' });
     expect(parseRoute(href.settings)).toEqual({ name: 'settings', tab: 'library' });
     expect(parseRoute(href.settingsTab('ratings'))).toEqual({ name: 'settings', tab: 'ratings' });
     expect(parseRoute(href.activity)).toEqual({ name: 'activity' });
@@ -210,11 +213,12 @@ describe('the fallback parents', () => {
     [{ name: 'home' }, undefined],
     [{ name: 'movies', sort: 'title', filters: [], minRating: 0 }, undefined],
     [{ name: 'shows', sort: 'title', filters: [], minRating: 0 }, undefined],
+    [{ name: 'collections' }, undefined],
     [{ name: 'item', id: 3 }, '#/movies'],
     [{ name: 'show', show: 'Lost' }, '#/shows'],
     [{ name: 'play', id: 3, startSec: 40 }, '#/item/3'],
     [{ name: 'person', id: 3 }, '#/'],
-    [{ name: 'collection', id: 3 }, '#/'],
+    [{ name: 'collection', id: 3 }, '#/collections'],
     [{ name: 'genre', id: 3 }, '#/'],
     [{ name: 'settings', tab: 'library' }, '#/'],
     [{ name: 'activity' }, '#/'],

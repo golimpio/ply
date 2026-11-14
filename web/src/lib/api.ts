@@ -248,7 +248,10 @@ export interface Playback {
 }
 
 export interface ItemDetail extends ItemSummary {
+  /** The file's name only: the folder that holds it is `folder`. */
   path: string;
+  /** The directory that holds the file, as the server's disk has it. */
+  folder: string;
   size: number;
   bitrate: number;
   streams: Stream[];

@@ -15,17 +15,21 @@ type stopStep struct {
 // stopper runs the shutdown steps in order and says what it is waiting for, so
 // a slow stop (a probe on a slow share, a download) never looks like a hang.
 type stopper struct {
-	log            *slog.Logger
-	every          time.Duration // how often a slow step is reported
-	deadline       time.Duration // after this the rest is not waited for
-	quick          <-chan os.Signal
-	onQuick        func()
+	log      *slog.Logger
+	every    time.Duration // how often a slow step is reported
+	deadline time.Duration // after this the rest is not waited for
+	quick    <-chan os.Signal
+	onQuick  func()
+	// hurry (ply -stop -force during a nice stop) cuts what is left of the deadline to hurried.
+	hurry          <-chan struct{}
+	hurried        time.Duration
 	reportProgress func(step string, waited time.Duration, left int)
 }
 
 // run reports false if it gave up waiting: the process should exit anyway.
 func (s stopper) run(steps []stopStep) bool {
 	start := time.Now()
+	end := start.Add(s.deadline)
 	giveUp := time.NewTimer(s.deadline)
 	defer giveUp.Stop()
 	tick := time.NewTicker(s.every)
@@ -47,6 +51,12 @@ func (s stopper) run(steps []stopStep) bool {
 					os.Exit(130)
 				}
 				return false
+			case <-s.hurry:
+				if time.Until(end) > s.hurried {
+					end = time.Now().Add(s.hurried)
+					giveUp.Reset(s.hurried)
+					s.log.Info("asked to stop at once; waiting no longer than", "within", s.hurried)
+				}
 			case <-tick.C:
 				waited := time.Since(began).Round(time.Second)
 				s.log.Info("still stopping", "step", st.name, "waited", waited,

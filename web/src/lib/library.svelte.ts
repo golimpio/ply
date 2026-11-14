@@ -1,9 +1,10 @@
-// The library's two lists, each fetched whole once per library version and patched by the client's
-// own marks and progress reports instead of refetched: the movies as cards and the episodes as cards
-// (the grids, home rails, search), the episodes with the show list too (Shows, Show, home, search).
-// Movies and Shows load only their own; a page that needs both calls ensureLibrary.
+// The library's lists, each fetched whole once per library version and patched by the client's own
+// marks and progress reports instead of refetched: the movies as cards and the episodes as cards
+// (the grids, home rails, search), the episodes with the show list too (Shows, Show, home, search),
+// and the collections (Collections, the header's count). Movies and Shows load only their own; a
+// page that needs both calls ensureLibrary.
 import { untrack } from 'svelte';
-import { api, type EpisodeCard, type ItemSummary, type ItemWatch, type MovieCard, type Progress, type ShowSummary, type TitleCard, type WatchResult } from './api';
+import { api, type CollectionCard, type EpisodeCard, type ItemSummary, type ItemWatch, type MovieCard, type Progress, type ShowSummary, type TitleCard, type WatchResult } from './api';
 import { RowStore, type Fields, type Row } from './rowstore.svelte';
 import { app } from './state.svelte';
 import { countsBadge, itemBadge, showCounts, type EpisodeCounts, type WatchBadge } from './watched';
@@ -36,10 +37,15 @@ export const episodes = new RowStore<EpisodeCard, ShowSummary[]>({
   extra: () => api.shows().catch(() => [] as ShowSummary[]),
 });
 
+/** The collections of the library's titles, for the Collections page and the header's count. */
+export const collections = new RowStore<CollectionCard>({ version, fetch: () => api.collections() });
+
 /** Load (or refresh after a scan) the movie cards. Safe to call often. */
 export const ensureMovies = (): Promise<void> => movies.ensure();
 /** Load (or refresh after a scan) the episodes and the show list. Safe to call often. */
 export const ensureEpisodes = (): Promise<void> => episodes.ensure();
+/** Load (or refresh after a scan) the collections. Safe to call often. */
+export const ensureCollections = (): Promise<void> => collections.ensure();
 /** Both lists, for the pages that show both (home, search, an item before its kind is known). */
 export function ensureLibrary(): Promise<void> {
   return Promise.all([movies.ensure(), episodes.ensure()]).then(() => undefined);

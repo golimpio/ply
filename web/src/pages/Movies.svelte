@@ -7,6 +7,7 @@
   import { passesMinRating, ratingScore } from '../lib/ratings';
   import { href, type LibraryView } from '../lib/router.svelte';
   import { app } from '../lib/state.svelte';
+  import GridSkeleton from '../components/GridSkeleton.svelte';
   import JumpRail from '../components/JumpRail.svelte';
   import LibraryControls from '../components/LibraryControls.svelte';
   import MediaCard from '../components/MediaCard.svelte';
@@ -73,9 +74,7 @@
   {#if movies.error && !movies.loaded}
     <p class="error">{movies.error}</p>
   {:else if !movies.loaded}
-    <div class="grid" aria-busy="true">
-      {#each Array(8) as _, i (i)}<div class="skeleton sk"></div>{/each}
-    </div>
+    <GridSkeleton />
   {:else if all.length === 0}
     <p class="muted">No movies yet. Point ply at a folder with <code>-media</code> and rescan.</p>
   {:else if shown.length === 0}
@@ -99,9 +98,3 @@
     </VirtualGrid>
   {/if}
 </div>
-
-<style>
-  .sk {
-    aspect-ratio: 16 / 9;
-  }
-</style>

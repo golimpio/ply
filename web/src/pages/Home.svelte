@@ -43,7 +43,7 @@
   import Icon from '../components/Icon.svelte';
   import MediaCard from '../components/MediaCard.svelte';
   import Rail from '../components/Rail.svelte';
-  import RatingGlyph from '../components/RatingGlyph.svelte';
+  import Rating from '../components/Rating.svelte';
 
   let continueItems = $state<ItemSummary[]>([]);
   let upcoming = $state<UpcomingShow[]>([]);
@@ -285,7 +285,8 @@
   });
   const featureScores = $derived.by(() => {
     const fallback = lead && 'rating' in lead ? lead : null;
-    const list = titleRatings(featureDetail?.meta, fallback);
+    const metaObj = featureDetail?.meta ?? (lead ? { id: lead.id, kind: lead.kind, title: lead.title } : null);
+    const list = titleRatings(metaObj, fallback);
     if (!list.length) return [];
     // Prioritize Rotten Tomatoes critics/audience when available, then IMDb, then others
     const priority = ['rt_critics', 'rt_audience', 'imdb', 'letterboxd', 'metacritic', 'tmdb', 'trakt'];
@@ -332,7 +333,8 @@
   const companionDetail = $derived(companionFull?.id === companion?.id ? companionFull?.item : null);
   const companionScores = $derived.by(() => {
     const fallback = companion && 'rating' in companion ? companion : null;
-    const list = titleRatings(companionDetail?.meta, fallback);
+    const metaObj = companionDetail?.meta ?? (companion ? { id: companion.id, kind: companion.kind, title: companion.title } : null);
+    const list = titleRatings(metaObj, fallback);
     if (!list.length) return [];
     const priority = ['rt_critics', 'rt_audience', 'imdb', 'letterboxd', 'metacritic', 'tmdb', 'trakt'];
     const sorted = [...list].sort((a, b) => {
@@ -500,14 +502,11 @@
             {/if}
 
             {#if featureScores.length}
-              <div class="hero-scores tabular">
+              <ul class="hero-scores ratings" aria-label="Ratings">
                 {#each featureScores as s (s.source)}
-                  <span class="hero-score-item">
-                    <RatingGlyph entry={s.entry} />
-                    <strong class="score-num">{s.val}</strong>
-                  </span>
+                  <li><Rating entry={s.entry} /></li>
                 {/each}
-              </div>
+              </ul>
             {/if}
 
             <div class="hero-actions">
@@ -560,21 +559,15 @@
             {/if}
 
             {#if companionScores.length}
-              <div class="hero-scores tabular">
+              <ul class="hero-scores ratings" aria-label="Ratings">
                 {#each companionScores as s (s.source)}
-                  <span class="hero-score-item">
-                    <RatingGlyph entry={s.entry} />
-                    <strong class="score-num">{s.val}</strong>
-                  </span>
+                  <li><Rating entry={s.entry} /></li>
                 {/each}
-              </div>
-            {:else if companion.rating}
-              <div class="hero-scores tabular">
-                <span class="hero-score-item">
-                  <RatingGlyph entry={companion.rating} />
-                  <strong class="score-num">{ratingValue(companion.rating)}</strong>
-                </span>
-              </div>
+              </ul>
+            {:else if companion?.rating}
+              <ul class="hero-scores ratings" aria-label="Ratings">
+                <li><Rating entry={companion.rating} /></li>
+              </ul>
             {/if}
 
             <div class="hero-actions">
@@ -852,30 +845,13 @@
     text-transform: uppercase;
   }
   .hero-scores {
+    list-style: none;
+    margin: 0 0 1.25rem 0;
+    padding: 0;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 1.35rem;
-    margin-bottom: 1.25rem;
-    font-family: var(--font-mono);
-    font-size: var(--fs-xs);
-    color: var(--text-muted);
-  }
-  .hero-score-item {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.45rem;
-  }
-  .hero-score-item :global(.glyph) {
-    width: 1.25em;
-    height: 1.25em;
-  }
-  .score-num {
-    font-family: var(--font-display);
-    font-size: var(--fs-2xl);
-    font-weight: var(--fw-regular);
-    color: var(--text);
-    margin-right: 0.15rem;
+    gap: var(--ratings-gap);
   }
   .hero-actions {
     display: flex;

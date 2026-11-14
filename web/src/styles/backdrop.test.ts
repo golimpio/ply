@@ -44,6 +44,19 @@ describe('backdrop-filter in the built CSS', () => {
     }
   });
 
+  it('the scrolled header uses an atmospheric gradient fade into --surface-bar-fade', () => {
+    const scrolledBars = rules(/^\.bar\.scrolled\.svelte-/);
+    expect(scrolledBars.length).toBeGreaterThanOrEqual(1);
+    const grad = scrolledBars.filter((b) => b.includes('--surface-bar') && b.includes('--surface-bar-fade'));
+    expect(grad.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('the scrolled header uses a subtle hairline border at the bottom', () => {
+    const scrolledBars = rules(/^\.bar\.scrolled\.svelte-/);
+    const hairline = scrolledBars.filter((b) => b.includes('--line-hairline'));
+    expect(hairline.length).toBeGreaterThanOrEqual(1);
+  });
+
   it('the season row keeps a room either side for its arrows, out of the page margin on a wide screen', () => {
     const rowWrap = rules(/^\.row-wrap\.has-arrows\.svelte-/).filter((b) => b.includes('--season-arrow-room'));
     // The posters are inset by the room, and a wide window pulls that same room out of the page margin.

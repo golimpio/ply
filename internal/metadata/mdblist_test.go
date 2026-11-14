@@ -40,6 +40,25 @@ const mdbTitle = `{
   ]
 }`
 
+// mdbLiveTitle is MDBList's answer as it is (read 2026-11-13, The Adam Project): IMDb's url is a
+// number, the sources' links are relative paths, and Rotten Tomatoes states its verdict with a
+// "fresh" number rather than a word. The first shape failed to decode at all, so no title got
+// MDBList's ratings.
+const mdbLiveTitle = `{
+  "title": "The Adam Project", "year": 2022, "type": "movie",
+  "ratings": [
+    {"source": "imdb", "value": 6.7, "score": 67, "votes": 264268, "url": 1402},
+    {"source": "metacritic", "value": 55, "score": 55, "votes": 48, "url": "/the-adam-project"},
+    {"source": "metacriticuser", "value": 6.5, "score": 65.0, "votes": 260, "url": null},
+    {"source": "trakt", "value": 74, "score": 74, "votes": 23621, "url": "https://trakt.tv/movies/the-adam-project-2022"},
+    {"source": "tomatoes", "value": 68, "score": 68, "votes": 217, "url": "/m/the_adam_project", "fresh": 0},
+    {"source": "popcorn", "value": 73, "score": 73, "votes": 2500, "url": "/m/the_adam_project"},
+    {"source": "tmdb", "value": 69, "score": 69, "votes": 5263, "url": null},
+    {"source": "letterboxd", "value": 3.0, "score": 60, "votes": 561844, "url": "/film/the-adam-project/"},
+    {"source": "myanimelist", "value": null, "score": null, "votes": null}
+  ]
+}`
+
 type mdbRequest struct {
 	Path, Query, Key, Agent string
 }
@@ -215,6 +234,38 @@ func TestMDBListMapsEverySource(t *testing.T) {
 	}
 }
 
+// MDBList's answer as it is now (mdbLiveTitle): a url of another kind must not fail the whole
+// answer, which is what left a library with no Rotten Tomatoes, Metacritic, Letterboxd or Trakt
+// ratings at all. A relative link is kept as no link (only an absolute https link on the source's
+// own site is one), and the score still comes through.
+func TestMDBListLiveAnswer(t *testing.T) {
+	srv := newMDBServer(t, jsonReply(200, mdbLiveTitle))
+	c, _ := quickMDB(t, srv)
+	title, err := c.ByTMDB(t.Context(), MDBListMovie, 696806)
+	if err != nil {
+		t.Fatalf("ByTMDB = %v", err)
+	}
+	got := map[string]store.Rating{}
+	for _, r := range title.StoreRatings(1234) {
+		got[r.Source] = r
+	}
+	want := map[string]store.Rating{
+		store.RatingRTCritics:  {Source: "rt_critics", Value: 68, Scale: 100, Votes: 217, State: "fresh", URL: "https://www.rottentomatoes.com/m/the_adam_project", FetchedAt: 1234},
+		store.RatingRTAudience: {Source: "rt_audience", Value: 73, Scale: 100, Votes: 2500, State: "upright", URL: "https://www.rottentomatoes.com/m/the_adam_project", FetchedAt: 1234},
+		store.RatingMetacritic: {Source: "metacritic", Value: 55, Scale: 100, Votes: 48, URL: "https://www.metacritic.com/movie/the-adam-project/", FetchedAt: 1234},
+		store.RatingLetterboxd: {Source: "letterboxd", Value: 3, Scale: 5, Votes: 561844, URL: "https://letterboxd.com/film/the-adam-project/", FetchedAt: 1234},
+		store.RatingTrakt:      {Source: "trakt", Value: 74, Scale: 100, Votes: 23621, URL: "https://trakt.tv/movies/the-adam-project-2022", FetchedAt: 1234},
+	}
+	if len(got) != len(want) {
+		t.Errorf("sources = %d (%v), want %d", len(got), got, len(want))
+	}
+	for src, w := range want {
+		if got[src] != w {
+			t.Errorf("%s = %+v, want %+v", src, got[src], w)
+		}
+	}
+}
+
 func TestMDBListRatingStates(t *testing.T) {
 	rt := func(source string, value float64, state string) string {
 		return fmt.Sprintf(`{"source": %q, "value": %v, "state": %q}`, source, value, state)
@@ -322,6 +373,10 @@ func TestMDBListRatingLinks(t *testing.T) {
 		{"metacritic", "https://www.metacritic.com/movie/the-matrix/", "https://www.metacritic.com/movie/the-matrix/"},
 		{"letterboxd", "https://letterboxd.com/film/the-matrix/", "https://letterboxd.com/film/the-matrix/"},
 		{"trakt", "https://trakt.tv/movies/the-matrix-1999", "https://trakt.tv/movies/the-matrix-1999"},
+		{"rt_critics", "/m/the_adam_project", "https://www.rottentomatoes.com/m/the_adam_project"},
+		{"metacritic", "/the-adam-project", "https://www.metacritic.com/movie/the-adam-project/"},
+		{"letterboxd", "/film/the-adam-project/", "https://letterboxd.com/film/the-adam-project/"},
+		{"trakt", "/movies/the-adam-project-2022", "https://trakt.tv/movies/the-adam-project-2022"},
 		{"trakt", "http://trakt.tv/movies/x", ""},
 		{"trakt", "javascript:alert(1)", ""},
 		{"trakt", "//trakt.tv/movies/x", ""},

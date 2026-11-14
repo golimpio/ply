@@ -294,6 +294,7 @@ func (m *menv) authCases() []authCase {
 		{"GET", "/api/people?q=a", ""},
 		{"GET", fmt.Sprintf("/api/people/%d", m.personID), ""},
 		{"GET", "/api/genres", ""},
+		{"GET", "/api/collections", ""},
 		{"GET", "/api/titles", ""},
 		{"GET", "/api/upcoming", ""},
 		{"PATCH", fmt.Sprintf("/api/titles/%d", m.matrixTitle), `{"title": "Hacked"}`},

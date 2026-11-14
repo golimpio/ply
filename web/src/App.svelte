@@ -11,6 +11,7 @@
   import TokenPrompt from './components/TokenPrompt.svelte';
   import Activity from './pages/Activity.svelte';
   import Collection from './pages/Collection.svelte';
+  import Collections from './pages/Collections.svelte';
   import Genre from './pages/Genre.svelte';
   import Home from './pages/Home.svelte';
   import Item from './pages/Item.svelte';
@@ -131,6 +132,8 @@
         <Movies view={route} />
       {:else if route.name === 'shows'}
         <Shows view={route} />
+      {:else if route.name === 'collections'}
+        <Collections />
       {:else if route.name === 'show'}
         {#key route.show}<Show show={route.show} season={route.season} />{/key}
       {:else if route.name === 'item'}

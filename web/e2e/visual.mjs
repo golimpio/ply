@@ -157,7 +157,7 @@ const HEAT_META = {
   source: 'tmdb', locked: false, matchState: 'matched', needsReview: false, rating: RATINGS[0], ratings: RATINGS, tmdbId: 949, imdbId: 'tt0113277',
 };
 const HEAT_DETAIL = {
-  ...ITEMS[0], path: '/Volumes/NAS/Movies/Heat (1995)/Heat (1995) 2160p.mkv', size: 41_234_567_890, bitrate: 32_000_000,
+  ...ITEMS[0], path: 'Heat (1995) 2160p.mkv', folder: '/Volumes/NAS/Movies/Heat (1995)', size: 41_234_567_890, bitrate: 32_000_000,
   streams: [
     { index: 0, type: 'video', codec: 'hevc', codecTag: 'hvc1', profile: 'Main 10', width: 3840, height: 2160, pixFmt: 'yuv420p10le', colorTransfer: 'smpte2084', default: true },
     { index: 1, type: 'audio', codec: 'truehd', channels: 8, language: 'eng', title: 'TrueHD 7.1', default: true },
@@ -404,13 +404,13 @@ async function open(browser, width, opts = {}) {
     if (p === '/api/items/8') {
       const it = byId[8];
       const ratings = [entry('rt_critics', 6, 100, { state: 'rotten', url: 'https://www.rottentomatoes.com/m/gigli' }), entry('rt_audience', 13, 100, { state: 'spilled', votes: 20_000 }), entry('imdb', 2.6, 10, { votes: 50_000 })];
-      return json(route, { ...it, path: '/m/Gigli.mkv', size: 1, bitrate: 1, streams: [], subtitles: [], playback: HEAT_DETAIL.playback,
+      return json(route, { ...it, path: 'Gigli.mkv', folder: '/m/Gigli', size: 1, bitrate: 1, streams: [], subtitles: [], playback: HEAT_DETAIL.playback,
         meta: { ...HEAT_META, id: 108, title: 'Gigli', year: 2003, itemId: 8, logo: undefined, collection: undefined, tagline: undefined, rating: ratings[0], ratings } });
     }
     const item = /^\/api\/items\/(\d+)$/.exec(p);
     if (item && byId[item[1]]) {
       const it = byId[item[1]];
-      return json(route, { ...it, path: `/m/${it.title}.mkv`, size: 1, bitrate: 1, streams: [], subtitles: [], playback: HEAT_DETAIL.playback });
+      return json(route, { ...it, path: `${it.title}.mkv`, folder: '/m', size: 1, bitrate: 1, streams: [], subtitles: [], playback: HEAT_DETAIL.playback });
     }
     return json(route, { error: `unmocked ${m} ${p}` }, 404);
   });

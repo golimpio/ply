@@ -1,5 +1,10 @@
 import type { Method } from './api';
 
+/** "1 episode", "3 episodes": a count and its word (`many` for a plural that is not the word plus s). */
+export function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
 export function formatDuration(sec?: number): string {
   if (!sec || sec <= 0) return '';
   if (sec < 60) return `${Math.round(sec)}s`;

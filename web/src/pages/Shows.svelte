@@ -1,11 +1,13 @@
 <script lang="ts">
   import { byName, railLetters } from '../lib/az';
+  import { plural } from '../lib/format';
   import { ensureEpisodes, episodes, showsOf, type ShowEntry } from '../lib/library.svelte';
   import { posterImg, prefersPosters, showWideImg } from '../lib/meta';
   import { passesMinRating, ratingScore } from '../lib/ratings';
   import { href, type LibraryView } from '../lib/router.svelte';
   import { app } from '../lib/state.svelte';
   import { countsBadge } from '../lib/watched';
+  import GridSkeleton from '../components/GridSkeleton.svelte';
   import JumpRail from '../components/JumpRail.svelte';
   import LibraryControls from '../components/LibraryControls.svelte';
   import MediaCard from '../components/MediaCard.svelte';
@@ -19,7 +21,6 @@
     void ensureEpisodes();
   });
 
-  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
   const nameOf = (s: ShowEntry) => s.meta?.sortTitle || s.show;
   // By name as the server lists names (lib/az): its sort title, year, then the show's own name.
   const all = $derived(
@@ -60,9 +61,7 @@
   {#if episodes.error && !episodes.loaded}
     <p class="error">{episodes.error}</p>
   {:else if !episodes.loaded}
-    <div class="grid" aria-busy="true">
-      {#each Array(8) as _, i (i)}<div class="skeleton sk"></div>{/each}
-    </div>
+    <GridSkeleton />
   {:else if all.length === 0}
     <p class="muted">No series yet. Episodes named like <code>Show S01E02</code> appear here after a scan.</p>
   {:else if shown.length === 0}
@@ -88,9 +87,3 @@
     </VirtualGrid>
   {/if}
 </div>
-
-<style>
-  .sk {
-    aspect-ratio: 16 / 9;
-  }
-</style>

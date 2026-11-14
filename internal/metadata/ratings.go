@@ -856,6 +856,22 @@ func (r *Ratings) RunMDBList(ctx context.Context, titleID int64) error {
 	var ratings []store.Rating
 	if found != nil {
 		ratings = found.StoreRatings(now)
+		for i := range ratings {
+			if ratings[i].URL == "" && reIMDbID.MatchString(t.IMDbID) {
+				switch ratings[i].Source {
+				case store.RatingTrakt:
+					media := "movies"
+					if t.Kind == store.KindSeries {
+						media = "shows"
+					}
+					ratings[i].URL = "https://trakt.tv/" + media + "/" + t.IMDbID
+				case store.RatingLetterboxd:
+					if t.Kind == store.KindMovie {
+						ratings[i].URL = "https://letterboxd.com/imdb/" + t.IMDbID + "/"
+					}
+				}
+			}
+		}
 	}
 	if err := r.o.Store.ReplaceMDBListRatings(ctx, titleID, ratings, now); err != nil && !errors.Is(err, store.ErrNotFound) {
 		return err

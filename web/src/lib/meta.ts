@@ -146,8 +146,8 @@ export function yearOf(meta: Pick<TitleDetail, 'year' | 'releaseDate'> | undefin
 }
 
 /**
- * A show's years: "2008–2013" once it ended, "2019–" while it runs, a
- * single year when it ended the year it began or nothing more is known.
+ * A show's years: "2008–2013" once it ended, or the premiere year "2019"
+ * while it runs or when it ended the year it began.
  */
 export function yearSpan(
   meta: Pick<TitleDetail, 'releaseDate' | 'endDate' | 'status'> | undefined | null,
@@ -157,7 +157,7 @@ export function yearSpan(
   if (!from) return '';
   const to = Number(meta?.endDate?.slice(0, 4));
   if (meta?.status === 'Ended' || meta?.status === 'Canceled') return to && to !== from ? `${from}–${to}` : String(from);
-  return meta?.status ? `${from}–` : String(from);
+  return String(from);
 }
 
 /** The crew with one of the jobs, each person once, in the order the jobs are given. */
@@ -275,3 +275,19 @@ export function versionLabel(i: Pick<ItemSummary, 'height' | 'hdr'> & { containe
   const hdr = i.hdr ? (typeof i.hdr === 'string' ? i.hdr.toUpperCase() : 'HDR') : '';
   return [[res, hdr].filter(Boolean).join(' '), i.container?.toUpperCase()].filter(Boolean).join(', ');
 }
+
+/** The collections a title belongs to, as a normalized array (0, 1 or multiple). */
+export function titleCollections(
+  meta:
+    | {
+        collection?: { id: number; name: string } | null;
+        collections?: { id: number; name: string }[] | null;
+      }
+    | undefined
+    | null,
+): { id: number; name: string }[] {
+  if (meta?.collections?.length) return meta.collections;
+  if (meta?.collection) return [meta.collection];
+  return [];
+}
+

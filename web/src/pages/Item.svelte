@@ -14,7 +14,7 @@
   } from '../lib/format';
   import { detail as loadDetail } from '../lib/details.svelte';
   import { ensureLibrary, episodesOf, findItem, markWatched, versionsOf, type LibraryRow } from '../lib/library.svelte';
-  import { CREDIT_LINES, crewWith, logoSrc, ratingLabel, runtimeLabel, versionLabel, yearOf } from '../lib/meta';
+  import { CREDIT_LINES, crewWith, logoSrc, ratingLabel, runtimeLabel, titleCollections, versionLabel, yearOf } from '../lib/meta';
   import { titleRatings } from '../lib/ratings';
   import { href } from '../lib/router.svelte';
   import { app } from '../lib/state.svelte';
@@ -22,6 +22,7 @@
   import { WATCHED } from '../lib/watched';
   import BackButton from '../components/BackButton.svelte';
   import Badges from '../components/Badges.svelte';
+  import CollectionsSection from '../components/CollectionsSection.svelte';
   import EditTitle from '../components/EditTitle.svelte';
   import FixMatch from '../components/FixMatch.svelte';
   import Hero from '../components/Hero.svelte';
@@ -114,6 +115,7 @@
   const resumeAt = $derived(item && progressOf(item) > 0 ? (item.progress?.positionSec ?? 0) : 0);
   // The movie's title, or the episode's show.
   const meta = $derived(detail.data?.meta);
+  const collections = $derived(titleCollections(meta));
   const ep = $derived(detail.data?.episodeInfo);
 
   // Other files of the same film (4K and 1080p, a director's cut).
@@ -368,7 +370,7 @@
     {#if notice}<p class="muted notice" role="status">{notice}</p>{/if}
     {#if markError}<p class="error notice" role="alert">{markError}</p>{/if}
 
-    {#if overview || meta?.genres.length || credits.length || meta?.collection}
+    {#if overview || meta?.genres.length || credits.length || (isEpisode && item.show)}
       <section class="about">
         <div class="about-main">
           {#if overview}<p class="title-overview">{overview}</p>{/if}
@@ -413,7 +415,7 @@
             </ul>
           {/if}
         </div>
-        {#if credits.length || meta?.collection}
+        {#if credits.length || (isEpisode && item.show)}
           <div class="about-side">
             {#if credits.length}
               <dl class="credits">
@@ -424,15 +426,6 @@
                   </dd>
                 {/each}
               </dl>
-            {/if}
-            {#if meta?.collection}
-              <a class="collection-callout" href={href.collection(meta.collection.id)}>
-                <div class="collection-meta">
-                  <span class="collection-kicker">Part of the collection</span>
-                  <span class="collection-name">{meta.collection.name}</span>
-                </div>
-                <span class="collection-arrow" aria-hidden="true">→</span>
-              </a>
             {/if}
             {#if isEpisode && item.show}
               <a class="callout-card" href={href.show(item.show, item.season)}>
@@ -489,101 +482,119 @@
       </nav>
     {/if}
 
-    <section class="playback">
-      <h2>In a web browser</h2>
-      {#if decision.error}
-        <p class="error">{decision.error}</p>
-      {:else if !decision.data}
-        <p class="muted">Checking how this plays…</p>
-      {:else}
-        {@const d = decision.data}
-        <p class="decision">
-          <span class="badge method {d.method}">{methodLabel(d.method)}</span>
-          <span class="muted">
-            {d.method === 'direct'
-              ? 'Plays the file as it is, with no conversion.'
-              : `Video is ${d.videoAction === 'copy' ? 'passed through' : 're-encoded'}, audio is ${
-                  d.audioAction === 'copy' ? 'passed through' : 're-encoded'
-                }.`}
-          </span>
-        </p>
-      {/if}
-    </section>
+    <CollectionsSection {collections} />
 
-    <details class="tech">
-      <summary>Technical details</summary>
-      {#if meta}
-        <p class="muted source">
-          Details from {sources[meta.source] ?? meta.source}{meta.locked ? ', with your edits' : ''}.
-        </p>
-      {/if}
-      {#if decision.data?.reasons.length}
-        <h3>Why this playback method</h3>
-        <ul class="reasons">
-          {#each decision.data.reasons as reason}<li>{reason}</li>{/each}
-        </ul>
-      {/if}
-      {#if detail.data}
-        {@const d = detail.data}
-        <h3>File</h3>
-        <dl class="kv">
-          <dt>Name</dt><dd class="wrap">{d.path}</dd>
-          <dt>Container</dt><dd>{d.container}</dd>
-          <dt>Video</dt><dd>{[codecLabel(d.videoCodec), d.width ? `${d.width}×${d.height}` : ''].filter(Boolean).join(', ')}</dd>
-          <dt>Audio</dt><dd>{codecLabel(d.audioCodec)}</dd>
-          <dt>Duration</dt><dd>{formatDuration(d.durationSec) || 'Unknown'}</dd>
-          <dt>Size</dt><dd>{formatBytes(d.size) || 'Unknown'}</dd>
-          <dt>Bitrate</dt><dd>{formatBitrate(d.bitrate) || 'Unknown'}</dd>
-        </dl>
-
-        <h3>Streams</h3>
-        <div class="scroll">
-          <table class="table">
-            <thead>
-              <tr><th>#</th><th>Type</th><th>Codec</th><th>Details</th><th>Language</th><th>Title</th><th>Flags</th></tr>
-            </thead>
-            <tbody>
-              {#each d.streams as s (s.index)}
-                <tr>
-                  <td>{s.index}</td>
-                  <td>{s.type}</td>
-                  <td>{codecLabel(s.codec)}{#if s.codecTag && s.type === 'video'} <span class="muted">({s.codecTag})</span>{/if}</td>
-                  <td>{streamDetails(s)}</td>
-                  <td>{s.language ?? ''}</td>
-                  <td>{s.title ?? ''}</td>
-                  <td>{streamFlags(s)}</td>
-                </tr>
-              {:else}
-                <tr><td colspan="7" class="muted">No stream information.</td></tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-
-        <div class="subs-header">
-          <h3>Subtitles</h3>
-          <button class="btn pill subtle" onclick={() => (managingSubs = true)}>
-            <Icon name="cc" />Manage subtitles
-          </button>
-        </div>
-        {#if d.subtitles.length}
-          <ul class="reasons">
-            {#each d.subtitles as sub (sub.key)}
-              <li>
-                {sub.title || sub.language || sub.key}
-                <span class="muted">{sub.format}{sub.image ? ', image (burned in when selected)' : ''}{sub.external ? ' (sidecar)' : ''}</span>
-              </li>
-            {/each}
-          </ul>
-        {:else}
-          <p class="muted">No subtitles attached to this file.</p>
+    <section class="detail-section file" aria-labelledby="file-title">
+      <div class="detail-section-head file-head">
+        <h2 class="detail-section-title file-title" id="file-title">File and playback</h2>
+        {#if decision.data}
+          <span class="badge method {decision.data.method}">{methodLabel(decision.data.method)}</span>
         {/if}
-      {:else if detail.error}
-        <p class="error">{detail.error}</p>
-      {:else}
-        <p class="muted">Loading file details…</p>
-      {/if}
-    </details>
+      </div>
+
+      <div class="file-body">
+        {#if decision.error}
+          <p class="error">{decision.error}</p>
+        {:else if !decision.data}
+          <p class="muted">Checking how this plays…</p>
+        {:else}
+          {@const pb = decision.data}
+          <section class="file-block">
+            <h3 class="editorial-kicker">In a web browser</h3>
+            <p class="plays">
+              {pb.method === 'direct'
+                ? 'Plays the file as it is, with no conversion.'
+                : `Video is ${pb.videoAction === 'copy' ? 'passed through' : 're-encoded'}, audio is ${
+                    pb.audioAction === 'copy' ? 'passed through' : 're-encoded'
+                  }.`}
+            </p>
+            {#if pb.reasons.length}
+              <div class="file-why">
+                <h3 class="editorial-kicker">Why this playback method</h3>
+                <ul class="reasons">
+                  {#each pb.reasons as reason}<li>{reason}</li>{/each}
+                </ul>
+              </div>
+            {/if}
+          </section>
+        {/if}
+
+        {#if detail.data}
+          {@const d = detail.data}
+          {@const av = d.streams.filter((s) => s.type === 'video' || s.type === 'audio')}
+          <section class="file-block">
+            <h3 class="editorial-kicker">File</h3>
+            <table class="table file-facts">
+              <tbody>
+                <tr><th scope="row">Name</th><td class="wrap">{d.path}</td></tr>
+                <tr><th scope="row">Folder</th><td class="wrap">{d.folder || 'Unknown'}</td></tr>
+                <tr><th scope="row">Container</th><td>{d.container}</td></tr>
+                <tr><th scope="row">Video</th><td>{[codecLabel(d.videoCodec), d.width ? `${d.width}×${d.height}` : ''].filter(Boolean).join(', ')}</td></tr>
+                <tr><th scope="row">Audio</th><td>{codecLabel(d.audioCodec)}</td></tr>
+                <tr><th scope="row">Duration</th><td>{formatDuration(d.durationSec) || 'Unknown'}</td></tr>
+                <tr><th scope="row">Size</th><td>{formatBytes(d.size) || 'Unknown'}</td></tr>
+                <tr><th scope="row">Bitrate</th><td>{formatBitrate(d.bitrate) || 'Unknown'}</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section class="file-block">
+            <h3 class="editorial-kicker">Streams</h3>
+            <div class="scroll">
+              <table class="table">
+                <thead>
+                  <tr><th>#</th><th>Type</th><th>Codec</th><th>Details</th><th>Language</th><th>Title</th><th>Flags</th></tr>
+                </thead>
+                <tbody>
+                  {#each av as s (s.index)}
+                    <tr>
+                      <td>{s.index}</td>
+                      <td>{s.type}</td>
+                      <td>{codecLabel(s.codec)}{#if s.codecTag && s.type === 'video'} <span class="muted">({s.codecTag})</span>{/if}</td>
+                      <td>{streamDetails(s)}</td>
+                      <td>{s.language ?? ''}</td>
+                      <td>{s.title ?? ''}</td>
+                      <td>{streamFlags(s)}</td>
+                    </tr>
+                  {:else}
+                    <tr><td colspan="7" class="muted">No video or audio streams.</td></tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="file-block">
+            <div class="subs-header">
+              <h3 class="editorial-kicker">Subtitles</h3>
+              <button class="btn pill subtle" onclick={() => (managingSubs = true)}>
+                <Icon name="cc" />Manage subtitles
+              </button>
+            </div>
+            {#if d.subtitles.length}
+              <ul class="reasons">
+                {#each d.subtitles as sub (sub.key)}
+                  <li>
+                    {sub.title || sub.language || sub.key}
+                    <span class="muted">{sub.format}{sub.image ? ', image (burned in when selected)' : ''}{sub.external ? ' (sidecar)' : ''}</span>
+                  </li>
+                {/each}
+              </ul>
+            {:else}
+              <p class="muted">No subtitles attached to this file.</p>
+            {/if}
+          </section>
+        {:else if detail.error}
+          <p class="error">{detail.error}</p>
+        {:else}
+          <p class="muted">Loading file details…</p>
+        {/if}
+
+        {#if meta}
+          <p class="muted source">Details from {sources[meta.source] ?? meta.source}{meta.locked ? ', with your edits' : ''}.</p>
+        {/if}
+      </div>
+    </section>
   </div>
 
   <FixMatch
@@ -690,80 +701,78 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .playback {
-    background: var(--surface-panel);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
-    backdrop-filter: var(--glass-blur);
-    padding: 1.1rem 1.25rem;
+  /* File and playback: a section at the end of the page, not a panel. A hairline and a heading
+     row; the facts below read as part of the page. */
+  .file {
+    border-top: 1px solid var(--line);
   }
-  .playback h2 {
-    margin: 0 0 0.6rem;
-    font-size: var(--fs-base);
-    font-family: var(--font-text);
-    font-weight: var(--fw-semibold-2);
-  }
-  .decision {
+  .file-head {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.6rem 0.9rem;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 1.1rem 0;
+  }
+  .file-title {
+    font-size: var(--fs-2xl);
+  }
+  .file-body {
+    display: grid;
+    gap: 1.75rem;
+    padding: 0 0 1.75rem;
+  }
+  .file-block {
+    display: grid;
+    gap: 0.75rem;
+    min-width: 0;
+  }
+  /* The heading belongs to the reasons under it: more space over it, less under it. */
+  .file-why {
+    display: grid;
+    gap: 0.4rem;
+    margin-top: 0.75rem;
+  }
+  .file-facts th,
+  .file-facts td {
+    vertical-align: top;
+  }
+  .file-facts th {
+    width: 1%;
+  }
+  .file-facts td {
+    white-space: normal;
+  }
+  .plays {
+    max-width: 62ch;
     margin: 0;
-  }
-  .tech {
-    border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
-    background: var(--surface-panel);
-    backdrop-filter: var(--glass-blur);
-    padding: 1.1rem 1.25rem;
-  }
-  .tech summary {
-    cursor: pointer;
-    font-weight: var(--fw-semibold-2);
-    width: fit-content;
-  }
-  .tech h3 {
-    margin: 1.5rem 0 0.6rem;
-    font-size: var(--fs-base);
+    color: var(--text-muted);
+    font-size: var(--fs-sm-3);
+    line-height: var(--lh-body-2);
   }
   .subs-header {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 0.5rem;
-    margin: 1.5rem 0 0.6rem;
-  }
-  .subs-header h3 {
-    margin: 0;
+    gap: 0.75rem;
   }
   .source {
-    margin: 1rem 0 0;
+    margin: 0;
     font-size: var(--fs-sm-3);
   }
   .reasons {
     margin: 0;
     padding-left: 1.2rem;
     color: var(--text-muted);
+    font-size: var(--fs-sm-3);
+    line-height: var(--lh-body-2);
+  }
+  .reasons li + li {
+    margin-top: 0.35rem;
   }
   .reasons .muted {
     margin-left: 0.6rem;
-  }
-  .kv {
-    display: grid;
-    grid-template-columns: max-content 1fr;
-    gap: 0.45rem 1.75rem;
-    margin: 0;
-    font-size: var(--fs-sm-3);
-  }
-  .kv dt {
-    color: var(--text-muted);
-    font-family: var(--font-mono);
-    font-size: var(--fs-xs);
-    letter-spacing: var(--tracking-wider);
-    text-transform: uppercase;
-  }
-  .kv dd {
-    margin: 0;
   }
   .wrap {
     overflow-wrap: anywhere;

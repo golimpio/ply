@@ -602,6 +602,9 @@ func TestItemDetail(t *testing.T) {
 		if d.Path != "Movie (2020).mp4" || strings.Contains(d.Path, "/") {
 			t.Errorf("path = %q, want the base name only", d.Path)
 		}
+		if d.Folder != e.dir {
+			t.Errorf("folder = %q, want %q", d.Folder, e.dir)
+		}
 		if d.Size != int64(len(fileContent)) || d.Bitrate != 4000 || d.Title != "Movie" {
 			t.Errorf("detail = %+v", d)
 		}
@@ -640,6 +643,9 @@ func TestItemDetail(t *testing.T) {
 		if len(pb.Reasons) != 1 || !strings.Contains(pb.Reasons[0], "container mkv") {
 			t.Errorf("reasons = %q", pb.Reasons)
 		}
+		if want := filepath.Join(e.dir, "Shows", "Cool Show", "Season 1"); d.Folder != want {
+			t.Errorf("folder = %q, want %q", d.Folder, want)
+		}
 		if len(d.Subtitles) != 2 || d.Subtitles[0].Key != "2" || !d.Subtitles[0].Image || d.Subtitles[0].Format != "hdmv_pgs_subtitle" ||
 			d.Subtitles[1].Key != "3" || d.Subtitles[1].Image || d.Subtitles[1].Language != "por" || d.Subtitles[1].Title != "Portuguese" {
 			t.Errorf("subtitles = %+v", d.Subtitles)
@@ -655,7 +661,7 @@ func TestItemDetail(t *testing.T) {
 		e := newEnv(t, "")
 		raw := decode[map[string]any](t, e.get(fmt.Sprintf("/api/items/%d", e.mkv)))
 		for _, k := range []string{"id", "kind", "title", "durationSec", "container", "videoCodec", "audioCodec",
-			"width", "height", "hdr", "addedAt", "path", "size", "bitrate", "streams", "subtitles", "playback",
+			"width", "height", "hdr", "addedAt", "path", "folder", "size", "bitrate", "streams", "subtitles", "playback",
 			"show", "season", "episode", "episodeTitle"} {
 			if _, ok := raw[k]; !ok {
 				t.Errorf("detail JSON lacks %q", k)

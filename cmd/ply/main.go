@@ -69,6 +69,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if cfg.Stop {
+		return stopRunning(context.Background(), cfg, os.Stderr)
+	}
 	log, closeLog, isInteractive := setupLogger(cfg)
 	defer closeLog()
 	if cfg.ScanIntervalSet {
@@ -125,6 +128,12 @@ func run() error {
 		return err
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
+	// ply -stop finds this server, and proves it may stop it, with what control.json says.
+	stops := newStopRequests()
+	ctl, err := newControl(ln.Addr(), tlsHost, cfg.TLSCert)
+	if err != nil {
+		return fmt.Errorf("control key: %w", err)
+	}
 
 	ffmpegBin := stream.ResolveFFmpeg(cfg.FFmpeg)
 	// Probing the GPU takes a moment: do it in the background, playback
@@ -385,6 +394,8 @@ func run() error {
 		ListenAddr: ln.Addr(),
 		TLSHost:    tlsHost,
 		URLKey:     urlKey,
+		Stop:       stops.ask,
+		ControlKey: ctl.Key,
 
 		FlagFolders: flagRoots,
 		SetRoots:    setRoots,
@@ -447,6 +458,12 @@ func run() error {
 	}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- serve(srv, ln, cert) }()
+	removeControl, err := ctl.write(cfg.Data)
+	if err != nil {
+		log.Warn("ply -stop will not find this server", "err", err)
+		removeControl = func() {}
+	}
+	defer removeControl()
 
 	adv, err := discovery.Advertise(discovery.Service{Name: cfg.Name, ID: id, Port: port,
 		API: api.Version, APIMin: api.VersionMin, TLSHost: tlsHost})
@@ -464,6 +481,7 @@ func run() error {
 	}
 
 	var serveFailure error
+	deadline := stopWithin
 	select {
 	case <-sigC:
 		if isInteractive && !cfg.LogStderr {
@@ -476,10 +494,18 @@ func run() error {
 					if isInteractive && !cfg.LogStderr {
 						fmt.Fprintln(os.Stderr, "\nForced exit.")
 					}
+					removeControl()
 					os.Exit(130)
 				}
 			}
 		}()
+		cancel()
+	case <-stops.nice:
+		apiStop(log, isInteractive && !cfg.LogStderr, false)
+		cancel()
+	case <-stops.force:
+		apiStop(log, isInteractive && !cfg.LogStderr, true)
+		deadline = forceStopWithin
 		cancel()
 	case serveFailure = <-serveErr:
 		cancel()
@@ -490,8 +516,10 @@ func run() error {
 	clean := stopper{
 		log:      log,
 		every:    2 * time.Second,
-		deadline: 15 * time.Second,
+		deadline: deadline,
 		quick:    sigC,
+		hurry:    stops.force,
+		hurried:  forceStopWithin,
 		reportProgress: func(step string, waited time.Duration, left int) {
 			if isInteractive && !cfg.LogStderr {
 				fmt.Fprintf(os.Stderr, "Still waiting for %s (%s)... press Ctrl-C again to quit immediately\n", step, waited)
@@ -501,6 +529,7 @@ func run() error {
 			if isInteractive && !cfg.LogStderr {
 				fmt.Fprintln(os.Stderr, "\nQuitting at once.")
 			}
+			removeControl()
 			os.Exit(130)
 		},
 	}.run([]stopStep{
@@ -546,12 +575,14 @@ func run() error {
 			fmt.Fprintln(os.Stderr, "\nShutdown timed out; forced exit.")
 		}
 		closeLog()
+		removeControl()
 		os.Exit(1)
 	}
 	if isInteractive && !cfg.LogStderr {
 		fmt.Fprintln(os.Stderr, "Stopped.")
 	}
 	closeLog()
+	removeControl() // the last thing: ply -stop waits for it
 	if serveFailure != nil {
 		return serveFailure
 	}

@@ -98,7 +98,8 @@ type Subtitle struct {
 // ItemDetail is the full item view.
 type ItemDetail struct {
 	ItemSummary
-	Path      string         `json:"path"` // base name only
+	Path      string         `json:"path"`   // base name only
+	Folder    string         `json:"folder"` // the directory that holds the file
 	Size      int64          `json:"size"`
 	Bitrate   int64          `json:"bitrate"`
 	Streams   []probe.Stream `json:"streams"`
@@ -213,6 +214,7 @@ func (s *Server) detail(e store.Entry, pb Playback) ItemDetail {
 	return ItemDetail{
 		ItemSummary: summarize(e),
 		Path:        filepath.Base(e.Path),
+		Folder:      filepath.Dir(e.Path),
 		Size:        e.Size,
 		Bitrate:     e.Bitrate,
 		Streams:     streams,

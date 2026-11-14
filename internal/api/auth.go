@@ -37,9 +37,10 @@ func principalOf(r *http.Request) principal {
 	return p
 }
 
-// requireAuth answers 401 to an /api request (but /api/info and /api/pair) without a credential,
-// and 403 to a device that asks for what only the owner may do. Without a token every request is
-// the owner's. A path the checks could read apart from the router is a 400 (routedPath).
+// requireAuth answers 401 to an /api request (but /api/info, /api/pair and the stop, whose
+// credential is the control key: handleStop) without a credential, and 403 to a device that asks
+// for what only the owner may do. Without a token every request is the owner's. A path the checks
+// could read apart from the router is a 400 (routedPath).
 func (s *Server) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !needsAuth(r.URL.Path) {
@@ -101,7 +102,7 @@ func routedPathOf(r *http.Request) string {
 var segmentEscaper = strings.NewReplacer("%", "%25", "/", "%2F")
 
 func needsAuth(p string) bool {
-	return (p == "/api" || strings.HasPrefix(p, "/api/")) && p != "/api/info" && p != "/api/pair"
+	return (p == "/api" || strings.HasPrefix(p, "/api/")) && p != "/api/info" && p != "/api/pair" && p != stopPath
 }
 
 // authenticate finds who r is from its credential: the shared token as Bearer or ?token=, a

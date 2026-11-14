@@ -28,6 +28,10 @@ type RootFlag struct {
 
 // Config is the fully resolved server configuration.
 type Config struct {
+	// Stop (-stop) starts no server: it stops the ply running with this data directory, through
+	// its API, and waits for it to exit; Force (-force) gives that stop 5 s before the server quits
+	// at once, as a second Ctrl-C does (docs/DESIGN.md, "Stopping").
+	Stop, Force bool
 	// Roots are the folders given with -media, -movies and -shows: absolute,
 	// cleaned, de-duplicated, in the order given.
 	Roots []RootFlag
@@ -260,6 +264,8 @@ func Parse(args []string, out io.Writer) (Config, error) {
 	fs.Var(rootList{"", &given}, "media", "media folder of either type: movies or shows is guessed from its files, and can be changed in Settings (repeatable)")
 	fs.Var(rootList{library.KindMovies, &given}, "movies", "folder of movies (repeatable); its type cannot be changed in Settings")
 	fs.Var(rootList{library.KindShows, &given}, "shows", "folder of TV shows (repeatable); its type cannot be changed in Settings")
+	fs.BoolVar(&c.Stop, "stop", false, "stop the ply running with this data directory (-data) nicely, and wait for it to exit")
+	fs.BoolVar(&c.Force, "force", false, "with -stop: give the nice stop 5 s, then quit at once (as a second Ctrl-C does)")
 	fs.StringVar(&c.Addr, "addr", ":8420", "listen address (:0 picks a free port)")
 	fs.StringVar(&data, "data", "", "data directory (default: per-user application data dir)")
 	fs.StringVar(&logDir, "log-dir", "", "log directory (default: per-user application log dir)")
@@ -336,6 +342,9 @@ func Parse(args []string, out io.Writer) (Config, error) {
 	}
 	if fs.NArg() > 0 {
 		return Config{}, fmt.Errorf("unexpected argument %q", fs.Arg(0))
+	}
+	if c.Force && !c.Stop {
+		return Config{}, errors.New("-force goes with -stop")
 	}
 	if (c.TLSCert == "") != (c.TLSKey == "") {
 		return Config{}, errors.New("-tls-cert and -tls-key go together")

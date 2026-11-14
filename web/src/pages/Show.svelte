@@ -1,9 +1,9 @@
 <script lang="ts">
   import { api, ApiError, type EpisodeCard, type EpisodeOrder, type Subtitle } from '../lib/api';
   import { useAmbient } from '../lib/ambient.svelte';
-  import { episodeLabel, formatDuration, seasonLabel } from '../lib/format';
+  import { episodeLabel, formatDuration, plural, seasonLabel } from '../lib/format';
   import { ensureEpisodes, episodes as episodeList, episodesOf, markWatched, showMeta, showsOf, type WatchTarget } from '../lib/library.svelte';
-  import { backdropOf, CREDIT_LINES, crewWith, logoSrc, posterImg, yearSpan } from '../lib/meta';
+  import { backdropOf, CREDIT_LINES, crewWith, logoSrc, posterImg, titleCollections, yearSpan } from '../lib/meta';
   import { morph } from '../lib/nav';
   import { ensureRatingPrefs, ratingPrefs } from '../lib/ratingprefs.svelte';
   import { orderShown, titleRatings } from '../lib/ratings';
@@ -15,6 +15,7 @@
   import Art from '../components/Art.svelte';
   import BackButton from '../components/BackButton.svelte';
   import Badges from '../components/Badges.svelte';
+  import CollectionsSection from '../components/CollectionsSection.svelte';
   import EditTitle from '../components/EditTitle.svelte';
   import FixMatch from '../components/FixMatch.svelte';
   import Hero from '../components/Hero.svelte';
@@ -83,6 +84,7 @@
   const selectSeason = (n: number) => redirect(href.show(show, n));
   const logo = $derived(logoSrc(meta));
   const years = $derived(yearSpan(meta, summary?.year));
+  const collections = $derived(titleCollections(meta));
   const ratings = $derived(titleRatings(meta, summary));
   // An episode's own rating (IMDb), when the settings show that source.
   const epRating = (e: EpisodeCard) => orderShown(e.ratings ?? [], ratingPrefs.shown)[0];
@@ -211,7 +213,6 @@
 
   useAmbient(() => artOf(entry?.cover)?.color);
 
-  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
   const resumeAt = (e: EpisodeCard) => (progressOf(e) > 0 ? (e.progress?.positionSec ?? 0) : 0);
   const status: Record<string, string> = {
     'Returning Series': 'Still running',
@@ -383,6 +384,8 @@
         {/each}
       </ol>
     </section>
+
+    <CollectionsSection {collections} />
   </div>
 
   {#if meta?.cast.length}

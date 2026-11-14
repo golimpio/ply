@@ -1,5 +1,6 @@
 // The M10 ratings UI in a real browser, against a mocked API: the rating chips of a title's page
-// (order, formats, links, tooltips, Metacritic's bands), the primary rating on cards, sorting and
+// (order, formats, links, tooltips, Metacritic's bands), a changed order and primary seen without a
+// reload, the one badge box of the hero's facts, the primary rating on cards, sorting and
 // filtering the Movies and Shows pages by rating, an episode's IMDb rating, and the Settings
 // Ratings card (the MDBList key, Test, the primary rating, the shown sources and their order, the
 // notices). The unit tests pin the helpers (lib/ratings.ts, the api calls); this pins what the
@@ -83,11 +84,11 @@ const episode = (id, show, season, ep, ratings, rating = null) => ({
 // Score100: Brazil 90, Heat 87, Cube 80, Alien 65, Dune none. By each source's own value instead:
 // Alien 65, Heat 8.7, Cube 8, Brazil 4.5. A sort by value is told apart from one by score100.
 const ITEMS = [
-  movie(1, 'Heat', entry('imdb', 8.7, 10, { votes: 1_234_567 })),
-  movie(2, 'Alien', entry('rt_critics', 65, 100, { state: 'fresh' })),
-  movie(3, 'Brazil', entry('letterboxd', 4.5, 5)),
-  movie(4, 'Cube', entry('imdb', 8.0, 10)),
-  movie(5, 'Dune', null),
+  movie(1, 'Heat', entry('imdb', 8.7, 10, { votes: 1_234_567 }), { ratings: ALL() }),
+  movie(2, 'Alien', entry('rt_critics', 65, 100, { state: 'fresh' }), { ratings: [entry('rt_critics', 65, 100, { state: 'fresh' })] }),
+  movie(3, 'Brazil', entry('letterboxd', 4.5, 5), { ratings: [entry('letterboxd', 4.5, 5)] }),
+  movie(4, 'Cube', entry('imdb', 8.0, 10), { ratings: [entry('imdb', 8.0, 10)] }),
+  movie(5, 'Dune', null, { ratings: [] }),
   episode(11, 'Lost', 1, 1, [entry('imdb', 8.9, 10, { votes: 5000, url: 'https://www.imdb.com/title/tt0636289/' })], entry('imdb', 9.0, 10)),
   episode(12, 'Lost', 1, 2, [], entry('imdb', 9.0, 10)),
   episode(21, 'Dark', 1, 1, [], entry('rt_audience', 85, 100)),
@@ -99,6 +100,13 @@ const SHOWS = [
   { show: 'Fringe', seasons: [1], episodeCount: 1, matchState: 'matched', needsReview: false, rating: null },
   { show: 'Lost', seasons: [1], episodeCount: 2, matchState: 'matched', needsReview: false, rating: entry('imdb', 9.0, 10) },
 ];
+// The server's primaryRating: the chosen source when the title has it, else its first rating; a
+// title with none stays without one. The mocked lists answer with the primary stored right now.
+const withPrimary = (primary) =>
+  ITEMS.map((it) => {
+    if (it.kind !== 'movie' || !it.ratings) return it;
+    return { ...it, rating: it.ratings.find((r) => r.source === primary) ?? it.ratings[0] ?? null };
+  });
 
 // The Activity page's history (one finished ratings job), for the check of its own .panel.
 const JOBS = [
@@ -168,7 +176,7 @@ async function open(browser, opts = {}) {
     if (p.startsWith('/api/images/')) return route.fulfill({ status: 404, body: '' });
     if (p === '/api/info') return json(route, { id: 'x', name: 'e2e', version: 'dev', authRequired: false });
     if (p === '/api/scan') return json(route, { running: false, itemCount: ITEMS.length, watching: [] });
-    if (p === '/api/items') return routeItems(route, ITEMS);
+    if (p === '/api/items') return routeItems(route, withPrimary(stored.ratingsPrimary));
     if (p === '/api/shows') return json(route, SHOWS);
     if (['/api/continue', '/api/upcoming', '/api/genres', '/api/folders', '/api/metadata/review'].includes(p)) return json(route, []);
     if (p === '/api/metadata/status') return json(route, { enabled: true, keySet: true, running: false, pending: 0, unmatched: 0, needsReview: 0, lastError: '' });
@@ -200,7 +208,7 @@ async function open(browser, opts = {}) {
         playback: { method: 'direct', videoAction: 'copy', audioAction: 'copy', audioIndex: 1, reasons: [], url: '', startSec: 0 },
         meta: {
           id: 101, kind: 'movie', title: 'Heat', year: 1995, itemId: 1, sortTitle: 'Heat', genres: [], cast: [], crew: [], source: 'tmdb', locked: false,
-          matchState: 'matched', needsReview: false, rating: ITEMS[0].rating, ratings: opts.ratings ?? ALL(),
+          matchState: 'matched', needsReview: false, certification: 'PG-13', rating: ITEMS[0].rating, ratings: opts.ratings ?? ALL(),
         },
       });
     }
@@ -243,12 +251,12 @@ const scenarios = {
     check('the chips follow ratingsShown, not the server', JSON.stringify(order) === JSON.stringify(shown), JSON.stringify(order));
     check('a hidden source has no chip', (await page.locator('ul.ratings [data-source="trakt"]').count()) === 0);
     const want = {
-      imdb: 'IMDb 8.7 1.2M',
-      rt_critics: 'Critics 93%',
-      rt_audience: 'Audience 41%',
-      metacritic: 'Metacritic 74',
-      letterboxd: 'Letterboxd 4.1',
-      tmdb: 'TMDB 7.8',
+      imdb: '8.7',
+      rt_critics: '93%',
+      rt_audience: '41%',
+      metacritic: '74',
+      letterboxd: '4.1',
+      tmdb: '7.8',
     };
     for (const [src, w] of Object.entries(want)) {
       const got = await face(page.locator(`ul.ratings [data-source="${src}"]`));
@@ -256,13 +264,12 @@ const scenarios = {
     }
     check('the tomato is fresh', (await page.locator('[data-source="rt_critics"] svg').getAttribute('data-glyph')) === 'fresh');
     check('the popcorn is spilled', (await page.locator('[data-source="rt_audience"] svg').getAttribute('data-glyph')) === 'spilled');
-    check('Letterboxd has its star', (await page.locator('[data-source="letterboxd"] svg').getAttribute('data-glyph')) === 'star');
+    check('Letterboxd has its glyph', (await page.locator('[data-source="letterboxd"] svg').getAttribute('data-glyph')) === 'letterboxd');
     const spoken = await text(page.locator('[data-source="rt_critics"] .sr-only'));
     check('each chip names its source in words', spoken === 'Rotten Tomatoes critics 93%, fresh (opens in a new tab)', spoken);
-    // Mutant caught: "out of 10" between IMDb's number and its votes (the name no longer holds
-    // what the chip shows, in order: WCAG 2.5.3).
+    // Mutant caught: "out of 10" said before the visible name and number (label in name).
     const imdbSpoken = await text(page.locator('[data-source="imdb"] .sr-only'));
-    check("IMDb's name holds what it shows, in order", imdbSpoken === 'IMDb 8.7, 1.2M votes (opens in a new tab)', imdbSpoken);
+    check("IMDb's name holds what it shows, in order", imdbSpoken === 'IMDb 8.7 out of 10, 1.2M votes (opens in a new tab)', imdbSpoken);
     const imdb = page.locator('ul.ratings [data-source="imdb"]');
     check('IMDb links to the title there', (await imdb.getAttribute('href')) === IMDB_URL);
     check('in a new tab, with no referrer', (await imdb.getAttribute('target')) === '_blank' && (await imdb.getAttribute('rel')) === 'noreferrer');
@@ -275,9 +282,87 @@ const scenarios = {
     const again = await open(browser);
     await again.page.goto(`${base}/#/item/1`);
     await chips(again.page).nth(6).waitFor();
-    check('with every source shown, Trakt is there too', (await face(again.page.locator('ul.ratings [data-source="trakt"]'))) === 'Trakt 84%');
+    check('with every source shown, Trakt is there too', (await face(again.page.locator('ul.ratings [data-source="trakt"]'))) === '84%');
     check('no page errors', !errors.length && !again.errors.length, [...errors, ...again.errors].join('; '));
     await again.context.close();
+  },
+
+  // Mutants caught: the order applied once and never again (a copy of ratingsShown made at mount),
+  // and a new order not reaching a page opened afterwards without a reload.
+  async 'Chips: a change of order is followed without a reload'(browser) {
+    const { context, page, server } = await open(browser);
+    await page.goto(`${base}/#/item/1`);
+    await chips(page).nth(6).waitFor();
+    await page.goto(`${base}/#/settings?tab=ratings`);
+    await card(page).waitFor();
+    for (let i = 0; i < 3; i++) await page.locator('#rs-up-metacritic').click();
+    for (let i = 0; i < 100 && server().ratingsShown[0] !== 'metacritic'; i++) await sleep(50);
+    check('the server has the new order', server().ratingsShown[0] === 'metacritic', JSON.stringify(server().ratingsShown));
+    await page.goto(`${base}/#/item/1`);
+    await chips(page).nth(6).waitFor();
+    const order = await chips(page).evaluateAll((els) => els.map((e) => e.dataset.source));
+    check(
+      'after the change: the chips follow it, no reload',
+      JSON.stringify(order) === JSON.stringify(['metacritic', 'imdb', 'rt_critics', 'rt_audience', 'letterboxd', 'trakt', 'tmdb']),
+      JSON.stringify(order),
+    );
+    await context.close();
+  },
+
+  // Mutants caught: a confirmed primary not refreshing the cards, and a card keeping the rating it
+  // was first painted with.
+  async 'Cards: a change of the primary rating is followed without a reload'(browser) {
+    const { context, page, server } = await open(browser, { settings: { ratingsAvailable: SOURCES } });
+    await page.goto(`${base}/#/movies`);
+    let faceNow = page.locator('.grid .card', { hasText: 'Heat' }).locator('.sub [data-source]');
+    await faceNow.waitFor();
+    check('before: IMDb 8.7', (await faceNow.getAttribute('data-source')) === 'imdb' && (await face(faceNow)) === '8.7', await face(faceNow));
+    await page.goto(`${base}/#/settings?tab=ratings`);
+    await card(page).waitFor();
+    await page.selectOption('#ratings-primary', 'metacritic');
+    await page.waitForFunction(() => document.querySelector('.ratings-card p.choice-message')?.textContent === 'Cards show the Metacritic rating.');
+    check('the server has Metacritic as the primary', server().ratingsPrimary === 'metacritic', server().ratingsPrimary);
+    await page.goto(`${base}/#/movies`);
+    faceNow = page.locator('.grid .card', { hasText: 'Heat' }).locator('.sub [data-source]');
+    await faceNow.waitFor();
+    check(
+      'after: Metacritic 74, no reload',
+      (await faceNow.getAttribute('data-source')) === 'metacritic' && (await face(faceNow)) === '74',
+      `${await faceNow.getAttribute('data-source')} ${await face(faceNow)}`,
+    );
+    await context.close();
+  },
+
+  // Mutant caught: a certification box of its own size, colour, border or type beside the format badges.
+  async 'Hero facts: a certification is a badge like the others'(browser) {
+    const { context, page } = await open(browser);
+    await page.goto(`${base}/#/item/1`);
+    const cert = page.locator('.meta .cert');
+    const res = page.locator('.meta .badge', { hasText: '1080p' });
+    await cert.waitFor();
+    await res.waitFor();
+    check('the certification says PG-13', (await text(cert)) === 'PG-13', await text(cert));
+    const box = (loc) =>
+      loc.evaluate((el) => {
+        const c = getComputedStyle(el);
+        return {
+          display: c.display,
+          padding: c.padding,
+          font: c.fontSize,
+          weight: c.fontWeight,
+          line: c.lineHeight,
+          letter: c.letterSpacing,
+          colour: c.color,
+          background: c.backgroundColor,
+          border: `${c.borderTopWidth} ${c.borderTopStyle} ${c.borderTopColor}`,
+          radius: c.borderRadius,
+          height: Math.round(el.getBoundingClientRect().height * 100) / 100,
+        };
+      });
+    const a = await box(cert);
+    const b = await box(res);
+    check('one box: the same size, colour, border and type', JSON.stringify(a) === JSON.stringify(b), `${JSON.stringify(a)} vs ${JSON.stringify(b)}`);
+    await context.close();
   },
 
   // Mutant caught: the band thresholds off by one (61 yellow, or 40 red, or 39 yellow, or 60 green).
@@ -285,11 +370,12 @@ const scenarios = {
     for (const [score, band] of [[61, 'good'], [60, 'mixed'], [40, 'mixed'], [39, 'bad']]) {
       const { context, page } = await open(browser, { ratings: ALL(score) });
       await page.goto(`${base}/#/item/1`);
-      const box = page.locator('[data-source="metacritic"] .score-box');
-      await box.waitFor();
-      const got = await box.getAttribute('data-band');
+      const meta = page.locator('[data-source="metacritic"]');
+      await meta.waitFor();
+      const glyph = meta.locator('[data-band]');
+      const got = await glyph.getAttribute('data-band');
       check(`a Metascore of ${score} is ${band}`, got === band, got);
-      check(`${score}: the number is in text`, (await text(box)) === String(score));
+      check(`${score}: the number is in text`, (await text(meta.locator('.score-value'))) === String(score));
       await context.close();
     }
   },
@@ -366,7 +452,7 @@ const scenarios = {
     check('episode 1 shows IMDb 8.9', (await face(first)) === '8.9', await face(first));
     check('episode 1 has an IMDb glyph', (await first.locator('svg.glyph[data-glyph="imdb"]').count()) === 1);
     check('episode 2, with none, shows none', (await eps.nth(1).locator('[data-source]').count()) === 0);
-    check("the show's chips are on the page too", (await face(page.locator('ul.ratings [data-source="imdb"]'))) === 'IMDb 9.0 600K');
+    check("the show's chips are on the page too", (await face(page.locator('ul.ratings [data-source="imdb"]'))) === '9.0');
     await context.close();
   },
 

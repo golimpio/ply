@@ -32,6 +32,35 @@ func testStopper(every, deadline time.Duration) (stopper, *lockedBuf) {
 	return stopper{log: slog.New(slog.NewTextHandler(&buf, nil)), every: every, deadline: deadline}, &buf
 }
 
+// ply -stop -force during a nice stop cuts the deadline short; a hurry that would lengthen it
+// changes nothing.
+func TestShutdownHurry(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		deadline, hurried time.Duration
+		want              time.Duration
+	}{
+		{"cut short", 10 * time.Second, 100 * time.Millisecond, 100 * time.Millisecond},
+		{"already shorter", 150 * time.Millisecond, 10 * time.Second, 150 * time.Millisecond},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := testStopper(time.Hour, tc.deadline)
+			hurry := make(chan struct{}, 1)
+			s.hurry, s.hurried = hurry, tc.hurried
+			hurry <- struct{}{}
+			block := make(chan struct{})
+			defer close(block)
+			start := time.Now()
+			if s.run([]stopStep{{"stuck", func() { <-block }}}) {
+				t.Fatal("run reported a clean stop of a stuck step")
+			}
+			if took := time.Since(start); took < tc.want || took > tc.want+time.Second {
+				t.Fatalf("gave up after %s, want %s", took, tc.want)
+			}
+		})
+	}
+}
+
 // A slow step is named while it is waited for, so a stop never looks frozen.
 func TestShutdownSaysWhatItWaitsFor(t *testing.T) {
 	s, out := testStopper(20*time.Millisecond, 5*time.Second)

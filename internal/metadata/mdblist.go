@@ -509,7 +509,10 @@ type MDBListRating struct {
 	Value  flexNum `json:"value"`  // on the source's own scale
 	Score  flexNum `json:"score"`  // MDBList's own 0-100 reading of it
 	Votes  flexNum `json:"votes"`
-	URL    string  `json:"url"`
+	// URL is not always a string: some entries give a number (IMDb's does), and the rest give a
+	// relative path (a Metacritic or Rotten Tomatoes page). A value of either kind must not fail the
+	// whole answer; cleanRatingURL keeps only an absolute https link on the source's own site.
+	URL flexString `json:"url"`
 	// State is Rotten Tomatoes' own word for the score, when MDBList gives one ("fresh",
 	// "certified fresh", "upright", "verified hot", ...).
 	State  string `json:"state"`
@@ -620,11 +623,60 @@ var ratingHosts = map[string]string{
 	store.RatingTrakt:      "trakt.tv",
 }
 
-// cleanRatingURL returns raw when it is an https link to the source's own site, else "".
-func cleanRatingURL(source, raw string) string {
+// cleanRatingURL returns raw when it is an https link to the source's own site, or resolves a
+// relative path against the source's canonical base URL; returns "" otherwise.
+func cleanRatingURL(source, raw string, media ...string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || len(raw) > 512 {
+		return ""
+	}
 	host := ratingHosts[source]
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || host == "" || u.Scheme != "https" || u.User != nil || len(raw) > 512 {
+	if host == "" {
+		return ""
+	}
+	mediaType := MDBListMovie
+	if len(media) > 0 && media[0] != "" {
+		mediaType = media[0]
+	}
+	if strings.HasPrefix(raw, "/") && !strings.HasPrefix(raw, "//") {
+		switch source {
+		case store.RatingRTCritics, store.RatingRTAudience:
+			if strings.HasPrefix(raw, "/m/") || strings.HasPrefix(raw, "/tv/") {
+				raw = "https://www.rottentomatoes.com" + raw
+			} else if mediaType == MDBListShow {
+				raw = "https://www.rottentomatoes.com/tv" + raw
+			} else {
+				raw = "https://www.rottentomatoes.com/m" + raw
+			}
+		case store.RatingMetacritic:
+			if strings.HasPrefix(raw, "/movie/") || strings.HasPrefix(raw, "/tv/") {
+				raw = "https://www.metacritic.com" + raw
+			} else if mediaType == MDBListShow {
+				raw = "https://www.metacritic.com/tv" + raw
+			} else {
+				raw = "https://www.metacritic.com/movie" + raw
+			}
+			if !strings.HasSuffix(raw, "/") && !strings.Contains(raw, "?") {
+				raw += "/"
+			}
+		case store.RatingLetterboxd:
+			if strings.HasPrefix(raw, "/film/") {
+				raw = "https://letterboxd.com" + raw
+			} else {
+				raw = "https://letterboxd.com/film" + raw
+			}
+		case store.RatingTrakt:
+			if strings.HasPrefix(raw, "/movies/") || strings.HasPrefix(raw, "/shows/") {
+				raw = "https://trakt.tv" + raw
+			} else if mediaType == MDBListShow {
+				raw = "https://trakt.tv/shows" + raw
+			} else {
+				raw = "https://trakt.tv/movies" + raw
+			}
+		}
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.User != nil || len(raw) > 512 {
 		return ""
 	}
 	h := strings.ToLower(u.Hostname())
@@ -692,7 +744,7 @@ func (t *MDBListTitle) StoreRatings(fetchedAt int64) []store.Rating {
 			continue
 		}
 		seen[k.source] = true
-		rating := store.Rating{Source: k.source, Value: v, Scale: k.scale, URL: cleanRatingURL(k.source, r.URL), FetchedAt: fetchedAt}
+		rating := store.Rating{Source: k.source, Value: v, Scale: k.scale, URL: cleanRatingURL(k.source, string(r.URL), t.Type), FetchedAt: fetchedAt}
 		if r.Votes.Valid && r.Votes.V > 0 {
 			rating.Votes = int(min(r.Votes.V, 1<<31))
 		}

@@ -585,14 +585,17 @@ func TestListFiltersGenresCollectionsAndPeople(t *testing.T) {
 	reloaded.Credits = []Credit{castCredit(6384, "Keanu Reeves", "Neo", 0)}
 	_, reloadedID := addMovie(t, s, "/media/reloaded.mkv", reloaded)
 
-	// Released earlier than both but added last: collections list by release date.
+	// Released earlier than both but added last: collections list by release date. It is in a second
+	// collection too (the title_collections junction: a title can be in several).
 	prequel := tmdbMovie(605, "Prequel", 1990)
 	prequel.Collection = &Collection{TMDBID: 2344, Name: "The Matrix Collection"}
+	prequel.Collections = []Collection{{TMDBID: 900, Name: "Animation Collection"}}
 	_, prequelID := addMovie(t, s, "/media/prequel.mkv", prequel)
 
 	western := tmdbMovie(700, "A Western", 1960)
 	western.Genres = []Genre{{ID: 37, Name: "Western"}}
 	western.Credits = []Credit{castCredit(55, "John Wayne", "Duke", 0)}
+	western.Collection = &Collection{TMDBID: 901, Name: "Western Collection"}
 	_, westernID := addMovie(t, s, "/media/western.mkv", western)
 
 	// A title no file links to is not in the library, whatever it shares.
@@ -606,6 +609,13 @@ func TestListFiltersGenresCollectionsAndPeople(t *testing.T) {
 	}
 	if got, _ := s.GetTitle(ctx, ghostID); got.CollectionID == 0 {
 		t.Fatal("positive control: the ghost title is in the collection")
+	}
+
+	// A collection no file brings into the library is not listed.
+	orphan := tmdbMovie(950, "Nobody's Film", 2020)
+	orphan.Collection = &Collection{TMDBID: 902, Name: "Nobody Collection"}
+	if _, err := s.UpsertTitle(ctx, orphan); err != nil {
+		t.Fatal(err)
 	}
 
 	ids := func(f TitleFilter) []int64 {
@@ -659,6 +669,36 @@ func TestListFiltersGenresCollectionsAndPeople(t *testing.T) {
 	}
 	if _, err := s.GetCollection(ctx, collectionID+99); !errors.Is(err, ErrNotFound) {
 		t.Errorf("unknown collection = %v", err)
+	}
+
+	// A collection in titles.collection_id alone still lists (the junction is filled in from it):
+	// delete the western's junction row, keeping the old column.
+	if _, err := s.rw.Exec(`DELETE FROM title_collections WHERE title_id = ?`, westernID); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetTitle(ctx, westernID); got.CollectionID == 0 {
+		t.Fatal("positive control: the western's collection column is set")
+	}
+
+	// Collections: every collection with a title in the library, by name, each title counted once.
+	collections, err := s.Collections(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := map[string]int{}
+	for _, c := range collections {
+		counts[c.Name] = c.Count
+	}
+	// The ghost is not counted in the Matrix, the orphan's collection is not listed, and the
+	// western is counted from its old column alone.
+	wantCounts := map[string]int{"Animation Collection": 1, "The Matrix Collection": 3, "Western Collection": 1}
+	if !reflect.DeepEqual(counts, wantCounts) {
+		t.Errorf("collections = %v, want %v", counts, wantCounts)
+	}
+	if !slices.IsSortedFunc(collections, func(a, b CollectionCount) int {
+		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+	}) {
+		t.Errorf("collections not sorted by name: %v", collections)
 	}
 
 	// Genres: counted over library titles only.

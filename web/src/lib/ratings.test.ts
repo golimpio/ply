@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CardRating, RatingEntry, RatingSource } from './api';
 import {
+  fallbackRatingUrl,
   linkParts,
   metacriticBand,
   normaliseRatings,
@@ -109,8 +110,8 @@ describe('tomatoState', () => {
 
 describe('labels and tooltips', () => {
   it('say the source in full, the scale and the votes', () => {
-    // IMDb's chip shows "IMDb 8.7 1.2M": the label has that, in that order (label in name).
-    expect(ratingAriaLabel(entry('imdb', 8.7, 10, { votes: 1_234_567 }))).toBe('IMDb 8.7, 1.2M votes');
+    // The chip shows "IMDb 8.7"; its label leads with that, in that order (label in name).
+    expect(ratingAriaLabel(entry('imdb', 8.7, 10, { votes: 1_234_567 }))).toBe('IMDb 8.7 out of 10, 1.2M votes');
     expect(ratingAriaLabel(entry('imdb', 8.7, 10))).toBe('IMDb 8.7 out of 10');
     expect(ratingAriaLabel(entry('rt_critics', 93, 100))).toBe('Rotten Tomatoes critics 93%, fresh');
     expect(ratingAriaLabel(entry('rt_audience', 41, 100))).toBe('Rotten Tomatoes audience 41%, spilled');
@@ -270,5 +271,20 @@ describe('safeRatingUrl', () => {
     expect(safeRatingUrl('javascript:alert(1)')).toBe('');
     expect(safeRatingUrl('')).toBe('');
     expect(safeRatingUrl('/relative')).toBe('');
+  });
+});
+
+describe('fallbackRatingUrl', () => {
+  it('derives links from available IDs and title', () => {
+    const meta = { imdbId: 'tt11198330', tmdbId: 94997, title: 'House of the Dragon', kind: 'series' };
+    expect(fallbackRatingUrl('imdb', meta)).toBe('https://www.imdb.com/title/tt11198330/');
+    expect(fallbackRatingUrl('tmdb', meta)).toBe('https://www.themoviedb.org/tv/94997');
+    expect(fallbackRatingUrl('letterboxd', meta)).toBe('https://letterboxd.com/imdb/tt11198330/');
+    expect(fallbackRatingUrl('trakt', meta)).toBe('https://trakt.tv/shows/tt11198330');
+    expect(fallbackRatingUrl('rt_critics', meta)).toBe('https://www.rottentomatoes.com/search?search=House%20of%20the%20Dragon');
+    expect(fallbackRatingUrl('metacritic', meta)).toBe('https://www.metacritic.com/search/House%20of%20the%20Dragon/');
+
+    const movie = { imdbId: 'tt0133093', tmdbId: 603, title: 'The Matrix', kind: 'movie' };
+    expect(fallbackRatingUrl('trakt', movie)).toBe('https://trakt.tv/movies/tt0133093');
   });
 });

@@ -106,15 +106,14 @@ const STATE_WORDS: Record<string, string> = {
 };
 
 /**
- * "IMDb 8.7, 1.2M votes", "Rotten Tomatoes critics 93%, fresh", "Metacritic 74 out of 100": what
- * a chip says aloud. It holds what the chip shows, in the same order (WCAG 2.5.3, label in name):
- * IMDb's chip shows its votes right after the number, so its scale is not put between them.
+ * "IMDb 8.7 out of 10, 1.2M votes", "Rotten Tomatoes critics 93%, fresh", "Metacritic 74 out of
+ * 100": what a chip says aloud. The source and the number it shows come first, in that order (WCAG
+ * 2.5.3, label in name); the votes are in the tooltip too, not on the chip's face.
  */
 export function ratingAriaLabel(e: RatingLike): string {
   const state = STATE_WORDS[tomatoState(e)];
   const votes = shortVotes(e.votes);
-  const scale = e.source === 'imdb' && votes ? '' : outOf(e);
-  return [`${SOURCE_NAMES[e.source] ?? e.source} ${ratingValue(e)}${scale}`, state, votes && `${votes} votes`].filter(Boolean).join(', ');
+  return [`${SOURCE_NAMES[e.source] ?? e.source} ${ratingValue(e)}${outOf(e)}`, state, votes && `${votes} votes`].filter(Boolean).join(', ');
 }
 
 /** "rated today", "rated 1 day ago", "rated 12 days ago"; '' when fetchedAt is not a date. */
@@ -151,13 +150,52 @@ export function orderShown<R extends Pick<RatingEntry, 'source'>>(ratings: R[], 
  * card had. A card's rating (no link, votes or age) may come back, so the entries are typed as
  * either side's: full entries only when both sides are full.
  */
+/** A fallback link when a stored rating entry has no URL of its own. */
+export function fallbackRatingUrl(
+  source: RatingSource,
+  meta?: { imdbId?: string | null; tmdbId?: number | null; title?: string | null; kind?: string | null } | null,
+): string {
+  if (!meta) return '';
+  switch (source) {
+    case 'imdb':
+      return meta.imdbId ? `https://www.imdb.com/title/${meta.imdbId}/` : (meta.title ? `https://www.imdb.com/find/?q=${encodeURIComponent(meta.title)}` : '');
+    case 'tmdb':
+      return meta.tmdbId ? `https://www.themoviedb.org/${meta.kind === 'series' ? 'tv' : 'movie'}/${meta.tmdbId}` : '';
+    case 'letterboxd':
+      if (meta.imdbId) return `https://letterboxd.com/imdb/${meta.imdbId}/`;
+      if (meta.tmdbId) return `https://letterboxd.com/tmdb/${meta.tmdbId}/`;
+      return meta.title ? `https://letterboxd.com/search/${encodeURIComponent(meta.title)}/` : '';
+    case 'trakt':
+      if (meta.imdbId) return `https://trakt.tv/${meta.kind === 'series' ? 'shows' : 'movies'}/${meta.imdbId}`;
+      if (meta.title) return `https://trakt.tv/search?query=${encodeURIComponent(meta.title)}`;
+      return '';
+    case 'rt_critics':
+    case 'rt_audience':
+      return meta.title ? `https://www.rottentomatoes.com/search?search=${encodeURIComponent(meta.title)}` : '';
+    case 'metacritic':
+      return meta.title ? `https://www.metacritic.com/search/${encodeURIComponent(meta.title)}/` : '';
+    default:
+      return '';
+  }
+}
+
+/**
+ * A title's ratings for its detail page: the detail's own list once it has come; before that (the
+ * cached summary paints the page first), or from a server that has no list, the one rating the
+ * card had. A card's rating (no link, votes or age) may come back, so the entries are typed as
+ * either side's: full entries only when both sides are full.
+ */
 export function titleRatings<M extends RatingLike, S extends RatingLike>(
-  meta: { ratings?: M[] | null; rating?: M | null } | undefined | null,
+  meta: ({ ratings?: M[] | null; rating?: M | null; imdbId?: string | null; tmdbId?: number | null; title?: string | null; kind?: string | null }) | undefined | null,
   summary: { rating?: S | null } | undefined | null,
 ): (M | S)[] {
-  if (meta?.ratings) return meta.ratings;
-  const one = meta?.rating ?? summary?.rating;
-  return one && typeof one === 'object' ? [one] : [];
+  const base: (M | S)[] = meta?.ratings ? [...meta.ratings] : (meta?.rating ?? summary?.rating) ? [meta?.rating ?? summary!.rating!] : [];
+  if (!meta) return base;
+  return base.map((r) => {
+    if (!r || typeof r !== 'object' || r.url) return r;
+    const url = fallbackRatingUrl(r.source, meta);
+    return url ? { ...r, url } : r;
+  });
 }
 
 /** A row, card, show or credit with its one rating: the lists read only its score100. */

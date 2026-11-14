@@ -33,6 +33,11 @@ targets that have no plumb command yet, and Xcode/`xcodebuild`.
   restore it.
 - **An absence assertion needs a positive control.** For example, before asserting that an item was deleted, assert that it existed.
 - **Leave no background processes running.** Temporary fixtures go in `t.TempDir()` or the session scratchpad.
+- **Stop a running ply with `ply -stop`**, never `pkill`: `bin/ply -stop -data <the server's -data dir>` stops it
+  nicely and waits for the exit ("Stopped."); add `-force` if it hangs (quits at once after 5 s). Leave out `-data`
+  only for the user's own server in the default data directory, and stop that one only when the user asks. If `-stop`
+  says no ply is running but the process is still there (an older build), kill it by the PID captured at its start.
+  Details: `docs/DESIGN.md`, "Stopping".
 - **Strictly DRY (Don't Repeat Yourself):** Reusing everything possible is mandatory across the entire codebase.
   - **Frontend:** Never define one-off magic numbers for margins, paddings, gaps, font sizes, line heights, or colors. Reuse tokens from `web/src/styles/tokens.css` (e.g. `--shelf-pad-y`, `--gutter`, `--bar-h`) and shared CSS classes in `web/src/app.css` (e.g. `.btn`, `.btn.pill`, `.chip`, `.badge`, `.editorial-kicker`, `.editorial-title`, `.editorial-brief`). Never duplicate CSS declarations across twin elements or parallel sections—factor shared styling into single reusable classes or CSS variables.
   - **Backend:** Reuse shared helper functions, constants, and types rather than duplicating logic across handlers, stream managers, scanners, or probes.

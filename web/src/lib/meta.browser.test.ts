@@ -20,6 +20,7 @@ import {
   wideImg,
   yearOf,
   yearSpan,
+  titleCollections,
 } from './meta';
 
 const T = (size: string, file = 'x') => `/api/images/tmdb/${size}/${file}.jpg`;
@@ -189,9 +190,9 @@ describe('labels', () => {
     expect(yearOf(undefined)).toBeUndefined();
   });
 
-  it("a show's years: a span once ended, open while running", () => {
+  it("a show's years: a span once ended, single premiere year while running", () => {
     expect(yearSpan({ releaseDate: '2008-01-20', endDate: '2013-09-29', status: 'Ended' })).toBe('2008–2013');
-    expect(yearSpan({ releaseDate: '2019-03-01', endDate: '2024-05-01', status: 'Returning Series' })).toBe('2019–');
+    expect(yearSpan({ releaseDate: '2019-03-01', endDate: '2024-05-01', status: 'Returning Series' })).toBe('2019');
     expect(yearSpan({ releaseDate: '2010-06-01', endDate: '2010-08-01', status: 'Canceled' })).toBe('2010');
     expect(yearSpan({ releaseDate: '', status: '' }, 2004)).toBe('2004');
     expect(yearSpan(undefined)).toBe('');
@@ -240,6 +241,18 @@ describe('labels', () => {
     expect(versionLabel(card({ height: 2160, hdr: 'dv', container: '' }))).toBe('4K DV');
     expect(versionLabel(card({ height: 1080, container: '' }))).toBe('1080p');
     expect(versionLabel({ height: 1080, hdr: 'hlg' })).toBe('1080p HLG'); // an older server sends none at all
+  });
+
+  it('titleCollections returns normalized array for collections, single collection, or empty', () => {
+    expect(titleCollections({ collections: [{ id: 1, name: 'A' }, { id: 2, name: 'B' }] })).toEqual([
+      { id: 1, name: 'A' },
+      { id: 2, name: 'B' },
+    ]);
+    expect(titleCollections({ collection: { id: 9, name: 'Aquaman Collection' } })).toEqual([
+      { id: 9, name: 'Aquaman Collection' },
+    ]);
+    expect(titleCollections({ collection: null })).toEqual([]);
+    expect(titleCollections(undefined)).toEqual([]);
   });
 });
 

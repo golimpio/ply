@@ -31,8 +31,9 @@
     list-style: none;
     margin: 0;
     padding: 0;
-    display: flex;
+display: flex;
     flex-wrap: wrap;
-    gap: var(--chip-gap);
+    align-items: center;
+    gap: var(--ratings-gap);
   }
 </style>

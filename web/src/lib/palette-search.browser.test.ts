@@ -5,7 +5,7 @@ import { api, type EpisodeCard, type GenreCount, type MovieCard } from './api';
 import { search } from './fuzzy';
 import { applyProgress, ensureLibrary, episodes } from './library.svelte';
 import { palette } from './palette.svelte';
-import { Latest, matchGenres, peopleQuery } from './palette-search';
+import { Latest, matchGenres, PEOPLE_DEBOUNCE_MS, peopleQuery } from './palette-search';
 
 // The real matcher, counted: the palette's searching is what must stop while it is closed.
 vi.mock('./fuzzy', async (importOriginal) => {
@@ -169,6 +169,43 @@ describe('SearchPalette', () => {
       applyProgress(pilot.id, { positionSec: 40, watched: false });
       flushSync();
       expect(searches()).toBe(before);
+    } finally {
+      unmount(cmp);
+      target.remove();
+      palette.open = false;
+    }
+  });
+
+  it('offers the people the server finds, an actor or a director, with what they do', async () => {
+    vi.spyOn(api, 'movieCards').mockResolvedValue([dune]);
+    vi.spyOn(api, 'episodeCards').mockResolvedValue([]);
+    vi.spyOn(api, 'shows').mockResolvedValue([]);
+    vi.spyOn(api, 'genres').mockResolvedValue([]);
+    // What GET /api/people answers for "deni": a director and an actor (the server matches both).
+    const people = vi.spyOn(api, 'people').mockResolvedValue([
+      { id: 31, name: 'Denis Villeneuve', knownFor: 'Directing' },
+      { id: 32, name: 'Timothée Chalamet', knownFor: 'Acting' },
+    ]);
+    const target = document.body.appendChild(document.createElement('div'));
+    const cmp = mount(SearchPalette, { target });
+    try {
+      palette.open = true;
+      flushSync();
+      await ensureLibrary();
+      const input = target.querySelector('input')!;
+      input.value = 'deni';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      flushSync();
+      // The lookup waits for typing to pause.
+      await new Promise((r) => setTimeout(r, PEOPLE_DEBOUNCE_MS + 40));
+      flushSync();
+      expect(people).toHaveBeenCalledWith('deni');
+      const rows = [...target.querySelectorAll('li[role="option"]')];
+      const director = rows.find((r) => r.textContent?.includes('Denis Villeneuve'));
+      const actor = rows.find((r) => r.textContent?.includes('Timothée Chalamet'));
+      expect(director?.querySelector('.sub')?.textContent).toContain('Directing');
+      expect(actor?.querySelector('.sub')?.textContent).toContain('Acting');
+      expect(director?.querySelector('.thumb.round')).not.toBeNull(); // a portrait, as a person reads
     } finally {
       unmount(cmp);
       target.remove();

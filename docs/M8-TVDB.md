@@ -237,7 +237,9 @@ does not yet.
   - The attribution is shown word for word, with its link.
 - **Status card:** `showsLine` is shown as the server gives it. The no-key wording accounts for both keys. With only a
   TVDB key it polls while a pass runs, never for movies that are pending until a TMDB key comes.
-- **Show page:** an "Episode order" select (Aired, DVD, Absolute) for shows whose source is TVDB. It sends
+- **Show page:** an "Episode order" select (Aired, DVD, Absolute) for shows whose source is TVDB, at the right end
+  of the season heading (with the season shown, not in a card above the row); the saying how the files are numbered
+  is for a screen reader, not drawn. It sends
   `PATCH {episodeOrder}`, then refetches. "N episodes don't fit this order." shows when `unmapped` > 0. A 409
   shows the server's words and puts the select back; a 502 says TVDB can't be reached.
 - **Source badges** (`SourceBadge.svelte`): TVDB, TMDB or "From .nfo" on the Item and Show pages and in Fix match

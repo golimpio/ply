@@ -4,6 +4,7 @@
 // any of its files is, in progress when none is watched and one is started; a show's counts leave
 // the specials out, unless it has nothing else.
 import type { ItemSummary, Progress } from './api';
+import { plural } from './format';
 
 /** What the counts read of an episode file: a card has them all, and so does a full row. */
 type EpisodeFile = Pick<ItemSummary, 'id' | 'show' | 'season' | 'episode' | 'watched'> & { progress?: Progress | null };
@@ -55,8 +56,6 @@ export interface WatchBadge {
   started: boolean;
 }
 
-const episodes = (n: number) => `${n} episode${n === 1 ? '' : 's'}`;
-
 export const WATCHED: WatchBadge = { kind: 'done', text: '✓', label: 'Watched', started: false };
 
 /**
@@ -72,9 +71,9 @@ export function countsBadge(c: Partial<EpisodeCounts> | null | undefined): Watch
   const also = going ? `, ${c?.inProgress} in progress` : '';
   if (watched > 0) {
     const left = count - watched;
-    return { kind: 'left', text: `${left} left`, label: `${episodes(left)} left${also}`, started: going };
+    return { kind: 'left', text: `${left} left`, label: `${plural(left, 'episode')} left${also}`, started: going };
   }
-  if (going) return { kind: 'started', text: 'In progress', label: `${episodes(c?.inProgress ?? 0)} in progress`, started: true };
+  if (going) return { kind: 'started', text: 'In progress', label: `${plural(c?.inProgress ?? 0, 'episode')} in progress`, started: true };
   return null;
 }
 

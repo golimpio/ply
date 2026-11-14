@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api, type EpisodeCard, type GenreCount, type PersonCard } from '../lib/api';
-  import { episodeLabel, formatDuration } from '../lib/format';
+  import { episodeLabel, formatDuration, plural } from '../lib/format';
   import { search, type Searchable } from '../lib/fuzzy';
   import { bothLists, ensureLibrary, episodes, libraryRows, showsOf, type LibraryRow, type ShowEntry } from '../lib/library.svelte';
   import { profileImg, type Img } from '../lib/meta';
@@ -77,7 +77,7 @@
       id: `show:${s.show}`,
       href: href.show(s.show),
       title: s.show,
-      sub: ['Series', `${s.episodeCount} episode${s.episodeCount === 1 ? '' : 's'}`],
+      sub: ['Series', plural(s.episodeCount, 'episode')],
       item: s.cover,
       label: s.show,
     }));
@@ -94,7 +94,7 @@
       id: `genre:${g.id}`,
       href: href.genre(g.id),
       title: g.name,
-      sub: ['Genre', `${g.count} title${g.count === 1 ? '' : 's'}`],
+      sub: ['Genre', plural(g.count, 'title')],
       label: g.name,
     }));
     return [...showHits, ...itemHits, ...personHits, ...genreHits];

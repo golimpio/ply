@@ -98,7 +98,8 @@ func (s *Store) PruneMetadata(ctx context.Context) (PruneResult, error) {
 					AND NOT EXISTS (SELECT 1 FROM series_matches WHERE title_id = x.id)
 					AND NOT EXISTS (SELECT 1 FROM title_watch WHERE title_id = x.id)`, titleChunk},
 				{&round.People, "people", `NOT EXISTS (SELECT 1 FROM credits WHERE person_id = x.id)`, writeChunk},
-				{&round.Collections, "collections", `NOT EXISTS (SELECT 1 FROM titles WHERE collection_id = x.id)`, writeChunk},
+				{&round.Collections, "collections", `NOT EXISTS (SELECT 1 FROM titles WHERE collection_id = x.id)
+					AND NOT EXISTS (SELECT 1 FROM title_collections WHERE collection_id = x.id)`, writeChunk},
 				{&round.Genres, "genres", `NOT EXISTS (SELECT 1 FROM title_genres WHERE genre_id = x.id)`, writeChunk},
 			} {
 				n, err := deleteSome(ctx, tx, step.table, step.where, step.limit)

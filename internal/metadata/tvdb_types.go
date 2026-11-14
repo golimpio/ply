@@ -17,7 +17,8 @@ import (
 // its answers have not always agreed on which, and one field of the wrong kind
 // must not fail a whole list.
 
-// flexString is a string that TVDB may send as a number (ids, years).
+// flexString is a string that a provider may send as a number (TVDB's ids and years, MDBList's
+// rating links).
 type flexString string
 
 func (s *flexString) UnmarshalJSON(b []byte) error {

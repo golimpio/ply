@@ -72,6 +72,8 @@ const PERSON = {
   id: 31, name: 'Al Pacino', knownFor: 'Acting',
   credits: [{ titleId: 77, kind: 'cast', character: 'Jack', title: { id: 77, kind: 'series', title: 'Lost', year: 2004, show: 'Lost' } }],
 };
+// GET /api/collections: the Collections tab's list (the one collection these fixtures have).
+const COLLECTIONS = [{ id: 9, name: 'The Mann Collection', count: 1 }];
 // The genre's titles come from the server on every visit (resource, no cache), and late: Back to
 // it finds a skeleton first, the page a scroll restore must wait for.
 const GENRE_TITLES = MOVIES.slice(0, 80).map((m) => ({ id: m.titleId, kind: 'movie', title: m.title, year: m.year, itemId: m.id, rating: null }));
@@ -127,6 +129,7 @@ async function open(browser, opts = {}) {
     if (p === '/api/settings') return json(route, settings);
     if (p === '/api/shows/Lost') return json(route, LOST);
     if (p === '/api/people/31') return json(route, PERSON);
+    if (p === '/api/collections') return json(route, COLLECTIONS);
     if (p === '/api/collections/9') return json(route, { id: 9, name: 'The Mann Collection', titles: [] });
     const m = p.match(/^\/api\/items\/(\d+)$/);
     const it = m && items.find((i) => i.id === Number(m[1]));
@@ -573,6 +576,30 @@ const scenarios = {
     const placeKept = boxes.length === 1 && (await page.locator('span.back.pending').count()) === 0;
     check('Back only ever says Lost', JSON.stringify([...labels]) === '["Lost"]', JSON.stringify([...labels]));
     check('its place was kept while unknown (no shift)', placeKept, `${JSON.stringify(boxes)}`);
+    await context.close();
+  },
+
+  // Mutants caught: the Collections tab missing or after Search rather than Series; the tab routing
+  // nowhere (notfound); a collection card that leads nowhere; Back from a collection to Home rather
+  // than the tab it was opened from.
+  async 'Collections: the tab after Series, a card, its page, and Back to the tab'(browser) {
+    const { context, page, errors } = await open(browser);
+    await page.goto(`${base}/#/`);
+    const tabs = await page.locator('header nav a').evaluateAll((as) => as.map((a) => a.getAttribute('href')));
+    check('the Collections tab follows Series', tabs.slice(0, 4).join(' ') === '#/ #/movies #/shows #/collections', tabs.join(' '));
+    await page.locator('header nav a[href="#/collections"]').click();
+    await page.locator('a.card[href="#/collection/9"]').waitFor();
+    check('the tab lists the collections', (await hash(page)) === '#/collections', await hash(page));
+    const title = await text(page.locator('h1'));
+    check('the page is titled Collections, counted', title === 'Collections1', title);
+    const card = await text(page.locator('a.card[href="#/collection/9"]'));
+    check('a collection card says how many titles it has', card.includes('The Mann Collection') && card.includes('1 title'), card);
+    await follow(page, '#/collection/9');
+    check('the collection page opens', (await hash(page)) === '#/collection/9', await hash(page));
+    await back(page).click();
+    await until(async () => (await hash(page)) === '#/collections');
+    check('Back returns to the Collections tab', (await hash(page)) === '#/collections', await hash(page));
+    check('no page errors', errors.length === 0, errors.join('; '));
     await context.close();
   },
 };

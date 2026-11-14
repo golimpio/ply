@@ -15,6 +15,7 @@ export type Route =
   | { name: 'home' }
   | ({ name: 'movies' } & LibraryView)
   | ({ name: 'shows' } & LibraryView)
+  | { name: 'collections' }
   | { name: 'show'; show: string; season?: number }
   | { name: 'item'; id: number }
   | { name: 'play'; id: number; startSec: number }
@@ -37,9 +38,9 @@ function libraryView(q: URLSearchParams, fallback: Sort): LibraryView {
 }
 
 /**
- * Hash forms: #/ (home), #/movies[?sort=&f=&min=], #/shows[?sort=&f=&min=], #/shows/<name>[?s=<season>],
- * #/item/<id>, #/play/<id>[?t=<resume seconds>], #/person/<id>, #/genre/<id>,
- * #/collection/<id>, #/settings[?tab=<tab>], #/activity.
+ * Hash forms: #/ (home), #/movies[?sort=&f=&min=], #/shows[?sort=&f=&min=], #/collections,
+ * #/shows/<name>[?s=<season>], #/item/<id>, #/play/<id>[?t=<resume seconds>], #/person/<id>,
+ * #/genre/<id>, #/collection/<id>, #/settings[?tab=<tab>], #/activity.
  */
 export function parseRoute(hash: string): Route {
   const [path, query = ''] = hash.replace(/^#\/?/, '').split('?');
@@ -57,6 +58,9 @@ export function parseRoute(hash: string): Route {
         const season = s.trim() === '' ? NaN : Number(s); // Number('') would be 0, i.e. Specials
         return { name: 'show', show: decodeURIComponent(arg), season: Number.isInteger(season) ? season : undefined };
       }
+      case 'collections':
+        if (!arg) return { name: 'collections' };
+        break;
       case 'settings':
         if (!arg) return { name: 'settings', tab: settingsTab(q) };
         break;
@@ -98,6 +102,7 @@ export const href = {
   home: '#/',
   movies: '#/movies',
   shows: '#/shows',
+  collections: '#/collections',
   moviesWith: (v: Partial<LibraryView>) => `#/movies${viewQuery(v, 'title')}`,
   showsWith: (v: Partial<LibraryView>) => `#/shows${viewQuery(v, 'title')}`,
   show: (name: string, season?: number) =>
@@ -130,12 +135,13 @@ export interface BackTarget {
   label: string;
 }
 
-/** The parent of a page that isn't a top-level section (undefined for Home, Movies and Shows). */
+/** The parent of a page that isn't a top-level section (undefined for Home, Movies, Shows, Collections). */
 export function parentOf(route: Route): BackTarget | undefined {
   switch (route.name) {
     case 'home':
     case 'movies':
     case 'shows':
+    case 'collections':
       return undefined;
     case 'item':
       return { hash: href.movies, label: 'Movies' }; // an episode's page passes its show instead
@@ -143,6 +149,8 @@ export function parentOf(route: Route): BackTarget | undefined {
       return { hash: href.shows, label: 'Shows' };
     case 'play':
       return { hash: href.item(route.id), label: 'Details' };
+    case 'collection':
+      return { hash: href.collections, label: 'Collections' };
     default:
       return { hash: href.home, label: 'Home' };
   }

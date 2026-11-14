@@ -69,7 +69,7 @@ Settings:
   - `imdbDatasetUpdatedAt`, which is null until the first download.
 
 ## UI (rare-tiger)
-- **Detail pages:** a row of rating chips under the title, each a link to the source: the IMDb logo-text with 8.7 and the vote count, a tomato with 93% (fresh/rotten/certified art), a popcorn with 91%, a Metacritic box with 74 coloured by band, Letterboxd ★4.1.
+- **Detail pages:** a row of rating chips under the title, each a link to the source: the IMDb logo-text with 8.7, a tomato with 93% (fresh/rotten/certified art), a popcorn with 91%, a Metacritic box with 74 coloured by band, Letterboxd ★4.1. The vote count is not on a chip's face: its tooltip and spoken label have it.
 - **Elsewhere:**
   - cards show the primary rating subtly;
   - Movies and Shows get "Sort: Rating" and a minimum-rating filter;
@@ -99,13 +99,17 @@ Settings:
   nothing serves it.
 - **MDBList's API.** Its own documentation pages could not be read (they are rendered by script). What is built follows
   MDBList's open-source client Kometa (`modules/mdblist.py`), which reads exactly these: `GET https://api.mdblist.com/{imdb|tmdb|tvdb}/{movie|show}/{id}?apikey=KEY`
-  gives the title with a `ratings` array of `{source, value, score, votes, url}`; the sources are `imdb`, `tmdb`,
-  `metacritic`, `metacriticuser`, `trakt`, `tomatoes`, `tomatoesaudience` (or `popcorn`), `letterboxd` and `myanimelist`;
+  gives the title with a `ratings` array of `{source, value, score, votes, url, fresh}`; the sources are `imdb`, `tmdb`,
+  `metacritic`, `metacriticuser`, `trakt`, `tomatoes`, `tomatoesaudience` (or `popcorn`), `letterboxd` and `myanimelist`.
+  Read again on 2026-11-13, the answer's `url` is not always a string (IMDb's is a number) and the other links are
+  relative paths: that one field failed the whole answer, so no title got an MDBList rating. A `url` of another kind
+  is now read as no link (only an absolute https link on the source's own site is kept); the `fresh` number is not
+  used, as `state`/`status` words are used when given and the 60% line otherwise.
   `GET /user` gives `api_requests` (the day's allowance) and `api_requests_count` (used today); a 429 whose error says
   "daily" is the allowance, and a 200 with `{"response": false, "error": "API Limit Reached!"}` is the same. The free key
-  is 1,000 requests a day, with 1,000 reads per 5 minutes. **Not verified:** whether the Rotten Tomatoes entries say
-  fresh/rotten/certified/upright/spilled/verified hot. The mapper takes a `state` or `status` word when there is one and
-  otherwise derives `fresh`/`rotten` and `upright`/`spilled` by Rotten Tomatoes' 60% line; `certified` and
+  is 1,000 requests a day, with 1,000 reads per 5 minutes. **The Rotten Tomatoes entries** carry a `fresh` number (0 or
+  1), not a word: the mapper takes a `state` or `status` word when there is one and otherwise derives
+  `fresh`/`rotten` and `upright`/`spilled` by Rotten Tomatoes' 60% line; `certified` and
   `verified_hot` appear only when MDBList says so (they need review counts the answer is not known to have). A `value`
   above its source's scale (an answer on another scale) is replaced by MDBList's own `score` (0 to 100) rescaled to the
   source's, when there is one; otherwise the entry is left out. The fixtures in the tests are made up in this shape.
@@ -209,7 +213,8 @@ machine is let off), and a redirect is an error.
 - `RatingEntry`: `{source, value, scale, score100, votes?, state?, url, fetchedAt}`. `votes` is left out when 0,
   `state` for any source but the two of Rotten Tomatoes, `url` is `""` when unknown, `fetchedAt` is RFC 3339 (UTC).
   IMDb's `url` is `https://www.imdb.com/title/<tconst>/`, TMDB's `https://www.themoviedb.org/{movie|tv}/<id>`, the rest
-  are MDBList's, kept only when they are https links on the source's own site.
+  are MDBList's (canonical HTTPS URLs on the source's own site, resolving relative paths like `/m/...` or `/film/...`).
+  The web UI also provides fallback canonical links by ID/title when the database entry has an empty URL.
 - Title detail (`meta`, `PATCH /api/titles/{id}`): `ratings: [entry...]` in the order imdb, rt_critics, rt_audience,
   metacritic, letterboxd, trakt, tmdb (`[]` when none), and `rating`.
 - `rating: entry | null` (always present) on every `TitleCard` (`/api/titles`, collections, a person's credits, review
@@ -260,12 +265,13 @@ machine is let off), and a redirect is an error.
   them, in the server's order, when the settings can't be read), and `ratingScore` (score100, -1 for none) for sorting
   and filtering. `api.ts` normalises Go's nulls (`ratings: null` → `[]`) and drops an entry of a source it does not know.
 - **Detail pages** (`components/Ratings.svelte`, `Rating.svelte`, `RatingGlyph.svelte`): a row of chips under the title's
-  facts, in `ratingsShown` order, each the source's short name ("IMDb", "Critics", "Audience", "Metacritic"...) and
-  its number, with IMDb's votes; a link to the source in a new tab when the entry has an https URL. The glyphs are our
-  own drawings (a tomato or a splat, a bucket of popcorn upright or spilled, a star for Letterboxd, a box coloured by
-  band for Metacritic), decoration only: the name and number are text, and each chip has its full label for screen
-  readers. The page reads `ratingsShown` from `GET /api/settings` (once per library version, and only when there are
-  ratings to order). An episode's page shows its own chips (IMDb) and keeps TMDB's number beside the star.
+  facts, in `ratingsShown` order. Every chip uses a bespoke vector SVG logo paired with the score value in uniform typography
+  (`--fs-base`, bold, tabular-nums), separated by `--ratings-gap`. The vote count is in the tooltip and the label read aloud,
+  not on the chip; each chip links to the source in a new tab when the entry has an https URL. The glyphs are vector SVGs
+  (IMDb rounded badge, fresh tomato / splat, upright popcorn / spilled, Metacritic circular monogram coloured by band,
+  Letterboxd 3-circle badge, Trakt radar badge, TMDB shield logo) scaled to proportional height (`1.2em`), decorative with full
+  accessible labels on the parent link. The page reads `ratingsShown` from `GET /api/settings` (once per library version, and
+  only when there are ratings to order). An episode's page shows its own chips (IMDb) and keeps TMDB's number beside the star.
 - **Cards and rows**: the primary rating (`rating`) at the start of the second line of a card (Movies, Shows, genres,
   collections, a person's credits; not the Home rails), and an episode's IMDb rating in the Show page's episode list, in
   the quiet form: the glyph (or the short name) and the number, never a link.

@@ -37,9 +37,10 @@ deploy/                    launchd plist + systemd unit
 CGO_ENABLED=0 must build for darwin/linux × amd64/arm64.
 
 ## Config
-Flags: `-media` (repeatable roots), `-addr` (default `:8420`, `:0` allowed), `-data`, `-token`, `-name`
-(default hostname), `-scan-interval` (accepted and ignored since M12: the full scan runs on its schedule in
-Settings → Schedules, and giving the flag at all logs where to set it), `-ffprobe`, `-ffmpeg` (default from PATH).
+Flags: `-stop` and `-force` (stop a running ply; "Stopping", below), `-media` (repeatable roots), `-addr` (default
+`:8420`, `:0` allowed), `-data`, `-token`, `-name` (default hostname), `-scan-interval` (accepted and ignored since
+M12: the full scan runs on its schedule in Settings → Schedules, and giving the flag at all logs where to set it),
+`-ffprobe`, `-ffmpeg` (default from PATH).
 M6 (metadata, live library):
 - `-watch` (default true): watch the media folders and pick up changes within seconds (`internal/watch`).
 - `-allow-host <name>` (repeatable; env `PLY_ALLOW_HOSTS`, comma-separated; `.example.org` allows every name under it):
@@ -68,6 +69,30 @@ Data dir: macOS `~/Library/Application Support/ply`; Linux `$XDG_DATA_HOME/ply` 
 the data dir is created 0700, a new DB file is created 0600 (never briefly readable), and the DB with its `-wal` and
 `-shm` files is chmod 0600 at every start). Where chmod is refused (EPERM, ENOTSUP, EROFS: vfat, exfat, some network
 mounts) ply starts anyway and logs a warning (`store.Warnings()`).
+
+## Stopping
+Ctrl-C (or SIGTERM) stops ply nicely: the steps of `cmd/ply/shutdown.go` in order, saying what each waits for, and
+exit after 15 s whatever is left; a second Ctrl-C quits at once. From another terminal, or a script:
+
+```
+ply -stop [-data <dir>]           # nicely, as one Ctrl-C; waits for the exit and says "Stopped."
+ply -stop -force [-data <dir>]    # the same nice stop, but quit at once after 5 s (as a second Ctrl-C)
+```
+
+- `-stop` starts no server: it stops the ply that runs with the same data directory (`-data`, default as for the
+  server), whatever its `-addr`, `-token` or HTTPS. A `-stop -force` while a nice stop is under way cuts what is left
+  of its 15 s to 5 s. `-force` alone is an error.
+- How it finds and proves itself to the server: once it listens, a server writes `<data>/control.json` (0600:
+  `{pid, url, key, tlsHost?, tlsCert?}`, written whole by a rename), with a random 32-byte key made for this run.
+  `url` is the listen address, or `127.0.0.1` for one that listens on every address. `-stop` reads it and calls
+  `POST /api/server/stop` with the key in `X-Ply-Control`, never through a proxy; over HTTPS it accepts only the
+  server whose certificate is the one in the `tlsCert` file (one the system does not trust, or an expired one, works).
+  Whoever can read the data directory owns the server, so the key, not `-token`, is the credential.
+- The server removes `control.json` as the very last thing it does, on every way out (a forced one included), and only
+  if it is still its own (another ply may have started with the same data directory since). `-stop` waits for that:
+  up to 20 s (10 s with `-force`); after that it says the server has not exited and exits 1.
+- No server: "no ply is running with the data directory …", exit 1. A ply that was killed leaves its file behind:
+  nothing answers at its address, so `-stop` says so and removes the file.
 
 ## Store
 modernc.org/sqlite, DSN `file:<path>?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)`
@@ -193,6 +218,7 @@ no `Origin`. Reads keep CORS `*` (media, Cast); a preflight is answered as above
 | PUT | `/api/titles/{id}/watched` | (M11) same body, every version of a film or every episode of a series; 404 when the title has no files |
 | PUT | `/api/shows/{name}/watched`, `/api/shows/{name}/seasons/{n}/watched` | (M11) same body, every episode of the show (matched or not; name as for `GET /api/shows/{name}`) or of one season (0 = specials); 404 for an unknown show or a season with no episodes |
 | GET | `/api/continue` | (M5) in-progress items, most recent first |
+| POST | `/api/server/stop?force=` | what `ply -stop` calls ("Stopping", below): 202 `{stopping:true, force}`, then the server stops; **private**, and outside the token check: its credential is the control key in `X-Ply-Control` (wrong or missing → 403, `force` not a boolean → 400, a server without the key → 503) |
 
 M6 (metadata; full details and the data model in `docs/M6-METADATA.md`). All need the token; `{id}` etc. unknown → 404,
 bad input → 400, TMDB unreachable → 502, lookups off (no key / `-metadata=false`) → 409, no metadata subsystem → 503.

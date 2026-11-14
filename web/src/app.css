@@ -290,8 +290,9 @@ code {
   outline-offset: var(--focus-offset);
 }
 
-/* Badges: format facts (4K, HDR10, codec). */
-.badge {
+/* Badges: format facts (4K, HDR10, codec) and a certification (R, PG-13), all one box. */
+.badge,
+.cert {
   display: inline-block;
   padding: 0.05rem 0.4rem;
   font-size: var(--fs-2xs);
@@ -541,15 +542,7 @@ select.settings-input option {
 }
 
 /* ---- A title's page (Item, Show): the hero's facts and actions, and what is said about it. */
-/* A certification (R, PG-13) in a hero's metadata run. */
-.cert {
-  padding: 0 0.4rem;
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-bold);
-  line-height: var(--lh-body);
-  border: 1px solid currentColor;
-  border-radius: var(--radius-sm);
-}
+/* A certification (R, PG-13) shares the badges' box: see .badge above. */
 /* A run of format badges. */
 .badges {
   display: inline-flex;
@@ -768,9 +761,8 @@ select.settings-input option {
   opacity: 0.8;
 }
 
-/* Callout cards: interactive glass cards linking to a collection, series, etc. */
-.callout-card,
-.collection-callout {
+/* Callout cards: interactive glass cards linking to an episode's series. */
+.callout-card {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -785,42 +777,53 @@ select.settings-input option {
     background var(--motion-hover),
     border-color var(--motion-hover);
 }
-.callout-card:hover,
-.collection-callout:hover {
+.callout-card:hover {
   background: var(--fill-hover);
   border-color: var(--line-hover);
 }
-.callout-meta,
-.collection-meta {
+.callout-meta {
   display: grid;
   gap: 0.15rem;
 }
-.callout-kicker,
-.collection-kicker {
+.callout-kicker {
   font-family: var(--font-mono);
   font-size: var(--fs-2xs-2);
   letter-spacing: var(--tracking-widest);
   text-transform: uppercase;
   color: var(--text-faint);
 }
-.callout-name,
-.collection-name {
+.callout-name {
   font-size: var(--fs-sm-3);
   font-weight: var(--fw-semibold);
   color: var(--text);
 }
-.callout-arrow,
-.collection-arrow {
+.callout-arrow {
   font-size: var(--fs-lg);
   color: var(--text-muted);
   transition:
     transform var(--motion-hover),
     color var(--motion-hover);
 }
-.callout-card:hover .callout-arrow,
-.collection-callout:hover .collection-arrow {
+.callout-card:hover .callout-arrow {
   color: var(--text);
   transform: translateX(3px);
+}
+
+/* Detail sections: hairline dividers and titles for sections like Collections, File and playback. */
+.detail-section {
+  border-top: 1px solid var(--line);
+}
+.detail-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1.1rem 0;
+}
+.detail-section-title {
+  font-size: var(--fs-2xl);
+  margin: 0;
 }
 
 /* Ratings (M10): one chip per source on a detail page, and the quiet form of cards and rows. */
@@ -828,37 +831,32 @@ select.settings-input option {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 1.25rem;
+  gap: var(--ratings-gap);
 }
 .ratings .score-chip {
+  display: inline-flex;
+  align-items: center;
   background: none;
   border: none;
   backdrop-filter: none;
   padding: 0;
   min-height: 0;
-  gap: 0.4rem;
+  gap: var(--chip-gap);
   font-size: var(--fs-base);
   font-weight: var(--fw-bold);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--lh-tight);
+  color: var(--text);
+  text-decoration: none;
+  transition: opacity var(--motion-hover);
 }
 .ratings a.score-chip:hover {
   border-color: transparent;
+  opacity: 0.82;
 }
 .ratings a.score-chip:hover .score-value {
   color: var(--text);
   text-decoration: underline;
-}
-.ratings [data-source='imdb'] .score-name {
-  background: var(--warn);
-  color: var(--on-warn);
-  font-weight: var(--fw-bold);
-  font-size: var(--fs-2xs);
-  line-height: 1;
-  padding: 0.15rem 0.35rem;
-  border-radius: var(--radius-sm);
-  letter-spacing: -0.02em;
-}
-.ratings [data-source='imdb'] .glyph.imdb {
-  display: none;
 }
 .score-chip {
   display: inline-flex;
@@ -884,11 +882,6 @@ a.score-chip:hover {
   font-weight: var(--fw-semibold);
   color: var(--text-muted);
 }
-.score-chip .score-votes {
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-medium);
-  color: var(--text-muted);
-}
 /* The quiet form: no frame, the size of the text around it. */
 .score-chip.compact {
   min-height: 0;
@@ -900,53 +893,38 @@ a.score-chip:hover {
   border: 0;
   backdrop-filter: none;
 }
-/* A Metascore in a box coloured by its band. */
-.score-box {
-  display: inline-grid;
-  place-items: center;
-  min-width: 1.9em;
-  padding: 0.05em 0.3em;
-  font-weight: var(--fw-bold);
-  line-height: var(--lh-compact);
-  color: var(--on-rating);
-  border-radius: var(--radius-sm);
-}
-.score-box[data-band='good'] {
-  background: var(--rating-good);
-}
-.score-box[data-band='mixed'] {
-  background: var(--rating-mixed);
-}
-.score-box[data-band='bad'] {
-  background: var(--rating-bad);
-}
 
-/* Tables (technical details) */
+/* Tables (the stream list of "File and playback"): the facts themselves, not another panel. */
 .table {
   width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
+  border-collapse: collapse;
   font-size: var(--fs-sm-3);
-  background: var(--surface-panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  backdrop-filter: var(--glass-blur);
-  overflow: hidden;
 }
 .table th,
 .table td {
-  padding: 0.6rem 0.9rem;
+  padding: 0.55rem 0.9rem;
   text-align: left;
   white-space: nowrap;
   border-bottom: 1px solid var(--line);
 }
-.table tr:last-child td {
+.table tr:last-child > * {
   border-bottom: none;
 }
 .table th {
   color: var(--text-muted);
-  font-weight: var(--fw-medium);
-  background: var(--surface-panel);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs-2);
+  font-weight: var(--fw-regular);
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+}
+.table th:first-child,
+.table td:first-child {
+  padding-left: 0;
+}
+.table th:last-child,
+.table td:last-child {
+  padding-right: 0;
 }
 
 /* Skeletons */
