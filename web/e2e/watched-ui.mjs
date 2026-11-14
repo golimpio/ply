@@ -1,7 +1,8 @@
 // Season posters on a show's page (components/SeasonRow.svelte) and watched / unwatched (M11, docs/
 // DESIGN.md "Watch state"), in a real browser against a mocked server: the row of season cards
 // (posters, the show's poster standing in for a missing one, the tabs pattern by mouse and keys,
-// the selected one, no wrapping on a phone, the cards in view loading first); the toggles of a film,
+// the selected one, the arrows that page it only where the row has more than it shows, no wrapping
+// on a phone, the cards in view loading first); the toggles of a film,
 // an episode, a season (specials too) and a show, each with its route and body; every card, rail
 // and count following the answer without a reload; the change undone on a 500; the badges; the
 // Unwatched filter reading item.watched; and PUT /progress answering watched.
@@ -401,6 +402,92 @@ const scenarios = {
     check('the row is wider than the screen, and scrolls', row.wider);
     check('it snaps to the cards', /x/.test(row.snap) && /mandatory/.test(row.snap), row.snap);
     check('the page itself does not scroll sideways', row.docWide);
+    // The positive control for the arrows: the one with seasons after it is in the page, and hidden
+    // by the phone's rule (the one with nothing before the start is not drawn at all).
+    await until(async () => (await page.locator('.row-wrap .arrow').count()) === 1);
+    check('the arrow of the row is in the page, and not drawn on a phone', (await page.locator('.row-wrap .arrow:visible').count()) === 0);
+    await context.close();
+  },
+
+  // Mutants caught: an arrow drawn while the row fits, or missing while it does not; an arrow drawn
+  // at an end with nothing that way; an arrow that scrolls the page rather than the row; the room
+  // beside the row dropped (an arrow over the selected poster's ring); the focus dropped with an
+  // arrow that goes; no room under the row; the room taken out of the window on a wide screen.
+  async 'a row with more seasons than it shows pages with an arrow at the edge that has more'(browser) {
+    // The same seasons at a width that fits them all: nothing to page to, so no arrows (and the
+    // positive control for the row that has them).
+    const wide = await open(browser, { hash: showHash(1), width: 1440, height: 900 });
+    await tabs(wide.page).first().waitFor();
+    const fits = await wide.page.locator('[role="tablist"][aria-label="Seasons"]').evaluate((el) => el.scrollWidth <= el.clientWidth);
+    check('at 1440 the row shows every season', fits);
+    check('and has no arrows', (await wide.page.locator('.row-wrap .arrow').count()) === 0);
+    // A wider poster stands in for a show with more seasons: the room the arrows need comes out of
+    // the page's margin, so the window is not scrolled and the posters stay on the page's column.
+    await wide.page.evaluate(() => document.documentElement.style.setProperty('--season-w', '11rem'));
+    await until(async () => (await wide.page.locator('.row-wrap .arrow').count()) > 0);
+    const pulled = await wide.page.evaluate(() => {
+      const wrap = document.querySelector('.row-wrap').getBoundingClientRect();
+      const card = document.querySelector('#season-tab-1 .frame').getBoundingClientRect();
+      const head = document.querySelector('.season-head').getBoundingClientRect();
+      return { sideways: document.documentElement.scrollWidth > innerWidth, inside: wrap.left >= 0 && wrap.right <= innerWidth, onColumn: Math.round(card.left - head.left) };
+    });
+    check('a wide window keeps the room inside itself, the posters on the page column', !pulled.sideways && pulled.inside && pulled.onColumn === 0, JSON.stringify(pulled));
+    await wide.context.close();
+
+    // Narrow enough that one page of the row leaves seasons either way (at 800 a page reaches the end).
+    const { context, page, errors } = await open(browser, { hash: showHash(1), width: 640, height: 900 });
+    await tabs(page).first().waitFor();
+    const row = page.locator('[role="tablist"][aria-label="Seasons"]');
+    const arrow = (name) => page.locator(`.row-wrap button[aria-label="Scroll seasons ${name}"]`);
+    const back = arrow('back');
+    const forward = arrow('forward');
+    await until(async () => (await forward.count()) === 1);
+    check('at its start: nothing before it, so no back arrow; the rest after it', (await back.count()) === 0 && (await forward.count()) === 1);
+    const y = await page.evaluate(() => window.scrollY);
+    await forward.click();
+    await until(async () => (await row.evaluate((el) => el.scrollLeft)) > 100);
+    const paged = await row.evaluate((el) => Math.round(el.scrollLeft));
+    check('an arrow pages the row sideways', paged > 100, String(paged));
+    check('not the page', (await page.evaluate(() => window.scrollY)) === y);
+    check('in its middle: an arrow each way', (await back.count()) === 1 && (await forward.count()) === 1);
+    // The row at a snap point, a whole season at its left edge and that season selected: its ring must
+    // not meet the back arrow. (Set at once: a smooth page and its snap take their own time.)
+    await row.evaluate((el) => (el.scrollLeft = 152));
+    await until(async () => (await row.evaluate((el) => Math.round(el.scrollLeft))) === 152);
+    const edge = await row.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return [...el.querySelectorAll('[role="tab"]')].find((t) => { const b = t.getBoundingClientRect(); return b.left >= r.left + 6 && b.right <= r.right - 6; })?.id;
+    });
+    await page.locator(`#${edge}`).click();
+    await until(async () => (await page.evaluate(() => location.hash)).endsWith(`?s=${edge.replace('season-tab-', '')}`));
+    const beside = await page.evaluate((id) => {
+      const a = document.querySelector('.arrow.back').getBoundingClientRect();
+      const card = document.getElementById(id);
+      return { ring: card.getAttribute('aria-selected'), gap: Math.round(card.querySelector('.frame').getBoundingClientRect().left - a.right) };
+    }, edge);
+    check('the selected season is the one at the edge (positive control for its ring)', beside.ring === 'true');
+    check('the back arrow keeps clear of its ring', beside.gap >= 10, `${beside.gap}px`);
+    // To the end with the forward arrow holding the focus: the arrow with nothing after it goes, and
+    // the one left in the row takes the focus (a removed button would drop it).
+    await forward.focus();
+    await row.evaluate((el) => (el.scrollLeft = el.scrollWidth));
+    await until(async () => (await forward.count()) === 0);
+    check('at its end: no arrow after the last season, one before it', (await forward.count()) === 0 && (await back.count()) === 1);
+    check('the arrow left in the row took the focus', (await page.evaluate(() => document.activeElement?.getAttribute('aria-label'))) === 'Scroll seasons back');
+    // And back to the start with that one holding it: it goes too, and the forward one takes the focus.
+    await back.focus();
+    await row.evaluate((el) => (el.scrollLeft = 0));
+    await until(async () => (await back.count()) === 0);
+    check('back at its start: no back arrow, the forward one is drawn', (await back.count()) === 0 && (await forward.count()) === 1);
+    check('the focus went with it, to the arrow still in the row', (await page.evaluate(() => document.activeElement?.getAttribute('aria-label'))) === 'Scroll seasons forward');
+    // The row's words end, then the gap before the season's own heading: not the 1.25rem it was.
+    const room = await page.evaluate(() => {
+      const r = document.querySelector('.row-wrap').getBoundingClientRect();
+      const h = document.querySelector('.season-head').getBoundingClientRect();
+      return Math.round(h.top - r.bottom);
+    });
+    check('the season heading has room under the row', room >= 32, `${room}px`);
+    check('no page errors', errors.length === 0, errors.join('; '));
     await context.close();
   },
 
@@ -434,6 +521,7 @@ const scenarios = {
     await page.locator('.season-top .season').first().waitFor();
     check('one card', (await page.locator('.season-top .season').count()) === 1);
     check('no tablist', (await page.locator('[role="tablist"][aria-label="Seasons"]').count()) === 0);
+    check('no arrows to page a row of one', (await page.locator('.arrow').count()) === 0);
     const beside = await page.evaluate(() => {
       const c = document.querySelector('.season-top .season').getBoundingClientRect();
       const h = document.querySelector('.season-head h2').getBoundingClientRect();

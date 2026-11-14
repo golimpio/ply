@@ -1,5 +1,21 @@
 // The row of season posters on a show's page (components/SeasonRow): which cards of the row are on
-// screen (those load first), and where to scroll it to show one.
+// screen (those load first), where to scroll it to show one, and whether there is more past its edges.
+
+/** A scroll box's edges: whether it has more than it shows, and whether it is at either end. */
+export interface ScrollEdges {
+  more: boolean;
+  atStart: boolean;
+  atEnd: boolean;
+}
+
+/**
+ * The edges of a scroll box scrolled to `scroll`, `width` wide, the content `content` wide. A pixel of
+ * slack: a browser reports a fraction off an end after a snap, and at a zoom.
+ */
+export function scrollEdges(scroll: number, width: number, content: number): ScrollEdges {
+  const reach = Math.max(0, content - width);
+  return { more: reach > 1, atStart: scroll <= 1, atEnd: scroll >= reach - 1 };
+}
 
 /**
  * The indices of the boxes that a scroll box shows any of, laid out along x: `left` and `width` of

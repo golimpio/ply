@@ -413,6 +413,14 @@
   --mask-solid: var(--black);
   --season-w: 8.5rem;
   --season-w-narrow: 7rem;
+  /* A season poster is 2:3: its height, for what is centred on one (the row's arrows). */
+  --season-poster-h: calc(var(--season-w) * 1.5);
+  /* The season row's arrows: the button, its inset from the row's edge, its clearance from a poster
+     (the selected ring's 4 px inside that), and the room either side that holds it. */
+  --season-arrow-w: 2.25rem;
+  --season-arrow-inset: 0.5rem;
+  --season-arrow-gap: 0.75rem;
+  --season-arrow-room: calc(var(--season-arrow-w) + var(--season-arrow-inset) + var(--season-arrow-gap));
   --ring-selected: 0 0 0 2px var(--surface-room), 0 0 0 4px var(--text);
   --scrim-season-label: var(--black-a65);
   --season-dot: 0.55rem;
@@ -564,5 +572,6 @@
 @media (max-width: 600px) {
   :root {
     --bar-h: 3.25rem;
+    --season-poster-h: calc(var(--season-w-narrow) * 1.5);
   }
 }

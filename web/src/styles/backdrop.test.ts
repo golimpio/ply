@@ -44,6 +44,19 @@ describe('backdrop-filter in the built CSS', () => {
     }
   });
 
+  it('the season row keeps a room either side for its arrows, out of the page margin on a wide screen', () => {
+    const rowWrap = rules(/^\.row-wrap\.has-arrows\.svelte-/).filter((b) => b.includes('--season-arrow-room'));
+    // The posters are inset by the room, and a wide window pulls that same room out of the page margin.
+    expect(rowWrap.some((b) => b.includes('padding-inline'))).toBe(true);
+    expect(rowWrap.some((b) => b.includes('margin-inline'))).toBe(true);
+    // The room is the arrow, its inset and its gap: the arrow must agree with it.
+    const arrows = rules(/^\.arrow(\.back|\.forward)?\.svelte-/);
+    expect(arrows.some((b) => b.includes('width:var(--season-arrow-w)'))).toBe(true);
+    expect(arrows.some((b) => b.includes('left:var(--season-arrow-inset)'))).toBe(true);
+    expect(arrows.some((b) => b.includes('right:var(--season-arrow-inset)'))).toBe(true);
+    expect(css).toMatch(/--season-arrow-room:calc\(/);
+  });
+
   it('no rule anywhere has the -webkit- form alone', () => {
     const lone = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter((m) => m[2].includes('-webkit-backdrop-filter') && !unprefixed(m[2])).map((m) => m[1]);
     expect(lone).toEqual([]);

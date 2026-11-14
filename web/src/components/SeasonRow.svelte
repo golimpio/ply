@@ -14,7 +14,8 @@
 </script>
 
 <script lang="ts">
-  import { inView, scrollToShow } from '../lib/seasons';
+  import { inView, scrollEdges, scrollToShow, type ScrollEdges } from '../lib/seasons';
+  import Icon from './Icon.svelte';
   import Picture from './Picture.svelte';
   import WatchBadge from './WatchBadge.svelte';
 
@@ -66,6 +67,51 @@
     row.scrollLeft = scrollToShow(el.offsetLeft - row.offsetLeft, el.offsetWidth, row.scrollLeft, row.clientWidth);
   }
 
+  // The row's edges, for the arrows that page it: an arrow only where the row has more that way.
+  let edge = $state<ScrollEdges>({ more: false, atStart: true, atEnd: true });
+  let back = $state<HTMLButtonElement>();
+  let forward = $state<HTMLButtonElement>();
+  // The arrow that takes the focus of one about to leave the row: drawn after the measure, so the
+  // effect below gives it once it is there (a button that goes would drop the focus instead).
+  let handoff = $state<'back' | 'forward' | null>(null);
+
+  function measureEdges() {
+    if (!row) return;
+    const next = scrollEdges(row.scrollLeft, row.clientWidth, row.scrollWidth);
+    // A scroll says where the row is on every frame: only a change redraws the arrows.
+    if (next.more === edge.more && next.atStart === edge.atStart && next.atEnd === edge.atEnd) return;
+    // Reaching an end undraws the arrow pressed there: the arrow left in the row takes its focus, so
+    // paging on stays where the row is.
+    const pressed = document.activeElement === back ? 'back' : document.activeElement === forward ? 'forward' : null;
+    if (pressed === 'back' && next.atStart) handoff = 'forward';
+    else if (pressed === 'forward' && next.atEnd) handoff = 'back';
+    edge = next;
+  }
+
+  $effect(() => {
+    if (handoff === null) return;
+    const el = handoff === 'back' ? back : forward;
+    handoff = null;
+    el?.focus({ preventScroll: true });
+  });
+
+  /** Move the row a screenful (a snap point settles it), as the arrows on its edges do. */
+  function page(dir: 1 | -1) {
+    if (!row || (dir < 0 ? edge.atStart : edge.atEnd)) return;
+    row.scrollBy({ left: dir * row.clientWidth * 0.85, behavior: 'smooth' });
+  }
+
+  $effect(() => {
+    const el = row;
+    if (!el) return;
+    // Another list (the details' order, a rescan), or another width, is measured again.
+    void order;
+    const observer = new ResizeObserver(measureEdges);
+    observer.observe(el);
+    measureEdges();
+    return () => observer.disconnect();
+  });
+
   $effect(() => {
     void selected;
     reveal();
@@ -116,24 +162,38 @@
 {/snippet}
 
 {#if tabs}
-  <!-- The tabs take the focus, one at a time; the row only hears their keys. -->
-  <!-- svelte-ignore a11y_interactive_supports_focus -->
-  <div class="row" role="tablist" aria-label="Seasons" aria-orientation="horizontal" bind:this={row} {onkeydown}>
-    {#each seasons as s, i (s.season)}
-      {@const on = s.season === selected}
-      <button
-        type="button"
-        class="season"
-        role="tab"
-        id={tabId(s.season)}
-        aria-selected={on}
-        aria-controls={on ? panel : undefined}
-        tabindex={on ? 0 : -1}
-        onclick={() => choose(s.season, false)}
-      >
-        {@render card(s, i)}
+  <div class="row-wrap" class:has-arrows={edge.more}>
+    <!-- The tabs take the focus, one at a time; the row only hears their keys. -->
+    <!-- svelte-ignore a11y_interactive_supports_focus -->
+    <div class="row" role="tablist" aria-label="Seasons" aria-orientation="horizontal" bind:this={row} onscroll={measureEdges} {onkeydown}>
+      {#each seasons as s, i (s.season)}
+        {@const on = s.season === selected}
+        <button
+          type="button"
+          class="season"
+          role="tab"
+          id={tabId(s.season)}
+          aria-selected={on}
+          aria-controls={on ? panel : undefined}
+          tabindex={on ? 0 : -1}
+          onclick={() => choose(s.season, false)}
+        >
+          {@render card(s, i)}
+        </button>
+      {/each}
+    </div>
+    <!-- A page of seasons each way, where the row has more than it shows: an arrow only at the edge
+         that has some, so none is drawn with nothing to do. -->
+    {#if edge.more && !edge.atStart}
+      <button type="button" class="btn icon arrow back" aria-label="Scroll seasons back" bind:this={back} onclick={() => page(-1)}>
+        <Icon name="left" />
       </button>
-    {/each}
+    {/if}
+    {#if edge.more && !edge.atEnd}
+      <button type="button" class="btn icon arrow forward" aria-label="Scroll seasons forward" bind:this={forward} onclick={() => page(1)}>
+        <Icon name="right" />
+      </button>
+    {/if}
   </div>
 {:else}
   <div class="row solo" bind:this={row}>
@@ -144,6 +204,20 @@
 {/if}
 
 <style>
+  .row-wrap {
+    position: relative;
+    min-width: 0;
+  }
+  /* The room the arrows sit in either side of the posters (the selected ring's 4 px inside its gap).
+     A wide window takes that room out of the page's margin, so the row stays on its column. */
+  .row-wrap.has-arrows {
+    padding-inline: var(--season-arrow-room);
+  }
+  @media (min-width: 75rem) {
+    .row-wrap.has-arrows {
+      margin-inline: calc(-1 * var(--season-arrow-room));
+    }
+  }
   .row {
     display: flex;
     flex-wrap: nowrap;
@@ -160,6 +234,35 @@
   }
   .row::-webkit-scrollbar {
     display: none;
+  }
+  /* Beside the row's edges, outside the posters, in the middle of their height: the page of seasons each way. */
+  .arrow {
+    position: absolute;
+    top: calc(var(--season-poster-h) / 2);
+    transform: translateY(-50%);
+    z-index: var(--z-over);
+    width: var(--season-arrow-w);
+    min-height: var(--season-arrow-w);
+    color: var(--text);
+    background: var(--surface-menu);
+    border-color: var(--line-overlay);
+    backdrop-filter: var(--blur-menu);
+    box-shadow: var(--shadow-popover);
+  }
+  .arrow.back {
+    left: var(--season-arrow-inset);
+  }
+  .arrow.forward {
+    right: var(--season-arrow-inset);
+  }
+  /* A phone swipes the row itself; the arrows would cover a third of a card. */
+  @media (max-width: 600px) {
+    .row-wrap.has-arrows {
+      padding-inline: 0;
+    }
+    .arrow {
+      display: none;
+    }
   }
   .season {
     position: relative; /* holds its sr-only words */

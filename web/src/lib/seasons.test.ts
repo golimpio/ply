@@ -1,5 +1,33 @@
 import { describe, expect, it } from 'vitest';
-import { inView, scrollToShow } from './seasons';
+import { inView, scrollEdges, scrollToShow } from './seasons';
+
+describe('scrollEdges', () => {
+  it('a row that fits has nothing more, and is at both ends', () => {
+    expect(scrollEdges(0, 300, 300)).toEqual({ more: false, atStart: true, atEnd: true });
+    expect(scrollEdges(0, 300, 200)).toEqual({ more: false, atStart: true, atEnd: true });
+  });
+
+  it('past the right edge there is more, and only that edge is ahead', () => {
+    expect(scrollEdges(0, 300, 800)).toEqual({ more: true, atStart: true, atEnd: false });
+  });
+
+  it('in the middle there is something either way', () => {
+    expect(scrollEdges(250, 300, 800)).toEqual({ more: true, atStart: false, atEnd: false });
+  });
+
+  it('at the right end the start is behind, the end reached', () => {
+    expect(scrollEdges(500, 300, 800)).toEqual({ more: true, atStart: false, atEnd: true });
+  });
+
+  it('a fraction of a pixel off an edge counts as it', () => {
+    expect(scrollEdges(0.5, 300, 800).atStart).toBe(true);
+    expect(scrollEdges(499.5, 300, 800).atEnd).toBe(true);
+  });
+
+  it('a row a pixel wider than it shows has nothing to page to', () => {
+    expect(scrollEdges(0, 300, 301).more).toBe(false);
+  });
+});
 
 describe('inView', () => {
   // Cards 100 wide, 10 apart: 0-100, 110-210, 220-320, 330-430, 440-540.

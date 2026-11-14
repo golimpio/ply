@@ -303,22 +303,6 @@
       </section>
     {/if}
 
-    {#if order}
-      <div class="order panel-card">
-        <div class="order-main">
-          <label for="episode-order">Episode order</label>
-          <select id="episode-order" class="settings-input" value={order} disabled={ordering} aria-describedby="episode-order-hint" onchange={changeOrder}>
-            {#each ORDERS as [value, label] (value)}<option {value}>{label}</option>{/each}
-          </select>
-        </div>
-        <span id="episode-order-hint" class="order-hint muted">
-          {ordering ? 'Numbering the episodes again…' : 'How your files are numbered: as aired, as on DVD, or straight through.'}
-        </span>
-      </div>
-      {#if orderError}<p class="error order-msg" role="alert">{orderError}</p>{/if}
-      {#if orderNote}<p class="muted order-msg" role="status">{orderNote}</p>{/if}
-    {/if}
-
     <section class="season">
       <div class="season-top" class:solo={seasons.length === 1}>
         <SeasonRow
@@ -339,8 +323,23 @@
           >
             <Icon name="check" />{`Mark ${seasonWord(current)} as ${seasonDone ? 'unwatched' : 'watched'}`}
           </button>
+          {#if order}
+            <!-- The order the season is read in: with the season shown, not a card of its own above the
+                 row. It maps every season again, so it is described in words for a screen reader. -->
+            <div class="order">
+              <label for="episode-order">Episode order</label>
+              <select id="episode-order" class="settings-input" value={order} disabled={ordering} aria-describedby="episode-order-hint" onchange={changeOrder}>
+                {#each ORDERS as [value, label] (value)}<option {value}>{label}</option>{/each}
+              </select>
+              <span id="episode-order-hint" class="sr-only" role="status">
+                {ordering ? 'Numbering the episodes again…' : 'How your files are numbered: as aired, as on DVD, or straight through.'}
+              </span>
+            </div>
+          {/if}
         </div>
       </div>
+      {#if orderError}<p class="error order-msg" role="alert">{orderError}</p>{/if}
+      {#if orderNote}<p class="muted order-msg" role="status">{orderNote}</p>{/if}
       {#if markError?.at === 'season'}<p class="error mark-error" role="alert">{markError.text}</p>{/if}
       {#if seasonInfo?.overview}<p class="muted season-overview">{seasonInfo.overview}</p>{/if}
 
@@ -434,16 +433,9 @@
   }
   .order {
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem 1.5rem;
-    padding: 0.9rem 1.25rem;
-  }
-  .order-main {
-    display: flex;
     align-items: center;
     gap: 0.75rem;
+    margin-inline-start: auto;
   }
   .order label {
     font-family: var(--font-mono);
@@ -455,18 +447,16 @@
   .order select:disabled {
     opacity: 0.6;
   }
-  .order-hint {
-    font-size: var(--fs-sm-3);
-  }
   .order-msg {
-    margin: -1.25rem 0 0;
+    margin: 0.75rem 0 0;
   }
   .season {
     padding-bottom: var(--shelf-pad-y);
   }
   .season-top {
     display: grid;
-    gap: 1.25rem;
+    row-gap: 2.5rem;
+    column-gap: 1.25rem;
     min-width: 0;
   }
   /* One season: its card beside its name and button, not a row with one card in it. */
@@ -481,6 +471,11 @@
   }
   .solo .season-head button {
     margin-top: 0.6rem;
+  }
+  /* Beside a lone card the head is a column: the order goes under its button, not across the page. */
+  .solo .order {
+    margin-inline-start: 0;
+    margin-top: 0.4rem;
   }
   .season-head {
     display: flex;

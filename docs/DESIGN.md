@@ -552,12 +552,21 @@ Svelte 5 (runes) + Vite + TypeScript, hls.js. No UI framework; small hand-writte
 - **Season posters** (`components/SeasonRow.svelte`, `lib/seasons.ts`): a show's seasons are a row of 2:3 posters
   (`--season-w`, `--season-w-narrow` from 600 px down), each with its name ("Specials" for 0, last), its episode count
   and its watch badge; a season with no poster of its own has the show's, its name on a band over it. The row
-  scrolls sideways with snap points and never wraps. Several seasons are the WAI-ARIA tabs pattern (as Settings: one
-  Tab stop, arrows, Home and End, selection follows focus; the episode list is the tabpanel); the selected one has
-  `--ring-selected`. The season is the hash's `?s=N`, and a switch is a `redirect()`, which leaves the page where it
-  is scrolled to for another state of the same page. The posters in view (the selected card scrolled into view
+  scrolls sideways with snap points and never wraps; a row with more seasons than it shows has an arrow at the edge
+  that still has more (either way while it is in the middle), a screenful each way, dark glass, centred on the
+  posters' height, and keeps a room either side for them (`--season-arrow-room`: the button, its inset and its
+  clearance from a poster, the selected ring's 4 px inside that) — out of the page's margin from 75 rem, so the
+  posters stay on the column, and inside it below, so no poster meets an arrow. The arrow at the end the row
+  reached is not drawn; the arrow left in the row takes the focus the removed button would drop; on a phone the
+  row swipes and no arrows are drawn (`scrollEdges` in `lib/seasons.ts`). The season's name sits a comfortable
+  gap under the row. Several seasons are the WAI-ARIA tabs pattern (as Settings: one Tab stop, arrows, Home and
+  End, selection follows focus; the episode list is the tabpanel); the selected one has `--ring-selected`. The
+  season is the hash's `?s=N`, and a switch is a `redirect()`, which leaves the page where it is scrolled to for
+  another state of the same page. The posters in view (the selected card scrolled into view
   first) load with `fetchpriority=high`, the rest lazily; none is asked for until the show's details are in, so a
   card never loads the show's poster and then its own. One season is a card beside its name, not a row of one.
+  A TVDB show's episode order (M8) is at the right of the season's heading, with the season shown, not in a card
+  of its own above the row.
   Tested by `e2e/watched-ui.mjs`.
 - **Watched** (M11, see "Watch state"; `lib/watched.ts`, `lib/library.svelte.ts`, `components/WatchBadge.svelte`):
   toggles on a film's and an episode's page ("Mark as watched" / "Mark as unwatched", text that says what happens),

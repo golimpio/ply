@@ -634,6 +634,8 @@ const scenarios = {
     const select = page.locator('#episode-order');
     await select.waitFor();
     check('it is labelled', (await text(page.locator('label[for="episode-order"]'))) === 'Episode order');
+    check('it sits with the season shown, not in a card above the row', (await page.locator('.season-head .order #episode-order').count()) === 1 && (await page.locator('.order.panel-card').count()) === 0);
+    check('its saying is for a screen reader, not drawn', (await page.locator('#episode-order-hint').evaluate((el) => Math.round(el.getBoundingClientRect().width))) === 1);
     check('it starts at the show’s order', (await select.inputValue()) === 'aired');
     check('the choices', (await select.locator('option').allTextContents()).join('|') === 'Aired|DVD|Absolute');
     const shows = hits[`/api/shows/${encodeURIComponent(SHOW)}`] ?? 0;
