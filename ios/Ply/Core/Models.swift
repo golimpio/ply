@@ -294,6 +294,8 @@ nonisolated struct ShowSummary: Decodable, Sendable, Hashable, Identifiable {
     let sortTitle: String?
     let poster: String?
     let backdrop: String?
+    /// The primary source's rating, as the web lists a show by it; absent when none is known.
+    let rating: Rating?
 
     var id: String { show }
     var allWatched: Bool { episodeCount > 0 && (watchedEpisodes ?? 0) >= episodeCount }

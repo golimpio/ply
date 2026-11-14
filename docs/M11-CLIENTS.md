@@ -403,10 +403,15 @@ checks both.
 - **Pairing:** when `authRequired`, the six-digit code; the device token is kept in the Keychain by server id, and a
   401 goes back to pairing. The app registers as `kind` `ios`, `ipados` or `tvos`, `app` `ply-ios` or `ply-tvos`.
 - **Browsing:** Home (Continue Watching, Coming Up, the newest films), Movies (sort and 4K/HDR/unwatched
-  filters), Shows (sort, by season; a whole season or show can be marked watched), and Browse: a search over
-  films, shows, episodes, people, genres and collections, the collections and genres themselves, a title's
-  page (cast and crew, trailers, its other versions, collection links), a person's page (library credits and
-  filmography), a genre's and a collection's titles, a show's page; watched state.
+  filters), Shows (sort by name, newest file, rating or episode count; unwatched only; a whole season or show
+  can be marked watched), and Browse: a search over films, shows, episodes, people, genres and collections,
+  ranked by the web's own matcher (`Core/Fuzzy.swift`, ported from `web/src/lib/fuzzy.ts`: accents folded in
+  both directions, a word start and a run of characters ahead of a scattered match), a People page over the
+  server's search (`GET /api/people?q=`, the only list of people it has), the collections and genres
+  themselves, a title's page (cast and crew, trailers, its other versions, collection links), a person's page
+  (library credits and filmography), a genre's and a collection's titles, a show's page; watched state. The
+  lists load together, except the episodes — the search's, and a show's newest file — which are fetched once,
+  when Browse opens or Shows sorts by newest, never with Home.
 - **Playing:** the `avplayer` profile in AVKit's own player, with `attempt`, a heartbeat every 10 s (`wireless`
   while AirPlay is on), progress once the stream has reached where it starts, a new session where it was after a
   404, and an end after a 410. The audio track can be chosen; a text subtitle is drawn from its WebVTT, a bitmap one
@@ -428,7 +433,9 @@ checks both.
   test host, so it works where Xcode 27's simulator test launch does not. It covers the SSE and WebVTT parsers, RFC
   3339 and path handling, the API client's requests and answers (with a URLProtocol stub), the models the server
   sends, the AirPlay play plan, next-episode selection, connect-failure classification, command history, discovery
-  dedupe, and the feed's own reconnect with `Last-Event-ID`. The app-hosted XCTest target is not used. CI runs these
+  dedupe, the feed's own reconnect with `Last-Event-ID`, the search matcher (the web's own fixtures, so that both
+  clients rank a search alike), a show's newest file, and that the episodes are fetched once, when a page asks,
+  not with Home (`LibraryModelTests`). The app-hosted XCTest target is not used. CI runs these
   tests and a generic iOS and tvOS build with Xcode 26+ (`make ci-build tv`).
 - **Not in the apps:** owner-only administration (pair/revoke, settings, folders, queue/jobs, scanning, metadata
   editing/matching, subtitle search/download) stays in the web UI; a paired device's token gets 403 by this

@@ -5,6 +5,7 @@ enum Route: Hashable {
     case item(Int64)
     case show(String)
     case person(Int64)
+    case people
     case genre(Int64, String)
     case collection(Int64, String)
 }
@@ -20,6 +21,7 @@ extension View {
             case let .item(id): ItemDetailView(id: id)
             case let .show(name): ShowView(name: name)
             case let .person(id): PersonView(id: id)
+            case .people: PeopleView()
             case let .genre(id, name): GenreView(id: id, name: name)
             case let .collection(id, name): CollectionView(id: id, name: name)
             }
@@ -247,5 +249,24 @@ struct Backdrop: View {
         #else
         Color(.systemBackground)
         #endif
+    }
+}
+
+/// Says the episodes could not be loaded, with a way to ask again: the Browse search reads them, and
+/// so does a show's newest file (the Shows "Recently updated" sort).
+struct EpisodesFailure: View {
+    @Environment(Connection.self) private var connection
+
+    var body: some View {
+        if let error = connection.library.episodesError {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("The episodes could not be loaded")
+                    .font(.subheadline.weight(.semibold))
+                Text(error).font(.caption).foregroundStyle(.secondary)
+                Button("Try again") { Task { await connection.library.ensureEpisodes() } }
+                    .font(.caption)
+            }
+            .padding(.horizontal)
+        }
     }
 }

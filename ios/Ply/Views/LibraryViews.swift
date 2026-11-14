@@ -160,6 +160,8 @@ struct MoviesView: View {
 
 enum ShowSort: String, CaseIterable, Identifiable {
     case title = "A to Z"
+    case added = "Recently Updated"
+    case rating = "Rating"
     case episodes = "Most Episodes"
 
     var id: String { rawValue }
@@ -179,10 +181,28 @@ struct ShowsView: View {
         if onlyUnwatched {
             list = list.filter { !$0.allWatched }
         }
+        let byTitle: (String, String) -> Bool = { $0.localizedStandardCompare($1) == .orderedAscending }
         switch sort {
         case .title:
-            let byTitle: (String, String) -> Bool = { $0.localizedStandardCompare($1) == .orderedAscending }
             return list.sorted { byTitle($0.sortTitle ?? $0.show, $1.sortTitle ?? $1.show) }
+        case .added:
+            // Newest first, a tie by name (`sorted` is not documented stable, and the web ties on it).
+            let latest = connection.library.latestAddedAt
+            return list.sorted { a, b in
+                let (one, other) = (latest[a.show] ?? 0, latest[b.show] ?? 0)
+                return one == other
+                    ? byTitle(a.sortTitle ?? a.show, b.sortTitle ?? b.show)
+                    : one > other
+            }
+        case .rating:
+            // On the server's 0-100 score, so sources on other scales compare; a show with no rating
+            // comes last (-1, as the web sorts it), and a tie is by name.
+            return list.sorted { a, b in
+                let (one, other) = (a.rating?.score ?? -1, b.rating?.score ?? -1)
+                return one == other
+                    ? byTitle(a.sortTitle ?? a.show, b.sortTitle ?? b.show)
+                    : one > other
+            }
         case .episodes:
             return list.sorted { $0.episodeCount > $1.episodeCount }
         }
@@ -220,6 +240,10 @@ struct ShowsView: View {
                     .padding(.top, 4)
                 }
 
+                if sort == .added {
+                    EpisodesFailure()
+                }
+
                 LazyVGrid(columns: posterColumns, spacing: 16) {
                     ForEach(filteredShows) { show in
                         NavigationLink(value: Route.show(show.show)) {
@@ -239,6 +263,10 @@ struct ShowsView: View {
             }
             .plySearchable($query, prompt: "Shows")
             .plyRefreshable { await library.reload() }
+            // Newest first is a show's newest file, which the episodes list says; fetch it only when
+            // that sort is chosen, and again after a reload has forgotten it.
+            .task(id: sort) { if sort == .added { await library.ensureEpisodes() } }
+            .task(id: library.generation) { if sort == .added { await library.ensureEpisodes() } }
             .navigationTitle("Shows")
             .plyDestinations()
         }

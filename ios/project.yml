@@ -54,6 +54,10 @@ targets:
       - path: Ply/Core/ConnectFailure.swift
       - path: Ply/Core/CommandHistory.swift
       - path: Ply/Core/NextEpisode.swift
+      - path: Ply/Core/Fuzzy.swift
+      - path: Ply/Core/ShowOrder.swift
+      - path: Ply/Core/PeopleQuery.swift
+      - path: Ply/App/LibraryModel.swift
       - path: Ply/Core/Discovery.swift
       - path: PlyCoreTests
     settings:

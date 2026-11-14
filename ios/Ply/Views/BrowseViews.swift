@@ -82,21 +82,14 @@ struct BrowseView: View {
                 await library.reload()
                 await browse.load()
             }
-            .task(id: library.generation) { await browse.load() }
-            .task(id: query) { await searchPeople() }
+            .task(id: library.generation) {
+                async let lists: Void = browse.load()
+                async let episodes: Void = library.ensureEpisodes()
+                _ = await (lists, episodes)
+            }
+            .task(id: query) { await connection.browse.searchPeople(trimmed) }
             .plyDestinations()
         }
-    }
-
-    /// People are looked up as typing pauses; a shorter query asks nothing.
-    private func searchPeople() async {
-        guard trimmed.count >= 2 else {
-            connection.browse.clearPeople()
-            return
-        }
-        try? await Task.sleep(for: .milliseconds(150))
-        guard !Task.isCancelled else { return }
-        await connection.browse.searchPeople(trimmed)
     }
 
     @ViewBuilder
@@ -125,6 +118,24 @@ struct BrowseView: View {
                     }
                 }
             }
+            // Always offered: the server has no list of people, but its search always works.
+            VStack(alignment: .leading, spacing: 10) {
+                Text("People").font(.title3.bold()).padding(.horizontal)
+                NavigationLink(value: Route.people) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "person.2.fill").foregroundStyle(.secondary)
+                        Text("Search the people in your library")
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                    }
+                    .font(.subheadline)
+                    .padding(12)
+                    .background(.quaternary, in: .rect(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal)
+            }
+            EpisodesFailure()
             if !browse.genres.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Genres").font(.title3.bold()).padding(.horizontal)
@@ -147,8 +158,8 @@ struct BrowseView: View {
                 }
             }
             if browse.loaded, browse.collections.isEmpty, browse.genres.isEmpty, browse.error == nil {
-                ContentUnavailableView("Nothing to browse yet", systemImage: "square.grid.2x2",
-                                       description: Text("Collections and genres come from the library's metadata. You can still search titles, shows and episodes."))
+                ContentUnavailableView("No genres or collections yet", systemImage: "square.grid.2x2",
+                                       description: Text("They come from the library's metadata. The search and the People page work already."))
             } else if !browse.loaded {
                 ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
             }
@@ -158,14 +169,16 @@ struct BrowseView: View {
 
     @ViewBuilder
     private func results(_ browse: BrowseModel, _ library: LibraryModel) -> some View {
-        let movies = library.movies.filter { $0.title.localizedStandardContains(trimmed) }
-        let shows = library.shows.filter { $0.show.localizedStandardContains(trimmed) }
-        let episodes = browse.episodes.filter {
-            ($0.episodeTitle ?? $0.title).localizedStandardContains(trimmed) || ($0.show ?? "").localizedStandardContains(trimmed)
-        }
-        let people = browse.people
-        let genres = browse.genres.filter { $0.name.localizedStandardContains(trimmed) }
-        let collections = browse.collections.filter { $0.name.localizedStandardContains(trimmed) }
+        // Ranked as the web ranks a search: the whole query as a word, then a run of characters, then
+        // characters scattered through the text. The lists were prepared when they were loaded.
+        let movies = library.movieSearch.search(trimmed, limit: 20)
+        let shows = library.showSearch.search(trimmed, limit: 20)
+        let episodes = library.episodeSearch.search(trimmed, limit: 20)
+        // The server's own search (GET /api/people?q=) is the only list of people it has; its matches
+        // are ranked here like every other kind, best first.
+        let people = Fuzzy.search(browse.people, query: trimmed, limit: 10)
+        let genres = Fuzzy.search(browse.genres, query: trimmed)
+        let collections = Fuzzy.search(browse.collections, query: trimmed)
         let anything = !movies.isEmpty || !shows.isEmpty || !episodes.isEmpty
             || !people.isEmpty || !genres.isEmpty || !collections.isEmpty || browse.peopleError != nil
 
@@ -175,21 +188,21 @@ struct BrowseView: View {
                     .font(.caption).foregroundStyle(.secondary).padding(.horizontal)
             }
             if !movies.isEmpty {
-                section("Movies", movies.prefix(20).map { movie in
+                section("Movies", movies.map { movie in
                     BrowseRow(image: movie.poster, placeholder: "film", title: movie.title,
                               subtitle: Format.facts(movie.year.map(String.init), Format.runtime(movie.durationSec)),
                               route: .item(movie.id))
                 })
             }
             if !shows.isEmpty {
-                section("Shows", shows.prefix(20).map { show in
+                section("Shows", shows.map { show in
                     BrowseRow(image: show.poster, placeholder: "tv", title: show.show,
                               subtitle: show.episodeCount == 1 ? "1 episode" : "\(show.episodeCount) episodes",
                               route: .show(show.show))
                 })
             }
             if !episodes.isEmpty {
-                section("Episodes", episodes.prefix(20).map { episode in
+                section("Episodes", episodes.map { episode in
                     BrowseRow(image: episode.landscapeImage, placeholder: "tv",
                               title: episode.episodeTitle ?? episode.title,
                               subtitle: Format.facts(episode.show, episode.episodeCode, episode.year.map(String.init)),
@@ -197,7 +210,7 @@ struct BrowseView: View {
                 })
             }
             if !people.isEmpty {
-                section("People", people.prefix(10).map { person in
+                section("People", people.map { person in
                     BrowseRow(image: person.profile, placeholder: "person.fill", title: person.name,
                               subtitle: person.knownFor ?? "Person", round: true, route: .person(person.id))
                 })
@@ -264,6 +277,86 @@ struct BrowseRow: View, Identifiable {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - people
+
+/// The people the titles in the library are about. The server has no list of them, only a search
+/// (`GET /api/people?q=`), so the page asks as typing pauses; an empty query prompts for a name.
+struct PeopleView: View {
+    @Environment(Connection.self) private var connection
+    @State private var query = ""
+    @State private var people: [PersonCard] = []
+    @State private var searchError: String?
+    @State private var searching = false
+
+    private var trimmed: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        ScrollView {
+            #if os(tvOS)
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Search people", text: $query)
+            }
+            .font(.headline)
+            .padding(.horizontal)
+            .padding(.top, 10)
+            #endif
+            content
+        }
+        .navigationTitle("People")
+        .plyInlineTitle()
+        .plySearchable($query, prompt: "People")
+        .task(id: query) { await search() }
+        .plyDestinations()
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if let searchError {
+            Text("The search failed: \(searchError)")
+                .font(.caption).foregroundStyle(.secondary).padding(.horizontal).padding(.top, 12)
+        }
+        if trimmed.isEmpty {
+            ContentUnavailableView("Search for a person", systemImage: "person.2",
+                                   description: Text("People come from the titles in your library."))
+                .padding(.top, 40)
+        } else if people.isEmpty, searchError == nil, searching {
+            ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
+        } else if people.isEmpty, searchError == nil {
+            ContentUnavailableView.search(text: trimmed).padding(.top, 40)
+        } else {
+            LazyVGrid(columns: posterColumns, spacing: 16) {
+                ForEach(people) { person in
+                    NavigationLink(value: Route.person(person.id)) {
+                        PosterCard(title: person.name, caption: person.knownFor, image: person.profile)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding()
+        }
+    }
+
+    /// People are looked up as typing pauses (`PeopleQuery`); a query too short asks nothing.
+    private func search() async {
+        searching = true
+        defer { searching = false }
+        do {
+            guard let found = try await PeopleQuery.people(trimmed, api: connection.api) else {
+                people = []
+                searchError = nil
+                return
+            }
+            people = found
+            searchError = nil
+        } catch is CancellationError {
+        } catch {
+            people = []
+            searchError = error.localizedDescription
+        }
     }
 }
 
