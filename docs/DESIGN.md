@@ -258,7 +258,8 @@ ItemSummary {id, kind, title, year, show, season, episode, episodeTitle, duratio
              + (M6) titleId?, poster?, backdrop?, logo?, rating?, certification?, genres?: [string], matchState,
              needsReview, sortTitle (movies only: episodes sort by show, season, episode), and for episodes overview?,
              still? (image fields are relative URLs, with ?token=)
-ItemDetail  ItemSummary + {path(basename only), size, bitrate, streams:[Stream], subtitles:[{key, language,
+ItemDetail  ItemSummary + {path(basename only), folder (the directory that holds the file), size, bitrate,
+             streams:[Stream], subtitles:[{key, language,
              title, format, image:bool, url?}], playback: Playback, meta?: TitleDetail,
              episodeInfo?: {name, overview, airDate, still, rating}}   -- "episode" stays the episode number
 TitleCard   {id, kind: movie|series, title, sortTitle, year, poster?, backdrop?, rating?, itemId?, show?, nextAirDate?,
@@ -467,8 +468,8 @@ Jellyfin/jellyfin-ffmpeg are GPL — read for design ideas only, never copy code
 Svelte 5 (runes) + Vite + TypeScript, hls.js. No UI framework; small hand-written CSS, dark theme, responsive
 (phone browser usable). Hash routing (`#/movies`, `#/shows`, `#/shows/<name>`, `#/item/<id>`, `#/play/<id>`).
 - Token: if `/api/info.authRequired`, prompt once, store in localStorage, send Bearer; append `?token=` to media URLs.
-- Library grid (Movies; Shows → seasons → episodes), item detail (codecs, streams, duration, playback decision &
-  reasons for this browser), player.
+- Library grid (Movies; Shows → seasons → episodes), item detail (the file's name and the folder that holds it,
+  codecs, streams, duration, playback decision & reasons for this browser), player.
 - Player: outside AirPlay-capable Safari, computes a browser profile (MediaSource.isTypeSupported / canPlayType for containers & codecs, incl.
   `video/mp4; codecs="hvc1"`, `audio/mp4; codecs="ac-3"`/`"ec-3"`), POSTs `/playback`, then: direct → `<video src>`;
   HLS → native if `canPlayType('application/vnd.apple.mpegurl')` (Safari) else hls.js. Seek past encoded range →
@@ -624,6 +625,14 @@ Svelte 5 (runes) + Vite + TypeScript, hls.js. No UI framework; small hand-writte
   not its film (a film seen in one version and being watched again in another stays). Card lines say the same
   distinct-episode count as the badge.
   Tested by `lib/watched.test.ts`, `lib/library.jsdom.test.ts` and `e2e/watched-ui.mjs`.
+- **File and playback** (`pages/Item.svelte`): the section at the end of a film's and an episode's page. First what
+  this browser will do with the file (the method as a badge in the heading, a sentence saying it, and the reasons
+  under it when there are any), then the file's own facts: its name, the folder that holds it, container, video
+  (codec and resolution), audio, duration, size and bitrate, below them the streams that are video or audio
+  (resolution and pixel format, channels as a word, language, title, default) and the subtitles, with Manage
+  subtitles. The folder is the server's (`ItemDetail.folder`, the directory of the file it read): the name alone has
+  none in it, and a file straight in a library folder has that folder. A fact the server has no value for reads
+  "Unknown". Tested by `e2e/item-file-ui.mjs` (a film, a file in the library's own folder, an episode).
 - **Library cache** (`lib/library.svelte.ts` on `lib/rowstore.svelte.ts`, `lib/details.svelte.ts`): two lists, each
   loaded once per library version. `movies` holds the movie cards (`GET /api/items?kind=movie&fields=card`) and
   `episodes` the episode cards (`GET /api/items?kind=episode&fields=card`), with `/api/shows` alongside (a failed
