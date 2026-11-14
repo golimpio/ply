@@ -9,13 +9,17 @@ final class PlayerPresenter: NSObject, AVPlayerViewControllerDelegate, UIAdaptiv
     private var current: AVPlayerViewController?
     private var overlay: UIViewController?
     private var onDismiss: (() -> Void)?
+    /// The window this presenter belongs to: with two iPad windows open, the play goes in this one, not
+    /// in whichever UIKit calls active first.
+    private weak var hostScene: UIWindowScene?
     /// Picture in Picture: the player is off the screen on purpose, so its leaving the window is
     /// not the person closing it. A restore brings the player back; closing the PiP window ends it.
     private var pipActive = false
     private var pipRestoring = false
 
     /// Shows the play, in place of the one showing; onDismiss is called when the person closes it.
-    func present(_ playback: PlaybackController, onDismiss: @escaping () -> Void) {
+    func present(_ playback: PlaybackController, in windowScene: UIWindowScene?, onDismiss: @escaping () -> Void) {
+        hostScene = windowScene
         let vc = AVPlayerViewController()
         vc.player = playback.player
         vc.delegate = self
@@ -57,16 +61,16 @@ final class PlayerPresenter: NSObject, AVPlayerViewControllerDelegate, UIAdaptiv
         let old = current
         current = vc
         self.onDismiss = onDismiss
-        let show = { [weak self] in
-            Self.afterTransitions {
-                guard let self, self.current === vc, let top = Self.top() else { return }
+        let show: () -> Void = { [weak self] in
+            self?.afterTransitions { [weak self] in
+                guard let self, self.current === vc, let top = self.top() else { return }
                 top.present(vc, animated: true) { [weak self] in
                     vc.presentationController?.delegate = self
                 }
             }
         }
         if let old, old.presentingViewController != nil {
-            Self.afterTransitions { old.dismiss(animated: false, completion: show) }
+            afterTransitions { old.dismiss(animated: false, completion: show) }
         } else {
             show()
         }
@@ -84,7 +88,7 @@ final class PlayerPresenter: NSObject, AVPlayerViewControllerDelegate, UIAdaptiv
         pipActive = false
         pipRestoring = false
         // A play that fails while the player is still coming up is dismissed once it is up.
-        Self.afterTransitions {
+        afterTransitions {
             if vc.presentingViewController != nil {
                 vc.dismiss(animated: true, completion: completion)
             } else {
@@ -118,7 +122,7 @@ final class PlayerPresenter: NSObject, AVPlayerViewControllerDelegate, UIAdaptiv
             return
         }
         pipRestoring = true
-        if playerViewController.presentingViewController == nil, let top = Self.top(), !playerViewController.isBeingPresented {
+        if playerViewController.presentingViewController == nil, let top = top(), !playerViewController.isBeingPresented {
             top.present(playerViewController, animated: true) { [weak self, weak playerViewController] in
                 playerViewController?.presentationController?.delegate = self
                 completionHandler(true)
@@ -165,27 +169,34 @@ final class PlayerPresenter: NSObject, AVPlayerViewControllerDelegate, UIAdaptiv
         }
     }
 
-    private static var root: UIViewController? {
-        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+    /// The root of this presenter's window; a presenter asked before its window says which one, or
+    /// one whose window has gone, falls back to whatever UIKit calls the active scene.
+    private func root() -> UIViewController? {
+        let scene = hostScene ?? Self.activeScene()
         return scene?.keyWindow?.rootViewController
     }
 
-    private static func top() -> UIViewController? {
-        var vc = root
+    private func top() -> UIViewController? {
+        var vc = root()
         while let next = vc?.presentedViewController, !next.isBeingDismissed {
             vc = next
         }
         return vc
     }
 
+    private static func activeScene() -> UIWindowScene? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        return scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+    }
+
     /// Runs action once no presentation or dismissal is under way: UIKit drops one asked for during
-    /// another (a play that fails as its player comes up, a play started as the last one closes).
-    private static func afterTransitions(_ action: @escaping () -> Void) {
-        var vc = root
+    /// another (a play that fails as its player comes up, a play started as the last one closes). It
+    /// reads this presenter's window, as the presentation itself does.
+    private func afterTransitions(_ action: @escaping () -> Void) {
+        var vc = root()
         while let v = vc {
             if let coordinator = v.transitionCoordinator {
-                coordinator.animate(alongsideTransition: nil) { _ in afterTransitions(action) }
+                coordinator.animate(alongsideTransition: nil) { [weak self] _ in self?.afterTransitions(action) }
                 return
             }
             vc = v.presentedViewController

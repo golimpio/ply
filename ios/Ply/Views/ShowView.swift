@@ -206,5 +206,15 @@ struct EpisodeRow: View {
             Spacer(minLength: 0)
         }
         .contentShape(.rect)
+        // The badge and the bar are hidden in the shared components, so the row says what they showed.
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(spoken)
+    }
+
+    /// The episode's watch state, in words: the row's own text already says which episode and how long.
+    private var spoken: String {
+        if episode.isWatched { return "Watched" }
+        if episode.fraction != nil { return "In progress" }
+        return ""
     }
 }

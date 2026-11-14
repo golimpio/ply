@@ -36,11 +36,39 @@ struct RootView: View {
         }
         .environment(playbackScene)
         .onAppear { model.register(playbackScene) }
+        .onDisappear { model.unregister(playbackScene) }
+        .background(WindowSceneReader { playbackScene.windowScene = $0 }.frame(width: 0, height: 0))
         .alert("ply", isPresented: Binding { model.alert != nil } set: { if !$0 { model.alert = nil } }) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(model.alert ?? "")
         }
+    }
+}
+
+/// The window this view is in, handed to its playback scene so that a play is presented in this
+/// window and not in whichever window UIKit calls active.
+private struct WindowSceneReader: UIViewRepresentable {
+    let onScene: @MainActor (UIWindowScene?) -> Void
+
+    func makeUIView(context: Context) -> WindowSceneProbe {
+        let view = WindowSceneProbe()
+        view.isUserInteractionEnabled = false
+        view.onScene = onScene
+        return view
+    }
+
+    func updateUIView(_ view: WindowSceneProbe, context: Context) {
+        view.onScene = onScene
+    }
+}
+
+private final class WindowSceneProbe: UIView {
+    var onScene: (@MainActor (UIWindowScene?) -> Void)?
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        onScene?(window?.windowScene)
     }
 }
 

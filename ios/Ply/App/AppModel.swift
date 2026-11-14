@@ -60,8 +60,8 @@ struct PlayRequest {
     private var playback: PlaybackController?
     /// The window showing the play, when one is: one play at a time, in the window that started it.
     private weak var shownIn: PlaybackScene?
-    /// The window a play nobody started (a remote command) is shown in: the last one to appear.
-    private weak var lastScene: PlaybackScene?
+    /// The windows there are, held weakly: a play nobody started goes in the newest of them.
+    private var scenes: [WeakScene] = []
     private var handledCommands: Set<Int64> = []
     /// The newest command this device acted on for this server, across launches.
     private var lastHandledSeq: Int64 = 0
@@ -222,18 +222,19 @@ struct PlayRequest {
         case "play":
             if let id = command.itemId {
                 // A play from another device lands in the window that started the last one, or the
-                // newest window there is.
-                if let scene = shownIn ?? lastScene {
+                // newest window there is. Only the play this command started may answer it.
+                let before = playback
+                if let scene = shownIn ?? lastWindow {
                     play(PlayRequest(itemId: id, startSec: command.positionSec), in: scene)
                 }
-                if let p = playback {
+                if playback !== before, let p = playback {
                     p.onStart = { [weak c] error in
                         guard let c else { return }
                         Task { try? await c.api.ack(command.seq, ok: error == nil, error: error) }
                     }
                     answered = true
                 } else {
-                    failure = "No server to play from"
+                    failure = connection == nil ? "No server to play from" : "No window to play in"
                 }
             } else {
                 failure = "play needs an itemId"
@@ -259,8 +260,27 @@ struct PlayRequest {
     /// A window says it is here, so that a play from another device lands in one (the newest window
     /// to appear).
     func register(_ scene: PlaybackScene) {
-        lastScene = scene
+        scenes.removeAll { $0.scene == nil }
+        if !scenes.contains(where: { $0.scene === scene }) {
+            scenes.append(WeakScene(scene: scene))
+        }
     }
+
+    /// The window went away. A play it was showing ends here — the player is closed and its progress
+    /// sent — but it is not dismissed: there is no window left to dismiss it into.
+    func unregister(_ scene: PlaybackScene) {
+        scenes.removeAll { $0.scene == nil || $0.scene === scene }
+        guard scene.presentation.shown else { return }
+        scene.forget()
+        guard let p = playback, shownIn === scene else { return }
+        playback = nil
+        shownIn = nil
+        p.close()
+        connection?.library.scheduleReload()
+    }
+
+    /// The newest window there is, for a play nobody started.
+    private var lastWindow: PlaybackScene? { scenes.last?.scene }
 
     func play(_ request: PlayRequest, in scene: PlaybackScene) {
         guard let c = connection else { return }
@@ -305,7 +325,7 @@ struct PlayRequest {
     private func autoplayNextEpisode(after current: ItemDetail, in scene: PlaybackScene?) {
         guard let show = current.item.show, !show.isEmpty, let scene, let c = connection else { return }
         Task { @MainActor [weak self] in
-            guard let self, self.connection === c else { return }
+            guard let self, self.connection === c, scene.windowScene != nil else { return }
             do {
                 let episodes = try await c.api.episodes(show: show)
                 guard let next = NextEpisodeSelection.after(current.item, in: episodes) else { return }
@@ -315,4 +335,9 @@ struct PlayRequest {
             }
         }
     }
+}
+
+/// A window held weakly: a scene whose window the person closed does not stay alive in the registry.
+private struct WeakScene {
+    weak var scene: PlaybackScene?
 }

@@ -431,21 +431,26 @@ checks both.
   and the shared views). The cards are a 10-foot size (`posterColumns`, `shelfCardWidth`, `genreTileWidth` and
   `shelfSpacing` in `Components.swift`: 220 pt posters, 240 pt shelf cards at a 28 pt gap), and both card kinds carry
   the focus effect (`hoverEffect`); the phone keeps its own sizes. Its icon is a layered `AppIcon.brandassets`
-  (`PlyTV/Assets.xcassets`): a drawn background gradient behind a drawn front play mark and wordmark, so it
-  parallaxes without a design tool, with `Top Shelf Image` and `Top Shelf Image Wide` beside it. `make tv-run`
+  (`PlyTV/Assets.xcassets`): a drawn background gradient behind a drawn front play mark and wordmark at 1x and 2x, so
+  it parallaxes without a design tool, with `Top Shelf Image` and `Top Shelf Image Wide` beside it. `make tv-run`
   installs it on a tvOS simulator. Picture in Picture is iPhone/iPad only.
 - **Accessibility and localization:** a card is one element to VoiceOver — its title, then its caption and its
-  watch state in words (`PosterCard`, `LandscapeCard`, `BrowseRow` via `accessibilityElement(children: .ignore)`),
-  with the picture, the watched badge and the progress bar behind it hidden; a filter chip says whether it is on
-  (`isSelected`). Every user-facing string is in `Ply/Localizable.xcstrings`, a String Catalog the toolchain extracts
-  (`SWIFT_EMIT_LOC_STRINGS`; `xcodebuild -exportLocalizations` lists them, 83 today) and both apps ship, so a new
-  language is a catalog entry, not a code change; the app is English-only until one is added. Still to come: the
-  VoiceOver audit of every page and the Dynamic Type pass at the largest sizes.
+  watch state in words (`PosterCard`, `LandscapeCard`, `BrowseRow` via `accessibilityElement(children: .ignore)`,
+  an episode row by `children: .combine` + its watch state), with the picture, the watched badge and the progress
+  bar behind it hidden; a filter chip says whether it is on (`isSelected`). The strings written as
+  `Text`/`LocalizedStringKey` are in `Ply/Localizable.xcstrings`, a String Catalog the toolchain extracts
+  (`SWIFT_EMIT_LOC_STRINGS`; `xcodebuild -exportLocalizations` lists them, 85 today) and both apps ship. Plain
+  Swift `String` values are not extracted — alerts, sort names, the facts lines (`Format.runtime`) — so a new
+  language needs those moved into the catalog first; the apps are English-only until a language is added. Still to
+  come: the VoiceOver audit of every page and the Dynamic Type pass at the largest sizes.
 - **iPad:** several windows at once (the generated scene manifest allows them). `RootView` gives each window its
   own `PlaybackScene` — its own AVKit presenter and its own hold on the play — while one `AppModel` keeps the single
   connection, feed, remote commands and play; a play started in one window ends the one in another where it was
-  shown, and a remote command's play lands in the window that started the last one, or the newest to appear
-  (`AppModel.register`). Pinned by `PlaybackPresentationTests`; two windows at once cannot be driven from a terminal.
+  shown, and a remote command's play lands in the window that started the last one, or the newest to appear. The
+  presenter resolves its window from the scene (`PlaybackScene.windowScene`, handed over by a `WindowSceneReader` in
+  `RootView`), never from whichever window UIKit calls active, and closing a window ends its play there
+  (`AppModel.unregister` — the player is closed and its progress sent, and there is no window to dismiss into).
+  `PlaybackPresentationTests` pins the per-window state machine; two windows at once cannot be driven from a terminal.
 - **Tests and CI:** `make test` runs the Foundation-only core on this Mac as a macOS logic test: no simulator, no
   test host, so it works where Xcode 27's simulator test launch does not. It covers the SSE and WebVTT parsers, RFC
   3339 and path handling, the API client's requests and answers (with a URLProtocol stub), the models the server
