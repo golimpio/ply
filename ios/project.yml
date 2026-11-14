@@ -15,6 +15,8 @@ settings:
     SWIFT_VERSION: "6.0"
     SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
     SWIFT_STRICT_CONCURRENCY: complete
+    # Every user-facing string is a candidate for the String Catalog (`Ply/Localizable.xcstrings`).
+    SWIFT_EMIT_LOC_STRINGS: YES
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: ${PLY_TEAM}
 targets:
@@ -78,6 +80,7 @@ targets:
       - path: Ply/App/AppShell.swift
       - path: Ply/Player
       - path: Ply/Views
+      - path: Ply/Localizable.xcstrings
       - path: Ply/PrivacyInfo.xcprivacy
       - path: PlyTV
     settings:

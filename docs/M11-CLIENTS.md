@@ -434,11 +434,13 @@ checks both.
   (`PlyTV/Assets.xcassets`): a drawn background gradient behind a drawn front play mark and wordmark, so it
   parallaxes without a design tool, with `Top Shelf Image` and `Top Shelf Image Wide` beside it. `make tv-run`
   installs it on a tvOS simulator. Picture in Picture is iPhone/iPad only.
-- **Accessibility (in progress):** a card is one element to VoiceOver — its title, then its caption and its watch
-  state in words (`PosterCard`, `LandscapeCard`, `BrowseRow` via `accessibilityElement(children: .ignore)`), with the
-  picture, the watched badge and the progress bar behind it hidden; a filter chip says whether it is on
-  (`isSelected`). Still to come: the VoiceOver audit of every page, Dynamic Type at the largest sizes, and a String
-  Catalog.
+- **Accessibility and localization:** a card is one element to VoiceOver — its title, then its caption and its
+  watch state in words (`PosterCard`, `LandscapeCard`, `BrowseRow` via `accessibilityElement(children: .ignore)`),
+  with the picture, the watched badge and the progress bar behind it hidden; a filter chip says whether it is on
+  (`isSelected`). Every user-facing string is in `Ply/Localizable.xcstrings`, a String Catalog the toolchain extracts
+  (`SWIFT_EMIT_LOC_STRINGS`; `xcodebuild -exportLocalizations` lists them, 83 today) and both apps ship, so a new
+  language is a catalog entry, not a code change; the app is English-only until one is added. Still to come: the
+  VoiceOver audit of every page and the Dynamic Type pass at the largest sizes.
 - **Tests and CI:** `make test` runs the Foundation-only core on this Mac as a macOS logic test: no simulator, no
   test host, so it works where Xcode 27's simulator test launch does not. It covers the SSE and WebVTT parsers, RFC
   3339 and path handling, the API client's requests and answers (with a URLProtocol stub), the models the server
