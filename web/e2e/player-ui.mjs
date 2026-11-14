@@ -62,6 +62,11 @@ mkdirSync(hlsDir);
 execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', clipFile, '-c', 'copy', '-f', 'hls', '-hls_time', '2', '-hls_playlist_type', 'vod',
   '-hls_segment_filename', join(hlsDir, 'seg%03d.ts'), join(hlsDir, 'index.m3u8')]);
 const longBytes = readFileSync(longFile);
+/** A 1 px transparent PNG: an item's backdrop (the test reads its address, not its pixels). */
+const PIXEL = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+  'base64',
+);
 
 // ---- the app ----------------------------------------------------------------------------------------
 
@@ -101,6 +106,8 @@ const detail = (opts) => ({
  *   width, height   the viewport
  *   touch    a phone: touch events, mobile viewport
  *   hangItem  GET of the item never answers; itemStatus: it answers this error
+ *   holdPost  POST /playback waits for s.release(): the player stays on its loading screen
+ *   badFile   the film's file is not media at all: the element fails
  */
 async function open(browser, opts = {}) {
   const context = await browser.newContext({
@@ -112,6 +119,8 @@ async function open(browser, opts = {}) {
   const errors = [];
   const unmocked = [];
   let posts = 0;
+  let releaseHold;
+  const held = new Promise((r) => (releaseHold = r));
 
   await context.exposeFunction('__rec', (e) => log.push(e));
   await context.addInitScript(({ hls }) => {
@@ -128,6 +137,12 @@ async function open(browser, opts = {}) {
         return /mpegurl/i.test(type) ? '' : can.call(this, type);
       };
     }
+    // Whether the buffering spinner was ever on screen: a control for the scenario that checks it
+    // is gone once the element has failed. (At init time there is no documentElement yet.)
+    window.__spinnerSeen = !!document.querySelector('.spinner');
+    new MutationObserver(() => {
+      if (document.querySelector('.spinner')) window.__spinnerSeen = true;
+    }).observe(document, { childList: true, subtree: true });
     // Every seek asked of a media element, as asked (before the element clamps it).
     window.__seeks = [];
     const ct = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'currentTime');
@@ -178,9 +193,12 @@ async function open(browser, opts = {}) {
     if (m === 'GET' && p === `/api/items/${ITEM}` && opts.hangItem) return new Promise(() => {}); // never answered
     if (m === 'GET' && p === `/api/items/${ITEM}` && opts.itemStatus) return json(route, { error: 'the server failed' }, opts.itemStatus);
     if (m === 'GET' && p === `/api/items/${ITEM}`) return json(route, detail(opts));
+    // A backdrop: 1 px, transparent (only its presence and address matter here).
+    if (m === 'GET' && p.startsWith('/api/images/')) return route.fulfill({ status: 200, contentType: 'image/png', body: PIXEL });
     if (m === 'PUT' && p === `/api/items/${ITEM}/progress`) return json(route, null);
     if (m === 'POST' && p === `/api/items/${ITEM}/playback`) {
       const body = JSON.parse(req.postData());
+      if (opts.holdPost) await held;
       const id = `s${++posts}`;
       const pb = opts.hls
         ? { method: 'remux', videoAction: 'copy', audioAction: 'transcode', audioIndex: body.audioIndex ?? 1, reasons: ['the browser cannot play this container'], url: `/api/sessions/${id}/index.m3u8`, sessionId: id, startSec: 0 }
@@ -211,6 +229,7 @@ async function open(browser, opts = {}) {
       });
     }
     if (m === 'GET' && p === `/api/items/${ITEM}/file`) {
+      if (opts.badFile) return route.fulfill({ status: 200, contentType: 'text/plain', body: 'this is not a video' });
       const range = /bytes=(\d*)-(\d*)/.exec(req.headers().range ?? '');
       const start = range?.[1] ? Number(range[1]) : 0;
       const end = range?.[2] ? Math.min(Number(range[2]), longBytes.length - 1) : longBytes.length - 1;
@@ -231,6 +250,17 @@ async function open(browser, opts = {}) {
     page, context, sessions, errors, unmocked,
     go: (hash) => page.goto(`${base}/${hash}`),
     hash: () => page.evaluate(() => location.hash),
+    /** The held POST /playback is answered now (`holdPost`). */
+    release: () => releaseHold(),
+    /** Whether the buffering spinner was ever seen (a control), and whether it is there now. */
+    spinnerSeen: () => page.evaluate(() => window.__spinnerSeen),
+    spinner: () => page.evaluate(() => !!document.querySelector('.spinner')),
+    /** The art the player shows while the stream is prepared: where from, how bright, how opaque. */
+    loadingArt: () => page.evaluate(() => {
+      const el = document.querySelector('.loading-art');
+      const img = el?.querySelector('img');
+      return el && img ? { src: img.getAttribute('src'), filter: getComputedStyle(img).filter, opacity: getComputedStyle(el).opacity } : null;
+    }),
     deletes: () => log.filter((e) => e.method === 'DELETE').map((e) => ({ id: e.url.split('/').pop(), keepalive: e.keepalive })),
     video: () => page.evaluate(() => {
       const v = document.querySelector('video');
@@ -349,6 +379,34 @@ try {
     await s.page.click(CLOSE);
     await until('✕ to leave', async () => (await s.hash()) === '#/item/1', 3000).catch(() => {});
     check('error: ✕ leaves', (await s.hash()) === '#/item/1', await s.hash());
+  });
+
+  // While the stream is prepared the player shows the item's own art (what its page opens on),
+  // dark, and fades it out as the picture arrives. Mutants: no loading art; the detail page's own
+  // brightness; an art that stays over the picture (no `done`, or `done` not tied to the phase).
+  await scenario('loading: the item’s art behind the stream', { holdPost: true, item: { backdrop: '/api/images/tmdb/w1280/art.jpg' } }, async (s) => {
+    await s.go('#/play/1');
+    const art = await until('the loading art', async () => await s.loadingArt());
+    check('loading art: the item’s backdrop, the one its page opens on', !!art.src?.includes('/api/images/tmdb/w1280/art.jpg'), art.src);
+    check('loading art: darker than on the page', art.filter.includes('brightness(0.45)'), art.filter);
+    check('loading art: shown while the stream is prepared', art.opacity === '1', art.opacity);
+    s.release();
+    await s.ready();
+    await until('the art to fade', async () => (await s.loadingArt())?.opacity === '0');
+    check('loading art: it fades out once the picture is there', true);
+  });
+
+  // The element fails after it had stalled. The spinner turns on 'waiting' and off on 'playing':
+  // nothing plays now, so it used to turn behind the error for ever. Mutant: no error/emptied listener.
+  await scenario('loading: a stream that will not play', { badFile: true }, async (s) => {
+    await s.go('#/play/1');
+    await s.page.locator('.overlay[role=alert]').waitFor();
+    const said = await s.page.locator('.overlay[role=alert]').textContent();
+    check('a failed stream: the overlay says so (control)', said.includes('Cannot play this item'), said);
+    check('a failed stream: the spinner was turning before it (control)', await s.spinnerSeen());
+    check('a failed stream: and it is gone with the error', !(await s.spinner()));
+    await sleep(400);
+    check('a failed stream: it stays gone', !(await s.spinner()));
   });
 
   // A click on the scrubber seeks to the time under the pointer: fraction of the bar times the

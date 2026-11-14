@@ -6,6 +6,7 @@
   import { needsReceiverChoice, observeAirPlay, reachesTarget, showAirPlay, supportsAirPlay } from '../lib/airplay';
   import { Heartbeat } from '../lib/heartbeat';
   import { applyProgress } from '../lib/library.svelte';
+  import { backdropImg } from '../lib/meta';
   import { AUTO_RETRIES, limitOf, probeMedia, type PlayLimit as Limit } from '../lib/playlimit';
   import { browserProfile } from '../lib/profile';
   import { Progress } from '../lib/progress';
@@ -661,6 +662,11 @@
   const subtitle = $derived(
     item.kind === 'episode' ? [item.show, episodeLabel(item.season, item.episode)].filter(Boolean).join(' · ') : '',
   );
+  /**
+   * The picture the item's own page opens on. It stands in while the stream is prepared: on a NAS
+   * the first frame takes a moment, and a black rectangle says nothing (the same art, darker).
+   */
+  const art = $derived(backdropImg(item));
 </script>
 
 <svelte:window onpagehide={leave} onpageshow={restore} />
@@ -710,6 +716,12 @@
       }}
       onerror={onVideoError}
     ></video>
+    {#if art}
+      <!-- The item's backdrop, dimmed, until a frame is ready; it fades out under the controls. -->
+      <div class="loading-art" class:done={phase !== 'starting'} aria-hidden="true">
+        <img src={art.src} srcset={art.srcset} sizes="100vw" alt="" decoding="async" />
+      </div>
+    {/if}
     {#if wireless && active}
       <AirPlayScreen device={airplayTargetName} />
     {/if}
@@ -832,6 +844,25 @@
     color: var(--text-cue);
     background-color: var(--scrim-player-strong);
     line-height: var(--lh-compact);
+  }
+  /* The item's own art, dimmed, while its stream is prepared: a picture rather than a black
+     rectangle. Above the picture (the element is still empty then) and under the controls. */
+  .loading-art {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 1;
+    transition: opacity var(--motion-fade) var(--ease);
+  }
+  .loading-art.done {
+    opacity: 0;
+  }
+  .loading-art img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+    filter: brightness(var(--dim-loading-art));
   }
   .overlay {
     position: absolute;

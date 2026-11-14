@@ -450,7 +450,10 @@ Svelte 5 (runes) + Vite + TypeScript, hls.js. No UI framework; small hand-writte
   bitmap track. The picker opens synchronously in the click; availability and wireless state are distinct.
 - **Player chrome** (`pages/Play.svelte`, `components/Player.svelte`, `components/PlayerControls.svelte`): Play fills
   the browser window (a fixed layer, not the Fullscreen API; App leaves the header and tab bar out), the picture
-  letterboxed on black; the full screen button still uses the Fullscreen API on the frame. An overlay over it: the
+  letterboxed on black; the full screen button still uses the Fullscreen API on the frame. Until a frame is ready the
+  stream's own backdrop — the picture the item's page opens on — is shown dimmed (`--dim-loading-art`) and fades out,
+  and the buffering spinner is cleared when the element fails (it only ever stops on `playing`), so nothing turns
+  behind the error. An overlay over it: the
   title at the top, the page's `h1` (a film: its title and year; an episode: show · SxxEyy above its title), how it
   is played (a badge; its reasons in a popover) and close (✕), the controls at the bottom; both bars pad into the
   safe areas (an iPhone held sideways). It shows on a mousemove, a touch or a key and hides 3 s (`IDLE_MS`) after

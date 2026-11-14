@@ -132,9 +132,14 @@
     const events = ['durationchange', 'play', 'pause', 'volumechange', 'loadedmetadata', 'seeked'];
     // The lock screen extrapolates the position itself: it is told only when that would go wrong.
     const turns = ['play', 'pause', 'seeked', 'ratechange', 'loadedmetadata'];
+    // A failed element (or one the host unloaded to start another stream) never fires 'playing',
+    // so the spinner would keep turning behind the error overlay.
+    const quiet = ['error', 'emptied'];
+    const onQuiet = () => (waiting = false);
     for (const ev of ticks) v.addEventListener(ev, tick);
     for (const ev of events) v.addEventListener(ev, sync);
     for (const ev of turns) v.addEventListener(ev, positionState);
+    for (const ev of quiet) v.addEventListener(ev, onQuiet);
     v.addEventListener('waiting', onWaiting);
     v.addEventListener('playing', onPlaying);
     void offset; // a new offset re-syncs; sync's own reads (buffered) must not re-run this
@@ -143,6 +148,7 @@
       for (const ev of ticks) v.removeEventListener(ev, tick);
       for (const ev of events) v.removeEventListener(ev, sync);
       for (const ev of turns) v.removeEventListener(ev, positionState);
+      for (const ev of quiet) v.removeEventListener(ev, onQuiet);
       v.removeEventListener('waiting', onWaiting);
       v.removeEventListener('playing', onPlaying);
     };
