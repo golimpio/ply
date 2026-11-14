@@ -18,5 +18,15 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<!-- The launch screen is the app's own velvet, not the system's blank page (INFOPLIST_KEY_UILaunchScreen_Generation
+	     is off in project.yml). -->
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+	</dict>
+	<!-- ply makes no use of encryption beyond HTTPS; App Store Connect asks once per build without it. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>
