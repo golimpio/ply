@@ -208,8 +208,10 @@ bad input → 400, TMDB unreachable → 502, lookups off (no key / `-metadata=fa
 | PATCH | `/api/titles/{id}` | `{title?, sortTitle?, year?, overview?, tagline?}` (at least one) → title `locked`; returns TitleDetail |
 | GET | `/api/titles/{id}/trailers` | `[{site: youtube\|vimeo, key, name?, type?: trailer\|teaser, language?, official, publishedAt?}]` best first; fetched the first time it is asked, kept 30 days (`docs/M6-METADATA.md`, "Trailers"); `[]` when there are none, the fetch failed or online lookups are off; unknown title → 404, no metadata subsystem → 503 |
 | GET | `/api/people?q=` | `[PersonCard]` (≥1 title in the library, max 20; blank q → `[]`) |
-| GET | `/api/people/{id}` | `Person` (details fetched from TMDB on first visit) with `credits` for library titles, newest first |
+| GET | `/api/people/{id}` | `Person` (details fetched from TMDB on first visit, with `wikidataId`, `imdbId`) with `credits` for library titles, newest first |
+| GET | `/api/people/{id}/filmography` | `[PersonFilmographyEntry]` external titles best first, cached locally; empty with lookups off; 404 unknown person |
 | GET | `/api/genres` | `[{id, name, count}]` |
+| GET | `/api/collections` | `[{id, name, poster?, backdrop?, count}]` the collections with a title in the library, by name; a collection without one is left out, and a title in several counts in each |
 | GET | `/api/titles?genre=&collection=&person=` | `[TitleCard]` (ids; non-numeric → 400), ordered by `sortTitle` (without regard to case), year, id; `ETag`/`304` |
 | GET | `/api/collections/{id}` | `{id, name, overview?, poster?, backdrop?, titles:[TitleCard]}` in release order |
 | GET | `/api/upcoming` | `[{titleId, show, poster?, backdrop?, nextAirDate, nextEpisode?: {season, episode, name}}]` library series airing today or later, soonest first, max 50 |
@@ -479,14 +481,16 @@ Svelte 5 (runes) + Vite + TypeScript, hls.js. No UI framework; small hand-writte
   rect is read on pointerdown and on resize); while hidden the clock and buffer bars don't update, so nothing runs,
   and they catch up as it shows; the lock screen's position is set on play, pause, seeked, ratechange and
   loadedmetadata only. Tested by `e2e/player-ui.mjs`.
-- **Back** (`lib/router.svelte.ts`, `components/BackButton.svelte`): the top-level sections, Home, Movies and Shows,
-  have no Back button; every other page has one under the header (floating over a hero): a film, an episode, a
-  show, a person, a collection, a genre, Settings and Activity (the player's close and Escape do the same). The router
+- **Back** (`lib/router.svelte.ts`, `components/BackButton.svelte`): the top-level sections, Home, Movies, Shows
+  and Collections, have no Back button; every other page has one under the header (floating over a hero): a film,
+  an episode, a show, a person, a collection, a genre, Settings and Activity (the player's close and Escape do the
+  same). The router
   keeps the views of the tab (at most 50), one per history entry, keyed in `history.state`; each holds its scroll
   position, the link that was followed (or the one in the middle of the screen), and state a page `remember()`s
   (the genre page's sort). `goBack()` goes to the previous view with `history.back()`, so the browser's Back and
   Forward stay in step; with none (a deep link) it replaces the entry with the parent (`parentOf`: a film → Movies,
-  an episode → its show, a show → Shows, the player → its item, everything else → Home), and the button names it.
+  an episode → its show, a show → Shows, a collection → Collections, the player → its item, everything else → Home),
+  and the button names it.
   Programmatic navigation goes through `navigate()` (a new entry) or `redirect()` (replaceState). On Back the scroll
   waits a frame (content-visibility lays a new grid out once, at its real sizes), then for the page: no `aria-busy`
   (skeletons, or Item's and Show's details on their way), and the followed link drawn, or room enough, or a page

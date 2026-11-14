@@ -74,6 +74,7 @@ type TitleDetail struct {
 	Logo          string
 	Genres        []Genre
 	Collection    *Collection
+	Collections   []Collection
 	Cast          []CastMember
 	Crew          []CrewMember
 	Source        string
@@ -209,8 +210,8 @@ func (s *Store) Titles(ctx context.Context, f TitleFilter) (cards []TitleCard, e
 		args = append(args, f.GenreID)
 	}
 	if f.CollectionID != 0 {
-		where = append(where, `t.collection_id = ?`)
-		args = append(args, f.CollectionID)
+		where = append(where, `(t.collection_id = ? OR EXISTS (SELECT 1 FROM title_collections tc WHERE tc.title_id = t.id AND tc.collection_id = ?))`)
+		args = append(args, f.CollectionID, f.CollectionID)
 	}
 	if f.PersonID != 0 {
 		where = append(where, `EXISTS (SELECT 1 FROM credits c WHERE c.title_id = t.id AND c.person_id = ?)`)
@@ -315,12 +316,18 @@ func getTitleDetail(ctx context.Context, q queryer, id int64) (TitleDetail, erro
 	if d.Genres, err = titleGenres(ctx, q, id); err != nil {
 		return TitleDetail{}, err
 	}
-	if t.CollectionID != 0 {
+	if d.Collections, err = titleCollections(ctx, q, id); err != nil {
+		return TitleDetail{}, err
+	}
+	if len(d.Collections) > 0 {
+		d.Collection = &d.Collections[0]
+	} else if t.CollectionID != 0 {
 		c, err := getCollection(ctx, q, t.CollectionID)
 		if err != nil {
 			return TitleDetail{}, err
 		}
 		d.Collection = &c
+		d.Collections = []Collection{c}
 	}
 	if d.Cast, d.Crew, err = titleCredits(ctx, q, id); err != nil {
 		return TitleDetail{}, err
@@ -416,6 +423,42 @@ type GenreCount struct {
 	Count int
 }
 
+// CollectionCount is a collection and the number of library titles in it.
+type CollectionCount struct {
+	Collection
+	Count int
+}
+
+// Collections lists the collections of library titles with how many titles each
+// has, by name. A collection without a title in the library is left out, and a
+// title in several collections counts in each.
+func (s *Store) Collections(ctx context.Context) ([]CollectionCount, error) {
+	rows, err := s.ro.QueryContext(ctx, `
+		SELECT `+collectionCols+`, COUNT(*) FROM collections c
+		JOIN (
+			SELECT collection_id, id AS title_id FROM titles WHERE collection_id IS NOT NULL
+			UNION
+			SELECT collection_id, title_id FROM title_collections
+		) m ON m.collection_id = c.id
+		JOIN titles t ON t.id = m.title_id
+		WHERE `+libraryTitle+`
+		GROUP BY c.id ORDER BY LOWER(c.name), c.id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CollectionCount
+	for rows.Next() {
+		var count int
+		c, err := scanCollection(rows.Scan, &count)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, CollectionCount{Collection: c, Count: count})
+	}
+	return out, rows.Err()
+}
+
 // CollectionDetail is a collection with its titles in the library, in release order.
 type CollectionDetail struct {
 	Collection
@@ -430,23 +473,56 @@ func (s *Store) GetCollection(ctx context.Context, id int64) (d CollectionDetail
 			return err
 		}
 		d.Collection = c
-		d.Titles, err = queryCards(ctx, q, "t.collection_id = ?", []any{id}, orderByRelease)
+		d.Titles, err = queryCards(ctx, q, "(t.collection_id = ? OR EXISTS (SELECT 1 FROM title_collections tc WHERE tc.title_id = t.id AND tc.collection_id = ?))", []any{id, id}, orderByRelease)
 		return err
 	})
 	return d, err
 }
 
-func getCollection(ctx context.Context, q queryer, id int64) (Collection, error) {
+// collectionCols are the columns of a Collection, in the order scanCollection reads them.
+const collectionCols = `c.id, c.tmdb_id, c.name, c.overview, c.poster, c.backdrop`
+
+// scanCollection reads a row of collectionCols, and whatever follows it into extra.
+func scanCollection(scan func(dest ...any) error, extra ...any) (Collection, error) {
 	var (
 		c    Collection
 		tmdb sql.NullInt64
 	)
-	err := q.QueryRowContext(ctx, `SELECT id, tmdb_id, name, overview, poster, backdrop FROM collections WHERE id = ?`, id).
-		Scan(&c.ID, &tmdb, &c.Name, &c.Overview, &c.Poster, &c.Backdrop)
+	dest := append([]any{&c.ID, &tmdb, &c.Name, &c.Overview, &c.Poster, &c.Backdrop}, extra...)
+	if err := scan(dest...); err != nil {
+		return Collection{}, err
+	}
+	c.TMDBID = tmdb.Int64
+	return c, nil
+}
+
+func titleCollections(ctx context.Context, q queryer, titleID int64) ([]Collection, error) {
+	rows, err := q.QueryContext(ctx, `
+		SELECT `+collectionCols+`
+		FROM title_collections tc
+		JOIN collections c ON c.id = tc.collection_id
+		WHERE tc.title_id = ?
+		ORDER BY tc.ord, LOWER(c.name), c.id`, titleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var collections []Collection
+	for rows.Next() {
+		c, err := scanCollection(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		collections = append(collections, c)
+	}
+	return collections, rows.Err()
+}
+
+func getCollection(ctx context.Context, q queryer, id int64) (Collection, error) {
+	c, err := scanCollection(q.QueryRowContext(ctx, `SELECT `+collectionCols+` FROM collections c WHERE c.id = ?`, id).Scan)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Collection{}, ErrNotFound
 	}
-	c.TMDBID = tmdb.Int64
 	return c, err
 }
 
@@ -473,7 +549,7 @@ type PersonDetail struct {
 }
 
 const personCols = `id, tmdb_id, tvdb_id, name, profile, biography, birthday, deathday, place_of_birth, known_for,
-	imdb_id, fetched_at`
+	imdb_id, wikidata_id, fetched_at`
 
 func scanPerson(sc scanner) (Person, error) {
 	var (
@@ -481,7 +557,7 @@ func scanPerson(sc scanner) (Person, error) {
 		tmdb, tvdb sql.NullInt64
 	)
 	err := sc.Scan(&p.ID, &tmdb, &tvdb, &p.Name, &p.Profile, &p.Biography, &p.Birthday, &p.Deathday,
-		&p.PlaceOfBirth, &p.KnownFor, &p.IMDbID, &p.FetchedAt)
+		&p.PlaceOfBirth, &p.KnownFor, &p.IMDbID, &p.WikidataID, &p.FetchedAt)
 	p.TMDBID, p.TVDBID = tmdb.Int64, tvdb.Int64
 	return p, err
 }
@@ -542,9 +618,11 @@ func (s *Store) GetPerson(ctx context.Context, id int64) (d PersonDetail, err er
 func (s *Store) SetPersonDetails(ctx context.Context, id int64, p Person, fetchedAt int64) error {
 	res, err := s.exec(ctx, prioHigh, `
 		UPDATE people SET biography = ?, birthday = ?, deathday = ?, place_of_birth = ?, known_for = ?,
-			imdb_id = ?, profile = CASE WHEN ? <> '' THEN ? ELSE profile END, fetched_at = ?
+			imdb_id = ?, wikidata_id = CASE WHEN ? <> '' THEN ? ELSE wikidata_id END,
+			profile = CASE WHEN ? <> '' THEN ? ELSE profile END, fetched_at = ?
 		WHERE id = ?`,
-		p.Biography, p.Birthday, p.Deathday, p.PlaceOfBirth, p.KnownFor, p.IMDbID, p.Profile, p.Profile,
+		p.Biography, p.Birthday, p.Deathday, p.PlaceOfBirth, p.KnownFor, p.IMDbID,
+		p.WikidataID, p.WikidataID, p.Profile, p.Profile,
 		fetchedAt, id)
 	if err != nil {
 		return err

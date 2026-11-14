@@ -752,6 +752,7 @@ type StaticSource struct {
 	mu       sync.Mutex
 	p        Provider
 	tvdb     Provider
+	lang     string
 	disabled bool
 	down     atomic.Bool
 	refused  atomic.Bool
@@ -759,6 +760,13 @@ type StaticSource struct {
 
 // NewStaticSource returns a source that always answers p (TMDB).
 func NewStaticSource(p Provider) *StaticSource { return &StaticSource{p: p} }
+
+// SetLanguage changes the language returned by Provider.
+func (s *StaticSource) SetLanguage(lang string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lang = lang
+}
 
 // Set changes the TMDB provider (nil: no key) and the privacy switch.
 func (s *StaticSource) Set(p Provider, enabled bool) {
@@ -781,7 +789,11 @@ func (s *StaticSource) SetTVDB(p Provider) {
 func (s *StaticSource) Provider(context.Context) (*Providers, Resolved) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r := Resolved{Enabled: !s.disabled, Language: DefaultLanguage, TVDBDown: s.down.Load(), TVDBRefused: s.refused.Load()}
+	lang := DefaultLanguage
+	if s.lang != "" {
+		lang = s.lang
+	}
+	r := Resolved{Enabled: !s.disabled, Language: lang, TVDBDown: s.down.Load(), TVDBRefused: s.refused.Load()}
 	if s.p != nil {
 		r.key, r.KeySource = "static", KeyFromSettings
 	}

@@ -117,12 +117,12 @@ type Worker struct {
 	probes         map[int64]probeEntry
 	seasonTried    map[seasonKey]time.Time
 	nfoApplied     map[int64]string // title id -> stamp of the NFO last laid over it
-	personFailed   map[int64]fetchFailure
-	trailerFailed  map[int64]fetchFailure // by title id
-	switchTried    map[int64]bool         // shows TVDB was asked about for the move from TMDB (see switchToTVDB)
-	switchRetryAt  time.Time
-	closed         bool
-
+	personFailed      map[int64]fetchFailure
+	trailerFailed     map[int64]fetchFailure // by title id
+	filmographyFailed map[int64]fetchFailure // by person id
+	switchTried       map[int64]bool         // shows TVDB was asked about for the move from TMDB (see switchToTVDB)
+	switchRetryAt     time.Time
+	closed            bool
 	// Background work (prefetching images after a manual match) runs under bgCtx,
 	// which Close cancels; bg is waited for there and at the end of Run.
 	bgCtx    context.Context
@@ -182,6 +182,7 @@ func NewWorker(o WorkerOptions) *Worker {
 		o: o, log: o.Logger, wake: make(chan struct{}, 1),
 		sidecars: map[int64]struct{}{}, retryRefreshAt: map[string]time.Time{}, probes: map[int64]probeEntry{}, seasonTried: map[seasonKey]time.Time{},
 		nfoApplied: map[int64]string{}, personFailed: map[int64]fetchFailure{}, trailerFailed: map[int64]fetchFailure{},
+		filmographyFailed: map[int64]fetchFailure{},
 		switchTried: map[int64]bool{},
 	}
 	w.bgCtx, w.bgCancel = context.WithCancel(context.Background())
@@ -256,9 +257,10 @@ func (w *Worker) Reload() {
 	w.reload = true
 	clear(w.personFailed) // a new key may find what the old one could not
 	clear(w.trailerFailed)
+	clear(w.filmographyFailed)
 	clear(w.switchTried)
 	w.switchRetryAt = time.Time{}
-	clear(w.retryRefreshAt) // a new key may be what the refresh was waiting for
+	clear(w.retryRefreshAt)
 	w.mu.Unlock()
 	w.signal()
 }

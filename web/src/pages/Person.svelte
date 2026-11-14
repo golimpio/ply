@@ -1,14 +1,26 @@
 <script lang="ts">
-  import { api, ApiError, mergedInto, type Person } from '../lib/api';
-  import { cardHref, groupCredits, lifeSpan } from '../lib/credits';
+  import { api, ApiError, mergedInto, type Person, type PersonFilmographyEntry } from '../lib/api';
+  import {
+    cardHref,
+    countUniqueTitles,
+    groupCredits,
+    imdbPersonUrl,
+    imdbTitleUrl,
+    lifeSpan,
+    splitCreditsByMedia,
+    tmdbTitleUrl,
+    wikipediaUrl,
+  } from '../lib/credits';
   import { backdropOf, posterImg, prefersPosters, profileImg } from '../lib/meta';
   import { resource } from '../lib/resource.svelte';
   import { href, redirect } from '../lib/router.svelte';
   import { openSearch } from '../lib/palette.svelte';
   import { titleBadge } from '../lib/library.svelte';
   import BackButton from '../components/BackButton.svelte';
+  import Dialog from '../components/Dialog.svelte';
   import MediaCard from '../components/MediaCard.svelte';
   import Picture from '../components/Picture.svelte';
+  import Rating from '../components/Rating.svelte';
 
   let { id }: { id: number } = $props();
 
@@ -32,12 +44,43 @@
 
   // Only credits that can be opened: a film with a file, a series with a show.
   const credits = $derived((person?.credits ?? []).filter((c) => cardHref(c.title)));
-  const sections = $derived(groupCredits(credits));
+  const media = $derived(splitCreditsByMedia(credits));
+  const filmSections = $derived(groupCredits(media.films));
+  const seriesSections = $derived(groupCredits(media.series));
+  const filmCount = $derived(countUniqueTitles(media.films));
+  const seriesCount = $derived(countUniqueTitles(media.series));
+
   // Most of a person's titles without a poster (no TMDB key) read better as wide cards.
   const wide = $derived(!prefersPosters([...new Map(credits.map((c) => [c.title.id, c.title])).values()]));
 
   const life = $derived(lifeSpan(person?.birthday, person?.deathday));
   const knownFor = $derived(person?.knownFor ? `Known for ${person.knownFor.toLowerCase()}` : '');
+  const wikiUrl = $derived(person ? wikipediaUrl(person.name, person.wikidataId) : '');
+  const imdbUrl = $derived(person ? imdbPersonUrl(person.imdbId) : '');
+
+  // External filmography (lazy-loaded in the background from local cache/TMDB).
+  const filmography = resource<PersonFilmographyEntry[]>(() => api.personFilmography(id));
+  const rawExternal = $derived(filmography.data ?? []);
+  const libraryTitleIds = $derived(new Set(credits.map((c) => c.title.id)));
+  const externalList = $derived(
+    rawExternal.filter((e) => !e.inLibrary && (e.tmdbId ? !libraryTitleIds.has(e.tmdbId) : true)),
+  );
+
+  // A shelf per kind, so that a card needn't say which it is. The server calls a series 'series';
+  // anything else is a film. A kind with nothing in it gets no shelf at all.
+  const moreSections = $derived(
+    [
+      { key: 'films', label: 'films', entries: externalList.filter((e) => e.kind !== 'series') },
+      { key: 'series', label: 'series', entries: externalList.filter((e) => e.kind === 'series') },
+    ].filter((s) => s.entries.length > 0),
+  );
+
+  let selectedEntry = $state<PersonFilmographyEntry | null>(null);
+  let dialogOpen = $state(false);
+  function openDetails(entry: PersonFilmographyEntry) {
+    selectedEntry = entry;
+    dialogOpen = true;
+  }
 
   // The biography stops at six lines until asked for more.
   let bioEl = $state<HTMLElement>();
@@ -105,6 +148,22 @@
             {#if knownFor}<span>{knownFor}</span>{/if}
           </div>
         {/if}
+        {#if wikiUrl || imdbUrl}
+          <div class="links">
+            {#if wikiUrl}
+              <a class="chip ext-link" href={wikiUrl} target="_blank" rel="noopener noreferrer">
+                <span>Wikipedia</span>
+                <span class="arrow" aria-hidden="true">↗</span>
+              </a>
+            {/if}
+            {#if imdbUrl}
+              <a class="chip ext-link" href={imdbUrl} target="_blank" rel="noopener noreferrer">
+                <span>IMDb</span>
+                <span class="arrow" aria-hidden="true">↗</span>
+              </a>
+            {/if}
+          </div>
+        {/if}
         {#if person.biography}
           <div class="bio">
             <p id="bio" bind:this={bioEl} class:clamped={!expanded}>{person.biography}</p>
@@ -118,28 +177,128 @@
       </div>
     </header>
 
-    <h2 class="library">In your library</h2>
-    {#each sections as section (section.group)}
-      <section class="group" aria-labelledby="group-{section.group}">
-        <h3 id="group-{section.group}">{section.group}<span class="n">{section.entries.length}</span></h3>
-        <div class={wide ? 'grid' : 'poster-grid'}>
-          {#each section.entries as { card, detail: role } (card.id)}
+    {#if filmSections.length > 0}
+      <section class="shelf" aria-labelledby="shelf-films">
+        <h2 id="shelf-films" class="library">In your films <span class="n">{filmCount}</span></h2>
+        {#each filmSections as section (section.group)}
+          <section class="group" aria-labelledby="group-film-{section.group}">
+            {#if filmSections.length > 1}
+              <h3 id="group-film-{section.group}">{section.group}<span class="n">{section.entries.length}</span></h3>
+            {/if}
+            <div class={wide ? 'grid' : 'poster-grid'}>
+              {#each section.entries as { card, detail: role } (card.id)}
+                <MediaCard
+                  shape={wide ? 'wide' : 'poster'}
+                  img={wide ? backdropOf(card) : posterImg(card)}
+                  href={cardHref(card) ?? href.home}
+                  title={card.title}
+                  sub={[card.year || undefined, role]}
+                  rating={card.rating}
+                  watch={titleBadge(card)}
+                />
+              {/each}
+            </div>
+          </section>
+        {/each}
+      </section>
+    {/if}
+
+    {#if seriesSections.length > 0}
+      <section class="shelf {filmSections.length > 0 ? 'shelf-divider' : ''}" aria-labelledby="shelf-series">
+        <h2 id="shelf-series" class="library">In your series <span class="n">{seriesCount}</span></h2>
+        {#each seriesSections as section (section.group)}
+          <section class="group" aria-labelledby="group-series-{section.group}">
+            {#if seriesSections.length > 1}
+              <h3 id="group-series-{section.group}">{section.group}<span class="n">{section.entries.length}</span></h3>
+            {/if}
+            <div class={wide ? 'grid' : 'poster-grid'}>
+              {#each section.entries as { card, detail: role } (card.id)}
+                <MediaCard
+                  shape={wide ? 'wide' : 'poster'}
+                  img={wide ? backdropOf(card) : posterImg(card)}
+                  href={cardHref(card) ?? href.home}
+                  title={card.title}
+                  sub={[card.year || undefined, role]}
+                  rating={card.rating}
+                  watch={titleBadge(card)}
+                />
+              {/each}
+            </div>
+          </section>
+        {/each}
+      </section>
+    {/if}
+
+    {#if filmSections.length === 0 && seriesSections.length === 0}
+      <p class="muted">None of their work is in your library right now.</p>
+    {/if}
+
+    {#each moreSections as section (section.key)}
+      <section class="shelf shelf-divider" aria-labelledby="more-{section.key}">
+        <h2 id="more-{section.key}" class="library">More {section.label} with {person.name} <span class="n">{section.entries.length}</span></h2>
+        <div class="poster-grid">
+          {#each section.entries as entry (entry.tmdbId || entry.tvdbId || entry.title)}
             <MediaCard
-              shape={wide ? 'wide' : 'poster'}
-              img={wide ? backdropOf(card) : posterImg(card)}
-              href={cardHref(card) ?? href.home}
-              title={card.title}
-              sub={[card.year || undefined, role]}
-              rating={card.rating}
-              watch={titleBadge(card)}
+              shape="poster"
+              img={posterImg(entry)}
+              href={`#filmography-${entry.tmdbId || entry.tvdbId || entry.title}`}
+              title={entry.title}
+              sub={[entry.year || undefined, entry.character || entry.job || entry.department]}
+              rating={entry.rating ? { source: 'tmdb', value: entry.rating, scale: 10, score100: Math.round(entry.rating * 10), url: entry.tmdbId ? tmdbTitleUrl(entry.kind, entry.tmdbId) : (entry.imdbId ? imdbTitleUrl(entry.imdbId) : '') } : null}
+              onclick={() => openDetails(entry)}
             />
           {/each}
         </div>
       </section>
-    {:else}
-      <p class="muted">None of their work is in your library right now.</p>
     {/each}
   </div>
+
+  {#if selectedEntry}
+    <Dialog bind:open={dialogOpen} title={selectedEntry.title}>
+      <div class="entry-modal">
+        <div class="entry-poster">
+          <Picture img={posterImg(selectedEntry)} ratio="2 / 3" label={selectedEntry.title} sizes="160px" />
+        </div>
+        <div class="entry-info">
+          <div class="entry-meta">
+            <span class="badge">{selectedEntry.kind === 'series' ? 'Series' : 'Film'}</span>
+            {#if selectedEntry.year}<span>{selectedEntry.year}</span>{/if}
+            {#if selectedEntry.rating}
+              <Rating entry={{ source: 'tmdb', value: selectedEntry.rating, scale: 10, score100: Math.round(selectedEntry.rating * 10), url: selectedEntry.tmdbId ? tmdbTitleUrl(selectedEntry.kind, selectedEntry.tmdbId) : (selectedEntry.imdbId ? imdbTitleUrl(selectedEntry.imdbId) : '') }} />
+            {/if}
+            {#if selectedEntry.episodeCount}
+              <span>{selectedEntry.episodeCount} episodes</span>
+            {/if}
+          </div>
+          {#if selectedEntry.character}
+            <p class="entry-role"><strong>Role:</strong> {selectedEntry.character}</p>
+          {:else if selectedEntry.job}
+            <p class="entry-role"><strong>Role:</strong> {selectedEntry.job}</p>
+          {/if}
+          {#if selectedEntry.originalTitle && selectedEntry.originalTitle !== selectedEntry.title}
+            <p class="entry-orig">Original title: <em>{selectedEntry.originalTitle}</em></p>
+          {/if}
+          <div class="entry-actions">
+            {#if selectedEntry.imdbId}
+              <a class="btn pill subtle" href={imdbTitleUrl(selectedEntry.imdbId)} target="_blank" rel="noopener noreferrer">
+                <span>IMDb</span>
+                <span class="arrow" aria-hidden="true">↗</span>
+              </a>
+            {/if}
+            {#if selectedEntry.tmdbId}
+              <a class="btn pill subtle" href={tmdbTitleUrl(selectedEntry.kind, selectedEntry.tmdbId)} target="_blank" rel="noopener noreferrer">
+                <span>TMDB</span>
+                <span class="arrow" aria-hidden="true">↗</span>
+              </a>
+            {/if}
+            <button class="btn pill" onclick={() => { dialogOpen = false; openSearch(); }}>
+              Search library
+            </button>
+          </div>
+        </div>
+      </div>
+    </Dialog>
+  {/if}
 {/if}
 
 <style>
@@ -167,6 +326,21 @@
     gap: 1rem;
     align-content: start;
   }
+  .links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .ext-link {
+    text-decoration: none;
+    font-size: var(--fs-xs);
+    min-height: 1.85rem;
+    padding: 0.2rem 0.75rem;
+  }
+  .arrow {
+    font-size: var(--fs-xs);
+    opacity: 0.7;
+  }
   .bio {
     display: grid;
     justify-items: start;
@@ -192,6 +366,11 @@
     background: none;
     border: 0;
     cursor: pointer;
+  }
+  .shelf-divider {
+    border-top: 1px solid var(--line);
+    padding-top: var(--shelf-pad-y);
+    margin-top: var(--shelf-pad-y);
   }
   .library {
     margin-bottom: 1.5rem;
@@ -225,6 +404,49 @@
     width: 60%;
   }
 
+  .entry-modal {
+    display: flex;
+    gap: 1.5rem;
+    align-items: flex-start;
+  }
+  .entry-poster {
+    flex: none;
+    width: 9rem;
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: var(--ring-hairline);
+  }
+  .entry-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .entry-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.65rem;
+    font-size: var(--fs-sm);
+    color: var(--text-muted);
+  }
+  .entry-role,
+  .entry-orig {
+    margin: 0;
+    font-size: var(--fs-sm);
+    color: var(--text-muted);
+  }
+  .entry-role strong {
+    color: var(--text);
+  }
+  .entry-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+    margin-top: 0.5rem;
+  }
+
   @media (max-width: 700px) {
     .head {
       flex-direction: column;
@@ -240,6 +462,17 @@
     .poster-grid {
       grid-template-columns: repeat(auto-fill, minmax(min(140px, 100%), 1fr));
       gap: 1.25rem 0.75rem;
+    }
+  }
+
+  @media (max-width: 600px) {
+    .entry-modal {
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+    .entry-actions {
+      justify-content: center;
     }
   }
 </style>

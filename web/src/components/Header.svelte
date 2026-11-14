@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { episodes, movies, showsOf } from '../lib/library.svelte';
+  import { collections, episodes, movies, showsOf } from '../lib/library.svelte';
   import { groupByTitle } from '../lib/meta';
   import { openSearch } from '../lib/palette.svelte';
   import { href, router } from '../lib/router.svelte';
@@ -15,6 +15,7 @@
 
   const movieCount = $derived(movies.loaded ? groupByTitle([...movies.rows]).length : 0);
   const showCount = $derived(episodes.loaded ? showsOf(episodes.rows).length : 0);
+  const collectionCount = $derived(collections.loaded ? collections.rows.length : 0);
   const totalCount = $derived(movieCount + showCount);
 </script>
 
@@ -31,6 +32,9 @@
     </a>
     <a href={href.shows} aria-current={section === 'shows' ? 'page' : undefined}>
       Series{#if showCount}<span class="nav-count tabular">{showCount}</span>{/if}
+    </a>
+    <a href={href.collections} aria-current={section === 'collections' ? 'page' : undefined}>
+      Collections{#if collectionCount}<span class="nav-count tabular">{collectionCount}</span>{/if}
     </a>
   </nav>
   <div class="grow"></div>
@@ -85,10 +89,10 @@
       box-shadow var(--motion-bar);
   }
   .bar.scrolled {
-    background: var(--surface-bar);
+    background: linear-gradient(to bottom, var(--surface-bar) 0%, var(--surface-bar-fade) 100%);
     /* Unprefixed only: the build adds -webkit- itself, and drops this one when both are written. */
     backdrop-filter: var(--blur-bar);
-    border-bottom-color: var(--line);
+    border-bottom-color: var(--line-hairline);
     box-shadow: var(--shadow-bar);
   }
   .brand {

@@ -180,9 +180,11 @@ func (s *Store) SetPersonDetailsMerged(ctx context.Context, id int64, p Person, 
 		}
 		_, err = tx.ExecContext(ctx, `
 			UPDATE people SET biography = ?, birthday = ?, deathday = ?, place_of_birth = ?, known_for = ?,
-				imdb_id = ?, profile = CASE WHEN ? <> '' THEN ? ELSE profile END, fetched_at = ?
+				imdb_id = ?, wikidata_id = CASE WHEN ? <> '' THEN ? ELSE wikidata_id END,
+				profile = CASE WHEN ? <> '' THEN ? ELSE profile END, fetched_at = ?
 			WHERE id = ?`,
-			p.Biography, p.Birthday, p.Deathday, p.PlaceOfBirth, p.KnownFor, p.IMDbID, p.Profile, p.Profile,
+			p.Biography, p.Birthday, p.Deathday, p.PlaceOfBirth, p.KnownFor, p.IMDbID,
+			p.WikidataID, p.WikidataID, p.Profile, p.Profile,
 			fetchedAt, survivor)
 		return err
 	})

@@ -1,6 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import type { PersonCredit, RatingEntry, RatingSource, TitleCard } from './api';
-import { cardHref, formatDate, groupCredits, groupOf, lifeSpan, sortCards, yearSpan } from './credits';
+import {
+  cardHref,
+  countUniqueTitles,
+  formatDate,
+  groupCredits,
+  groupOf,
+  imdbPersonUrl,
+  imdbTitleUrl,
+  lifeSpan,
+  sortCards,
+  splitCreditsByMedia,
+  tmdbTitleUrl,
+  wikipediaUrl,
+  yearSpan,
+} from './credits';
 
 let nextId = 1;
 const card = (over: Partial<TitleCard> = {}): TitleCard => {
@@ -228,5 +242,67 @@ describe('dates: month lengths', () => {
     expect(formatDate('2023-05-31')).toBe('31 May 2023');
     expect(formatDate('2024-02-29')).toBe('29 February 2024');
     expect(formatDate('2023-02-29')).toBe('');
+  });
+});
+
+describe('splitCreditsByMedia and countUniqueTitles', () => {
+  it('separates series credits from film credits', () => {
+    const movie1 = card({ kind: 'movie', title: 'Speed' });
+    const movie2 = card({ kind: 'movie', title: 'The Matrix' });
+    const show = card({ kind: 'series', title: 'John Wick: The Series' });
+
+    const credits = [cast(movie1, 'Jack Traven'), cast(movie2, 'Neo'), cast(show, 'John Wick')];
+    const { films, series } = splitCreditsByMedia(credits);
+
+    expect(films.map((c) => c.title.title)).toEqual(['Speed', 'The Matrix']);
+    expect(series.map((c) => c.title.title)).toEqual(['John Wick: The Series']);
+  });
+
+  it('counts unique titles deduplicating roles in the same title', () => {
+    const movie = card({ kind: 'movie', title: 'Matrix' });
+    const credits = [cast(movie, 'Neo'), crew(movie, 'Stunt Coordinator')];
+    expect(countUniqueTitles(credits)).toBe(1);
+  });
+});
+
+describe('external URL helpers', () => {
+  it('wikipediaUrl builds canonical wikidata-linked url when Q-id is valid', () => {
+    expect(wikipediaUrl('Keanu Reeves', 'Q43416')).toBe(
+      'https://www.wikidata.org/wiki/Special:GoToLinkedPage/enwiki/Q43416',
+    );
+    expect(wikipediaUrl('Keanu Reeves', ' q43416 ')).toBe(
+      'https://www.wikidata.org/wiki/Special:GoToLinkedPage/enwiki/q43416',
+    );
+  });
+
+  it('wikipediaUrl falls back to search when wikidataId is missing or invalid', () => {
+    expect(wikipediaUrl('Keanu Reeves', undefined)).toBe(
+      'https://en.wikipedia.org/wiki/Special:Search?search=Keanu%20Reeves',
+    );
+    expect(wikipediaUrl('Keanu Reeves', '')).toBe(
+      'https://en.wikipedia.org/wiki/Special:Search?search=Keanu%20Reeves',
+    );
+    expect(wikipediaUrl('Keanu Reeves', 'invalid-id')).toBe(
+      'https://en.wikipedia.org/wiki/Special:Search?search=Keanu%20Reeves',
+    );
+  });
+
+  it('imdbPersonUrl builds person url or empty string', () => {
+    expect(imdbPersonUrl('nm0000206')).toBe('https://www.imdb.com/name/nm0000206/');
+    expect(imdbPersonUrl('')).toBe('');
+    expect(imdbPersonUrl(undefined)).toBe('');
+  });
+
+  it('imdbTitleUrl builds title url or empty string', () => {
+    expect(imdbTitleUrl('tt0133093')).toBe('https://www.imdb.com/title/tt0133093/');
+    expect(imdbTitleUrl('')).toBe('');
+    expect(imdbTitleUrl(undefined)).toBe('');
+  });
+
+  it('tmdbTitleUrl builds movie and tv urls', () => {
+    expect(tmdbTitleUrl('movie', 603)).toBe('https://www.themoviedb.org/movie/603');
+    expect(tmdbTitleUrl('series', 1396)).toBe('https://www.themoviedb.org/tv/1396');
+    expect(tmdbTitleUrl('movie', 0)).toBe('');
+    expect(tmdbTitleUrl('movie', undefined)).toBe('');
   });
 });

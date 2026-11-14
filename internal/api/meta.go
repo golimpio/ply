@@ -122,12 +122,68 @@ func (s *Server) handlePerson(w http.ResponseWriter, r *http.Request) {
 	out := Person{
 		ID: d.ID, Name: d.Name, Profile: s.imageURL(d.Profile, profileSize), KnownFor: d.KnownFor,
 		Biography: d.Biography, Birthday: d.Birthday, Deathday: d.Deathday, PlaceOfBirth: d.PlaceOfBirth, IMDbID: d.IMDbID,
-		TMDBID: d.TMDBID, TVDBID: d.TVDBID, Credits: []PersonCredit{},
+		WikidataID: d.WikidataID,
+		TMDBID:     d.TMDBID, TVDBID: d.TVDBID, Credits: []PersonCredit{},
 	}
 	primary := s.ratingsPrimary(r.Context())
 	for _, c := range d.Credits {
 		out.Credits = append(out.Credits, PersonCredit{TitleID: c.Title.ID, Kind: c.Kind, Job: c.Job, Character: c.Character,
 			Title: s.titleCard(c.Title, primary)})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handlePersonFilmography lists a person's external filmography, best first. They are fetched the
+// first time the person's page asks; a fetch that fails only means fewer (or none). With online lookups
+// off the list is empty.
+func (s *Server) handlePersonFilmography(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseID(w, r, "person")
+	if !ok || s.metadataOff(w) {
+		return
+	}
+	var entries []store.PersonFilmographyEntry
+	var err error
+	if s.Metadata != nil {
+		entries, err = s.Metadata.Filmography(r.Context(), id)
+	} else {
+		var res store.PersonFilmography
+		res, err = s.Store.GetPersonFilmography(r.Context(), id)
+		entries = res.Entries
+	}
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		writeError(w, http.StatusNotFound, "person not found")
+		return
+	case errors.Is(err, metadata.ErrLookupsOff):
+		entries = nil
+	case r.Context().Err() != nil:
+		return
+	case err != nil:
+		s.Logger.Debug("metadata: filmography", "person", id, "err", err)
+	}
+	out := make([]PersonFilmographyEntry, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, PersonFilmographyEntry{
+			Kind:          e.Kind,
+			TMDBID:        e.TMDBID,
+			TVDBID:        e.TVDBID,
+			IMDbID:        e.IMDbID,
+			Title:         e.Title,
+			OriginalTitle: e.OriginalTitle,
+			Year:          e.Year,
+			ReleaseDate:   e.ReleaseDate,
+			Character:     e.Character,
+			Job:           e.Job,
+			Department:    e.Department,
+			CreditKind:    e.CreditKind,
+			Poster:        s.imageURL(e.Poster, posterSize),
+			Backdrop:      s.imageURL(e.Backdrop, backdropSize),
+			Rating:        e.Rating,
+			VoteCount:     e.VoteCount,
+			Popularity:    e.Popularity,
+			EpisodeCount:  e.EpisodeCount,
+			InLibrary:     e.InLibrary,
+		})
 	}
 	writeJSON(w, http.StatusOK, out)
 }

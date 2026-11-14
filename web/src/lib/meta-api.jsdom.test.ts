@@ -256,6 +256,10 @@ describe('metadata requests', () => {
     stubFetch(json(null));
     expect(await m.api.genres()).toEqual([]);
     stubFetch(json(null));
+    expect(await m.api.personFilmography(7)).toEqual([]);
+    stubFetch(json(null));
+    expect(await m.api.collections()).toEqual([]);
+    stubFetch(json(null));
     expect(await m.api.titles()).toEqual([]);
     stubFetch(json(null));
     expect(await m.api.review()).toEqual([]);
@@ -273,12 +277,18 @@ describe('metadata requests', () => {
     let fn = stubFetch(json({ id: 7, name: 'P', credits: [] }));
     await m.api.person(7);
     expect(call(fn)[0]).toBe('/api/people/7');
+    fn = stubFetch(json([{ title: 'Speed', kind: 'movie', inLibrary: false }]));
+    expect(await m.api.personFilmography(7)).toEqual([{ title: 'Speed', kind: 'movie', inLibrary: false }]);
+    expect(call(fn)[0]).toBe('/api/people/7/filmography');
     fn = stubFetch(json({ id: 3, name: 'C', titles: [] }));
     await m.api.collection(3);
     expect(call(fn)[0]).toBe('/api/collections/3');
     fn = stubFetch(json([{ id: 28, name: 'Action', count: 4 }]));
     expect(await m.api.genres()).toEqual([{ id: 28, name: 'Action', count: 4 }]);
     expect(call(fn)[0]).toBe('/api/genres');
+    fn = stubFetch(json([{ id: 9, name: 'The Mann Collection', count: 3 }]));
+    expect(await m.api.collections()).toEqual([{ id: 9, name: 'The Mann Collection', count: 3 }]);
+    expect(call(fn)[0]).toBe('/api/collections');
   });
 
   it('filters titles by genre, collection and person, and only by what is given', async () => {

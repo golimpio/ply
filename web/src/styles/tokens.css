@@ -125,7 +125,7 @@
   --velvet-950-a70: rgb(12 12 11 / 0.75);
   --velvet-950-a72: rgb(12 12 11 / 0.72);
   --velvet-950-a75: rgb(12 12 11 / 0.75);
-  --velvet-950-a78: rgb(12 12 11 / 0.88);
+  --velvet-950-a78: rgb(12 12 11 / 0.78);
   --velvet-950-a85: rgb(12 12 11 / 0.85);
   --velvet-950-a86: rgb(12 12 11 / 0.9);
   --velvet-950-a90: rgb(12 12 11 / 0.92);
@@ -328,7 +328,7 @@
   --shadow-dialog: 0 30px 80px var(--black-a55);
   --shadow-menu: 0 20px 50px var(--black-a50);
   --shadow-popover: 0 16px 40px var(--black-a50);
-  --shadow-bar: 0 1px 0 var(--line-hairline);
+  --shadow-bar: none;
   --shadow-tabbar: 0 -1px 0 var(--line-hairline);
   --ring-hairline: 0 0 0 1px var(--line-hairline);
   --ring-hover: 0 0 0 2px var(--line-hover);
@@ -405,6 +405,7 @@
   --chip-h: 2rem; /* a rating chip */
   --chip-pad: 0.2rem 0.7rem;
   --chip-gap: 0.4rem;
+  --ratings-gap: var(--space-11); /* between rating chips under a title */
   --page-max: 68rem;
   /* The centred column of a film's or a series' page. */
   --detail-max: 72rem;

@@ -65,6 +65,64 @@ export function groupCredits(credits: PersonCredit[]): CreditSection[] {
   return sections;
 }
 
+export interface MediaCredits {
+  films: PersonCredit[];
+  series: PersonCredit[];
+}
+
+/**
+ * Splits a person's library credits into films and series.
+ * Any title with kind === 'series' goes to series, everything else to films.
+ */
+export function splitCreditsByMedia(credits: PersonCredit[]): MediaCredits {
+  const films: PersonCredit[] = [];
+  const series: PersonCredit[] = [];
+  for (const c of credits) {
+    if (c.title?.kind === 'series') {
+      series.push(c);
+    } else {
+      films.push(c);
+    }
+  }
+  return { films, series };
+}
+
+/** Count distinct titles in a list of credits. */
+export function countUniqueTitles(credits: PersonCredit[]): number {
+  return new Set(credits.map((c) => c.title.id)).size;
+}
+
+/**
+ * Canonical Wikipedia article URL for a Wikidata Q-id (e.g. "Q43416"), or search fallback if empty/unknown.
+ */
+export function wikipediaUrl(name: string, wikidataId?: string): string {
+  if (wikidataId && /^Q\d+$/i.test(wikidataId.trim())) {
+    return `https://www.wikidata.org/wiki/Special:GoToLinkedPage/enwiki/${encodeURIComponent(wikidataId.trim())}`;
+  }
+  return `https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(name.trim())}`;
+}
+
+/** IMDb person profile URL, or '' if empty. */
+export function imdbPersonUrl(imdbId?: string): string {
+  if (!imdbId) return '';
+  const clean = imdbId.trim();
+  return clean ? `https://www.imdb.com/name/${encodeURIComponent(clean)}/` : '';
+}
+
+/** IMDb title URL, or '' if empty. */
+export function imdbTitleUrl(imdbId?: string): string {
+  if (!imdbId) return '';
+  const clean = imdbId.trim();
+  return clean ? `https://www.imdb.com/title/${encodeURIComponent(clean)}/` : '';
+}
+
+/** TMDB title URL, or '' if empty. */
+export function tmdbTitleUrl(kind: string, tmdbId?: number): string {
+  if (!tmdbId || tmdbId <= 0) return '';
+  const media = kind === 'series' ? 'tv' : 'movie';
+  return `https://www.themoviedb.org/${media}/${tmdbId}`;
+}
+
 /** Sort key where a larger value is newer; a title with no year (0, or less) ranks lowest. */
 const yearRank = (c: TitleCard) => Math.max(c.year, 0);
 

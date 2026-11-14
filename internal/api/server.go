@@ -138,6 +138,13 @@ type Options struct {
 	// URLKey is the server's secret for the URL tokens (docs/M11-CLIENTS.md, "URL tokens"), kept
 	// in the data directory so that the URLs it made outlive a restart. nil makes one for this run.
 	URLKey []byte
+
+	// Stop stops the server (POST /api/server/stop, what `ply -stop` calls; docs/DESIGN.md,
+	// "Stopping"): nicely, or with force, giving the nice stop 5 s. It must not block. ControlKey is
+	// the request's credential, the key the server wrote to <data>/control.json. Either empty: the
+	// endpoint answers 503.
+	Stop       func(force bool)
+	ControlKey string
 }
 
 // Server is the HTTP handler for the whole application.
@@ -216,11 +223,13 @@ func New(o Options) *Server {
 	mux.HandleFunc("GET /api/receivers", s.handleReceivers)
 	mux.HandleFunc("GET /api/people", s.handlePeople)
 	mux.HandleFunc("GET /api/people/{id}", s.handlePerson)
+	mux.HandleFunc("GET /api/people/{id}/filmography", s.handlePersonFilmography)
 	mux.HandleFunc("GET /api/genres", s.handleGenres)
 	mux.HandleFunc("GET /api/titles", s.handleTitles)
 	mux.HandleFunc("PATCH /api/titles/{id}", s.handlePatchTitle)
 	mux.HandleFunc("GET /api/titles/{id}/trailers", s.handleTitleTrailers)
 	mux.HandleFunc("PUT /api/titles/{id}/watched", s.handleTitleWatched)
+	mux.HandleFunc("GET /api/collections", s.handleCollections)
 	mux.HandleFunc("GET /api/collections/{id}", s.handleCollection)
 	mux.HandleFunc("GET /api/upcoming", s.handleUpcoming)
 	mux.HandleFunc("GET /api/images/tmdb/{size}/{file}", s.handleTMDBImage)
@@ -250,12 +259,13 @@ func New(o Options) *Server {
 	mux.HandleFunc("POST /api/queue/pause", s.handleQueuePause)
 	mux.HandleFunc("POST /api/queue/resume", s.handleQueuePause)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
+	mux.HandleFunc("POST "+stopPath, s.handleStop)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
 	})
 	mux.Handle("/", spaHandler(o.UI))
 
-	var inner http.Handler = compress(mux)
+	inner := compress(mux)
 	if o.Governor != nil {
 		inner = o.Governor.Track(isBrowse)(inner) // browsing holds the background queue
 	}
@@ -292,7 +302,7 @@ func private(urlPath string) bool {
 	p := path.Clean(urlPath)
 	// /api/settings/test makes the server log in to a provider with a key the page cannot see; the
 	// pairing pair: a code for the owner's page, a token for a native app.
-	if p == "/api/settings/test" || p == "/api/pair" || p == "/api/pairing" {
+	if p == "/api/settings/test" || p == "/api/pair" || p == "/api/pairing" || p == stopPath {
 		return true
 	}
 	for _, root := range []string{"/api/folders", "/api/fs", "/api/jobs", "/api/queue", "/api/schedules", "/api/events", "/api/devices", "/api/receivers"} {

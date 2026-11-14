@@ -1,6 +1,7 @@
 <script lang="ts" module>
-  import type { CardRating, ItemSummary } from '../lib/api';
+  import type { ItemSummary } from '../lib/api';
   import type { PictureSource } from '../lib/meta';
+  import type { RatingLike } from '../lib/ratings';
 
   /** What a card reads of its item: a movie card (lib/api MovieCard) and a full row both fit. */
   export type CardItem = PictureSource &
@@ -39,6 +40,7 @@
     sizes = undefined,
     hold = false,
     watch = undefined,
+    onclick = undefined,
   }: {
     item?: CardItem;
     img?: Img | null;
@@ -48,11 +50,12 @@
     sub?: string | (string | number | null | undefined)[];
     label?: string;
     note?: string;
-    rating?: CardRating | null;
+    rating?: RatingLike | null;
     priority?: 'high' | 'low';
     sizes?: string;
     hold?: boolean;
     watch?: Watch | null;
+    onclick?: (e: MouseEvent) => void;
   } = $props();
   const badge = $derived(watch === undefined ? itemBadge(item) : watch);
 
@@ -61,7 +64,18 @@
   const picture = $derived(img !== undefined ? img : shape === 'poster' ? posterImg(item) : wideImg(item));
 </script>
 
-<a class="card {shape}" {href} onclick={morph}>
+<a
+  class="card {shape}"
+  {href}
+  onclick={(e) => {
+    if (onclick) {
+      e.preventDefault();
+      onclick(e);
+    } else {
+      morph(e);
+    }
+  }}
+>
   <div class="frame">
     <Picture
       img={picture}
@@ -213,7 +227,16 @@
     line-height: 1;
   }
   .rating :global(.glyph) {
-    width: 0.9em;
-    height: 0.9em;
+    height: 1.15em;
+    width: auto;
+    max-width: 2.5em;
+    flex: none;
+    display: inline-block;
+    vertical-align: middle;
+  }
+  .rating :global(.glyph-imdb),
+  .rating :global(.glyph-tmdb) {
+    height: 1.05em;
+    width: auto;
   }
 </style>

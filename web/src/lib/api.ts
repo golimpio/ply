@@ -341,6 +341,7 @@ export interface TitleDetail extends TitleCard {
   logo?: string;
   genres: Genre[];
   collection?: { id: number; name: string };
+  collections?: { id: number; name: string }[];
   cast: CastMember[];
   crew: CrewMember[];
   source: TitleSource;
@@ -421,13 +422,45 @@ export interface Person extends PersonCard {
   deathday?: string;
   placeOfBirth?: string;
   imdbId?: string;
+  wikidataId?: string;
   tmdbId?: number;
   tvdbId?: number;
   /** Only titles in the library, newest first. */
   credits: PersonCredit[];
 }
 
+export interface PersonFilmographyEntry {
+  kind: 'movie' | 'series' | string;
+  tmdbId?: number;
+  tvdbId?: number;
+  imdbId?: string;
+  title: string;
+  originalTitle?: string;
+  year?: number;
+  releaseDate?: string;
+  character?: string;
+  job?: string;
+  department: string;
+  creditKind: 'cast' | 'crew' | string;
+  poster?: string;
+  backdrop?: string;
+  rating?: number;
+  voteCount?: number;
+  popularity?: number;
+  episodeCount?: number;
+  inLibrary: boolean;
+}
+
 export interface GenreCount extends Genre {
+  count: number;
+}
+
+/** A collection with a title in the library, and how many titles it has (GET /api/collections). */
+export interface CollectionCard {
+  id: number;
+  name: string;
+  poster?: string;
+  backdrop?: string;
   count: number;
 }
 
@@ -1368,6 +1401,11 @@ export const api = {
     return { ...p, credits: (p.credits ?? []).map((c) => ({ ...c, title: normaliseRow(c.title) })) };
   },
 
+  /** External filmography for a person; [] when none or online lookups are off. */
+  async personFilmography(id: number): Promise<PersonFilmographyEntry[]> {
+    return (await request<PersonFilmographyEntry[] | null>('GET', `/api/people/${id}/filmography`)) ?? [];
+  },
+
   /** A title's trailers, best first; [] when it has none or online lookups are off. */
   async trailers(titleId: number): Promise<Trailer[]> {
     return (await request<Trailer[] | null>('GET', `/api/titles/${titleId}/trailers`)) ?? [];
@@ -1386,6 +1424,11 @@ export const api = {
       person: f.person ? String(f.person) : undefined,
     });
     return ((await request<TitleCard[] | null>('GET', `/api/titles${q}`)) ?? []).map(normaliseRow);
+  },
+
+  /** The collections with a title in the library, by name (GET /api/collections). */
+  async collections(): Promise<CollectionCard[]> {
+    return (await request<CollectionCard[] | null>('GET', '/api/collections')) ?? [];
   },
 
   async collection(id: number): Promise<CollectionDetail> {

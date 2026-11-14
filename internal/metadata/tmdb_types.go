@@ -272,17 +272,76 @@ type SeasonDetails struct {
 	Episodes     []EpisodeDetails `json:"episodes"`
 }
 
+// PersonExternalIDs is external_ids of /person/{id}.
+type PersonExternalIDs struct {
+	IMDbID     string `json:"imdb_id"`
+	WikidataID string `json:"wikidata_id"`
+}
+
 // PersonDetails is /person/{id}.
 type PersonDetails struct {
-	ID                 int64  `json:"id"`
-	Name               string `json:"name"`
-	Biography          string `json:"biography"`
-	Birthday           string `json:"birthday"`
-	Deathday           string `json:"deathday"`
-	PlaceOfBirth       string `json:"place_of_birth"`
-	KnownForDepartment string `json:"known_for_department"`
-	ProfilePath        string `json:"profile_path"`
-	IMDbID             string `json:"imdb_id"`
+	ID                 int64             `json:"id"`
+	Name               string            `json:"name"`
+	Biography          string            `json:"biography"`
+	Birthday           string            `json:"birthday"`
+	Deathday           string            `json:"deathday"`
+	PlaceOfBirth       string            `json:"place_of_birth"`
+	KnownForDepartment string            `json:"known_for_department"`
+	ProfilePath        string            `json:"profile_path"`
+	IMDbID             string            `json:"imdb_id"`
+	ExternalIDs        PersonExternalIDs `json:"external_ids"`
+}
+
+// PersonCreditEntry is an entry of /person/{id}/combined_credits cast or crew.
+type PersonCreditEntry struct {
+	ID            int64   `json:"id"`
+	MediaType     string  `json:"media_type"` // "movie" or "tv"
+	Title         string  `json:"title"`      // movie
+	Name          string  `json:"name"`       // series
+	OriginalTitle string  `json:"original_title"`
+	OriginalName  string  `json:"original_name"`
+	ReleaseDate   string  `json:"release_date"`   // movie
+	FirstAirDate  string  `json:"first_air_date"` // series
+	Character     string  `json:"character"`
+	Department    string  `json:"department"`
+	Job           string  `json:"job"`
+	PosterPath    string  `json:"poster_path"`
+	BackdropPath  string  `json:"backdrop_path"`
+	VoteAverage   float64 `json:"vote_average"`
+	VoteCount     int     `json:"vote_count"`
+	Popularity    float64 `json:"popularity"`
+	EpisodeCount  int     `json:"episode_count"`
+}
+
+// TitleOrName returns Title for movie or Name for tv.
+func (c *PersonCreditEntry) TitleOrName() string {
+	if c.Title != "" {
+		return c.Title
+	}
+	return c.Name
+}
+
+// OriginalTitleOrName returns OriginalTitle or OriginalName.
+func (c *PersonCreditEntry) OriginalTitleOrName() string {
+	if c.OriginalTitle != "" {
+		return c.OriginalTitle
+	}
+	return c.OriginalName
+}
+
+// Date returns ReleaseDate or FirstAirDate.
+func (c *PersonCreditEntry) Date() string {
+	if c.ReleaseDate != "" {
+		return c.ReleaseDate
+	}
+	return c.FirstAirDate
+}
+
+// PersonCombinedCredits is /person/{id}/combined_credits.
+type PersonCombinedCredits struct {
+	ID   int64               `json:"id"`
+	Cast []PersonCreditEntry `json:"cast"`
+	Crew []PersonCreditEntry `json:"crew"`
 }
 
 // CollectionDetails is /collection/{id}.

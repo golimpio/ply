@@ -590,7 +590,17 @@ func (c *Client) Videos(ctx context.Context, kind string, id int64) ([]Video, er
 // PersonDetails fetches /person/{id}.
 func (c *Client) PersonDetails(ctx context.Context, id int64) (*PersonDetails, error) {
 	var out PersonDetails
-	if err := c.get(ctx, "/person/"+strconv.FormatInt(id, 10), nil, &out); err != nil {
+	q := url.Values{"append_to_response": {"external_ids"}}
+	if err := c.get(ctx, "/person/"+strconv.FormatInt(id, 10), q, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// PersonCombinedCredits fetches /person/{id}/combined_credits.
+func (c *Client) PersonCombinedCredits(ctx context.Context, id int64) (*PersonCombinedCredits, error) {
+	var out PersonCombinedCredits
+	if err := c.get(ctx, "/person/"+strconv.FormatInt(id, 10)+"/combined_credits", nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

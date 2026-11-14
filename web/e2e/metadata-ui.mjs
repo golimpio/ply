@@ -79,6 +79,23 @@ const twin = (id, extra = {}) => film(id, 'Twin Film', 2021, { titleId: 500, ...
 const playing = { positionSec: 600, watched: false };
 const status = (over = {}) => ({ enabled: true, keySet: true, running: false, pending: 0, unmatched: 0, needsReview: 0, lastError: '', ...over });
 
+// A person page: one film in the library, and a filmography of both kinds (a second person has only
+// films), for the shelves the page splits it into.
+const person = (id, name, credits = []) => ({ id, name, knownFor: 'Acting', credits });
+const PERSON = person(31, 'Greta Gerwig', [
+  { titleId: 101, kind: 'cast', character: 'Frances', title: { id: 101, kind: 'movie', title: '1917', year: 2019, itemId: 1 } },
+]);
+const PERSON_FILMS_ONLY = person(32, 'Solo Director');
+const credit = (title, kind, tmdbId, year, over = {}) => ({ title, kind, tmdbId, year, department: 'Acting', creditKind: 'cast', inLibrary: false, ...over });
+const FILMOGRAPHY = {
+  31: [
+    credit('Frances Ha', 'movie', 121, 2012, { character: 'Frances' }),
+    credit('Lady Bird', 'movie', 122, 2017, { department: 'Directing', creditKind: 'crew', job: 'Director' }),
+    credit('Girls', 'series', 123, 2012),
+  ],
+  32: [credit('Little Women', 'movie', 124, 2019, { department: 'Directing', creditKind: 'crew', job: 'Director' })],
+};
+
 /**
  * A fresh page on the mocked server.
  *   slowMovieSearch  the movie search answers after this many ms (the show search at once)
@@ -131,6 +148,13 @@ async function open(browser, opts = {}) {
       return it ? json(route, detail(it)) : json(route, { error: 'not found' }, 404);
     }
     if (p.startsWith('/api/shows/')) return json(route, { show: 'Breaking Bad', episodeCount: 0, seasons: [] });
+    const who = /^\/api\/people\/(\d+)(\/filmography)?$/.exec(p);
+    if (who) {
+      const id = Number(who[1]);
+      if (who[2]) return json(route, FILMOGRAPHY[id] ?? []);
+      const found = [PERSON, PERSON_FILMS_ONLY].find((x) => x.id === id);
+      return found ? json(route, found) : json(route, { error: 'person not found' }, 404);
+    }
     return json(route, { error: `unmocked ${p}` }, 404);
   });
   return { context, page, calls, searches, hits, errors };
@@ -468,6 +492,35 @@ const scenarios = {
     check('HDR alone: any version', (await movieTitles(page, '?f=hdr')).join(' | ') === 'Both Film | Split Film');
     const both = await movieTitles(page, '?f=4k,hdr');
     check('4K and HDR: only the film with a version that is both', both.join(' | ') === 'Both Film', both.join(' | '));
+    await context.close();
+  },
+
+  // Mutant caught: the external filmography back in one shelf, "More with", one count for both kinds.
+  async 'Person: the external filmography is a shelf per kind'(browser) {
+    const { context, page } = await open(browser);
+    const headings = async () =>
+      (await page.locator('h2.library').allTextContents()).map((s) => s.replace(/\s+/g, ' ').trim()).join(' | ');
+    const titles = async (key) =>
+      (await page.locator(`section[aria-labelledby="more-${key}"] .card .title`).allTextContents()).map((s) => s.trim());
+    await page.goto(`${base}/#/person/31`);
+    await page.locator('section[aria-labelledby="more-films"]').waitFor();
+    check(
+      'a shelf per kind, each with its own count',
+      (await headings()) === 'In your films 1 | More films with Greta Gerwig 2 | More series with Greta Gerwig 1',
+      await headings(),
+    );
+    check('the films shelf holds the films', (await titles('films')).join(' | ') === 'Frances Ha | Lady Bird', (await titles('films')).join(' | '));
+    check('the series shelf holds the series', (await titles('series')).join(' | ') === 'Girls', (await titles('series')).join(' | '));
+    // Not needed any more: the shelf says which kind each card is, so no card and no filter repeats it.
+    check('no card is labelled with its kind', (await page.locator('section.shelf .note').count()) === 0);
+    check('and no all/films/series filter', (await page.locator('section.shelf [role="radiogroup"]').count()) === 0);
+    // Positive control for those two absences: the cards and the shelves are there to begin with.
+    check('the shelves have their cards', (await page.locator('section.shelf .card').count()) === 4);
+    // A kind with nothing in it gets no heading (and no empty grid).
+    await page.goto(`${base}/#/person/32`);
+    await page.locator('section[aria-labelledby="more-films"]').waitFor();
+    check('only films: the one shelf', (await headings()) === 'More films with Solo Director 1', await headings());
+    check('and no empty series shelf', (await page.locator('section[aria-labelledby="more-series"]').count()) === 0);
     await context.close();
   },
 };

@@ -50,7 +50,8 @@ type Fake struct {
 	// What Trailers returns by the title's id (either kind), as it is; an id that is not here
 	// is a 404.
 	TrailerLists map[int64][]store.Video
-	// What Changes returns.
+	// What CombinedCredits returns by the person's TMDB id; an id that is not here is a 404.
+	Filmography map[int64]*metadata.PersonCombinedCredits
 	ChangedMovies []int64
 	ChangedShows  []int64
 	// ImageBase is where ImageURL points (an httptest server serving images).
@@ -240,6 +241,17 @@ func (f *Fake) Person(ctx context.Context, id int64) (*store.Person, error) {
 	}
 	cp := *p
 	return &cp, nil
+}
+
+func (f *Fake) CombinedCredits(ctx context.Context, id int64) (*metadata.PersonCombinedCredits, error) {
+	if err := f.enter(ctx, "CombinedCredits(%d)", id); err != nil {
+		return nil, err
+	}
+	c, ok := f.Filmography[id]
+	if !ok {
+		return nil, notFound(fmt.Sprintf("GET /person/%d/combined_credits", id))
+	}
+	return c, nil
 }
 
 func (f *Fake) Changes(ctx context.Context, kind string, _, _ time.Time) ([]int64, error) {

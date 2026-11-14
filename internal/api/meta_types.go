@@ -74,25 +74,26 @@ type CrewMember struct {
 // TitleDetail is a title with everything the item page shows.
 type TitleDetail struct {
 	TitleCard
-	TMDBID        int64          `json:"tmdbId,omitempty"`
-	TVDBID        int64          `json:"tvdbId,omitempty"`
-	IMDbID        string         `json:"imdbId,omitempty"`
-	OriginalTitle string         `json:"originalTitle,omitempty"`
-	SortTitle     string         `json:"sortTitle"`
-	Overview      string         `json:"overview,omitempty"`
-	Tagline       string         `json:"tagline,omitempty"`
-	ReleaseDate   string         `json:"releaseDate,omitempty"`
-	EndDate       string         `json:"endDate,omitempty"`
-	Status        string         `json:"status,omitempty"`
-	RuntimeMin    *int           `json:"runtimeMin,omitempty"`
-	VoteCount     *int           `json:"voteCount,omitempty"`
-	Certification string         `json:"certification,omitempty"`
-	Logo          string         `json:"logo,omitempty"`
-	Genres        []Genre        `json:"genres"`
-	Collection    *CollectionRef `json:"collection,omitempty"`
-	Cast          []CastMember   `json:"cast"`
-	Crew          []CrewMember   `json:"crew"`
-	Source        string         `json:"source"` // tvdb | tmdb | nfo | mixed
+	TMDBID        int64           `json:"tmdbId,omitempty"`
+	TVDBID        int64           `json:"tvdbId,omitempty"`
+	IMDbID        string          `json:"imdbId,omitempty"`
+	OriginalTitle string          `json:"originalTitle,omitempty"`
+	SortTitle     string          `json:"sortTitle"`
+	Overview      string          `json:"overview,omitempty"`
+	Tagline       string          `json:"tagline,omitempty"`
+	ReleaseDate   string          `json:"releaseDate,omitempty"`
+	EndDate       string          `json:"endDate,omitempty"`
+	Status        string          `json:"status,omitempty"`
+	RuntimeMin    *int            `json:"runtimeMin,omitempty"`
+	VoteCount     *int            `json:"voteCount,omitempty"`
+	Certification string          `json:"certification,omitempty"`
+	Logo          string          `json:"logo,omitempty"`
+	Genres        []Genre         `json:"genres"`
+	Collection    *CollectionRef  `json:"collection,omitempty"`
+	Collections   []CollectionRef `json:"collections,omitempty"`
+	Cast          []CastMember    `json:"cast"`
+	Crew          []CrewMember    `json:"crew"`
+	Source        string          `json:"source"` // tvdb | tmdb | nfo | mixed
 	// EpisodeOrder is how a show's files map to its episodes: aired, dvd or absolute. Only a
 	// show with source "tvdb" has one to change (PATCH /api/titles/{id}); the field is not there
 	// for a movie or a show from anywhere else.
@@ -151,9 +152,33 @@ type Person struct {
 	Deathday     string         `json:"deathday,omitempty"`
 	PlaceOfBirth string         `json:"placeOfBirth,omitempty"`
 	IMDbID       string         `json:"imdbId,omitempty"`
+	WikidataID   string         `json:"wikidataId,omitempty"`
 	TMDBID       int64          `json:"tmdbId,omitempty"` // a person both sites know has both, and one page
 	TVDBID       int64          `json:"tvdbId,omitempty"`
 	Credits      []PersonCredit `json:"credits"`
+}
+
+// PersonFilmographyEntry is an entry of GET /api/people/{id}/filmography.
+type PersonFilmographyEntry struct {
+	Kind          string  `json:"kind"`
+	TMDBID        int64   `json:"tmdbId,omitempty"`
+	TVDBID        int64   `json:"tvdbId,omitempty"`
+	IMDbID        string  `json:"imdbId,omitempty"`
+	Title         string  `json:"title"`
+	OriginalTitle string  `json:"originalTitle,omitempty"`
+	Year          int     `json:"year,omitempty"`
+	ReleaseDate   string  `json:"releaseDate,omitempty"`
+	Character     string  `json:"character,omitempty"`
+	Job           string  `json:"job,omitempty"`
+	Department    string  `json:"department"`
+	CreditKind    string  `json:"creditKind"`
+	Poster        string  `json:"poster,omitempty"`
+	Backdrop      string  `json:"backdrop,omitempty"`
+	Rating        float64 `json:"rating,omitempty"`
+	VoteCount     int     `json:"voteCount,omitempty"`
+	Popularity    float64 `json:"popularity,omitempty"`
+	EpisodeCount  int     `json:"episodeCount,omitempty"`
+	InLibrary     bool    `json:"inLibrary"`
 }
 
 // Trailer is an entry of GET /api/titles/{id}/trailers: a video at a site that plays it, by its
@@ -173,6 +198,16 @@ type GenreCount struct {
 	ID    int64  `json:"id"`
 	Name  string `json:"name"`
 	Count int    `json:"count"`
+}
+
+// CollectionCard is an entry of GET /api/collections: a collection and how many
+// library titles are in it.
+type CollectionCard struct {
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	Poster   string `json:"poster,omitempty"`
+	Backdrop string `json:"backdrop,omitempty"`
+	Count    int    `json:"count"`
 }
 
 // CollectionDetail is GET /api/collections/{id}.
@@ -437,6 +472,14 @@ func (s *Server) titleDetail(d store.TitleDetail, primary string) *TitleDetail {
 	}
 	if d.Collection != nil {
 		out.Collection = &CollectionRef{ID: d.Collection.ID, Name: d.Collection.Name}
+	}
+	if len(d.Collections) > 0 {
+		out.Collections = make([]CollectionRef, len(d.Collections))
+		for i, c := range d.Collections {
+			out.Collections[i] = CollectionRef{ID: c.ID, Name: c.Name}
+		}
+	} else if out.Collection != nil {
+		out.Collections = []CollectionRef{*out.Collection}
 	}
 	for _, c := range d.Cast {
 		out.Cast = append(out.Cast, CastMember{PersonID: c.PersonID, Name: c.Name, Character: c.Character,

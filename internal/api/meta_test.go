@@ -354,6 +354,32 @@ func TestPeople(t *testing.T) {
 	wantJSONError(t, m2.get("/api/people?q="+strings.Repeat("a", maxSearchQuery+1)), 400)
 }
 
+func TestPersonFilmography(t *testing.T) {
+	m := newMetaEnv(t, "")
+	m.fake.Filmography = map[int64]*metadata.PersonCombinedCredits{
+		6384: {
+			Cast: []metadata.PersonCreditEntry{
+				{ID: 101, MediaType: "movie", Title: "Speed", Character: "Jack Traven", Popularity: 80, PosterPath: "/speed.jpg"},
+			},
+		},
+	}
+
+	got := decode[[]PersonFilmographyEntry](t, m.get(fmt.Sprintf("/api/people/%d/filmography", m.personID)))
+	if len(got) != 1 || got[0].Title != "Speed" || got[0].Poster != "/api/images/tmdb/w342/speed.jpg" {
+		t.Errorf("filmography = %+v", got)
+	}
+
+	wantJSONError(t, m.get("/api/people/99999/filmography"), 404)
+	wantJSONError(t, m.get("/api/people/abc/filmography"), 404)
+
+	// Lookups off: returns []
+	m.src.Set(m.fake, false)
+	gotOff := decode[[]PersonFilmographyEntry](t, m.get(fmt.Sprintf("/api/people/%d/filmography", m.personID)))
+	if len(gotOff) != 0 {
+		t.Errorf("lookups off = %+v, want empty", gotOff)
+	}
+}
+
 func TestPersonPageSurvivesTMDBTrouble(t *testing.T) {
 	m := newMetaEnv(t, "")
 	m.fake.Offline()
@@ -418,9 +444,14 @@ func TestGenresTitlesAndCollections(t *testing.T) {
 	wantJSONError(t, m.get("/api/collections/x"), 404)
 	wantJSONError(t, m.get("/api/collections/0"), 404)
 
+	list := decode[[]CollectionCard](t, m.get("/api/collections"))
+	if len(list) != 1 || list[0].ID != m.collectionID || list[0].Name != "The Matrix Collection" ||
+		list[0].Count != 1 || list[0].Poster != withTok("/api/images/tmdb/w342/cp.jpg") {
+		t.Errorf("collections = %+v", list)
+	}
+
 	// JSON shape: empty lists are lists.
-	var raw map[string]any
-	raw = decode[map[string]any](t, m.get(fmt.Sprintf("/api/items/%d", m.mp4)))["meta"].(map[string]any)
+	raw := decode[map[string]any](t, m.get(fmt.Sprintf("/api/items/%d", m.mp4)))["meta"].(map[string]any)
 	for _, k := range []string{"genres", "cast", "crew"} {
 		if _, ok := raw[k].([]any); !ok {
 			t.Errorf("meta.%s = %v, want a list", k, raw[k])

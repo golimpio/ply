@@ -190,9 +190,17 @@ func (p *TMDB) Person(ctx context.Context, tmdbID int64) (*store.Person, error) 
 	if err != nil {
 		return nil, err
 	}
+	imdb := d.IMDbID
+	if imdb == "" {
+		imdb = d.ExternalIDs.IMDbID
+	}
 	return &store.Person{TMDBID: d.ID, Name: d.Name, Profile: ImageRef(d.ProfilePath), Biography: d.Biography,
 		Birthday: d.Birthday, Deathday: d.Deathday, PlaceOfBirth: d.PlaceOfBirth,
-		KnownFor: d.KnownForDepartment, IMDbID: d.IMDbID}, nil
+		KnownFor: d.KnownForDepartment, IMDbID: imdb, WikidataID: d.ExternalIDs.WikidataID}, nil
+}
+
+func (p *TMDB) CombinedCredits(ctx context.Context, id int64) (*PersonCombinedCredits, error) {
+	return p.c.PersonCombinedCredits(ctx, id)
 }
 
 func (p *TMDB) Changes(ctx context.Context, kind string, start, end time.Time) ([]int64, error) {

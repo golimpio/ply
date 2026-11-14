@@ -242,9 +242,11 @@ All image URLs are relative and carry `?token=` like other media URLs.
 | GET | `/api/items/{id}` | ItemDetail gains `meta?: TitleDetail` (movie, or the episode's series) and `episodeInfo?: {name, overview, airDate, still, rating}` (not `episode`: that key is the episode number) |
 | GET | `/api/shows` | each show gains `titleId?`, `poster?`, `backdrop?`, `year?`, `overview?`, `genres?`, `rating?`, `matchState`, `needsReview` |
 | GET | `/api/shows/{name}` | `{show…, meta?: TitleDetail, seasons:[{season, name, overview, poster, airDate, episodeCount}]}` |
-| GET | `/api/people/{id}` | `{id, name, profile?, biography?, birthday?, deathday?, placeOfBirth?, knownFor?, imdbId?, credits:[{titleId, kind, job, character, title:TitleCard}]}` — only titles in the library, newest first |
+| GET | `/api/people/{id}` | `{id, name, profile?, biography?, birthday?, deathday?, placeOfBirth?, knownFor?, imdbId?, wikidataId?, credits:[{titleId, kind, job, character, title:TitleCard}]}` — only titles in the library, newest first |
+| GET | `/api/people/{id}/filmography` | `[PersonFilmographyEntry]` external filmography cached in `person_filmography`, sorted by popularity, noise filtered |
 | GET | `/api/people?q=` | `[PersonCard]` (name prefix/substring, people with ≥1 local title, max 20) |
 | GET | `/api/genres` | `[{id, name, count}]` |
+| GET | `/api/collections` | `[{id, name, poster?, backdrop?, count}]` (by name; only collections with a title in the library) |
 | GET | `/api/titles?genre=&collection=&person=` | `[TitleCard]` |
 | GET | `/api/collections/{id}` | `{id, name, overview, poster, backdrop, titles:[TitleCard]}` (release order) |
 | GET | `/api/upcoming` | `[{titleId, show, poster?, backdrop?, nextAirDate, nextEpisode?: {season, episode, name}}]` — series with a file in the library whose `next_air_date` is today (server's local date) or later, soonest first (by name within a day), at most 50; `nextEpisode` is absent when TMDB did not say which episode; `[]` when none |
@@ -278,7 +280,9 @@ Mutating endpoints need the token like everything else. Unknown ids → 404. Bad
   "…" menu, "Refresh metadata".
 - Fix match dialog: search box prefilled with title/year, results with poster/year/overview, one click to apply;
   also paste a TMDB/IMDb URL or id. Works for movies and whole shows.
-- Person page `#/person/<id>`: photo, bio, "In your library" grid grouped Acting / Directing / Writing.
+- Person page `#/person/<id>`: photo, bio, "In your films" and "In your series" grids grouped Acting /
+  Directing / Writing, then "More films with …" and "More series with …" shelves of the external
+  filmography (a shelf per kind, so no card is labelled with it).
 - Genre `#/genre/<id>`, collection `#/collection/<id>` pages; Shows page with series posters; show page with
   season tabs, episode stills and overviews.
 - Search palette also finds people, genres and collections.

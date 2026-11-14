@@ -122,7 +122,40 @@ type Person struct {
 	PlaceOfBirth string
 	KnownFor     string
 	IMDbID       string
+	WikidataID   string
 	FetchedAt    int64 // unix seconds; 0 = details never fetched
+}
+
+// PersonFilmographyEntry is one credit of a person outside or inside the library.
+type PersonFilmographyEntry struct {
+	Kind          string // KindMovie | KindSeries
+	TMDBID        int64
+	TVDBID        int64
+	IMDbID        string
+	Title         string
+	OriginalTitle string
+	Year          int
+	ReleaseDate   string
+	Character     string
+	Job           string
+	Department    string
+	CreditKind    string // CreditCast | CreditCrew
+	Poster        string
+	Backdrop      string
+	Rating        float64
+	VoteCount     int
+	Popularity    float64
+	EpisodeCount  int
+	InLibrary     bool
+}
+
+// PersonFilmography is what is stored of a person's external filmography: the credits,
+// best first, what they were fetched for (the caller's ref, "tmdb:6384@en-US"; "" never fetched)
+// and when (unix seconds).
+type PersonFilmography struct {
+	Entries   []PersonFilmographyEntry
+	Ref       string
+	CheckedAt int64
 }
 
 // Credit ties a person to a title. Job is empty for cast.
@@ -182,9 +215,10 @@ const (
 // A locked title keeps its title, sort title, year, overview and tagline.
 type TitleInput struct {
 	Title
-	Genres     []Genre
-	Collection *Collection // nil = the title belongs to none
-	Credits    []Credit
+	Genres      []Genre
+	Collection  *Collection // nil = the title belongs to none
+	Collections []Collection
+	Credits     []Credit
 	Seasons    []Season // the seasons fetched; others are left alone
 	// ResetSeasons makes Seasons the only seasons the title has: the others, and their
 	// episodes, are removed (a change of episode order renumbers them all).
@@ -260,6 +294,16 @@ func upsertTitleTx(ctx context.Context, tx *sql.Tx, in *TitleInput) (int64, erro
 		return id, nil
 	}
 	if err := setGenres(ctx, tx, id, in.Genres); err != nil {
+		return 0, err
+	}
+	var cols []*Collection
+	if in.Collection != nil {
+		cols = append(cols, in.Collection)
+	}
+	for i := range in.Collections {
+		cols = append(cols, &in.Collections[i])
+	}
+	if err := setCollections(ctx, tx, id, cols); err != nil {
 		return 0, err
 	}
 	if err := setCredits(ctx, tx, id, in.Credits); err != nil {
@@ -523,6 +567,29 @@ func setGenres(ctx context.Context, tx *sql.Tx, titleID int64, genres []Genre) e
 		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO title_genres (title_id, genre_id) VALUES (?, ?)`,
 			titleID, id); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func setCollections(ctx context.Context, tx *sql.Tx, titleID int64, cols []*Collection) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM title_collections WHERE title_id = ?`, titleID); err != nil {
+		return err
+	}
+	seen := map[int64]bool{}
+	for ord, c := range cols {
+		if c == nil {
+			continue
+		}
+		cid, err := upsertCollection(ctx, tx, c)
+		if err != nil {
+			return err
+		}
+		if id, ok := cid.(int64); ok && id > 0 && !seen[id] {
+			seen[id] = true
+			if _, err := tx.ExecContext(ctx, `INSERT INTO title_collections (title_id, collection_id, ord) VALUES (?, ?, ?)`, titleID, id, ord); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

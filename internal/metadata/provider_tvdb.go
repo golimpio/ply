@@ -202,10 +202,14 @@ func (p *TVDBProvider) Person(ctx context.Context, id int64) (*store.Person, err
 			}
 		}
 	}
-	return &store.Person{TVDBID: d.ID, TMDBID: d.RemoteIDs.TMDBID(), Name: d.Name, Profile: TVDBImageRef(d.Image),
-		Biography: bio, Birthday: d.Birth, Deathday: d.Death, PlaceOfBirth: d.BirthPlace, IMDbID: d.RemoteIDs.IMDbID()}, nil
+		wiki := d.RemoteIDs.Get("Wikidata")
+		if wiki == "" {
+			wiki = d.RemoteIDs.Get("Wikipedia")
+		}
+		return &store.Person{TVDBID: d.ID, TMDBID: d.RemoteIDs.TMDBID(), Name: d.Name, Profile: TVDBImageRef(d.Image),
+			Biography: bio, Birthday: d.Birth, Deathday: d.Death, PlaceOfBirth: d.BirthPlace, IMDbID: d.RemoteIDs.IMDbID(),
+			WikidataID: wiki}, nil
 }
-
 // Changes is TVDB's updates feed for shows, from start on; end is not used (the
 // feed has no end), and movies have none.
 func (p *TVDBProvider) Changes(ctx context.Context, kind string, start, _ time.Time) ([]int64, error) {

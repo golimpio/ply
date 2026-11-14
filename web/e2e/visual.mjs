@@ -213,6 +213,12 @@ const COLLECTION = {
   id: 9, name: 'The Mann Collection', overview: 'Crime films by Michael Mann, in the order they came out.', poster: img('mann-poster'), backdrop: img('mann-backdrop', 'w1280'),
   titles: [card(byId[1]), { id: 120, kind: 'movie', title: 'Collateral', year: 2004, poster: img('collateral-poster') }, card(byId[3], { title: 'Thief', year: 1981 })],
 };
+// GET /api/collections: the Collections page, in the server's order (by name). One is an NFO set
+// with no artwork of its own, as a collection TMDB never filled in.
+const COLLECTIONS = [
+  { id: 4, name: 'The Animated Set', count: 1 },
+  { id: 9, name: 'The Mann Collection', poster: img('mann-poster'), backdrop: img('mann-backdrop', 'w1280'), count: 3 },
+];
 const PERSON = {
   id: 31, name: 'Al Pacino', profile: img('pacino-profile', 'w185'), knownFor: 'Acting', birthday: '1940-04-25', placeOfBirth: 'New York City, New York, USA', tmdbId: 1158,
   biography: 'Alfredo James Pacino is an American actor. Considered one of the greatest actors of the twentieth century, he has received many awards.\n\nHe began his career on stage in the 1960s and moved to film soon after. '.repeat(3),
@@ -223,6 +229,16 @@ const PERSON = {
   ],
 };
 const PEOPLE = [{ id: 31, name: 'Al Pacino', profile: img('pacino-profile', 'w185'), knownFor: 'Acting' }, { id: 33, name: 'Val Kilmer', knownFor: 'Acting' }];
+// The external filmography: the person page reads it as a shelf per kind, and no card says which it is.
+const credit = (title, kind, tmdbId, year, over = {}) => ({ title, kind, tmdbId, year, department: 'Acting', creditKind: 'cast', inLibrary: false, ...over });
+const FILMOGRAPHY = [
+  credit('Serpico', 'movie', 964, 1973, { character: 'Frank Serpico', poster: img('serpico-poster'), rating: 7.8 }),
+  credit('Dog Day Afternoon', 'movie', 968, 1975, { character: 'Sonny Wortzik', poster: img('dog-day-poster'), rating: 8.0 }),
+  credit('Scarface', 'movie', 111, 1983, { character: 'Tony Montana', poster: img('scarface-poster'), rating: 8.3 }),
+  credit('The Insider', 'movie', 9008, 1999, { character: 'Lowell Bergman', poster: img('insider-poster'), rating: 7.8 }),
+  credit('Angels in America', 'series', 4158, 2003, { character: 'Roy Cohn', poster: img('angels-poster'), rating: 8.1 }),
+  credit('Hunters', 'series', 88055, 2020, { character: 'Meyer Offerman', poster: img('hunters-poster'), rating: 7.2 }),
+];
 const UPCOMING = [{ titleId: 78, show: 'Dark', poster: img('dark-poster'), backdrop: img('dark-backdrop', 'w1280'), nextAirDate: '2026-11-08', nextEpisode: { season: 2, episode: 1, name: 'Beginnings and Endings' } }];
 const CANDIDATES = [
   { source: 'tmdb', id: 949, tmdbId: 949, title: 'Heat', year: 1995, overview: 'Obsessive master thief Neil McCauley leads a top-notch crew.', poster: img('heat-poster', 'w92'), score: 0.98 },
@@ -338,9 +354,11 @@ async function open(browser, width, opts = {}) {
     if (p === '/api/upcoming') return json(route, opts.items ? [] : UPCOMING);
     if (p === '/api/genres') return json(route, opts.items ? [] : GENRES);
     if (p === '/api/titles') return json(route, GENRE_TITLES[u.searchParams.get('genre')] ?? []);
+    if (p === '/api/collections') return json(route, opts.items ? [] : COLLECTIONS);
     if (p === '/api/collections/9') return json(route, COLLECTION);
     if (p === '/api/people') return json(route, PEOPLE);
     if (p === '/api/people/31') return json(route, PERSON);
+    if (p === '/api/people/31/filmography') return json(route, FILMOGRAPHY);
     if (p === '/api/settings' && m === 'GET') return json(route, settings);
     if (p === '/api/settings' && opts.putError) return json(route, { error: opts.putError }, 400);
     if (p === '/api/settings/test') return json(route, opts.testError ? { ok: false, error: opts.testError } : { ok: true });
@@ -502,11 +520,7 @@ const SHOTS = [
   { name: 'movies-sorted', hash: '#/movies?sort=rating&min=70', ready: 'a.card', full: true },
   { name: 'shows', hash: '#/shows', ready: 'a.card', full: true },
   {
-    name: 'item', hash: '#/item/1', ready: 'ul.ratings .score-chip', full: true,
-    act: async (page) => {
-      await page.click('details.tech summary');
-      await visible(page, 'details.tech table');
-    },
+    name: 'item', hash: '#/item/1', ready: 'section.file table', full: true,
   },
   { name: 'item-version', hash: '#/item/6', ready: 'text=Versions', full: true },
   { name: 'item-review', hash: '#/item/4', ready: '[role="note"]', full: true }, // "might not be the right film"
@@ -515,6 +529,7 @@ const SHOTS = [
   { name: 'episode', hash: '#/item/12', ready: 'nav.siblings', full: true },
   { name: 'genre', hash: '#/genre/18', ready: 'h1 .count', full: true },
   { name: 'collection', hash: '#/collection/9', ready: 'a.card', full: true },
+  { name: 'collections', hash: '#/collections', ready: 'a.card', full: true },
   { name: 'person', hash: '#/person/31', ready: 'h2.library', full: true },
   // Settings, a shot per tab (#/settings?tab=...; Library is the bare #/settings).
   ...[
