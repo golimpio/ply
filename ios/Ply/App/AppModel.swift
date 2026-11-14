@@ -58,7 +58,10 @@ struct PlayRequest {
 
     private var feed: EventFeed?
     private var playback: PlaybackController?
-    private let presenter = PlayerPresenter()
+    /// The window showing the play, when one is: one play at a time, in the window that started it.
+    private weak var shownIn: PlaybackScene?
+    /// The window a play nobody started (a remote command) is shown in: the last one to appear.
+    private weak var lastScene: PlaybackScene?
     private var handledCommands: Set<Int64> = []
     /// The newest command this device acted on for this server, across launches.
     private var lastHandledSeq: Int64 = 0
@@ -218,7 +221,11 @@ struct PlayRequest {
         switch command.type {
         case "play":
             if let id = command.itemId {
-                play(PlayRequest(itemId: id, startSec: command.positionSec))
+                // A play from another device lands in the window that started the last one, or the
+                // newest window there is.
+                if let scene = shownIn ?? lastScene {
+                    play(PlayRequest(itemId: id, startSec: command.positionSec), in: scene)
+                }
                 if let p = playback {
                     p.onStart = { [weak c] error in
                         guard let c else { return }
@@ -249,19 +256,23 @@ struct PlayRequest {
 
     // MARK: playback
 
-    func play(_ request: PlayRequest) {
+    /// A window says it is here, so that a play from another device lands in one (the newest window
+    /// to appear).
+    func register(_ scene: PlaybackScene) {
+        lastScene = scene
+    }
+
+    func play(_ request: PlayRequest, in scene: PlaybackScene) {
         guard let c = connection else { return }
-        if let old = playback {
-            playback = nil
-            old.close() // the presenter replaces its player in place
-        }
+        if playback != nil { endPlayback(.closed) } // one play at a time: the first one goes, where it was
         let p = PlaybackController(api: c.api, request: request)
         playback = p
+        shownIn = scene
         p.onEnd = { [weak self, weak p] end in
             guard let self, let p, self.playback === p else { return }
             self.endPlayback(end)
         }
-        presenter.present(p) { [weak self, weak p] in
+        scene.present(p) { [weak self, weak p] in
             guard let self, let p, self.playback === p else { return }
             self.endPlayback(.closed)
         }
@@ -271,6 +282,9 @@ struct PlayRequest {
     private func endPlayback(_ end: PlaybackEnd) {
         guard let p = playback else { return }
         playback = nil
+        // The window that showed it takes it down, and the next episode, if any, plays there.
+        let scene = shownIn
+        shownIn = nil
         let detail = p.itemDetail
         p.close()
         connection?.library.scheduleReload() // its progress, Continue Watching
@@ -279,23 +293,23 @@ struct PlayRequest {
         case .stoppedElsewhere: "Playback was stopped from another device."
         case .finished, .closed: nil
         }
-        presenter.dismiss { [weak self] in
+        scene?.dismiss { [weak self] in
             if let message {
                 self?.alert = message
             } else if case .finished = end, let detail, detail.item.isEpisode {
-                self?.autoplayNextEpisode(after: detail)
+                self?.autoplayNextEpisode(after: detail, in: scene)
             }
         }
     }
 
-    private func autoplayNextEpisode(after current: ItemDetail) {
-        guard let show = current.item.show, !show.isEmpty, let c = connection else { return }
+    private func autoplayNextEpisode(after current: ItemDetail, in scene: PlaybackScene?) {
+        guard let show = current.item.show, !show.isEmpty, let scene, let c = connection else { return }
         Task { @MainActor [weak self] in
             guard let self, self.connection === c else { return }
             do {
                 let episodes = try await c.api.episodes(show: show)
                 guard let next = NextEpisodeSelection.after(current.item, in: episodes) else { return }
-                self.play(PlayRequest(itemId: next.id, startSec: 0))
+                self.play(PlayRequest(itemId: next.id, startSec: 0), in: scene)
             } catch {
                 // If the next episode cannot be fetched, stay on the current page.
             }

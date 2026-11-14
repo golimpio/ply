@@ -12,6 +12,8 @@ func configureAppCaches(memoryCapacity: Int, diskCapacity: Int) {
 /// The app's root, whatever the platform: connecting and pairing, then the tabs.
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    /// This window's player: two windows never share one (docs/M11-CLIENTS.md, "The apps").
+    @State private var playbackScene = PlaybackScene(presenter: PlayerPresenter())
 
     var body: some View {
         @Bindable var model = model
@@ -32,6 +34,8 @@ struct RootView: View {
                     .environment(connection)
             }
         }
+        .environment(playbackScene)
+        .onAppear { model.register(playbackScene) }
         .alert("ply", isPresented: Binding { model.alert != nil } set: { if !$0 { model.alert = nil } }) {
             Button("OK", role: .cancel) {}
         } message: {

@@ -59,6 +59,7 @@ targets:
       - path: Ply/Core/Fuzzy.swift
       - path: Ply/Core/ShowOrder.swift
       - path: Ply/Core/PeopleQuery.swift
+      - path: Ply/Core/PlaybackPresentation.swift
       - path: Ply/App/LibraryModel.swift
       - path: Ply/Core/Discovery.swift
       - path: PlyCoreTests

@@ -39,8 +39,9 @@ TVSIMID := $(shell xcrun simctl list devices available | grep -F -e "    $(TVSIM
 
 all: build
 
-# Regenerated whenever the spec or any source file (added, removed, changed) is newer.
-Ply.xcodeproj: project.yml $(shell find Ply PlyTV PlyCoreTests)
+# Regenerated whenever the spec or any source file (added, removed, changed) is newer. A name with
+# a space (an asset catalog's "App Icon - App Store.imagestack") is escaped: make would split it.
+Ply.xcodeproj: project.yml $(shell find Ply PlyTV PlyCoreTests -print | sed 's/ /\\ /g')
 	@$(MAKE) --no-print-directory toolchain
 	PLY_TEAM="$(TEAM)" xcodegen generate --quiet
 	@touch $@

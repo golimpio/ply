@@ -8,6 +8,8 @@ struct ItemDetailView: View {
     let id: Int64
     @Environment(Connection.self) private var connection
     @Environment(AppModel.self) private var model
+    /// The player of this window, not another one's.
+    @Environment(PlaybackScene.self) private var playbackScene
     @State private var detail: ItemDetail?
     @State private var error: String?
     @State private var audioIndex: Int?
@@ -254,7 +256,8 @@ struct ItemDetailView: View {
     }
 
     private func play(from start: Double, receiver: Receiver? = nil) {
-        model.play(PlayRequest(itemId: id, startSec: start, audioIndex: audioIndex, subtitle: subtitle, receiver: receiver))
+        model.play(PlayRequest(itemId: id, startSec: start, audioIndex: audioIndex, subtitle: subtitle, receiver: receiver),
+                   in: playbackScene)
     }
 
     private func setWatched(_ watched: Bool) {

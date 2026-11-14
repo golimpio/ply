@@ -441,6 +441,11 @@ checks both.
   (`SWIFT_EMIT_LOC_STRINGS`; `xcodebuild -exportLocalizations` lists them, 83 today) and both apps ship, so a new
   language is a catalog entry, not a code change; the app is English-only until one is added. Still to come: the
   VoiceOver audit of every page and the Dynamic Type pass at the largest sizes.
+- **iPad:** several windows at once (the generated scene manifest allows them). `RootView` gives each window its
+  own `PlaybackScene` — its own AVKit presenter and its own hold on the play — while one `AppModel` keeps the single
+  connection, feed, remote commands and play; a play started in one window ends the one in another where it was
+  shown, and a remote command's play lands in the window that started the last one, or the newest to appear
+  (`AppModel.register`). Pinned by `PlaybackPresentationTests`; two windows at once cannot be driven from a terminal.
 - **Tests and CI:** `make test` runs the Foundation-only core on this Mac as a macOS logic test: no simulator, no
   test host, so it works where Xcode 27's simulator test launch does not. It covers the SSE and WebVTT parsers, RFC
   3339 and path handling, the API client's requests and answers (with a URLProtocol stub), the models the server
