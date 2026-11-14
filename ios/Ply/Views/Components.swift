@@ -150,6 +150,8 @@ struct RemoteImage: View {
                 }
             }
             .clipped()
+            // The card around it says what it is; the picture itself says nothing.
+            .accessibilityHidden(true)
     }
 }
 
@@ -164,6 +166,7 @@ struct ProgressBar: View {
             }
         }
         .frame(height: 4)
+        .accessibilityHidden(true)
     }
 }
 
@@ -174,6 +177,7 @@ struct WatchedBadge: View {
             .foregroundStyle(.white, .tint)
             .font(.title3)
             .padding(6)
+            .accessibilityHidden(true)
     }
 }
 
@@ -200,6 +204,22 @@ struct PosterCard: View {
         .contentShape(.rect)
         // The TV's focus effect: a card that lifts and highlights as the focus engine reaches it.
         .hoverEffect()
+        // One element to VoiceOver: the title, and in words what the badge and the bar show.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(spoken)
+    }
+
+    /// What the picture's overlays say, in words.
+    private var spoken: String {
+        var parts: [String] = []
+        if let caption, !caption.isEmpty { parts.append(caption) }
+        if watched {
+            parts.append("Watched")
+        } else if fraction != nil {
+            parts.append("In progress")
+        }
+        return parts.joined(separator: ", ")
     }
 }
 
@@ -220,6 +240,26 @@ struct LandscapeCard: View {
         }
         .contentShape(.rect)
         .hoverEffect()
+        // One element to VoiceOver: the title, then the line under it and the watch state.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(item.isEpisode ? item.show ?? item.title : item.title)
+        .accessibilityValue(spoken)
+    }
+
+    /// The card's second line, and whether it was started or watched, in words.
+    private var spoken: String {
+        var parts: [String] = []
+        if item.isEpisode {
+            parts.append(Format.facts(item.episodeCode, item.episodeTitle))
+        } else if let year = item.year {
+            parts.append(String(year))
+        }
+        if item.isWatched {
+            parts.append("Watched")
+        } else if item.fraction != nil {
+            parts.append("In progress")
+        }
+        return parts.joined(separator: ", ")
     }
 }
 

@@ -275,6 +275,10 @@ struct BrowseRow: View, Identifiable {
             .padding(.horizontal)
             .padding(.vertical, 4)
             .contentShape(.rect)
+            // One line to VoiceOver: the title, and what the line under it says.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(title)
+            .accessibilityValue(subtitle ?? "")
         }
         .buttonStyle(.plain)
     }

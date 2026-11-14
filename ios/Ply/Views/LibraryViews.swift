@@ -338,6 +338,8 @@ struct FilterChip: View {
                 #endif
         }
         .buttonStyle(.plain)
+        // A filter is a toggle, and VoiceOver should say whether it is on.
+        .accessibilityAddTraits(isOn ? [.isSelected] : [])
     }
 }
 
