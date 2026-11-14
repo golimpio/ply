@@ -454,7 +454,39 @@ checks both.
   clients rank a search alike), a show's newest file, and that the episodes are fetched once, when a page asks,
   not with Home (`LibraryModelTests`). The app-hosted XCTest target is not used. CI runs these
   tests and a generic iOS and tvOS build with Xcode 26+ (`make ci-build tv`).
+- **Distribution:** the apps ship as `com.ply.ios` and `com.ply.tvos` (`MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` in
+  `project.yml`), with the icon family (light, dark and tinted in `Ply/Assets.xcassets/AppIcon.appiconset`, the TV's
+  layered brand assets), a launch screen in the app's own velvet (`UILaunchScreen` in `Ply/Info.plist`,
+  `LaunchBackground`), the privacy manifest (`PrivacyInfo.xcprivacy`), and `ITSAppUsesNonExemptEncryption` false.
+  `make device TEAM=<team>` builds a signed device binary, but this machine has no Apple ID in Xcode and no
+  provisioning profile for `com.ply.ios`, so that step and TestFlight need the owner's account. The checklist, in
+  order: an App Store Connect app record for each bundle id; the team in Xcode's Accounts (or `make device TEAM=`);
+  a first signed archive (Product > Archive, or `xcodebuild -exportArchive`); TestFlight with an internal tester;
+  then the store listing (screenshots at the required sizes, description, privacy answers drawn from the privacy
+  manifest, and tvOS's own listing). Nothing here can be done from a terminal without that account.
 - **Not in the apps:** owner-only administration (pair/revoke, settings, folders, queue/jobs, scanning, metadata
   editing/matching, subtitle search/download) stays in the web UI; a paired device's token gets 403 by this
   contract. Chromecast, Android, watchOS and visionOS are separate clients, not this app.
 - **Not yet:** AirPlay and Picture in Picture on real hardware.
+
+## Offline downloads — an assessment (2026-11-15, not built)
+The apps can browse, search and play over the network, and nothing more: there is no download, no offline library
+and no queue of pending progress. What the server has today is enough to *move bytes* — `GET /api/items/{id}/file`
+answers `Range` and `ETag`, so a client can fetch and resume a direct-playable file, and sidecar subtitles are
+`/api/items/{id}/subtitles/{key}.vtt` — but not enough to promise a download that works:
+- **A plan, not a URL.** A downloader needs the exact byte count, a checksum to verify a resumed file, and the
+  sidecar subtitles that go with the item. `size` is on the summary, but there is no plan endpoint and no checksum,
+  and a resumed transfer cannot be trusted without one.
+- **Portable copies.** A file that only remuxes or transcodes (HEVC 10-bit, TrueHD) plays through a live HLS session
+  that dies on idle; saving it means either storing the segments as a private format or asking the server for a
+  portable encode. Neither exists, and `/playback` is built for now, not for a queue.
+- **Watch state offline.** Playback offline would write progress and watched marks with nowhere to send them: the
+  client needs a durable outbox and the server's `PUT /progress` and `PUT /watched` are idempotent enough to replay,
+  but the client has no such queue today.
+- **Storage and eviction.** The library is personal, so there is no licence to enforce; the policy is the person's
+  disk budget and their choice of what to keep, which is a UI and a storage budget rather than a server problem.
+Recommendation: a server milestone first (a download plan with size and checksum, a portable-copy endpoint, and
+subtitle sidecars in the plan), then the client (background `URLSession`, a storage budget, an offline badge in the
+library, and the progress outbox). Building a client downloader against `/file` alone would silently fail on exactly
+the files a phone cannot direct-play.
+
