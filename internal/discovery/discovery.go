@@ -5,8 +5,12 @@ package discovery
 import (
 	"fmt"
 	"net"
+	"os"
+	"os/exec"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 )
 
 // ServiceType is the DNS-SD service type clients browse for.
@@ -14,7 +18,9 @@ const ServiceType = "_ply._tcp"
 
 // Advertiser is a registered mDNS service.
 type Advertiser struct {
-	r *responder
+	r    *responder
+	cmd  *exec.Cmd
+	once sync.Once
 }
 
 // Service is what the advertisement says of this server.
@@ -30,10 +36,15 @@ type Service struct {
 }
 
 // Advertise registers a _ply._tcp service with the TXT records of txtRecords.
-// It returns once the socket is open; the name is probed for and announced in
-// the background, and taken as "name (2)" (and so on) while another responder
-// has it.
+// Where the system has a registrar of its own, it is used (macOS); elsewhere
+// ply's responder probes for the name and announces it in the background.
 func Advertise(s Service) (*Advertiser, error) {
+	return advertise(s)
+}
+
+// advertiseMDNS is the Go responder used where the system's registrar cannot be
+// borrowed.
+func advertiseMDNS(s Service) (*Advertiser, error) {
 	// A dot would split the instance name into extra labels; and it is one label at most.
 	instance := fitLabel(strings.ReplaceAll(s.Name, ".", "-"), "")
 	z, err := newZone(instance, hostLabel(), s.Port, txtRecords(s))
@@ -63,9 +74,24 @@ func txtRecords(s Service) []string {
 // Shutdown says goodbye and closes the responder. It is safe on a nil Advertiser,
 // and to call twice.
 func (a *Advertiser) Shutdown() {
-	if a != nil && a.r != nil {
-		a.r.shutdown()
+	if a == nil {
+		return
 	}
+	a.once.Do(func() {
+		if a.r != nil {
+			a.r.shutdown()
+		}
+		if a.cmd != nil && a.cmd.Process != nil {
+			_ = a.cmd.Process.Signal(os.Interrupt)
+			done := make(chan struct{})
+			go func() { _ = a.cmd.Wait(); close(done) }()
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				_ = a.cmd.Process.Kill()
+			}
+		}
+	})
 }
 
 // URLs returns the http URLs clients can use to reach a listener bound to
