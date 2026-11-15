@@ -5,6 +5,8 @@ struct OrganicFannedDeckView: View {
     @Environment(AppModel.self) private var model
     @Environment(PlaybackScene.self) private var playbackScene
     @State private var selectedIndex: Int = 0
+    @State private var dragOffset: CGFloat = 0
+    @State private var isDragging: Bool = false
 
     private var count: Int { items.count }
 
@@ -17,7 +19,7 @@ struct OrganicFannedDeckView: View {
         #if os(tvOS)
         280
         #else
-        195
+        205
         #endif
     }
 
@@ -25,22 +27,22 @@ struct OrganicFannedDeckView: View {
         #if os(tvOS)
         400
         #else
-        290
+        300
         #endif
     }
 
     private var horizontalOffset: CGFloat {
         #if os(tvOS)
-        65
+        70
         #else
-        44
+        52
         #endif
     }
 
     var body: some View {
         if count > 0, let active = activeItem {
             VStack(spacing: 16) {
-                // The Fanned Deck Stage
+                // The Fanned Deck Stage - Perfectly centered horizontally across the full screen width
                 ZStack {
                     // Ambient backlight behind the active card
                     RadialGradient(
@@ -51,66 +53,111 @@ struct OrganicFannedDeckView: View {
                         ],
                         center: .center,
                         startRadius: 0,
-                        endRadius: 130
+                        endRadius: 140
                     )
                     .frame(width: cardWidth * 1.3, height: cardHeight * 0.6)
                     .blur(radius: 35)
-                    .offset(y: 20)
+                    .offset(x: dragOffset * 0.5, y: 20)
 
                     // Left Tilted Card (-13°)
                     if count > 1 {
                         let leftIdx = (selectedIndex - 1 + count) % count
+                        let progress = min(1, max(-1, dragOffset / 150))
+                        let xOffset = -horizontalOffset + (progress > 0 ? progress * horizontalOffset : dragOffset * 0.2)
+                        let rot = -13.0 + (progress > 0 ? progress * 13.0 : 0)
+                        let scale = 0.88 + (progress > 0 ? progress * 0.16 : 0)
+                        let opac = 0.72 + (progress > 0 ? progress * 0.28 : max(-0.72, progress * 0.72))
+
                         deckCard(items[leftIdx], isCenter: false)
-                            .rotationEffect(.degrees(-13))
-                            .offset(x: -horizontalOffset, y: 12)
-                            .scaleEffect(0.88)
-                            .opacity(0.72)
+                            .rotationEffect(.degrees(rot))
+                            .offset(x: xOffset, y: 14)
+                            .scaleEffect(scale)
+                            .opacity(max(0, opac))
                             .brightness(-0.15)
-                            .zIndex(2)
+                            .zIndex(progress > 0.5 ? 10 : 2)
                             .onTapGesture {
-                                withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
+                                withAnimation(.spring(response: 0.38, dampingFraction: 0.8)) {
                                     selectedIndex = leftIdx
                                 }
+                                #if os(iOS)
+                                UISelectionFeedbackGenerator().selectionChanged()
+                                #endif
                             }
                     }
 
                     // Right Tilted Card (+13°)
                     if count > 2 {
                         let rightIdx = (selectedIndex + 1) % count
+                        let progress = min(1, max(-1, dragOffset / 150))
+                        let xOffset = horizontalOffset + (progress < 0 ? progress * horizontalOffset : dragOffset * 0.2)
+                        let rot = 13.0 + (progress < 0 ? progress * 13.0 : 0)
+                        let scale = 0.88 + (progress < 0 ? -progress * 0.16 : 0)
+                        let opac = 0.72 + (progress < 0 ? -progress * 0.28 : min(0, -progress * 0.72))
+
                         deckCard(items[rightIdx], isCenter: false)
-                            .rotationEffect(.degrees(13))
-                            .offset(x: horizontalOffset, y: 12)
-                            .scaleEffect(0.88)
-                            .opacity(0.72)
+                            .rotationEffect(.degrees(rot))
+                            .offset(x: xOffset, y: 14)
+                            .scaleEffect(scale)
+                            .opacity(max(0, opac))
                             .brightness(-0.15)
-                            .zIndex(2)
+                            .zIndex(progress < -0.5 ? 10 : 2)
                             .onTapGesture {
-                                withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
+                                withAnimation(.spring(response: 0.38, dampingFraction: 0.8)) {
                                     selectedIndex = rightIdx
                                 }
+                                #if os(iOS)
+                                UISelectionFeedbackGenerator().selectionChanged()
+                                #endif
                             }
                     }
 
                     // Center Elevated Card (0°)
+                    let progress = min(1, max(-1, dragOffset / 150))
+                    let centerRot = progress * 13.0
+                    let centerScale = 1.04 - abs(progress) * 0.16
+                    let centerOpacity = 1.0 - abs(progress) * 0.25
+
                     deckCard(active, isCenter: true)
-                        .offset(x: 0, y: -4)
-                        .scaleEffect(1.04)
-                        .zIndex(10)
+                        .rotationEffect(.degrees(centerRot))
+                        .offset(x: dragOffset * 0.7, y: -4)
+                        .scaleEffect(centerScale)
+                        .opacity(centerOpacity)
+                        .zIndex(abs(progress) > 0.5 ? 2 : 10)
                 }
+                .frame(maxWidth: .infinity, alignment: .center)
                 .frame(height: cardHeight + 40)
                 .contentShape(Rectangle())
                 #if os(iOS)
-                .gesture(
-                    DragGesture(minimumDistance: 25)
+                .highPriorityGesture(
+                    DragGesture(minimumDistance: 10)
+                        .onChanged { value in
+                            if abs(value.translation.width) > abs(value.translation.height) {
+                                isDragging = true
+                                dragOffset = value.translation.width
+                            }
+                        }
                         .onEnded { value in
-                            if value.translation.width < -30 {
-                                withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
+                            let threshold: CGFloat = 45
+                            let velocity = value.predictedEndTranslation.width - value.translation.width
+                            if value.translation.width < -threshold || velocity < -70 {
+                                withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) {
                                     selectedIndex = (selectedIndex + 1) % count
+                                    dragOffset = 0
                                 }
-                            } else if value.translation.width > 30 {
-                                withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
+                                UISelectionFeedbackGenerator().selectionChanged()
+                            } else if value.translation.width > threshold || velocity > 70 {
+                                withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) {
                                     selectedIndex = (selectedIndex - 1 + count) % count
+                                    dragOffset = 0
                                 }
+                                UISelectionFeedbackGenerator().selectionChanged()
+                            } else {
+                                withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) {
+                                    dragOffset = 0
+                                }
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                isDragging = false
                             }
                         }
                 )
@@ -145,9 +192,12 @@ struct OrganicFannedDeckView: View {
                                         .fill(Color.white.opacity(0.25))
                                         .frame(width: 6, height: 6)
                                         .onTapGesture {
-                                            withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
+                                            withAnimation(.spring(response: 0.38, dampingFraction: 0.8)) {
                                                 selectedIndex = idx
                                             }
+                                            #if os(iOS)
+                                            UISelectionFeedbackGenerator().selectionChanged()
+                                            #endif
                                         }
                                 }
                             }
@@ -156,7 +206,9 @@ struct OrganicFannedDeckView: View {
                     }
                 }
                 .padding(.horizontal, 20)
+                .frame(maxWidth: .infinity, alignment: .center)
             }
+            .frame(maxWidth: .infinity, alignment: .center)
         }
     }
 
@@ -174,7 +226,7 @@ struct OrganicFannedDeckView: View {
                     .shadow(color: .black.opacity(isCenter ? 0.9 : 0.6), radius: isCenter ? 24 : 12, y: isCenter ? 12 : 6)
             }
             .buttonStyle(.plain)
-            .disabled(!isCenter)
+            .disabled(!isCenter || isDragging)
 
             // Bottom gradient on center card for contrast
             if isCenter {
@@ -212,6 +264,7 @@ struct OrganicFannedDeckView: View {
                 .buttonStyle(.plain)
                 .padding(14)
                 .hoverEffect()
+                .disabled(isDragging)
             }
         }
     }
