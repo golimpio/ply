@@ -459,6 +459,8 @@ struct MoviesView: View {
     @Environment(Connection.self) private var connection
     @State private var query = ""
     @State private var sort: MovieSort = .title
+    @State private var selectedGenre: String? = nil
+    @State private var selectedDecade: DecadeFilter = .all
     @State private var only4K = false
     @State private var onlyHDR = false
     @State private var onlyUnwatched = false
@@ -469,10 +471,33 @@ struct MoviesView: View {
     @State private var hideTask: Task<Void, Never>? = nil
     #endif
 
+    private var availableGenres: [String] {
+        let all = connection.library.movies.flatMap { $0.genres ?? [] }
+        return Array(Set(all)).sorted()
+    }
+
+    private var hasActiveFilters: Bool {
+        selectedGenre != nil || selectedDecade != .all || only4K || onlyHDR || onlyUnwatched
+    }
+
+    private func resetFilters() {
+        selectedGenre = nil
+        selectedDecade = .all
+        only4K = false
+        onlyHDR = false
+        onlyUnwatched = false
+    }
+
     private var filteredMovies: [Item] {
         var list = connection.library.movies
         if !query.isEmpty {
             list = list.filter { $0.title.localizedStandardContains(query) }
+        }
+        if let selectedGenre {
+            list = list.filter { $0.genres?.contains(selectedGenre) == true }
+        }
+        if selectedDecade != .all {
+            list = list.filter { selectedDecade.matches(year: $0.year) }
         }
         if only4K {
             list = list.filter { $0.is4K }
@@ -576,9 +601,29 @@ struct MoviesView: View {
                                 }
                                 .buttonStyle(.bordered)
 
+                                if let genre = selectedGenre {
+                                    ActiveFilterChip(title: genre) {
+                                        selectedGenre = nil
+                                    }
+                                }
+
+                                if selectedDecade != .all {
+                                    ActiveFilterChip(title: selectedDecade.rawValue) {
+                                        selectedDecade = .all
+                                    }
+                                }
+
                                 FilterChip(title: "4K", isOn: $only4K)
                                 FilterChip(title: "HDR", isOn: $onlyHDR)
                                 FilterChip(title: "Unwatched", isOn: $onlyUnwatched)
+
+                                if hasActiveFilters {
+                                    Button("Clear all") {
+                                        resetFilters()
+                                    }
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                }
                             }
                             .padding(.horizontal)
                             .padding(.top, 4)
@@ -624,7 +669,7 @@ struct MoviesView: View {
                 }
             }
             .overlay {
-                if (!query.isEmpty || only4K || onlyHDR || onlyUnwatched) && filteredMovies.isEmpty {
+                if (!query.isEmpty || hasActiveFilters) && filteredMovies.isEmpty {
                     ContentUnavailableView.search(text: query.isEmpty ? "filtered films" : query)
                 } else {
                     LibraryStatus(library: library, isEmpty: library.movies.isEmpty)
@@ -638,9 +683,48 @@ struct MoviesView: View {
                     PlyBrand(size: 28)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Text("Films")
-                        .font(.title3.bold())
-                        .foregroundStyle(.primary)
+                    Menu {
+                        Section("Sort By") {
+                            Picker("Sort", selection: $sort) {
+                                ForEach(MovieSort.allCases) { Text($0.rawValue).tag($0) }
+                            }
+                        }
+
+                        if !availableGenres.isEmpty {
+                            Section("Genre") {
+                                Picker("Genre", selection: $selectedGenre) {
+                                    Text("All Genres").tag(String?.none)
+                                    ForEach(availableGenres, id: \.self) { genre in
+                                        Text(genre).tag(Optional(genre))
+                                    }
+                                }
+                            }
+                        }
+
+                        Section("Release Era") {
+                            Picker("Era", selection: $selectedDecade) {
+                                ForEach(DecadeFilter.allCases) { Text($0.rawValue).tag($0) }
+                            }
+                        }
+
+                        Section("Attributes") {
+                            Toggle("4K UHD", isOn: $only4K)
+                            Toggle("HDR", isOn: $onlyHDR)
+                            Toggle("Unwatched", isOn: $onlyUnwatched)
+                        }
+
+                        if hasActiveFilters {
+                            Section {
+                                Button(role: .destructive) {
+                                    resetFilters()
+                                } label: {
+                                    Label("Reset Filters", systemImage: "arrow.counterclockwise")
+                                }
+                            }
+                        }
+                    } label: {
+                        FilterButtonLabel(hasActive: hasActiveFilters)
+                    }
                 }
                 #endif
             }
@@ -668,6 +752,7 @@ struct ShowsView: View {
     @Environment(Connection.self) private var connection
     @State private var query = ""
     @State private var sort: ShowSort = .title
+    @State private var selectedDecade: DecadeFilter = .all
     @State private var onlyUnwatched = false
     #if os(iOS)
     @State private var isScrubberVisible = false
@@ -676,10 +761,22 @@ struct ShowsView: View {
     @State private var hideTask: Task<Void, Never>? = nil
     #endif
 
+    private var hasActiveFilters: Bool {
+        selectedDecade != .all || onlyUnwatched
+    }
+
+    private func resetFilters() {
+        selectedDecade = .all
+        onlyUnwatched = false
+    }
+
     private var filteredShows: [ShowSummary] {
         var list = connection.library.shows
         if !query.isEmpty {
             list = list.filter { $0.show.localizedStandardContains(query) }
+        }
+        if selectedDecade != .all {
+            list = list.filter { selectedDecade.matches(year: $0.year) }
         }
         if onlyUnwatched {
             list = list.filter { !$0.allWatched }
@@ -780,7 +877,21 @@ struct ShowsView: View {
                                 }
                                 .buttonStyle(.bordered)
 
+                                if selectedDecade != .all {
+                                    ActiveFilterChip(title: selectedDecade.rawValue) {
+                                        selectedDecade = .all
+                                    }
+                                }
+
                                 FilterChip(title: "Unwatched", isOn: $onlyUnwatched)
+
+                                if hasActiveFilters {
+                                    Button("Clear all") {
+                                        resetFilters()
+                                    }
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                }
                             }
                             .padding(.horizontal)
                             .padding(.top, 4)
@@ -829,7 +940,7 @@ struct ShowsView: View {
                 }
             }
             .overlay {
-                if (!query.isEmpty || onlyUnwatched) && filteredShows.isEmpty {
+                if (!query.isEmpty || hasActiveFilters) && filteredShows.isEmpty {
                     ContentUnavailableView.search(text: query.isEmpty ? "filtered series" : query)
                 } else {
                     LibraryStatus(library: library, isEmpty: library.shows.isEmpty)
@@ -847,9 +958,35 @@ struct ShowsView: View {
                     PlyBrand(size: 28)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Text("Series")
-                        .font(.title3.bold())
-                        .foregroundStyle(.primary)
+                    Menu {
+                        Section("Sort By") {
+                            Picker("Sort", selection: $sort) {
+                                ForEach(ShowSort.allCases) { Text($0.rawValue).tag($0) }
+                            }
+                        }
+
+                        Section("Release Era") {
+                            Picker("Era", selection: $selectedDecade) {
+                                ForEach(DecadeFilter.allCases) { Text($0.rawValue).tag($0) }
+                            }
+                        }
+
+                        Section("Attributes") {
+                            Toggle("Unwatched Only", isOn: $onlyUnwatched)
+                        }
+
+                        if hasActiveFilters {
+                            Section {
+                                Button(role: .destructive) {
+                                    resetFilters()
+                                } label: {
+                                    Label("Reset Filters", systemImage: "arrow.counterclockwise")
+                                }
+                            }
+                        }
+                    } label: {
+                        FilterButtonLabel(hasActive: hasActiveFilters)
+                    }
                 }
                 #endif
             }
@@ -862,7 +999,6 @@ struct ShowsView: View {
             .plyDestinations()
         }
     }
-
     private func caption(_ show: ShowSummary) -> String {
         let left = show.episodeCount - (show.watchedEpisodes ?? 0)
         if left > 0 && left < show.episodeCount { return "\(left) left" }
@@ -904,6 +1040,87 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
         }
+    }
+}
+enum DecadeFilter: String, CaseIterable, Identifiable {
+    case all = "All Eras"
+    case twenties = "2020s"
+    case tens = "2010s"
+    case zeros = "2000s"
+    case nineties = "1990s"
+    case eighties = "1980s"
+    case classic = "Pre-1980"
+
+    var id: String { rawValue }
+
+    func matches(year: Int?) -> Bool {
+        guard let year else { return false }
+        switch self {
+        case .all: return true
+        case .twenties: return year >= 2020
+        case .tens: return year >= 2010 && year < 2020
+        case .zeros: return year >= 2000 && year < 2010
+        case .nineties: return year >= 1990 && year < 2000
+        case .eighties: return year >= 1980 && year < 1990
+        case .classic: return year < 1980
+        }
+    }
+}
+
+/// An active filter indicator chip with a quick dismissal '✕' button.
+struct ActiveFilterChip: View {
+    let title: String
+    let onRemove: () -> Void
+
+    var body: some View {
+        Button(action: onRemove) {
+            HStack(spacing: 4) {
+                Text(title)
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+            }
+            .font(.footnote.weight(.medium))
+            #if os(iOS)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Color.orange.opacity(0.18), in: .capsule)
+            .overlay(
+                Capsule().strokeBorder(Color.orange.opacity(0.4), lineWidth: 0.8)
+            )
+            .foregroundStyle(Color.orange)
+            #else
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(Color.orange.opacity(0.3), in: .capsule)
+            .foregroundStyle(Color.white)
+            #endif
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// A glass capsule label for the top-trailing Filter button in library navigation bars.
+struct FilterButtonLabel: View {
+    let hasActive: Bool
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: hasActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                .font(.system(size: 14, weight: .semibold))
+            Text("Filter")
+                .font(.subheadline.weight(.medium))
+        }
+        .foregroundStyle(hasActive ? Color.orange : Color.white)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            Capsule()
+                .fill(hasActive ? Color.orange.opacity(0.18) : Color.white.opacity(0.08))
+                .overlay(
+                    Capsule()
+                        .strokeBorder(hasActive ? Color.orange.opacity(0.4) : Color.white.opacity(0.12), lineWidth: 0.8)
+                )
+        )
     }
 }
 

@@ -191,16 +191,19 @@ struct FloatingTabBar: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
-        .background(
+        .background {
             Capsule()
-                .fill(Color.black.opacity(0.82))
-                .background(.ultraThinMaterial, in: Capsule())
-                .overlay(
+                .fill(.ultraThinMaterial)
+                .overlay {
                     Capsule()
-                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.8)
-                )
-                .shadow(color: Color.black.opacity(0.6), radius: 20, y: 8)
-        )
+                        .fill(Color.black.opacity(0.35))
+                }
+                .overlay {
+                    Capsule()
+                        .strokeBorder(Color.white.opacity(0.15), lineWidth: 0.8)
+                }
+                .shadow(color: Color.black.opacity(0.2), radius: 8, y: 0)
+        }
         .frame(maxWidth: 360)
     }
 }

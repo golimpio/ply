@@ -95,11 +95,6 @@ struct BrowseView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     PlyBrand(size: 28)
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Text("Search")
-                        .font(.title3.bold())
-                        .foregroundStyle(.primary)
-                }
                 #endif
             }
             #if os(iOS)
