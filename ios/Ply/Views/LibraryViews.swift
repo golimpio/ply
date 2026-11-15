@@ -462,6 +462,12 @@ struct MoviesView: View {
     @State private var only4K = false
     @State private var onlyHDR = false
     @State private var onlyUnwatched = false
+    #if os(iOS)
+    @State private var isScrubberVisible = false
+    @State private var scrubProgress: CGFloat = 0
+    @State private var currentScrubLabel = ""
+    @State private var hideTask: Task<Void, Never>? = nil
+    #endif
 
     private var filteredMovies: [Item] {
         var list = connection.library.movies
@@ -492,25 +498,45 @@ struct MoviesView: View {
         }
     }
 
-    private var availableLetters: [String] {
-        let letters = Set(filteredMovies.map { alphabetLetter(of: $0.sortTitle ?? $0.title) })
-        return letters.sorted { a, b in
-            if a == "#" { return true }
-            if b == "#" { return false }
-            return a < b
+    private func label(for movie: Item) -> String {
+        switch sort {
+        case .title:
+            return alphabetLetter(of: movie.sortTitle ?? movie.title)
+        case .year:
+            return movie.year.map(String.init) ?? "#"
+        case .rating:
+            return movie.rating.map { "★\($0.label)" } ?? "•"
+        case .added, .duration:
+            return alphabetLetter(of: movie.sortTitle ?? movie.title)
         }
     }
 
-    private var firstMovieIdByLetter: [String: Int64] {
-        var map: [String: Int64] = [:]
-        for movie in filteredMovies {
-            let letter = alphabetLetter(of: movie.sortTitle ?? movie.title)
-            if map[letter] == nil {
-                map[letter] = movie.id
+    #if os(iOS)
+    private func handleScroll(offset: CGFloat) {
+        guard filteredMovies.count >= 8 else { return }
+        if !isScrubberVisible {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isScrubberVisible = true
             }
         }
-        return map
+        let rows = CGFloat((filteredMovies.count + 2) / 3)
+        let estHeight = max(1, rows * 210)
+        let p = max(0, min(1, -offset / estHeight))
+        scrubProgress = p
+        let idx = max(0, min(filteredMovies.count - 1, Int(p * CGFloat(filteredMovies.count - 1))))
+        currentScrubLabel = label(for: filteredMovies[idx])
+
+        hideTask?.cancel()
+        hideTask = Task {
+            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            if !Task.isCancelled {
+                withAnimation(.easeOut(duration: 0.35)) {
+                    isScrubberVisible = false
+                }
+            }
+        }
     }
+    #endif
 
     var body: some View {
         let library = connection.library
@@ -518,6 +544,16 @@ struct MoviesView: View {
             ScrollViewReader { proxy in
                 ZStack(alignment: .trailing) {
                     ScrollView {
+                        #if os(iOS)
+                        GeometryReader { geo in
+                            Color.clear.preference(
+                                key: ScrollOffsetPreferenceKey.self,
+                                value: geo.frame(in: .named("MoviesScroll")).minY
+                            )
+                        }
+                        .frame(height: 0)
+                        #endif
+
                         #if os(tvOS)
                         HStack(spacing: 8) {
                             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -559,20 +595,30 @@ struct MoviesView: View {
                             }
                         }
                         .padding()
-                        .padding(.trailing, sort == .title && availableLetters.count > 1 ? 16 : 0)
                         #if os(iOS)
                         .padding(.bottom, 74)
                         #endif
                     }
+                    .coordinateSpace(name: "MoviesScroll")
+                    #if os(iOS)
+                    .onPreferenceChange(ScrollOffsetPreferenceKey.self) { offset in
+                        handleScroll(offset: offset)
+                    }
+                    #endif
 
                     #if os(iOS)
-                    if sort == .title && availableLetters.count > 1 {
-                        AlphabetJumpRail(letters: availableLetters) { letter in
-                            if let id = firstMovieIdByLetter[letter] {
-                                proxy.scrollTo(id, anchor: .top)
-                            }
-                        }
-                        .padding(.trailing, 2)
+                    if filteredMovies.count >= 8 {
+                        FastScrollScrubber(
+                            itemCount: filteredMovies.count,
+                            currentLabel: currentScrubLabel,
+                            onScrub: { index in
+                                let movie = filteredMovies[index]
+                                currentScrubLabel = label(for: movie)
+                                proxy.scrollTo(movie.id, anchor: .top)
+                            },
+                            isVisible: $isScrubberVisible,
+                            progress: $scrubProgress
+                        )
                     }
                     #endif
                 }
@@ -623,6 +669,12 @@ struct ShowsView: View {
     @State private var query = ""
     @State private var sort: ShowSort = .title
     @State private var onlyUnwatched = false
+    #if os(iOS)
+    @State private var isScrubberVisible = false
+    @State private var scrubProgress: CGFloat = 0
+    @State private var currentScrubLabel = ""
+    @State private var hideTask: Task<Void, Never>? = nil
+    #endif
 
     private var filteredShows: [ShowSummary] {
         var list = connection.library.shows
@@ -659,25 +711,36 @@ struct ShowsView: View {
         }
     }
 
-    private var availableLetters: [String] {
-        let letters = Set(filteredShows.map { alphabetLetter(of: $0.sortTitle ?? $0.show) })
-        return letters.sorted { a, b in
-            if a == "#" { return true }
-            if b == "#" { return false }
-            return a < b
-        }
+    private func label(for show: ShowSummary) -> String {
+        return alphabetLetter(of: show.sortTitle ?? show.show)
     }
 
-    private var firstShowNameByLetter: [String: String] {
-        var map: [String: String] = [:]
-        for show in filteredShows {
-            let letter = alphabetLetter(of: show.sortTitle ?? show.show)
-            if map[letter] == nil {
-                map[letter] = show.show
+    #if os(iOS)
+    private func handleScroll(offset: CGFloat) {
+        guard filteredShows.count >= 8 else { return }
+        if !isScrubberVisible {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isScrubberVisible = true
             }
         }
-        return map
+        let rows = CGFloat((filteredShows.count + 2) / 3)
+        let estHeight = max(1, rows * 210)
+        let p = max(0, min(1, -offset / estHeight))
+        scrubProgress = p
+        let idx = max(0, min(filteredShows.count - 1, Int(p * CGFloat(filteredShows.count - 1))))
+        currentScrubLabel = label(for: filteredShows[idx])
+
+        hideTask?.cancel()
+        hideTask = Task {
+            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            if !Task.isCancelled {
+                withAnimation(.easeOut(duration: 0.35)) {
+                    isScrubberVisible = false
+                }
+            }
+        }
     }
+    #endif
 
     var body: some View {
         let library = connection.library
@@ -685,6 +748,16 @@ struct ShowsView: View {
             ScrollViewReader { proxy in
                 ZStack(alignment: .trailing) {
                     ScrollView {
+                        #if os(iOS)
+                        GeometryReader { geo in
+                            Color.clear.preference(
+                                key: ScrollOffsetPreferenceKey.self,
+                                value: geo.frame(in: .named("ShowsScroll")).minY
+                            )
+                        }
+                        .frame(height: 0)
+                        #endif
+
                         #if os(tvOS)
                         HStack(spacing: 8) {
                             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -727,20 +800,30 @@ struct ShowsView: View {
                             }
                         }
                         .padding()
-                        .padding(.trailing, sort == .title && availableLetters.count > 1 ? 16 : 0)
                         #if os(iOS)
                         .padding(.bottom, 74)
                         #endif
                     }
+                    .coordinateSpace(name: "ShowsScroll")
+                    #if os(iOS)
+                    .onPreferenceChange(ScrollOffsetPreferenceKey.self) { offset in
+                        handleScroll(offset: offset)
+                    }
+                    #endif
 
                     #if os(iOS)
-                    if sort == .title && availableLetters.count > 1 {
-                        AlphabetJumpRail(letters: availableLetters) { letter in
-                            if let name = firstShowNameByLetter[letter] {
-                                proxy.scrollTo(name, anchor: .top)
-                            }
-                        }
-                        .padding(.trailing, 2)
+                    if filteredShows.count >= 8 {
+                        FastScrollScrubber(
+                            itemCount: filteredShows.count,
+                            currentLabel: currentScrubLabel,
+                            onScrub: { index in
+                                let show = filteredShows[index]
+                                currentScrubLabel = label(for: show)
+                                proxy.scrollTo(show.show, anchor: .top)
+                            },
+                            isVisible: $isScrubberVisible,
+                            progress: $scrubProgress
+                        )
                     }
                     #endif
                 }

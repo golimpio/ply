@@ -79,73 +79,106 @@ func alphabetLetter(of title: String) -> String {
 }
 
 #if os(iOS)
-/// A vertical A to Z fast-scrolling jump rail along the edge of the list.
-struct AlphabetJumpRail: View {
-    let letters: [String]
-    let onSelect: (String) -> Void
-    @State private var draggingLetter: String? = nil
+struct ScrollOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+/// A Plex-style fast-scrolling vertical slider docked along the right edge of the screen.
+/// Appears when scrolling, featuring an edge-docked handle with vertical arrows and a floating white indicator bubble.
+struct FastScrollScrubber: View {
+    let itemCount: Int
+    let currentLabel: String
+    let onScrub: (Int) -> Void
+
+    @Binding var isVisible: Bool
+    @Binding var progress: CGFloat
+    @State private var isDragging: Bool = false
+    @State private var lastReportedIndex: Int = -1
 
     var body: some View {
-        HStack(spacing: 12) {
-            // Floating Touch Bubble Indicator when dragging
-            if let dragging = draggingLetter {
-                Text(dragging)
-                    .font(.system(size: 26, weight: .bold, design: .serif))
-                    .foregroundStyle(.white)
-                    .frame(width: 52, height: 52)
-                    .background(
-                        Circle()
-                            .fill(Color.orange)
-                            .shadow(color: Color.orange.opacity(0.4), radius: 10, y: 4)
-                    )
-                    .transition(.scale.combined(with: .opacity))
-            }
+        GeometryReader { geo in
+            let topInset: CGFloat = 80
+            let bottomInset: CGFloat = 110
+            let trackHeight = max(100, geo.size.height - topInset - bottomInset)
+            let clampedProgress = max(0, min(1, progress))
+            let currentY = topInset + (clampedProgress * trackHeight)
 
-            // The Vertical Letter Strip
-            VStack(spacing: 1) {
-                ForEach(letters, id: \.self) { letter in
-                    Text(letter)
-                        .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                        .foregroundStyle(draggingLetter == letter ? Color.orange : Color.secondary)
-                        .frame(width: 16, height: 14)
+            HStack(spacing: 8) {
+                Spacer()
+
+                if isVisible {
+                    // Floating White Indicator Bubble
+                    ZStack {
+                        Circle()
+                            .fill(Color.white)
+                            .frame(width: 44, height: 44)
+                            .shadow(color: Color.black.opacity(0.35), radius: 8, y: 3)
+
+                        if isDragging && !currentLabel.isEmpty {
+                            Text(currentLabel)
+                                .font(.system(size: 20, weight: .bold, design: .serif))
+                                .foregroundStyle(Color.black)
+                        } else {
+                            Circle()
+                                .fill(Color.black)
+                                .frame(width: 7, height: 7)
+                        }
+                    }
+                    .scaleEffect(isDragging ? 1.08 : 0.95)
+                    .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isDragging)
+                    .transition(.scale.combined(with: .opacity))
+
+                    // Docked Slider Handle on right edge with vertical arrows
+                    ZStack {
+                        Capsule()
+                            .fill(Color.black.opacity(0.72))
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(Color.white.opacity(0.2), lineWidth: 0.8)
+                            )
+                            .frame(width: 22, height: 38)
+                            .shadow(color: Color.black.opacity(0.4), radius: 6, y: 2)
+
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(Color.white.opacity(0.85))
+                    }
+                    .frame(width: 32, height: 44, alignment: .trailing)
+                    .contentShape(Rectangle())
                 }
             }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 2)
-            .background(
-                Capsule()
-                    .fill(Color.black.opacity(0.35))
-                    .background(.ultraThinMaterial, in: Capsule())
-            )
-            .contentShape(Rectangle())
+            .position(x: geo.size.width - 24, y: currentY)
+            .opacity(isVisible ? 1 : 0)
+            .animation(.easeInOut(duration: 0.25), value: isVisible)
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
-                        updateSelection(at: value.location.y)
+                        isDragging = true
+                        isVisible = true
+                        let localY = value.location.y - topInset
+                        let p = max(0, min(1, localY / trackHeight))
+                        progress = p
+
+                        guard itemCount > 0 else { return }
+                        let index = Int(p * CGFloat(itemCount - 1))
+                        let clamped = max(0, min(itemCount - 1, index))
+
+                        if clamped != lastReportedIndex {
+                            lastReportedIndex = clamped
+                            UISelectionFeedbackGenerator().selectionChanged()
+                            onScrub(clamped)
+                        }
                     }
                     .onEnded { _ in
-                        withAnimation(.easeOut(duration: 0.15)) {
-                            draggingLetter = nil
-                        }
+                        isDragging = false
                     }
             )
         }
-    }
-
-    private func updateSelection(at y: CGFloat) {
-        guard !letters.isEmpty else { return }
-        let itemHeight: CGFloat = 15
-        let totalHeight = CGFloat(letters.count) * itemHeight
-        let clampedY = max(0, min(y - 8, totalHeight - 1))
-        let idx = Int((clampedY / totalHeight) * CGFloat(letters.count))
-        let clampedIdx = max(0, min(letters.count - 1, idx))
-        let letter = letters[clampedIdx]
-
-        if draggingLetter != letter {
-            draggingLetter = letter
-            UISelectionFeedbackGenerator().selectionChanged()
-            onSelect(letter)
-        }
+        .allowsHitTesting(isVisible)
     }
 }
 #endif
