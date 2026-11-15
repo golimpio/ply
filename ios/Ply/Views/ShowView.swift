@@ -5,12 +5,25 @@ struct ShowView: View {
     let name: String
     @Environment(Connection.self) private var connection
     @Environment(AppModel.self) private var model
+    @Environment(PlaybackScene.self) private var playbackScene
     @State private var detail: ShowDetail?
     @State private var episodes: [Item] = []
     @State private var season: Int?
     @State private var error: String?
     @State private var trailers: [Trailer] = []
     @State private var selectedTrailer: Trailer?
+
+    private var heroHeight: CGFloat {
+        #if os(tvOS)
+        500
+        #else
+        390
+        #endif
+    }
+
+    private var nextEpisodeToPlay: Item? {
+        episodes.first(where: { !$0.isWatched }) ?? episodes.first
+    }
 
     /// The seasons that have files, the specials (0) last.
     private var seasons: [Int] {
@@ -31,34 +44,35 @@ struct ShowView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Backdrop(path: detail?.backdrop ?? detail?.meta?.backdrop)
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(name).font(.title.bold())
-                    Text(Format.facts(detail?.year.map(String.init), detail?.meta?.certification, detail?.rating?.label))
-                        .font(.subheadline).foregroundStyle(.secondary)
-                    if let overview = detail?.overview ?? detail?.meta?.overview {
-                        Text(overview).font(.callout)
-                    }
-                    HStack(spacing: 12) {
-                        Button {
-                            setShowWatched(!allShowWatched)
-                        } label: {
-                            Label(allShowWatched ? "Show watched" : "Mark show watched",
-                                  systemImage: allShowWatched ? "checkmark.circle.fill" : "checkmark.circle")
-                        }
-                        .buttonStyle(.borderless)
+            VStack(alignment: .leading, spacing: 18) {
+                heroStage(detail)
 
-                        if !trailers.isEmpty {
-                            Button { selectedTrailer = trailers.first } label: {
-                                Label("Trailer", systemImage: "film")
-                            }
-                            .buttonStyle(.bordered)
+                HStack(spacing: 12) {
+                    if !trailers.isEmpty {
+                        Button { selectedTrailer = trailers.first } label: {
+                            Label("Trailer", systemImage: "film")
+                                .font(.subheadline.weight(.semibold))
                         }
+                        .buttonStyle(.bordered)
                     }
-                    .padding(.top, 4)
+
+                    Button {
+                        setShowWatched(!allShowWatched)
+                    } label: {
+                        Label(allShowWatched ? "Show watched" : "Mark show watched",
+                              systemImage: allShowWatched ? "checkmark.circle.fill" : "checkmark.circle")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(allShowWatched ? .orange : .white)
+
+                    Spacer()
                 }
                 .padding(.horizontal)
+
+                if let overview = detail?.overview ?? detail?.meta?.overview {
+                    Text(overview).font(.callout).padding(.horizontal)
+                }
 
                 HStack {
                     if seasons.count > 1 {
@@ -120,8 +134,12 @@ struct ShowView: View {
                     }
                 }
             }
-            .padding(.bottom)
+            .padding(.bottom, 32)
         }
+        #if os(iOS)
+        .ignoresSafeArea(edges: .top)
+        .toolbarBackground(.hidden, for: .navigationBar)
+        #endif
         .overlay {
             if let error, episodes.isEmpty {
                 ContentUnavailableView("Cannot load \(name)", systemImage: "exclamationmark.triangle", description: Text(error))
@@ -129,12 +147,107 @@ struct ShowView: View {
                 ProgressView()
             }
         }
-        .navigationTitle(name)
+        #if os(iOS)
+        .navigationTitle("")
         .plyInlineTitle()
+        #else
+        .navigationTitle(name)
+        #endif
         .task(id: connection.library.generation) { await load() }
         .sheet(item: $selectedTrailer) { trailer in
             TrailerSheet(trailer: $selectedTrailer, all: trailers)
         }
+    }
+
+    @ViewBuilder
+    private func heroStage(_ d: ShowDetail?) -> some View {
+        let backdropPath = d?.backdrop ?? d?.meta?.backdrop
+
+        ZStack(alignment: .bottomLeading) {
+            // Full-bleed Artwork from line 0
+            RemoteImage(path: backdropPath, placeholder: "photo")
+                .aspectRatio(contentMode: .fill)
+                .frame(maxWidth: .infinity)
+                .frame(height: heroHeight)
+                .clipped()
+
+            // Top Degrade / Vignette
+            LinearGradient(
+                colors: [
+                    Color.black.opacity(0.85),
+                    Color.black.opacity(0.4),
+                    Color.clear
+                ],
+                startPoint: .top,
+                endPoint: .center
+            )
+
+            // Center Cinematic Play Button (plays next unwatched episode)
+            if let nextEp = nextEpisodeToPlay {
+                Button {
+                    let start = nextEp.resumeSec > 0 ? nextEp.resumeSec : 0
+                    model.play(PlayRequest(itemId: nextEp.id, startSec: start), in: playbackScene)
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.orange, Color.red.opacity(0.85)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 64, height: 64)
+                            .shadow(color: Color.orange.opacity(0.55), radius: 14, y: 6)
+
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundStyle(.white)
+                            .offset(x: 2)
+                    }
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                .padding(.top, 24)
+            }
+
+            // Bottom Degrade (darkening into pure black, finishing after title & facts)
+            LinearGradient(
+                colors: [
+                    Color.clear,
+                    Color.black.opacity(0.25),
+                    Color.black.opacity(0.75),
+                    Color.black.opacity(0.96),
+                    Color.black
+                ],
+                startPoint: .center,
+                endPoint: .bottom
+            )
+
+            // Title & Facts inside bottom of hero
+            VStack(alignment: .leading, spacing: 6) {
+                Text(name)
+                    .font(.system(size: 28, weight: .bold, design: .serif))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+
+                let facts = Format.facts(
+                    d?.year.map(String.init),
+                    d?.meta?.certification,
+                    d?.rating?.label
+                )
+                if !facts.isEmpty {
+                    Text(facts)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 16)
+        }
+        .frame(height: heroHeight)
+        .frame(maxWidth: .infinity)
     }
 
     private func setShowWatched(_ watched: Bool) {

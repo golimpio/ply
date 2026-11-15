@@ -40,38 +40,49 @@ struct ItemDetailView: View {
         }
     }
 
+    private var heroHeight: CGFloat {
+        #if os(tvOS)
+        500
+        #else
+        390
+        #endif
+    }
+
     private func content(_ d: ItemDetail) -> some View {
         let item = d.item
         return ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Backdrop(path: item.isEpisode ? item.landscapeImage : item.backdrop ?? d.meta?.backdrop ?? item.art?.backdrop)
-                VStack(alignment: .leading, spacing: 8) {
-                    if item.isEpisode {
-                        NavigationLink(value: Route.show(item.show ?? "")) {
-                            Text(Format.facts(item.show, item.episodeCode)).font(.subheadline.weight(.semibold))
+            VStack(alignment: .leading, spacing: 18) {
+                // The Hero Stage: starts from line 0, with top degrade, center play button, bottom degrade, and title & facts
+                heroStage(d)
+
+                // Action Buttons Row: [Trailer] and [Mark as watched] side-by-side
+                actionButtons(item)
+
+                if let fraction = item.fraction {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ProgressBar(fraction: fraction)
+                        if item.resumeSec > 0 {
+                            Text("Resume from \(Format.clock(item.resumeSec))")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.secondary)
                         }
-                        Text(item.episodeTitle ?? d.episodeInfo?.name ?? item.title).font(.title.bold())
-                    } else {
-                        Text(d.meta?.title ?? item.title).font(.title.bold())
                     }
-                    Text(Format.facts(item.year.map(String.init), Format.runtime(item.durationSec),
-                                      d.meta?.certification, (item.rating ?? d.meta?.rating)?.label))
-                        .font(.subheadline).foregroundStyle(.secondary)
-                    if let collection = d.meta?.collection, d.meta?.collections?.isEmpty ?? true {
+                    .padding(.horizontal)
+                }
+
+                if let collection = d.meta?.collection, d.meta?.collections?.isEmpty ?? true {
+                    NavigationLink(value: Route.collection(collection.id, collection.name)) {
+                        Label(collection.name, systemImage: "rectangle.stack").font(.subheadline)
+                    }
+                    .padding(.horizontal)
+                } else {
+                    ForEach(d.meta?.collections ?? [], id: \.id) { collection in
                         NavigationLink(value: Route.collection(collection.id, collection.name)) {
                             Label(collection.name, systemImage: "rectangle.stack").font(.subheadline)
                         }
-                    } else {
-                        ForEach(d.meta?.collections ?? [], id: \.id) { collection in
-                            NavigationLink(value: Route.collection(collection.id, collection.name)) {
-                                Label(collection.name, systemImage: "rectangle.stack").font(.subheadline)
-                            }
-                        }
+                        .padding(.horizontal)
                     }
                 }
-                .padding(.horizontal)
-
-                playButtons(item).padding(.horizontal)
 
                 if !item.isEpisode, let titleId = item.titleId {
                     let versions = connection.library.movies.filter { $0.titleId == titleId }
@@ -120,46 +131,149 @@ struct ItemDetailView: View {
                     }
                 }
             }
-            .padding(.bottom)
+            .padding(.bottom, 32)
         }
+        #if os(iOS)
+        .ignoresSafeArea(edges: .top)
+        .toolbarBackground(.hidden, for: .navigationBar)
+        #endif
     }
 
     @ViewBuilder
-    private func playButtons(_ item: Item) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 12) {
-                if item.resumeSec > 0 {
-                    Button { play(from: item.resumeSec) } label: {
-                        Label("Resume from \(Format.clock(item.resumeSec))", systemImage: "play.fill")
+    private func heroStage(_ d: ItemDetail) -> some View {
+        let item = d.item
+        let backdropPath = item.isEpisode ? item.landscapeImage : item.backdrop ?? d.meta?.backdrop ?? item.art?.backdrop
+
+        ZStack(alignment: .bottomLeading) {
+            // Full-bleed Artwork from line 0
+            RemoteImage(path: backdropPath, placeholder: "photo")
+                .aspectRatio(contentMode: .fill)
+                .frame(maxWidth: .infinity)
+                .frame(height: heroHeight)
+                .clipped()
+
+            // Top Degrade / Vignette
+            LinearGradient(
+                colors: [
+                    Color.black.opacity(0.85),
+                    Color.black.opacity(0.4),
+                    Color.clear
+                ],
+                startPoint: .top,
+                endPoint: .center
+            )
+
+            // Center Cinematic Play Button
+            Button {
+                let start = item.resumeSec > 0 ? item.resumeSec : 0
+                play(from: start)
+            } label: {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.orange, Color.red.opacity(0.85)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 64, height: 64)
+                        .shadow(color: Color.orange.opacity(0.55), radius: 14, y: 6)
+
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundStyle(.white)
+                        .offset(x: 2)
+                }
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .padding(.top, 24)
+
+            // Bottom Degrade (darkening into pure black, finishing after title & facts)
+            LinearGradient(
+                colors: [
+                    Color.clear,
+                    Color.black.opacity(0.25),
+                    Color.black.opacity(0.75),
+                    Color.black.opacity(0.96),
+                    Color.black
+                ],
+                startPoint: .center,
+                endPoint: .bottom
+            )
+
+            // Title & Facts inside bottom of hero
+            VStack(alignment: .leading, spacing: 6) {
+                if item.isEpisode {
+                    if let show = item.show {
+                        NavigationLink(value: Route.show(show)) {
+                            Text(Format.facts(show, item.episodeCode))
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Color.orange)
+                        }
                     }
-                    .buttonStyle(.borderedProminent)
-                    Button { play(from: 0) } label: {
-                        Label("From the start", systemImage: "arrow.counterclockwise")
-                    }
-                    .buttonStyle(.bordered)
+                    Text(item.episodeTitle ?? d.episodeInfo?.name ?? item.title)
+                        .font(.system(size: 28, weight: .bold, design: .serif))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
                 } else {
-                    Button { play(from: 0) } label: {
-                        Label("Play", systemImage: "play.fill").frame(minWidth: 120)
-                    }
-                    .buttonStyle(.borderedProminent)
+                    Text(d.meta?.title ?? item.title)
+                        .font(.system(size: 28, weight: .bold, design: .serif))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
                 }
-                if !trailers.isEmpty {
-                    Button { selectedTrailer = trailers.first } label: {
-                        Label("Trailer", systemImage: "film")
-                    }
-                    .buttonStyle(.bordered)
+
+                let facts = Format.facts(
+                    item.year.map(String.init),
+                    Format.runtime(item.durationSec),
+                    d.meta?.certification,
+                    (item.rating ?? d.meta?.rating)?.label
+                )
+                if !facts.isEmpty {
+                    Text(facts)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .lineLimit(1)
                 }
             }
-            .controlSize(.large)
-            if let fraction = item.fraction {
-                ProgressView(value: fraction)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 16)
+        }
+        .frame(height: heroHeight)
+        .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private func actionButtons(_ item: Item) -> some View {
+        HStack(spacing: 12) {
+            if !trailers.isEmpty {
+                Button { selectedTrailer = trailers.first } label: {
+                    Label("Trailer", systemImage: "film")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
             }
+
             Button { setWatched(!item.isWatched) } label: {
                 Label(item.isWatched ? "Watched" : "Mark as watched",
                       systemImage: item.isWatched ? "checkmark.circle.fill" : "checkmark.circle")
+                    .font(.subheadline.weight(.semibold))
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.bordered)
+            .tint(item.isWatched ? .orange : .white)
+
+            if item.resumeSec > 0 {
+                Button { play(from: 0) } label: {
+                    Label("From start", systemImage: "arrow.counterclockwise")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+            }
+
+            Spacer()
         }
+        .padding(.horizontal)
     }
 
     /// The AirPlay targets the server could route a play to. Choosing one starts the play on the
