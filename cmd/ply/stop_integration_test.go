@@ -60,8 +60,12 @@ func TestEndToEndStop(t *testing.T) {
 		if p.cmd.ProcessState.ExitCode() != 0 {
 			t.Errorf("%v: ply exited with %v, want a clean exit\n%s", args, p.waitErr, p.log.String())
 		}
-		if log := p.log.String(); !strings.Contains(log, "asked by ply -stop") || strings.Contains(log, "level=ERROR") {
-			t.Errorf("%v: the log does not say why it stopped, or has an error:\n%s", args, log)
+		why := `msg="shutting down: asked by ply -stop"`
+		if len(args) == 2 {
+			why = `msg="shutting down: asked by ply -stop -force" within=5s`
+		}
+		if log := p.log.String(); !strings.Contains(log, why) || strings.Contains(log, "level=ERROR") {
+			t.Errorf("%v: the log does not say %s, or has an error:\n%s", args, why, log)
 		}
 		if _, err := os.Stat(controlPath(data)); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("%v: the control file outlived the server: %v", args, err)

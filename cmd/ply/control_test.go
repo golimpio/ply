@@ -9,10 +9,12 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"log/slog"
 	"math/big"
 	"net"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -186,13 +188,9 @@ func TestStopRunningWithNoServer(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "no ply is running") {
 		t.Fatalf("no control file: %v, want no ply is running", err)
 	}
-	// A ply that was killed left its file: nothing listens at its address.
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	stale, _ := newControl(ln.Addr(), "", "")
-	ln.Close()
+	// A ply that was killed left its file: nothing listens at its address, and its pid is gone.
+	stale := closedControl(t)
+	stale.PID = deadPID(t)
 	if _, err := stale.write(data); err != nil {
 		t.Fatal(err)
 	}
@@ -202,6 +200,61 @@ func TestStopRunningWithNoServer(t *testing.T) {
 	}
 	if _, err := os.Stat(controlPath(data)); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("the stale control file is still there: %v", err)
+	}
+}
+
+// closedControl is the control of a server whose listener is closed, run by this process.
+func closedControl(t *testing.T) control {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := newControl(ln.Addr(), "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln.Close()
+	return c
+}
+
+// deadPID is the pid of a process that has exited and been reaped.
+func deadPID(t *testing.T) int {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^$")
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+	if processAlive(cmd.Process.Pid) {
+		t.Skipf("pid %d was reused at once", cmd.Process.Pid)
+	}
+	return cmd.Process.Pid
+}
+
+func TestProcessAlive(t *testing.T) {
+	if !processAlive(os.Getpid()) {
+		t.Fatal("this process is not alive")
+	}
+	if pid := deadPID(t); processAlive(pid) {
+		t.Fatalf("exited pid %d is alive", pid)
+	}
+}
+
+// A ply that is already stopping has closed its listener but still runs: its control file stays,
+// and ply -stop waits for its exit.
+func TestStopRunningWhileItStops(t *testing.T) {
+	for _, force := range []bool{false, true} {
+		data := t.TempDir()
+		c := closedControl(t) // this process's pid: alive
+		if _, err := c.write(data); err != nil {
+			t.Fatal(err)
+		}
+		time.AfterFunc(200*time.Millisecond, func() { c.removeFrom(data) }) // it exits
+		var out bytes.Buffer
+		err := stopRunning(context.Background(), config.Config{Data: data, Stop: true, Force: force}, &out)
+		if err != nil || !strings.Contains(out.String(), "already stopping") || !strings.HasSuffix(out.String(), "Stopped.\n") {
+			t.Fatalf("force %v: %v, said %q; want it to wait for the exit", force, err, out.String())
+		}
 	}
 }
 
@@ -228,6 +281,39 @@ func TestWaitForExitGivesUp(t *testing.T) {
 	err := waitForExit(context.Background(), data, c, 150*time.Millisecond)
 	if err == nil || !strings.Contains(err.Error(), "has not exited") {
 		t.Fatalf("waitForExit = %v, want a timeout", err)
+	}
+}
+
+// Each way to end the server is told apart, and a forced stop gets the short deadline.
+func TestStopCauses(t *testing.T) {
+	failed := errors.New("listener failed")
+	for _, want := range []stopCause{causeSignal, causeStop, causeForceStop, causeServeFailure} {
+		sigC, stops, serveErr := make(chan os.Signal, 1), newStopRequests(), make(chan error, 1)
+		switch want {
+		case causeSignal:
+			sigC <- os.Interrupt
+		case causeStop:
+			stops.ask(false)
+		case causeForceStop:
+			stops.ask(true)
+		case causeServeFailure:
+			serveErr <- failed
+		}
+		got, err := awaitStop(sigC, stops, serveErr)
+		if got != want || (err != nil) != (want == causeServeFailure) {
+			t.Fatalf("awaitStop = %v, %v; want %v", got, err, want)
+		}
+		s := shutdownStopper(slog.New(slog.DiscardHandler), got, sigC, stops)
+		wantDeadline := stopWithin
+		if want == causeForceStop {
+			wantDeadline = forceStopWithin
+		}
+		if s.deadline != wantDeadline || s.hurried != forceStopWithin || s.quick != (<-chan os.Signal)(sigC) ||
+			s.hurry != (<-chan struct{})(stops.force) {
+			t.Errorf("%v: stopper deadline %s, hurried %s, quick and hurry wired %v %v; want %s, %s, true, true", want,
+				s.deadline, s.hurried, s.quick == (<-chan os.Signal)(sigC), s.hurry == (<-chan struct{})(stops.force),
+				wantDeadline, forceStopWithin)
+		}
 	}
 }
 

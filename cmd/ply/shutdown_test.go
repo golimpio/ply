@@ -38,16 +38,18 @@ func TestShutdownHurry(t *testing.T) {
 	for _, tc := range []struct {
 		name              string
 		deadline, hurried time.Duration
+		after             time.Duration // when the hurry comes; 0: before run starts
 		want              time.Duration
 	}{
-		{"cut short", 10 * time.Second, 100 * time.Millisecond, 100 * time.Millisecond},
-		{"already shorter", 150 * time.Millisecond, 10 * time.Second, 150 * time.Millisecond},
+		{"cut short", 10 * time.Second, 100 * time.Millisecond, 0, 100 * time.Millisecond},
+		{"cut short while it waits", 10 * time.Second, 100 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond},
+		{"already shorter", 150 * time.Millisecond, 10 * time.Second, 0, 150 * time.Millisecond},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, _ := testStopper(time.Hour, tc.deadline)
 			hurry := make(chan struct{}, 1)
 			s.hurry, s.hurried = hurry, tc.hurried
-			hurry <- struct{}{}
+			time.AfterFunc(tc.after, func() { hurry <- struct{}{} })
 			block := make(chan struct{})
 			defer close(block)
 			start := time.Now()

@@ -464,6 +464,11 @@ func run() error {
 		removeControl = func() {}
 	}
 	defer removeControl()
+	// quit leaves at once: control.json goes first, or ply -stop would think it still runs.
+	quit := func(code int) {
+		removeControl()
+		os.Exit(code)
+	}
 
 	adv, err := discovery.Advertise(discovery.Service{Name: cfg.Name, ID: id, Port: port,
 		API: api.Version, APIMin: api.VersionMin, TLSHost: tlsHost})
@@ -480,10 +485,9 @@ func run() error {
 		log.Info("reachable at", "url", u)
 	}
 
-	var serveFailure error
-	deadline := stopWithin
-	select {
-	case <-sigC:
+	cause, serveFailure := awaitStop(sigC, stops, serveErr)
+	switch cause {
+	case causeSignal:
 		if isInteractive && !cfg.LogStderr {
 			fmt.Fprintln(os.Stderr, "\nShutting down... (press Ctrl-C again to quit immediately)")
 		}
@@ -494,45 +498,30 @@ func run() error {
 					if isInteractive && !cfg.LogStderr {
 						fmt.Fprintln(os.Stderr, "\nForced exit.")
 					}
-					removeControl()
-					os.Exit(130)
+					quit(130)
 				}
 			}
 		}()
-		cancel()
-	case <-stops.nice:
-		apiStop(log, isInteractive && !cfg.LogStderr, false)
-		cancel()
-	case <-stops.force:
-		apiStop(log, isInteractive && !cfg.LogStderr, true)
-		deadline = forceStopWithin
-		cancel()
-	case serveFailure = <-serveErr:
-		cancel()
+	case causeStop, causeForceStop:
+		apiStop(log, isInteractive && !cfg.LogStderr, cause == causeForceStop)
 	}
+	cancel()
 
 	shutCtx, cancelShut := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancelShut()
-	clean := stopper{
-		log:      log,
-		every:    2 * time.Second,
-		deadline: deadline,
-		quick:    sigC,
-		hurry:    stops.force,
-		hurried:  forceStopWithin,
-		reportProgress: func(step string, waited time.Duration, left int) {
-			if isInteractive && !cfg.LogStderr {
-				fmt.Fprintf(os.Stderr, "Still waiting for %s (%s)... press Ctrl-C again to quit immediately\n", step, waited)
-			}
-		},
-		onQuick: func() {
-			if isInteractive && !cfg.LogStderr {
-				fmt.Fprintln(os.Stderr, "\nQuitting at once.")
-			}
-			removeControl()
-			os.Exit(130)
-		},
-	}.run([]stopStep{
+	stop := shutdownStopper(log, cause, sigC, stops)
+	stop.reportProgress = func(step string, waited time.Duration, left int) {
+		if isInteractive && !cfg.LogStderr {
+			fmt.Fprintf(os.Stderr, "Still waiting for %s (%s)... press Ctrl-C again to quit immediately\n", step, waited)
+		}
+	}
+	stop.onQuick = func() {
+		if isInteractive && !cfg.LogStderr {
+			fmt.Fprintln(os.Stderr, "\nQuitting at once.")
+		}
+		quit(130)
+	}
+	clean := stop.run([]stopStep{
 		{"network announcement", adv.Shutdown},
 		{"receiver discovery", receivers.Close},
 		// Kill every ffmpeg and drop the temp dirs first: requests waiting on
@@ -575,8 +564,7 @@ func run() error {
 			fmt.Fprintln(os.Stderr, "\nShutdown timed out; forced exit.")
 		}
 		closeLog()
-		removeControl()
-		os.Exit(1)
+		quit(1)
 	}
 	if isInteractive && !cfg.LogStderr {
 		fmt.Fprintln(os.Stderr, "Stopped.")

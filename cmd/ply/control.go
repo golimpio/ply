@@ -21,7 +21,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"syscall"
 	"time"
 
 	"ply/internal/api"
@@ -183,27 +182,36 @@ func stopRunning(ctx context.Context, cfg config.Config, out io.Writer) error {
 	}
 	req.Header.Set(api.ControlHeader, c.Key)
 	resp, err := client.Do(req)
-	if errors.Is(err, syscall.ECONNREFUSED) {
-		// A ply that was killed leaves its file: nothing listens there any more.
+	var dial *net.OpError
+	hint := "" // what to try if it does not exit
+	switch {
+	case errors.As(err, &dial) && dial.Op == "dial" && !processAlive(c.PID):
+		// A ply that was killed leaves its file: nothing listens there, and nothing runs.
 		c.removeFrom(cfg.Data)
 		return fmt.Errorf("no ply is running with the data directory %s (pid %d left %s behind; removed)",
 			cfg.Data, c.PID, controlName)
-	}
-	if err != nil {
+	case errors.As(err, &dial) && dial.Op == "dial":
+		// It closed its listener: it is already stopping, and quits within its own deadline. Nothing
+		// can hurry it from here: a second Ctrl-C (or SIGTERM) can.
+		fmt.Fprintf(out, "ply (pid %d) no longer answers at %s: it is already stopping; waiting for it to exit...\n",
+			c.PID, c.URL)
+		within = stopWithin
+	case err != nil:
 		return fmt.Errorf("ply (pid %d) at %s: %w", c.PID, c.URL, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusAccepted {
-		var e struct{ Error string }
-		json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&e)
-		return fmt.Errorf("ply (pid %d) at %s refused the stop: %s %s", c.PID, c.URL, resp.Status, e.Error)
-	}
-	fmt.Fprintf(out, "Stopping ply (pid %d, %s)...\n", c.PID, c.URL)
-	if err := waitForExit(ctx, cfg.Data, c, within+exitGrace); err != nil {
-		if !cfg.Force {
-			return fmt.Errorf("%w; ply -stop -force quits it in %s", err, forceStopWithin)
+	default:
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusAccepted {
+			var e struct{ Error string }
+			json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&e)
+			return fmt.Errorf("ply (pid %d) at %s refused the stop: %s %s", c.PID, c.URL, resp.Status, e.Error)
 		}
-		return err
+		fmt.Fprintf(out, "Stopping ply (pid %d, %s)...\n", c.PID, c.URL)
+		if !cfg.Force {
+			hint = fmt.Sprintf("; ply -stop -force quits it in %s", forceStopWithin)
+		}
+	}
+	if err := waitForExit(ctx, cfg.Data, c, within+exitGrace); err != nil {
+		return fmt.Errorf("%w%s", err, hint)
 	}
 	fmt.Fprintln(out, "Stopped.")
 	return nil
@@ -245,6 +253,42 @@ func apiStop(log *slog.Logger, tty, force bool) {
 	} else {
 		fmt.Fprintln(os.Stderr, "\nShutting down (ply -stop)... (press Ctrl-C to quit immediately)")
 	}
+}
+
+// stopCause is what ends the server.
+type stopCause int
+
+const (
+	causeSignal       stopCause = iota // Ctrl-C or SIGTERM
+	causeStop                          // ply -stop
+	causeForceStop                     // ply -stop -force
+	causeServeFailure                  // the listener failed
+)
+
+// awaitStop waits for what ends the server; err is the listener's failure.
+func awaitStop(sigC <-chan os.Signal, stops stopRequests, serveErr <-chan error) (stopCause, error) {
+	select {
+	case <-sigC:
+		return causeSignal, nil
+	case <-stops.nice:
+		return causeStop, nil
+	case <-stops.force:
+		return causeForceStop, nil
+	case err := <-serveErr:
+		return causeServeFailure, err
+	}
+}
+
+// shutdownStopper is the stopper of a shutdown that cause started: it waits 15 s, or 5 s for a
+// forced stop; another signal quits at once, and a forced stop asked meanwhile cuts what is left
+// to 5 s. The caller sets what it shows on the terminal and how it quits.
+func shutdownStopper(log *slog.Logger, cause stopCause, sigC <-chan os.Signal, stops stopRequests) stopper {
+	s := stopper{log: log, every: 2 * time.Second, deadline: stopWithin, quick: sigC,
+		hurry: stops.force, hurried: forceStopWithin}
+	if cause == causeForceStop {
+		s.deadline = forceStopWithin
+	}
+	return s
 }
 
 // stopRequests are the stops asked for through the API, nice or forced; one of each is enough.

@@ -82,7 +82,8 @@ ply -stop -force [-data <dir>]    # the same nice stop, but quit at once after 5
 - `-stop` starts no server: it stops the ply that runs with the same data directory (`-data`, default as for the
   server), whatever its `-addr`, `-token` or HTTPS. A `-stop -force` while a nice stop is under way cuts what is left
   of its 15 s to 5 s. `-force` alone is an error.
-- How it finds and proves itself to the server: once it listens, a server writes `<data>/control.json` (0600:
+- How it finds and proves itself to the server: once it serves (after its start-up, so a `-stop` during a slow start
+  finds none), a server writes `<data>/control.json` (0600:
   `{pid, url, key, tlsHost?, tlsCert?}`, written whole by a rename), with a random 32-byte key made for this run.
   `url` is the listen address, or `127.0.0.1` for one that listens on every address. `-stop` reads it and calls
   `POST /api/server/stop` with the key in `X-Ply-Control`, never through a proxy; over HTTPS it accepts only the
@@ -92,7 +93,10 @@ ply -stop -force [-data <dir>]    # the same nice stop, but quit at once after 5
   if it is still its own (another ply may have started with the same data directory since). `-stop` waits for that:
   up to 20 s (10 s with `-force`); after that it says the server has not exited and exits 1.
 - No server: "no ply is running with the data directory …", exit 1. A ply that was killed leaves its file behind:
-  nothing answers at its address, so `-stop` says so and removes the file.
+  nothing answers at its address and its pid is gone, so `-stop` says so and removes the file. A ply whose pid is
+  still there but that no longer answers has closed its listener: it is already stopping (a Ctrl-C, an earlier
+  `-stop`), so `-stop` keeps the file and waits for the exit, which its own deadline makes 15 s at most. `-force`
+  cannot hurry it from there; a second Ctrl-C (or SIGTERM) can.
 
 ## Store
 modernc.org/sqlite, DSN `file:<path>?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)`

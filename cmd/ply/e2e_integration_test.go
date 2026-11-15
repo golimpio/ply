@@ -514,8 +514,7 @@ func mentioning(t *testing.T, s string) []procInfo {
 	return out
 }
 
-func processAlive(pid int) bool { return syscall.Kill(pid, 0) == nil }
-func groupAlive(pgid int) bool  { return syscall.Kill(-pgid, 0) == nil }
+func groupAlive(pgid int) bool { return syscall.Kill(-pgid, 0) == nil }
 
 // client talks to the server under test.
 type client struct {
