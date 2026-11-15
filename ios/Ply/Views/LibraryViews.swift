@@ -1,113 +1,226 @@
 import SwiftUI
-
-/// An editorial hero banner at the top of Home, highlighting an in-progress or featured film.
-struct HeroBanner: View {
-    let item: Item
+/// An organic 3D fanned deck spotlighting featured, in-progress, and recent items on Home.
+struct OrganicFannedDeckView: View {
+    let items: [Item]
     @Environment(AppModel.self) private var model
     @Environment(PlaybackScene.self) private var playbackScene
+    @State private var selectedIndex: Int = 0
 
-    private var kicker: String {
-        if item.resumeSec > 0 {
-            return "Continue Watching"
-        }
-        return item.isEpisode ? "Featured Series" : "Featured Film"
+    private var count: Int { items.count }
+
+    private var activeItem: Item? {
+        guard !items.isEmpty, selectedIndex < items.count else { return nil }
+        return items[selectedIndex]
     }
 
-    private var titleText: String {
-        item.isEpisode ? (item.show ?? item.title) : item.title
+    private var cardWidth: CGFloat {
+        #if os(tvOS)
+        280
+        #else
+        195
+        #endif
     }
 
-    private var metaFacts: String {
-        let durationOrEpisode = item.isEpisode
-            ? Format.facts(item.episodeCode, item.episodeTitle)
-            : (item.durationSec > 0 ? Format.runtime(Double(item.durationSec)) : nil)
-        return Format.facts(item.year.map(String.init), durationOrEpisode, item.rating?.label)
+    private var cardHeight: CGFloat {
+        #if os(tvOS)
+        400
+        #else
+        290
+        #endif
+    }
+
+    private var horizontalOffset: CGFloat {
+        #if os(tvOS)
+        65
+        #else
+        44
+        #endif
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            NavigationLink(value: Route.item(item.id)) {
-                ZStack(alignment: .bottomLeading) {
-                    RemoteImage(path: item.backdrop ?? item.landscapeImage, placeholder: "film")
-                        .aspectRatio(16 / 9, contentMode: .fit)
-                        .clipShape(.rect(cornerRadius: 12))
-                        .overlay {
-                            LinearGradient(
-                                colors: [.clear, .black.opacity(0.85)],
-                                startPoint: .center,
-                                endPoint: .bottom
-                            )
-                            .clipShape(.rect(cornerRadius: 12))
-                        }
+        if count > 0, let active = activeItem {
+            VStack(spacing: 16) {
+                // The Fanned Deck Stage
+                ZStack {
+                    // Ambient backlight behind the active card
+                    RadialGradient(
+                        colors: [
+                            Color.orange.opacity(0.65),
+                            Color.red.opacity(0.25),
+                            Color.clear
+                        ],
+                        center: .center,
+                        startRadius: 0,
+                        endRadius: 130
+                    )
+                    .frame(width: cardWidth * 1.3, height: cardHeight * 0.6)
+                    .blur(radius: 35)
+                    .offset(y: 20)
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(Color.accentColor)
-                                .frame(width: 7, height: 7)
-                            Text(kicker.uppercased())
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                        }
+                    // Left Tilted Card (-13°)
+                    if count > 1 {
+                        let leftIdx = (selectedIndex - 1 + count) % count
+                        deckCard(items[leftIdx], isCenter: false)
+                            .rotationEffect(.degrees(-13))
+                            .offset(x: -horizontalOffset, y: 12)
+                            .scaleEffect(0.88)
+                            .opacity(0.72)
+                            .brightness(-0.15)
+                            .zIndex(2)
+                            .onTapGesture {
+                                withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
+                                    selectedIndex = leftIdx
+                                }
+                            }
+                    }
 
-                        Text(titleText)
-                            .font(.system(size: 24, weight: .bold, design: .serif))
-                            .foregroundStyle(.white)
+                    // Right Tilted Card (+13°)
+                    if count > 2 {
+                        let rightIdx = (selectedIndex + 1) % count
+                        deckCard(items[rightIdx], isCenter: false)
+                            .rotationEffect(.degrees(13))
+                            .offset(x: horizontalOffset, y: 12)
+                            .scaleEffect(0.88)
+                            .opacity(0.72)
+                            .brightness(-0.15)
+                            .zIndex(2)
+                            .onTapGesture {
+                                withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
+                                    selectedIndex = rightIdx
+                                }
+                            }
+                    }
+
+                    // Center Elevated Card (0°)
+                    deckCard(active, isCenter: true)
+                        .offset(x: 0, y: -4)
+                        .scaleEffect(1.04)
+                        .zIndex(10)
+                }
+                .frame(height: cardHeight + 40)
+                .contentShape(Rectangle())
+                #if os(iOS)
+                .gesture(
+                    DragGesture(minimumDistance: 25)
+                        .onEnded { value in
+                            if value.translation.width < -30 {
+                                withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
+                                    selectedIndex = (selectedIndex + 1) % count
+                                }
+                            } else if value.translation.width > 30 {
+                                withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
+                                    selectedIndex = (selectedIndex - 1 + count) % count
+                                }
+                            }
+                        }
+                )
+                #endif
+
+                // Title & Metadata
+                VStack(spacing: 6) {
+                    Text(active.isEpisode ? (active.show ?? active.title) : active.title)
+                        .font(.system(size: 22, weight: .bold, design: .serif))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .multilineTextAlignment(.center)
+
+                    let facts = metaFacts(for: active)
+                    if !facts.isEmpty {
+                        Text(facts)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
-                    .padding(14)
+
+                    // Pagination Dots
+                    if count > 1 {
+                        HStack(spacing: 6) {
+                            ForEach(0..<min(count, 8), id: \.self) { idx in
+                                if idx == selectedIndex {
+                                    Capsule()
+                                        .fill(Color.orange)
+                                        .frame(width: 18, height: 6)
+                                } else {
+                                    Circle()
+                                        .fill(Color.white.opacity(0.25))
+                                        .frame(width: 6, height: 6)
+                                        .onTapGesture {
+                                            withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
+                                                selectedIndex = idx
+                                            }
+                                        }
+                                }
+                            }
+                        }
+                        .padding(.top, 4)
+                    }
                 }
+                .padding(.horizontal, 20)
+            }
+        }
+    }
+
+    private func deckCard(_ item: Item, isCenter: Bool) -> some View {
+        ZStack(alignment: .bottomTrailing) {
+            NavigationLink(value: Route.item(item.id)) {
+                RemoteImage(path: item.poster, placeholder: "film")
+                    .aspectRatio(2 / 3, contentMode: .fill)
+                    .frame(width: cardWidth, height: cardHeight)
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
+                    )
+                    .shadow(color: .black.opacity(isCenter ? 0.9 : 0.6), radius: isCenter ? 24 : 12, y: isCenter ? 12 : 6)
             }
             .buttonStyle(.plain)
-            .hoverEffect()
+            .disabled(!isCenter)
 
-            VStack(alignment: .leading, spacing: 8) {
-                if !metaFacts.isEmpty {
-                    Text(metaFacts)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                }
+            // Bottom gradient on center card for contrast
+            if isCenter {
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.65)],
+                    startPoint: .center,
+                    endPoint: .bottom
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .allowsHitTesting(false)
 
-                if let overview = item.overview, !overview.isEmpty {
-                    Text(overview)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
+                // Circular Play Pill on Center Card
+                Button {
+                    let start = item.resumeSec > 0 ? item.resumeSec : 0
+                    model.play(PlayRequest(itemId: item.id, startSec: start), in: playbackScene)
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.orange, Color.red.opacity(0.85)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 44, height: 44)
+                            .shadow(color: Color.orange.opacity(0.55), radius: 8, y: 4)
 
-                HStack(spacing: 12) {
-                    Button {
-                        let start = item.resumeSec > 0 ? item.resumeSec : 0
-                        model.play(PlayRequest(itemId: item.id, startSec: start), in: playbackScene)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "play.fill")
-                            Text(item.resumeSec > 0 ? "Resume" : "Play")
-                                .fontWeight(.semibold)
-                        }
-                        .padding(.vertical, 8)
-                        .padding(.horizontal, 18)
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(.white)
+                            .offset(x: 1)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .clipShape(Capsule())
-
-                    NavigationLink(value: Route.item(item.id)) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "info.circle")
-                            Text("Details")
-                                .fontWeight(.medium)
-                        }
-                        .padding(.vertical, 8)
-                        .padding(.horizontal, 16)
-                    }
-                    .buttonStyle(.bordered)
-                    .clipShape(Capsule())
                 }
-                .padding(.top, 2)
+                .buttonStyle(.plain)
+                .padding(14)
+                .hoverEffect()
             }
-            .padding(.horizontal, 4)
         }
-        .padding(.horizontal)
+    }
+
+    private func metaFacts(for item: Item) -> String {
+        let duration = item.durationSec > 0 ? Format.runtime(item.durationSec) : nil
+        let genresOrCode = item.isEpisode ? item.episodeCode : item.genres?.prefix(2).joined(separator: " / ")
+        let rating = item.rating.map { "★ \($0.label)" }
+        return Format.facts(item.year.map(String.init), genresOrCode, duration, rating)
     }
 }
 
@@ -116,15 +229,24 @@ struct HomeView: View {
     @Environment(AppModel.self) private var model
     @Environment(PlaybackScene.self) private var playbackScene
 
-    private var featuredItem: Item? {
+    private var featuredItems: [Item] {
         let library = connection.library
-        if let continueItem = library.continueWatching.first {
-            return continueItem
+        var list: [Item] = []
+        for item in library.continueWatching {
+            if !list.contains(where: { $0.id == item.id }) {
+                list.append(item)
+            }
         }
-        if let movieWithBackdrop = library.recentMovies.first(where: { $0.backdrop != nil }) {
-            return movieWithBackdrop
+        for movie in library.recentMovies {
+            if !list.contains(where: { $0.id == movie.id }) {
+                list.append(movie)
+            }
+            if list.count >= 8 { break }
         }
-        return library.recentMovies.first ?? library.movies.first
+        if list.isEmpty {
+            list = Array(library.movies.prefix(5))
+        }
+        return list
     }
 
     var body: some View {
@@ -144,8 +266,10 @@ struct HomeView: View {
                     .padding(.top, 8)
                     #endif
 
-                    if let featured = featuredItem {
-                        HeroBanner(item: featured)
+                    if !featuredItems.isEmpty {
+                        OrganicFannedDeckView(items: featuredItems)
+                            .padding(.top, 6)
+                            .padding(.bottom, 6)
                     }
 
                     if !library.continueWatching.isEmpty {

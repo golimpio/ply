@@ -76,7 +76,7 @@ struct BrowseView: View {
                     results(browse, library)
                 }
             }
-            .navigationTitle(trimmed.isEmpty ? "Browse" : "Search")
+            .navigationTitle("Search")
             .plySearchable($query, prompt: "Titles, shows, episodes, people, genres")
             .plyRefreshable {
                 await library.reload()

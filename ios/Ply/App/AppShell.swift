@@ -111,7 +111,7 @@ struct MainTabs: View {
             ShowsView()
                 .tabItem { Label("Series", systemImage: "tv") }
             BrowseView()
-                .tabItem { Label("Browse", systemImage: "square.grid.2x2") }
+                .tabItem { Label("Search", systemImage: "magnifyingglass") }
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gear") }
         }
