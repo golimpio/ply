@@ -387,6 +387,7 @@ struct PersonView: View {
     @State private var person: Person?
     @State private var filmography: [PersonFilmographyEntry] = []
     @State private var error: String?
+    @State private var isBioExpanded = false
 
     private var externalFilms: [PersonFilmographyEntry] {
         filmography.filter { !$0.isSeries && $0.isExternal }
@@ -399,35 +400,38 @@ struct PersonView: View {
     var body: some View {
         ScrollView {
             if let person {
-                VStack(alignment: .leading, spacing: 24) {
+                VStack(spacing: 28) {
                     header(person)
-                    ForEach(CreditSection.sections(person.credits)) { section in
-                        Shelf(section.title) {
-                            ForEach(section.entries) { entry in
-                                CreditCard(entry: entry)
+
+                    VStack(alignment: .leading, spacing: 24) {
+                        ForEach(CreditSection.sections(person.credits)) { section in
+                            Shelf(section.title) {
+                                ForEach(section.entries) { entry in
+                                    CreditCard(entry: entry)
+                                }
                             }
                         }
-                    }
-                    if !externalFilms.isEmpty {
-                        Shelf("Other Films") {
-                            ForEach(externalFilms) { entry in
-                                FilmographyCard(entry: entry)
+                        if !externalFilms.isEmpty {
+                            Shelf("Other Films") {
+                                ForEach(externalFilms) { entry in
+                                    FilmographyCard(entry: entry)
+                                }
                             }
                         }
-                    }
-                    if !externalSeries.isEmpty {
-                        Shelf("Other Series") {
-                            ForEach(externalSeries) { entry in
-                                FilmographyCard(entry: entry)
+                        if !externalSeries.isEmpty {
+                            Shelf("Other Series") {
+                                ForEach(externalSeries) { entry in
+                                    FilmographyCard(entry: entry)
+                                }
                             }
                         }
-                    }
-                    if person.credits.isEmpty && externalFilms.isEmpty && externalSeries.isEmpty {
-                        Text("None of their work is in the library right now.")
-                            .font(.callout).foregroundStyle(.secondary).padding(.horizontal)
+                        if person.credits.isEmpty && externalFilms.isEmpty && externalSeries.isEmpty {
+                            Text("None of their work is in the library right now.")
+                                .font(.callout).foregroundStyle(.secondary).padding(.horizontal)
+                        }
                     }
                 }
-                .padding(.bottom)
+                .padding(.bottom, 32)
             }
         }
         .navigationTitle(person?.name ?? "Person")
@@ -444,33 +448,83 @@ struct PersonView: View {
     }
 
     private func header(_ person: Person) -> some View {
-        HStack(alignment: .top, spacing: 16) {
-            RemoteImage(path: person.profile, placeholder: "person.fill")
-                .aspectRatio(2 / 3, contentMode: .fit)
-                .frame(width: shelfCardWidth)
-                .clipShape(.rect(cornerRadius: 8))
-            VStack(alignment: .leading, spacing: 6) {
-                Text(person.name).font(.title.bold())
-                let facts = Format.facts(person.knownFor.map { "Known for \($0)" },
-                                         Self.life(person), person.placeOfBirth)
+        VStack(alignment: .center, spacing: 14) {
+            // Centralized circular portrait
+            ZStack {
+                Circle()
+                    .fill(Color.orange.opacity(0.18))
+                    .frame(width: 130, height: 130)
+                    .blur(radius: 24)
+
+                RemoteImage(path: person.profile, placeholder: "person.fill")
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 120, height: 120)
+                    .clipShape(Circle())
+                    .overlay(
+                        Circle().strokeBorder(Color.white.opacity(0.14), lineWidth: 1.5)
+                    )
+                    .shadow(color: Color.black.opacity(0.45), radius: 14, y: 5)
+            }
+            .padding(.top, 8)
+
+            // Centralized Name & Metadata
+            VStack(spacing: 6) {
+                Text(person.name)
+                    .font(.system(size: 26, weight: .bold, design: .serif))
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.center)
+
+                let facts = Format.facts(
+                    person.knownFor.map { "Known for \($0)" },
+                    Self.life(person),
+                    person.placeOfBirth
+                )
                 if !facts.isEmpty {
-                    Text(facts).font(.subheadline).foregroundStyle(.secondary)
-                }
-                if let biography = person.biography, !biography.isEmpty {
-                    Text(biography).font(.callout).lineLimit(10)
+                    Text(facts)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
                 }
             }
-            Spacer(minLength: 0)
+
+            // Centralized Biography with Read More
+            if let biography = person.biography, !biography.isEmpty {
+                VStack(spacing: 6) {
+                    Text(biography)
+                        .font(.callout)
+                        .foregroundStyle(.white.opacity(0.85))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(isBioExpanded ? nil : 5)
+                        .lineSpacing(3)
+
+                    if biography.count > 250 {
+                        Button {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                isBioExpanded.toggle()
+                            }
+                        } label: {
+                            Text(isBioExpanded ? "Show less" : "Read more")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(Color.orange)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, 2)
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 4)
+            }
         }
-        .padding(.horizontal)
-        .padding(.top, 4)
+        .frame(maxWidth: .infinity)
+        .padding(.top, 8)
     }
 
-    /// "1964–", "1930–2004".
+    /// "Born 2003", "1930–2004".
     private static func life(_ person: Person) -> String? {
         guard let born = person.birthday?.prefix(4), !born.isEmpty else { return nil }
         if let died = person.deathday?.prefix(4), !died.isEmpty { return "\(born)–\(died)" }
-        return "\(born)–"
+        return "Born \(born)"
     }
 
     private func load() async {
