@@ -79,7 +79,6 @@ struct BrowseView: View {
                 Spacer().frame(height: 74)
                 #endif
             }
-            .navigationTitle("Search")
             .plySearchable($query, prompt: "Titles, shows, episodes, people, genres")
             .plyRefreshable {
                 await library.reload()
@@ -91,6 +90,24 @@ struct BrowseView: View {
                 _ = await (lists, episodes)
             }
             .task(id: query) { await connection.browse.searchPeople(trimmed) }
+            .toolbar {
+                #if os(iOS)
+                ToolbarItem(placement: .topBarLeading) {
+                    PlyBrand(size: 28)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Text("Search")
+                        .font(.title3.bold())
+                        .foregroundStyle(.primary)
+                }
+                #endif
+            }
+            #if os(iOS)
+            .navigationTitle("")
+            .plyInlineTitle()
+            #else
+            .navigationTitle("Search")
+            #endif
             .plyDestinations()
         }
     }

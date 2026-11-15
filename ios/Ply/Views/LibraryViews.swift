@@ -586,7 +586,24 @@ struct MoviesView: View {
             }
             .plySearchable($query, prompt: "Films")
             .plyRefreshable { await library.reload() }
+            .toolbar {
+                #if os(iOS)
+                ToolbarItem(placement: .topBarLeading) {
+                    PlyBrand(size: 28)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Text("Films")
+                        .font(.title3.bold())
+                        .foregroundStyle(.primary)
+                }
+                #endif
+            }
+            #if os(iOS)
+            .navigationTitle("")
+            .plyInlineTitle()
+            #else
             .navigationTitle("Films")
+            #endif
             .plyDestinations()
         }
     }
@@ -741,7 +758,24 @@ struct ShowsView: View {
             // that sort is chosen, and again after a reload has forgotten it.
             .task(id: sort) { if sort == .added { await library.ensureEpisodes() } }
             .task(id: library.generation) { if sort == .added { await library.ensureEpisodes() } }
+            .toolbar {
+                #if os(iOS)
+                ToolbarItem(placement: .topBarLeading) {
+                    PlyBrand(size: 28)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Text("Series")
+                        .font(.title3.bold())
+                        .foregroundStyle(.primary)
+                }
+                #endif
+            }
+            #if os(iOS)
+            .navigationTitle("")
+            .plyInlineTitle()
+            #else
             .navigationTitle("Series")
+            #endif
             .plyDestinations()
         }
     }
