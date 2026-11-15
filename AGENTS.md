@@ -17,13 +17,30 @@ plumb cannot do. When you fall back to a native tool, say why in one line, and r
 | Compile errors | `diagnostics`, or `fail_on_new_errors` on the edit. `run_task build` is the final word: the LSP is sometimes stale. |
 | Build and test Go | `run_task` (`language: "go"`, slots `build`, `test`, `lint`, `e2e` = integration, `verify`), plus `run_command` `go-vet`, `go-test-race`, `go-test-integration`, `go-tidy`, `ply-build` |
 | Build and test the web UI | `run_command` `web-install`, `web-check`, `web-build`, `web-test`, `web-e2e` |
+| Build and test the iOS/tvOS apps | `run_command` `ios-test` (core, on the Mac), `ios-app-test` / `ios-tv-test` (hosted in the apps, on the simulators), `ios-check` (all three), `ios-build` (iPhone and Apple TV builds): the `ios/` Makefile's targets. Xcode's MCP tools for previews and diagnostics (below). |
 | Which tests to run | `topology_affected` |
 | Git | the plumb `git` tool (`status`, `diff`, `log`, `add`, `commit`). Push only when the user asks. |
 | Talk to a peer agent | `leave_note` / `check_messages` |
 | Project memory | `search_memories`, `write_memory` |
 
 What still needs a native tool (shell): `ffmpeg`/`ffprobe` fixtures, `curl` against a running ply, `make`
-targets that have no plumb command yet, and Xcode/`xcodebuild`.
+targets that have no plumb command yet, and Xcode/`xcodebuild` beyond the `ios-*` commands.
+
+### Xcode's MCP tools (the iOS/tvOS apps)
+Xcode serves its own tools over MCP (`xcrun mcpbridge`; the server is `xcode` in Claude Code, Codex and Antigravity,
+`xcode-tools` for Xcode's built-in agents). Use them for what the `ios-*` commands cannot do: `RenderPreview` (look at a
+SwiftUI view), `XcodeRefreshCodeIssuesInFile` and `GetBuildLog` (diagnostics), `RunProject` / `GetConsoleOutput` /
+`StopProject` (the app running in Xcode), and `DocumentationSearch`; `BuildProject` and `RunAllTests` / `RunSomeTests`
+(the `Ply` and `PlyTV` schemes' app tests) are a cross-check of the `ios-*` commands, not a substitute.
+- **Open the project first:** `make project` in `ios/`, then `XcodeOpenWorkspace` on `ios/Ply.xcodeproj`. The first time
+  an agent does this, Xcode asks the user to approve that agent and the folder. If a tool answers "isn't approved",
+  ask the user to approve it in Xcode; do not retry in a loop.
+- **Never change anything through Xcode's tools:** `ios/Ply.xcodeproj` is generated from `ios/project.yml` (XcodeGen)
+  and not committed, so a change made there is lost, and a file written through Xcode bypasses plumb. Edit the sources,
+  `project.yml` and the String Catalog with plumb, then `make project`. Off limits: `XcodeWrite`, `XcodeUpdate`,
+  `XcodeMV`, `XcodeRM`, `XcodeMakeDir`, `XcodeNewTarget`, `XcodeNewProject`, `UpdateTargetBuildSetting`,
+  `UpdateFileCompilerFlags`, `AddInfoPlist`, `AddEntitlement`, `StringCatalogEdit`.
+- **A test that finishes is the proof**, not a build: the `ios-*` commands are the final word, as `run_task` is for Go.
 
 ## Other rules
 - **The repository is public.** Never commit API keys, PINs, tokens, `.plumb/memories/` or anything from the

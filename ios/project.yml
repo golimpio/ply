@@ -19,6 +19,15 @@ settings:
     SWIFT_EMIT_LOC_STRINGS: YES
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: ${PLY_TEAM}
+# What the two app-hosted test targets (PlyAppTests, PlyTVAppTests) share.
+targetTemplates:
+  AppTests:
+    type: bundle.unit-test
+    sources:
+      - path: PlyAppTests
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
 targets:
   Ply:
     type: application
@@ -96,15 +105,46 @@ targets:
         INFOPLIST_FILE: PlyTV/Info.plist
         INFOPLIST_KEY_CFBundleDisplayName: ply
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+  # Tests that need the app itself (its bundle, UIKit, the player): hosted in the iPhone/iPad app
+  # and in the Apple TV app, on a simulator. `make app-test` and `make tv-test` run them, and they
+  # are the test action of the Ply and PlyTV schemes, so Xcode's own test runner finds them too.
+  PlyAppTests:
+    templates: [AppTests]
+    platform: iOS
+    dependencies:
+      - target: Ply
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ply.ios.apptests
+  PlyTVAppTests:
+    templates: [AppTests]
+    platform: tvOS
+    deploymentTarget: "17.0"
+    dependencies:
+      - target: PlyTV
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ply.tvos.apptests
+        # The TV app's product is Ply.app, not PlyTV.app, so XcodeGen's guess of the host is wrong.
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Ply.app/Ply
+        BUNDLE_LOADER: $(TEST_HOST)
 schemes:
   Ply:
     build:
       targets:
         Ply: all
+        PlyAppTests: [test]
+    test:
+      targets:
+        - PlyAppTests
   PlyTV:
     build:
       targets:
         PlyTV: all
+        PlyTVAppTests: [test]
+    test:
+      targets:
+        - PlyTVAppTests
   PlyCore:
     build:
       targets:

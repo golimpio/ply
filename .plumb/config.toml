@@ -77,3 +77,43 @@ exec = ['make', 'e2e-web']
 name = 'web-e2e'
 timeout = '15m0s'
 working_dir = ''
+
+[[command]]
+allow_writes = true
+deny_network = false
+exec = ['make', 'test']
+name = 'ios-test'
+timeout = '15m0s'
+working_dir = 'ios'
+
+[[command]]
+allow_writes = true
+deny_network = false
+exec = ['make', 'app-test']
+name = 'ios-app-test'
+timeout = '20m0s'
+working_dir = 'ios'
+
+[[command]]
+allow_writes = true
+deny_network = false
+exec = ['make', 'tv-test']
+name = 'ios-tv-test'
+timeout = '20m0s'
+working_dir = 'ios'
+
+[[command]]
+allow_writes = true
+deny_network = false
+exec = ['make', 'check']
+name = 'ios-check'
+timeout = '30m0s'
+working_dir = 'ios'
+
+[[command]]
+allow_writes = true
+deny_network = false
+exec = ['make', 'build', 'tv']
+name = 'ios-build'
+timeout = '20m0s'
+working_dir = 'ios'

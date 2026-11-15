@@ -37,13 +37,16 @@ nonisolated struct DiscoveredServer: Identifiable, Hashable, Sendable {
 
 /// Browses for ply servers with NWBrowser while it is started (docs/M11-CLIENTS.md, "Platforms").
 @Observable final class Discovery {
+    /// The Bonjour type ply advertises; Info.plist's NSBonjourServices must list it, or iOS refuses the browse.
+    nonisolated static let serviceType = "_ply._tcp"
+
     private(set) var servers: [DiscoveredServer] = []
     private(set) var problem: String?
     private var browser: NWBrowser?
 
     func start() {
         guard browser == nil else { return }
-        let b = NWBrowser(for: .bonjourWithTXTRecord(type: "_ply._tcp", domain: nil), using: .tcp)
+        let b = NWBrowser(for: .bonjourWithTXTRecord(type: Self.serviceType, domain: nil), using: .tcp)
         b.browseResultsChangedHandler = { [weak self] results, _ in
             // The same service is reported once per interface it is seen on; its TXT id names it.
             let list = uniqueByID(results.compactMap(DiscoveredServer.init))

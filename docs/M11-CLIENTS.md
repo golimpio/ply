@@ -392,10 +392,11 @@ Receiver, ply on `http://192.168.4.196:8420`:
 
 ## The apps (`ios/`, 2026-11-12; iPhone, iPad and Apple TV)
 The first native clients: SwiftUI, iOS 17 and tvOS 17 and later. Everything they need to build is in `ios/`
-(XcodeGen's `project.yml` and a Makefile: `make`, `make test`, `make ci-build`, `make run`, `make tv`, `make tv-run`,
-`make device TEAM=<team id>`), so they can move to a repository of their own. The generated
-`Ply.xcodeproj` is not committed. Xcode 26 or newer (Swift 6.2) and XcodeGen are required; the Makefile
-checks both.
+(XcodeGen's `project.yml` and a Makefile: `make`, `make test`, `make app-test`, `make tv-test`, `make check`,
+`make ci-build`, `make run`, `make tv`, `make tv-run`, `make device TEAM=<team id>`), so they can move to a repository
+of their own. The generated `Ply.xcodeproj` is not committed. Xcode 26 or newer (Swift 6.2) and XcodeGen are
+required; the Makefile checks both. The app-hosted tests need a released Xcode (27.2 works): the Xcode 27.0 beta
+started the test host suspended and never resumed it, so a run hung until it timed out.
 - **Connecting:** `NWBrowser` for `_ply._tcp`, then the IPv4 address mDNS resolves (`https://<host>` with `tls=1`),
   or an address typed (`http` or `https`, port 8420 when none is given). `api` and `apiMin` of `/api/info` are
   checked first: a server to update and an app to update are told apart, and only an unreachable one has "try again".
@@ -453,15 +454,28 @@ checks both.
   window both call `AppModel.unregister`, which closes the player, sends its progress and forgets the presentation
   without dismissing into a window that is gone. `PlaybackPresentationTests` and `PlaybackWindowsTests` pin the
   per-window state and the window registry; two windows at once cannot be driven from a terminal.
-- **Tests and CI:** `make test` runs the Foundation-only core on this Mac as a macOS logic test: no simulator, no
-  test host, so it works where Xcode 27's simulator test launch does not. It covers the SSE and WebVTT parsers, RFC
+- **Tests and CI:** `make test` runs the Foundation-only core on this Mac as a macOS logic test: no simulator and no
+  test host, so it is quick and runs anywhere. It covers the SSE and WebVTT parsers, RFC
   3339 and path handling, the API client's requests and answers (with a URLProtocol stub), the models the server
   sends, the AirPlay play plan, next-episode selection, connect-failure classification, command history, discovery
   dedupe, the feed's own reconnect with `Last-Event-ID`, the search matcher (the web's own fixtures, so that both
   clients rank a search alike), a show's newest file, that the episodes are fetched once, when a page asks, not
   with Home (`LibraryModelTests`), the window registry and a remote play's outcome (`PlaybackWindowsTests`), and a
-  window's hold on the play (`PlaybackPresentationTests`). The app-hosted XCTest target is not used. CI runs these
-  tests and a generic iOS and tvOS build with Xcode 26+ (`make ci-build tv`).
+  window's hold on the play (`PlaybackPresentationTests`). What only the built app can show is in `PlyAppTests`,
+  hosted in the iPhone/iPad app (`make app-test`, on `SIM`, the iPhone 18 Pro by default) and in the Apple TV app
+  (`make tv-test`, on `TVSIM`, the Apple TV 4K by default): that its Info.plist lists the Bonjour type `Discovery`
+  browses for, asks for the local network, and allows plain HTTP to it. They are the test action of the `Ply` and
+  `PlyTV` schemes, so Xcode's own test runner finds them too; `make check` runs all three suites. A simulator name is
+  matched exactly, on the newest runtime that has it; when the default devices are missing (an older Xcode), the
+  newest iPhone and Apple TV are used, while a name given as `SIM=`/`TVSIM=` must exist. Agents run these through
+  plumb (`ios-test`, `ios-app-test`, `ios-tv-test`, `ios-check`, `ios-build`). CI runs the core tests and a generic
+  iOS and tvOS build with Xcode 26+ (`make ci-build tv`).
+- **Xcode's tools for agents:** Xcode serves its own tools over MCP (`xcrun mcpbridge`, 27.2 here): build, run
+  the tests of the active scheme, render a SwiftUI preview, read the build log and a file's diagnostics, run the app
+  and read its console. An agent opens `ios/Ply.xcodeproj` (`make project` first, so it matches `project.yml`), and
+  the first time it does, Xcode asks the owner to approve that agent and the folder. The project is generated, so
+  nothing is changed through Xcode's file and project tools: `project.yml` and the sources are edited, and the project
+  is generated again. The rules for agents are in `AGENTS.md`.
 - **Distribution:** the apps ship as `com.ply.ios` and `com.ply.tvos` (`MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` in
   `project.yml`), with the icon family (light, dark and tinted in `Ply/Assets.xcassets/AppIcon.appiconset`, the TV's
   layered brand assets), a launch screen in the app's own velvet (`UILaunchScreen` in `Ply/Info.plist`,
