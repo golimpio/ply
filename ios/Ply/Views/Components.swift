@@ -1,17 +1,37 @@
 import SwiftUI
 
-/// The ply brand mark, in display serif italic.
-struct PlyBrand: View {
-    var size: CGFloat = 26
+/// The authentic ply brand logo: a warm amber-orange play mark and modern clean wordmark.
+struct PlyLogo: View {
+    var size: CGFloat = 22
 
     var body: some View {
-        Text("Ply")
-            .font(.system(size: size, weight: .regular, design: .serif).italic())
-            .tracking(-0.5)
-            .foregroundStyle(.primary)
-            .accessibilityLabel("Ply")
+        HStack(spacing: 6) {
+            Image(systemName: "play.fill")
+                .font(.system(size: size * 0.68, weight: .bold))
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.98, green: 0.62, blue: 0.22),
+                            Color(red: 0.92, green: 0.44, blue: 0.14)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .shadow(color: Color.orange.opacity(0.35), radius: 4, y: 1)
+
+            Text("ply")
+                .font(.system(size: size, weight: .bold, design: .rounded))
+                .tracking(-0.5)
+                .foregroundStyle(.white)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Ply")
     }
 }
+
+/// The ply brand mark (alias to PlyLogo for consistent authentic branding across all views).
+typealias PlyBrand = PlyLogo
 
 /// Where a navigation link goes, in every tab.
 enum Route: Hashable {

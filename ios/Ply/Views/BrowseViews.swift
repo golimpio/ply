@@ -69,6 +69,13 @@ struct BrowseView: View {
                 .font(.headline)
                 .padding(.horizontal)
                 .padding(.top, 10)
+                #elseif os(iOS)
+                HStack {
+                    PlyLogo(size: 24)
+                    Spacer()
+                }
+                .padding(.horizontal)
+                .padding(.top, 4)
                 #endif
                 if trimmed.isEmpty {
                     browseHome(browse)
@@ -90,13 +97,6 @@ struct BrowseView: View {
                 _ = await (lists, episodes)
             }
             .task(id: query) { await connection.browse.searchPeople(trimmed) }
-            .toolbar {
-                #if os(iOS)
-                ToolbarItem(placement: .topBarLeading) {
-                    PlyBrand(size: 28)
-                }
-                #endif
-            }
             #if os(iOS)
             .navigationTitle("")
             .plyInlineTitle()
