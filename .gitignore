@@ -34,6 +34,7 @@ npm-debug.log*
 
 # Local agent state and browser artifacts
 /.plumb/memories/
+.plumb/
 /.playwright-mcp/
 
 # macOS and editor temporary files
