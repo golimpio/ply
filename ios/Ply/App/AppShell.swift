@@ -101,6 +101,147 @@ final class WindowSceneProbe: UIView {
     }
 }
 
+#if os(iOS)
+enum AppTab: Int, CaseIterable, Identifiable {
+    case home
+    case films
+    case series
+    case search
+    case settings
+
+    var id: Int { rawValue }
+
+    var icon: String {
+        switch self {
+        case .home: "house"
+        case .films: "film"
+        case .series: "tv"
+        case .search: "magnifyingglass"
+        case .settings: "gearshape"
+        }
+    }
+
+    var activeIcon: String {
+        switch self {
+        case .home: "house.fill"
+        case .films: "film.fill"
+        case .series: "tv.fill"
+        case .search: "magnifyingglass"
+        case .settings: "gearshape.fill"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .home: "Home"
+        case .films: "Films"
+        case .series: "Series"
+        case .search: "Search"
+        case .settings: "Settings"
+        }
+    }
+}
+
+/// A floating minimalist glass dock without text labels, featuring crisp minimalist icons and an orange highlight.
+struct FloatingTabBar: View {
+    @Binding var selectedTab: AppTab
+    @Namespace private var animation
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(AppTab.allCases) { tab in
+                let isSelected = selectedTab == tab
+                Button {
+                    if selectedTab != tab {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
+                            selectedTab = tab
+                        }
+                        #if os(iOS)
+                        UISelectionFeedbackGenerator().selectionChanged()
+                        #endif
+                    }
+                } label: {
+                    ZStack {
+                        if isSelected {
+                            Capsule()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [Color.orange, Color.orange.opacity(0.88)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .matchedGeometryEffect(id: "ActiveTabIndicator", in: animation)
+                                .frame(width: 48, height: 38)
+                                .shadow(color: Color.orange.opacity(0.45), radius: 8, y: 3)
+                        }
+
+                        Image(systemName: isSelected ? tab.activeIcon : tab.icon)
+                            .font(.system(size: tab == .search ? 18 : 19, weight: isSelected ? .semibold : .regular))
+                            .foregroundStyle(isSelected ? Color.white : Color.white.opacity(0.42))
+                            .scaleEffect(isSelected ? 1.05 : 1.0)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(tab.label)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(
+            Capsule()
+                .fill(Color.black.opacity(0.82))
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(
+                    Capsule()
+                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.8)
+                )
+                .shadow(color: Color.black.opacity(0.6), radius: 20, y: 8)
+        )
+        .frame(maxWidth: 360)
+    }
+}
+
+struct MainTabs: View {
+    @State private var selectedTab: AppTab = .home
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            // Tab containers - kept alive to preserve scroll and navigation state without UIKit UITabBar
+            ZStack {
+                HomeView()
+                    .opacity(selectedTab == .home ? 1 : 0)
+                    .allowsHitTesting(selectedTab == .home)
+
+                MoviesView()
+                    .opacity(selectedTab == .films ? 1 : 0)
+                    .allowsHitTesting(selectedTab == .films)
+
+                ShowsView()
+                    .opacity(selectedTab == .series ? 1 : 0)
+                    .allowsHitTesting(selectedTab == .series)
+
+                BrowseView()
+                    .opacity(selectedTab == .search ? 1 : 0)
+                    .allowsHitTesting(selectedTab == .search)
+
+                SettingsView()
+                    .opacity(selectedTab == .settings ? 1 : 0)
+                    .allowsHitTesting(selectedTab == .settings)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea(.keyboard, edges: .bottom)
+
+            FloatingTabBar(selectedTab: $selectedTab)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 8)
+        }
+    }
+}
+#else
 struct MainTabs: View {
     var body: some View {
         TabView {
@@ -117,3 +258,4 @@ struct MainTabs: View {
         }
     }
 }
+#endif

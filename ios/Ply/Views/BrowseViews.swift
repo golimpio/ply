@@ -75,6 +75,9 @@ struct BrowseView: View {
                 } else {
                     results(browse, library)
                 }
+                #if os(iOS)
+                Spacer().frame(height: 74)
+                #endif
             }
             .navigationTitle("Search")
             .plySearchable($query, prompt: "Titles, shows, episodes, people, genres")
