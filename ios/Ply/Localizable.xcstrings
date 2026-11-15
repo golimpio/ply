@@ -1,6 +1,9 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "" : {
+
+    },
     "%lld" : {
 
     },
@@ -64,6 +67,9 @@
     "Default" : {
 
     },
+    "Details" : {
+
+    },
     "Device id" : {
 
     },
@@ -71,6 +77,9 @@
 
     },
     "Downloading subtitles…" : {
+
+    },
+    "Films" : {
 
     },
     "Forget this server" : {
@@ -83,9 +92,6 @@
 
     },
     "Genres" : {
-
-    },
-    "Home" : {
 
     },
     "Looking for ply servers…" : {
@@ -163,6 +169,15 @@
     "ply" : {
 
     },
+    "Ply" : {
+
+    },
+    "Programme" : {
+
+    },
+    "Resume" : {
+
+    },
     "Resume from %@" : {
 
     },
@@ -172,13 +187,7 @@
     "Search for a person" : {
 
     },
-    "Search movies" : {
-
-    },
     "Search people" : {
-
-    },
-    "Search shows" : {
 
     },
     "Search the people in your library" : {
@@ -188,6 +197,9 @@
 
     },
     "Season watched" : {
+
+    },
+    "Series" : {
 
     },
     "Server" : {

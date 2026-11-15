@@ -111,7 +111,7 @@ struct MainTabs: View {
     var body: some View {
         TabView {
             HomeView()
-                .tabItem { Label("Programme", systemImage: "house") }
+                .tabItem { Label("Home", systemImage: "house") }
             MoviesView()
                 .tabItem { Label("Films", systemImage: "film") }
             ShowsView()

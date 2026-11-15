@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// An editorial hero banner at the top of Programme, highlighting an in-progress or featured film.
+/// An editorial hero banner at the top of Home, highlighting an in-progress or featured film.
 struct HeroBanner: View {
     let item: Item
     @Environment(AppModel.self) private var model
@@ -135,7 +135,7 @@ struct HomeView: View {
                     #if os(tvOS)
                     HStack(spacing: 12) {
                         PlyBrand(size: 36)
-                        Text("Programme")
+                        Text("Home")
                             .font(.title2.weight(.medium))
                             .foregroundStyle(.secondary)
                         Spacer()
