@@ -385,50 +385,87 @@ struct MoviesView: View {
         }
     }
 
+    private var availableLetters: [String] {
+        let letters = Set(filteredMovies.map { alphabetLetter(of: $0.sortTitle ?? $0.title) })
+        return letters.sorted { a, b in
+            if a == "#" { return true }
+            if b == "#" { return false }
+            return a < b
+        }
+    }
+
+    private var firstMovieIdByLetter: [String: Int64] {
+        var map: [String: Int64] = [:]
+        for movie in filteredMovies {
+            let letter = alphabetLetter(of: movie.sortTitle ?? movie.title)
+            if map[letter] == nil {
+                map[letter] = movie.id
+            }
+        }
+        return map
+    }
+
     var body: some View {
         let library = connection.library
         NavigationStack {
-            ScrollView {
-                #if os(tvOS)
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Search films", text: $query)
-                }
-                .font(.headline)
-                .padding(.horizontal)
-                .padding(.top, 10)
-                #endif
+            ScrollViewReader { proxy in
+                ZStack(alignment: .trailing) {
+                    ScrollView {
+                        #if os(tvOS)
+                        HStack(spacing: 8) {
+                            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                            TextField("Search films", text: $query)
+                        }
+                        .font(.headline)
+                        .padding(.horizontal)
+                        .padding(.top, 10)
+                        #endif
 
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        Menu {
-                            Picker("Sort", selection: $sort) {
-                                ForEach(MovieSort.allCases) { Text($0.rawValue).tag($0) }
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                Menu {
+                                    Picker("Sort", selection: $sort) {
+                                        ForEach(MovieSort.allCases) { Text($0.rawValue).tag($0) }
+                                    }
+                                } label: {
+                                    Label(sort.rawValue, systemImage: "arrow.up.arrow.down")
+                                        .font(.footnote)
+                                }
+                                .buttonStyle(.bordered)
+
+                                FilterChip(title: "4K", isOn: $only4K)
+                                FilterChip(title: "HDR", isOn: $onlyHDR)
+                                FilterChip(title: "Unwatched", isOn: $onlyUnwatched)
                             }
-                        } label: {
-                            Label(sort.rawValue, systemImage: "arrow.up.arrow.down")
-                                .font(.footnote)
+                            .padding(.horizontal)
+                            .padding(.top, 4)
                         }
-                        .buttonStyle(.bordered)
 
-                        FilterChip(title: "4K", isOn: $only4K)
-                        FilterChip(title: "HDR", isOn: $onlyHDR)
-                        FilterChip(title: "Unwatched", isOn: $onlyUnwatched)
-                    }
-                    .padding(.horizontal)
-                    .padding(.top, 4)
-                }
-
-                LazyVGrid(columns: posterColumns, spacing: 16) {
-                    ForEach(filteredMovies) { movie in
-                        NavigationLink(value: Route.item(movie.id)) {
-                            PosterCard(title: movie.title, caption: movie.year.map(String.init), image: movie.poster,
-                                       watched: movie.isWatched, fraction: movie.fraction)
+                        LazyVGrid(columns: posterColumns, spacing: 16) {
+                            ForEach(filteredMovies) { movie in
+                                NavigationLink(value: Route.item(movie.id)) {
+                                    PosterCard(title: movie.title, caption: movie.year.map(String.init), image: movie.poster,
+                                               watched: movie.isWatched, fraction: movie.fraction)
+                                }
+                                .buttonStyle(.plain)
+                                .id(movie.id)
+                            }
                         }
-                        .buttonStyle(.plain)
+                        .padding()
+                        .padding(.trailing, sort == .title && availableLetters.count > 1 ? 16 : 0)
                     }
+
+                    #if os(iOS)
+                    if sort == .title && availableLetters.count > 1 {
+                        AlphabetJumpRail(letters: availableLetters) { letter in
+                            if let id = firstMovieIdByLetter[letter] {
+                                proxy.scrollTo(id, anchor: .top)
+                            }
+                        }
+                        .padding(.trailing, 2)
+                    }
+                    #endif
                 }
-                .padding()
             }
             .overlay {
                 if (!query.isEmpty || only4K || onlyHDR || onlyUnwatched) && filteredMovies.isEmpty {
@@ -495,51 +532,88 @@ struct ShowsView: View {
         }
     }
 
+    private var availableLetters: [String] {
+        let letters = Set(filteredShows.map { alphabetLetter(of: $0.sortTitle ?? $0.show) })
+        return letters.sorted { a, b in
+            if a == "#" { return true }
+            if b == "#" { return false }
+            return a < b
+        }
+    }
+
+    private var firstShowNameByLetter: [String: String] {
+        var map: [String: String] = [:]
+        for show in filteredShows {
+            let letter = alphabetLetter(of: show.sortTitle ?? show.show)
+            if map[letter] == nil {
+                map[letter] = show.show
+            }
+        }
+        return map
+    }
+
     var body: some View {
         let library = connection.library
         NavigationStack {
-            ScrollView {
-                #if os(tvOS)
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Search series", text: $query)
-                }
-                .font(.headline)
-                .padding(.horizontal)
-                .padding(.top, 10)
-                #endif
+            ScrollViewReader { proxy in
+                ZStack(alignment: .trailing) {
+                    ScrollView {
+                        #if os(tvOS)
+                        HStack(spacing: 8) {
+                            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                            TextField("Search series", text: $query)
+                        }
+                        .font(.headline)
+                        .padding(.horizontal)
+                        .padding(.top, 10)
+                        #endif
 
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        Menu {
-                            Picker("Sort", selection: $sort) {
-                                ForEach(ShowSort.allCases) { Text($0.rawValue).tag($0) }
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                Menu {
+                                    Picker("Sort", selection: $sort) {
+                                        ForEach(ShowSort.allCases) { Text($0.rawValue).tag($0) }
+                                    }
+                                } label: {
+                                    Label(sort.rawValue, systemImage: "arrow.up.arrow.down")
+                                        .font(.footnote)
+                                }
+                                .buttonStyle(.bordered)
+
+                                FilterChip(title: "Unwatched", isOn: $onlyUnwatched)
                             }
-                        } label: {
-                            Label(sort.rawValue, systemImage: "arrow.up.arrow.down")
-                                .font(.footnote)
+                            .padding(.horizontal)
+                            .padding(.top, 4)
                         }
-                        .buttonStyle(.bordered)
 
-                        FilterChip(title: "Unwatched", isOn: $onlyUnwatched)
-                    }
-                    .padding(.horizontal)
-                    .padding(.top, 4)
-                }
-
-                if sort == .added {
-                    EpisodesFailure()
-                }
-
-                LazyVGrid(columns: posterColumns, spacing: 16) {
-                    ForEach(filteredShows) { show in
-                        NavigationLink(value: Route.show(show.show)) {
-                            PosterCard(title: show.show, caption: caption(show), image: show.poster, watched: show.allWatched)
+                        if sort == .added {
+                            EpisodesFailure()
                         }
-                        .buttonStyle(.plain)
+
+                        LazyVGrid(columns: posterColumns, spacing: 16) {
+                            ForEach(filteredShows) { show in
+                                NavigationLink(value: Route.show(show.show)) {
+                                    PosterCard(title: show.show, caption: caption(show), image: show.poster, watched: show.allWatched)
+                                }
+                                .buttonStyle(.plain)
+                                .id(show.show)
+                            }
+                        }
+                        .padding()
+                        .padding(.trailing, sort == .title && availableLetters.count > 1 ? 16 : 0)
                     }
+
+                    #if os(iOS)
+                    if sort == .title && availableLetters.count > 1 {
+                        AlphabetJumpRail(letters: availableLetters) { letter in
+                            if let name = firstShowNameByLetter[letter] {
+                                proxy.scrollTo(name, anchor: .top)
+                            }
+                        }
+                        .padding(.trailing, 2)
+                    }
+                    #endif
                 }
-                .padding()
             }
             .overlay {
                 if (!query.isEmpty || onlyUnwatched) && filteredShows.isEmpty {

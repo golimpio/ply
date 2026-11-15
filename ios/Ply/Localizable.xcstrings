@@ -31,9 +31,6 @@
     "Audio" : {
 
     },
-    "Browse" : {
-
-    },
     "Cannot load %@" : {
 
     },
@@ -67,13 +64,7 @@
     "Default" : {
 
     },
-    "Details" : {
-
-    },
     "Device id" : {
-
-    },
-    "Done" : {
 
     },
     "Downloading subtitles…" : {
@@ -92,6 +83,9 @@
 
     },
     "Genres" : {
+
+    },
+    "Home" : {
 
     },
     "Looking for ply servers…" : {
@@ -170,12 +164,6 @@
 
     },
     "Ply" : {
-
-    },
-    "Programme" : {
-
-    },
-    "Resume" : {
 
     },
     "Resume from %@" : {

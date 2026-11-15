@@ -68,6 +68,87 @@ let genreTileWidth: CGFloat = {
     150
     #endif
 }()
+/// The rail's letter for a title: A to Z (case-insensitive, accents stripped), else # (digits, symbols).
+func alphabetLetter(of title: String) -> String {
+    let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let first = trimmed.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current).first else {
+        return "#"
+    }
+    let upper = String(first).uppercased()
+    return (upper >= "A" && upper <= "Z") ? upper : "#"
+}
+
+#if os(iOS)
+/// A vertical A to Z fast-scrolling jump rail along the edge of the list.
+struct AlphabetJumpRail: View {
+    let letters: [String]
+    let onSelect: (String) -> Void
+    @State private var draggingLetter: String? = nil
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // Floating Touch Bubble Indicator when dragging
+            if let dragging = draggingLetter {
+                Text(dragging)
+                    .font(.system(size: 26, weight: .bold, design: .serif))
+                    .foregroundStyle(.white)
+                    .frame(width: 52, height: 52)
+                    .background(
+                        Circle()
+                            .fill(Color.orange)
+                            .shadow(color: Color.orange.opacity(0.4), radius: 10, y: 4)
+                    )
+                    .transition(.scale.combined(with: .opacity))
+            }
+
+            // The Vertical Letter Strip
+            VStack(spacing: 1) {
+                ForEach(letters, id: \.self) { letter in
+                    Text(letter)
+                        .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                        .foregroundStyle(draggingLetter == letter ? Color.orange : Color.secondary)
+                        .frame(width: 16, height: 14)
+                }
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 2)
+            .background(
+                Capsule()
+                    .fill(Color.black.opacity(0.35))
+                    .background(.ultraThinMaterial, in: Capsule())
+            )
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        updateSelection(at: value.location.y)
+                    }
+                    .onEnded { _ in
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            draggingLetter = nil
+                        }
+                    }
+            )
+        }
+    }
+
+    private func updateSelection(at y: CGFloat) {
+        guard !letters.isEmpty else { return }
+        let itemHeight: CGFloat = 15
+        let totalHeight = CGFloat(letters.count) * itemHeight
+        let clampedY = max(0, min(y - 8, totalHeight - 1))
+        let idx = Int((clampedY / totalHeight) * CGFloat(letters.count))
+        let clampedIdx = max(0, min(letters.count - 1, idx))
+        let letter = letters[clampedIdx]
+
+        if draggingLetter != letter {
+            draggingLetter = letter
+            UISelectionFeedbackGenerator().selectionChanged()
+            onSelect(letter)
+        }
+    }
+}
+#endif
 
 extension View {
     /// The pages a Route opens.
