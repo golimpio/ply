@@ -1,247 +1,156 @@
 import SwiftUI
-/// An organic 3D fanned deck spotlighting featured, in-progress, and recent items on Home.
-struct OrganicFannedDeckView: View {
+/// The Cinema Canvas & Peeking Deck spotlighting featured, in-progress, and recent items on Home.
+struct PeekingCanvasDeckView: View {
     let items: [Item]
     @Environment(AppModel.self) private var model
     @Environment(PlaybackScene.self) private var playbackScene
-    @State private var selectedIndex: Int = 0
-    @State private var dragOffset: CGFloat = 0
-    @State private var dragVertical: CGFloat = 0
-    @State private var isDragging: Bool = false
-    @State private var isAnimatingShuffle: Bool = false
-
-    private var count: Int { items.count }
+    @State private var activeItemId: Int64?
 
     private var activeItem: Item? {
-        guard !items.isEmpty, selectedIndex < items.count else { return nil }
-        return items[selectedIndex]
+        if let id = activeItemId, let item = items.first(where: { $0.id == id }) {
+            return item
+        }
+        return items.first
     }
 
     private var cardWidth: CGFloat {
         #if os(tvOS)
-        280
+        340
         #else
-        220
+        260
         #endif
     }
 
     private var cardHeight: CGFloat {
         #if os(tvOS)
-        400
+        480
         #else
-        320
-        #endif
-    }
-
-    private var horizontalOffset: CGFloat {
-        #if os(tvOS)
-        125
-        #else
-        95
+        375
         #endif
     }
 
     var body: some View {
-        if count > 0, let active = activeItem {
+        if !items.isEmpty, let active = activeItem {
             VStack(spacing: 16) {
-                // The Fanned Deck Stage - Perfectly centered horizontally across the full screen width
-                ZStack {
-                    // Ambient backlight directly centered behind the active card
-                    RadialGradient(
-                        colors: [
-                            Color.orange.opacity(0.38),
-                            Color.red.opacity(0.14),
-                            Color.clear
-                        ],
-                        center: .center,
-                        startRadius: 20,
-                        endRadius: 160
-                    )
-                    .frame(width: cardWidth * 1.5, height: cardHeight * 0.8)
-                    .blur(radius: 36)
-                    .offset(x: dragOffset * 0.25, y: 15)
-                    .allowsHitTesting(false)
+                // The Horizontal Peeking Canvas Carousel
+                GeometryReader { proxy in
+                    let screenWidth = proxy.size.width
+                    let sideInset = max(16, (screenWidth - cardWidth) / 2)
 
-                    // Left Tilted Card (-13°)
-                    if count > 1 {
-                        let leftIdx = (selectedIndex - 1 + count) % count
-                        let progress = dragOffset > 0 ? min(1.0, dragOffset / 180.0) : 0.0
-                        let xPos = -horizontalOffset + (progress * horizontalOffset)
-                        let yPos = 12.0 * (1.0 - progress)
-                        let rot = -13.0 + (progress * 13.0)
-                        let scale = 0.88 + (progress * 0.12)
-                        let opac = 0.92 + (progress * 0.08)
-                        let bright = -0.06 * (1.0 - progress)
-                        let zIdx = progress > 0.65 ? 10.0 : 2.0
-
-                        deckCard(items[leftIdx], isCenter: false)
-                            .rotationEffect(.degrees(rot))
-                            .offset(x: xPos, y: yPos)
-                            .scaleEffect(scale)
-                            .opacity(opac)
-                            .brightness(bright)
-                            .zIndex(zIdx)
-                            .onTapGesture {
-                                guard !isDragging, !isAnimatingShuffle else { return }
-                                executeShuffle(toNext: false)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 14) {
+                            ForEach(items) { item in
+                                canvasCard(item, isCenter: item.id == active.id)
+                                    .id(item.id)
+                                    .scrollTransition(.interactive, axis: .horizontal) { content, phase in
+                                        content
+                                            .scaleEffect(phase.isIdentity ? 1.0 : 0.92)
+                                            .opacity(phase.isIdentity ? 1.0 : 0.55)
+                                            .brightness(phase.isIdentity ? 0.0 : -0.06)
+                                    }
                             }
+                        }
+                        .scrollTargetLayout()
                     }
-
-                    // Right Tilted Card (+13°)
-                    if count > 1 {
-                        let rightIdx = (selectedIndex + 1) % count
-                        let progress = dragOffset < 0 ? min(1.0, -dragOffset / 180.0) : 0.0
-                        let xPos = horizontalOffset - (progress * horizontalOffset)
-                        let yPos = 12.0 * (1.0 - progress)
-                        let rot = 13.0 - (progress * 13.0)
-                        let scale = 0.88 + (progress * 0.12)
-                        let opac = 0.92 + (progress * 0.08)
-                        let bright = -0.06 * (1.0 - progress)
-                        let zIdx = progress > 0.65 ? 10.0 : 2.0
-
-                        deckCard(items[rightIdx], isCenter: false)
-                            .rotationEffect(.degrees(rot))
-                            .offset(x: xPos, y: yPos)
-                            .scaleEffect(scale)
-                            .opacity(opac)
-                            .brightness(bright)
-                            .zIndex(zIdx)
-                            .onTapGesture {
-                                guard !isDragging, !isAnimatingShuffle else { return }
-                                executeShuffle(toNext: true)
-                            }
-                    }
-
-                    // Center Active Card (Upright, on top, tracks drag smoothly)
-                    let absProgress = min(1.0, abs(dragOffset) / 180.0)
-                    let centerRot = Double(dragOffset / 20.0)
-                    let centerScale = 1.0 - absProgress * 0.12
-                    let centerOpac = 1.0 - absProgress * 0.08
-                    let centerBright = -absProgress * 0.06
-                    let centerZIdx = absProgress > 0.65 ? 1.0 : 10.0
-
-                    deckCard(active, isCenter: true)
-                        .rotationEffect(.degrees(centerRot))
-                        .offset(x: dragOffset, y: dragVertical)
-                        .scaleEffect(centerScale)
-                        .opacity(centerOpac)
-                        .brightness(centerBright)
-                        .zIndex(centerZIdx)
+                    .scrollTargetBehavior(.viewAligned)
+                    .safeAreaPadding(.horizontal, sideInset)
+                    .scrollPosition(id: $activeItemId)
                 }
-                .frame(maxWidth: .infinity, alignment: .center)
-                .frame(height: cardHeight + 36)
-                .contentShape(Rectangle())
-                #if os(iOS)
-                .highPriorityGesture(
-                    DragGesture(minimumDistance: 6)
-                        .onChanged { value in
-                            guard !isAnimatingShuffle else { return }
-                            if !isDragging {
-                                if abs(value.translation.width) > abs(value.translation.height) * 0.7 {
-                                    isDragging = true
-                                }
-                            }
-                            if isDragging {
-                                dragOffset = value.translation.width
-                                dragVertical = max(-18, min(18, value.translation.height * 0.12))
-                            }
-                        }
-                        .onEnded { value in
-                            guard isDragging, !isAnimatingShuffle else { return }
-                            let dx = value.translation.width
-                            let vx = value.predictedEndTranslation.width - dx
-                            let threshold: CGFloat = 45
-                            let velocityThreshold: CGFloat = 120
+                .frame(height: cardHeight + 20)
 
-                            if dx < -threshold || vx < -velocityThreshold {
-                                executeShuffle(toNext: true)
-                            } else if dx > threshold || vx > velocityThreshold {
-                                executeShuffle(toNext: false)
-                            } else {
-                                withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                                    dragOffset = 0
-                                    dragVertical = 0
-                                }
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                                    isDragging = false
-                                }
-                            }
-                        }
-                )
-                #endif
-
-                // Title & Metadata
-                VStack(spacing: 6) {
+                // Title & Metadata Block (matching reference specification)
+                VStack(spacing: 8) {
+                    // Release Year
                     if let year = active.year {
                         Text(String(year))
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color(white: 0.6))
                     }
 
+                    // Main Title (Bold clean sans-serif)
                     Text(active.isEpisode ? (active.show ?? active.title) : active.title)
-                        .font(.system(size: 24, weight: .bold, design: .serif))
+                        .font(.system(size: 26, weight: .bold, design: .default))
                         .foregroundStyle(.white)
                         .lineLimit(1)
                         .multilineTextAlignment(.center)
 
-                    // Metadata Chips Row
+                    // Frosted Glass Metadata Pills Row
                     HStack(spacing: 8) {
+                        // Genre Pill
                         if let genres = active.genres, let first = genres.first {
                             Text(first)
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(Color.white.opacity(0.08), in: Capsule())
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.9))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 7)
+                                .background(
+                                    Capsule()
+                                        .fill(Color.white.opacity(0.10))
+                                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+                                )
                         } else if active.isEpisode, let code = active.episodeCode {
                             Text(code)
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(Color.white.opacity(0.08), in: Capsule())
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.9))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 7)
+                                .background(
+                                    Capsule()
+                                        .fill(Color.white.opacity(0.10))
+                                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+                                )
                         }
 
+                        // Duration Pill
                         if active.durationSec > 0 {
                             Text(Format.runtime(active.durationSec))
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(Color.white.opacity(0.08), in: Capsule())
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.9))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 7)
+                                .background(
+                                    Capsule()
+                                        .fill(Color.white.opacity(0.10))
+                                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+                                )
                         }
 
+                        // Star Rating Pill
                         if let rating = active.rating {
-                            HStack(spacing: 3) {
+                            HStack(spacing: 4) {
                                 Image(systemName: "star.fill")
-                                    .font(.system(size: 9))
+                                    .font(.system(size: 11))
                                     .foregroundStyle(Color.yellow)
                                 Text(rating.label)
-                                    .font(.caption2.weight(.bold))
-                                    .foregroundStyle(.primary)
+                                    .font(.subheadline.weight(.bold))
+                                    .foregroundStyle(.white)
                             }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(Color.yellow.opacity(0.12), in: Capsule())
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(
+                                Capsule()
+                                    .fill(Color.white.opacity(0.10))
+                                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+                            )
                         }
                     }
+                    .padding(.top, 2)
 
                     // Pagination Dots
-                    if count > 1 {
+                    if items.count > 1 {
                         HStack(spacing: 6) {
-                            ForEach(0..<min(count, 8), id: \.self) { idx in
-                                if idx == selectedIndex {
+                            ForEach(Array(items.prefix(8).enumerated()), id: \.element.id) { index, item in
+                                if item.id == active.id {
                                     Capsule()
                                         .fill(Color.orange)
-                                        .frame(width: 18, height: 5)
+                                        .frame(width: 22, height: 5)
                                 } else {
                                     Circle()
-                                        .fill(Color.white.opacity(0.25))
-                                        .frame(width: 5, height: 5)
+                                        .fill(Color.white.opacity(0.28))
+                                        .frame(width: 5.5, height: 5.5)
                                         .onTapGesture {
-                                            guard !isDragging, !isAnimatingShuffle else { return }
                                             withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                                selectedIndex = idx
+                                                activeItemId = item.id
                                             }
                                             #if os(iOS)
                                             UISelectionFeedbackGenerator().selectionChanged()
@@ -250,62 +159,44 @@ struct OrganicFannedDeckView: View {
                                 }
                             }
                         }
-                        .padding(.top, 4)
+                        .padding(.top, 6)
                     }
                 }
-                .animation(.easeInOut(duration: 0.22), value: selectedIndex)
+                .animation(.easeInOut(duration: 0.2), value: active.id)
                 .padding(.horizontal, 20)
                 .frame(maxWidth: .infinity, alignment: .center)
             }
             .frame(maxWidth: .infinity, alignment: .center)
-        }
-    }
-
-    private func executeShuffle(toNext: Bool) {
-        guard !isAnimatingShuffle else { return }
-        isAnimatingShuffle = true
-        #if os(iOS)
-        UISelectionFeedbackGenerator().selectionChanged()
-        #endif
-
-        let targetOffset: CGFloat = toNext ? -180 : 180
-        withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
-            dragOffset = targetOffset
-            dragVertical = 0
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) {
-            if toNext {
-                selectedIndex = (selectedIndex + 1) % count
-            } else {
-                selectedIndex = (selectedIndex - 1 + count) % count
-            }
-            dragOffset = 0
-            dragVertical = 0
-            isDragging = false
-            isAnimatingShuffle = false
-        }
-    }
-
-    private func deckCard(_ item: Item, isCenter: Bool) -> some View {
-        ZStack(alignment: .bottomTrailing) {
-            if isCenter {
-                NavigationLink(value: Route.item(item.id)) {
-                    cardPoster(item, isCenter: true)
+            .onAppear {
+                if activeItemId == nil {
+                    activeItemId = items.first?.id
                 }
-                .buttonStyle(.plain)
-                .disabled(isDragging || isAnimatingShuffle || abs(dragOffset) > 8)
+            }
+        }
+    }
 
-                // Bottom subtle scrim on the card for contrast
+    private func canvasCard(_ item: Item, isCenter: Bool) -> some View {
+        NavigationLink(value: Route.item(item.id)) {
+            ZStack(alignment: .bottom) {
+                RemoteImage(path: item.poster, placeholder: "film")
+                    .aspectRatio(2 / 3, contentMode: .fill)
+                    .frame(width: cardWidth, height: cardHeight)
+                    .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 28, style: .continuous)
+                            .strokeBorder(Color.white.opacity(isCenter ? 0.16 : 0.08), lineWidth: 1)
+                    )
+
+                // Bottom subtle scrim for contrast
                 LinearGradient(
                     colors: [.clear, .black.opacity(0.65)],
                     startPoint: .center,
                     endPoint: .bottom
                 )
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                 .allowsHitTesting(false)
 
-                // Floating Circular Orange Play Button
+                // Centered Bottom Play Pill (like in reference image)
                 Button {
                     #if os(iOS)
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -313,53 +204,40 @@ struct OrganicFannedDeckView: View {
                     let start = item.resumeSec > 0 ? item.resumeSec : 0
                     model.play(PlayRequest(itemId: item.id, startSec: start), in: playbackScene)
                 } label: {
-                    ZStack {
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    colors: [Color.orange, Color.red.opacity(0.85)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .frame(width: 44, height: 44)
-                            .shadow(color: Color.orange.opacity(0.55), radius: 8, y: 4)
-
+                    HStack(spacing: 6) {
                         Image(systemName: "play.fill")
-                            .font(.system(size: 16, weight: .bold))
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(Color.orange)
+                        Text(item.resumeSec > 0 ? "Resume" : "Play")
+                            .font(.caption.weight(.bold))
                             .foregroundStyle(.white)
-                            .offset(x: 1.5)
                     }
-                    .frame(width: 54, height: 54)
-                    .contentShape(Circle())
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .background(
+                        Capsule()
+                            .fill(Color.black.opacity(0.70))
+                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.8))
+                    )
                 }
                 .buttonStyle(.plain)
-                .padding(12)
-                .hoverEffect()
-                .disabled(isDragging || isAnimatingShuffle)
-                .zIndex(15)
-            } else {
-                cardPoster(item, isCenter: false)
+                .padding(.bottom, 16)
+                .opacity(isCenter ? 1.0 : 0.0)
+                .animation(.easeInOut(duration: 0.2), value: isCenter)
             }
-        }
-    }
-
-    private func cardPoster(_ item: Item, isCenter: Bool) -> some View {
-        RemoteImage(path: item.poster, placeholder: "film")
-            .aspectRatio(2 / 3, contentMode: .fill)
-            .frame(width: cardWidth, height: cardHeight)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(Color.white.opacity(isCenter ? 0.16 : 0.08), lineWidth: 1)
-            )
+            .contentShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
             .shadow(
-                color: Color.black.opacity(isCenter ? 0.55 : 0.35),
-                radius: isCenter ? 20 : 12,
-                y: isCenter ? 10 : 6
+                color: Color.black.opacity(isCenter ? 0.65 : 0.35),
+                radius: isCenter ? 22 : 10,
+                y: isCenter ? 12 : 5
             )
+        }
+        .buttonStyle(.plain)
     }
 }
+
+/// Backward compatibility alias
+typealias OrganicFannedDeckView = PeekingCanvasDeckView
 
 struct HomeView: View {
     @Environment(Connection.self) private var connection
@@ -411,7 +289,7 @@ struct HomeView: View {
                     #endif
 
                     if !featuredItems.isEmpty {
-                        OrganicFannedDeckView(items: featuredItems)
+                        PeekingCanvasDeckView(items: featuredItems)
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.top, 4)
                             .padding(.bottom, 6)
