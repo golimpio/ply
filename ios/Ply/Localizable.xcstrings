@@ -79,7 +79,7 @@
     "Forgetting the server removes this device's token; the owner can also revoke it in Settings › Devices." : {
 
     },
-    "From the start" : {
+    "From start" : {
 
     },
     "Genres" : {
@@ -152,9 +152,6 @@
 
     },
     "People search failed: %@" : {
-
-    },
-    "Play" : {
 
     },
     "Play on Apple TV" : {

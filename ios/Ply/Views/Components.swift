@@ -291,6 +291,50 @@ struct RemoteImage: View {
     }
 }
 
+/// An ambient blurred chromatic wash behind detail views, tinted by the item's backdrop.
+struct AmbientBackdropWash: View {
+    @Environment(Connection.self) private var connection
+    let path: String?
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                Color.black
+
+                if let path, !path.isEmpty {
+                    AsyncImage(url: connection.api.url(path)) { phase in
+                        if let image = phase.image {
+                            image
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: proxy.size.width, height: proxy.size.height)
+                                .clipped()
+                                .blur(radius: 70)
+                                .saturation(1.6)
+                                .brightness(-0.1)
+                                .opacity(0.38)
+                        }
+                    }
+
+                    LinearGradient(
+                        colors: [
+                            Color.black.opacity(0.15),
+                            Color.black.opacity(0.55),
+                            Color.black.opacity(0.85),
+                            Color.black.opacity(0.95)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                }
+            }
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
 struct ProgressBar: View {
     let fraction: Double
 

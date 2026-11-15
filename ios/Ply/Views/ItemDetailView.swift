@@ -42,101 +42,107 @@ struct ItemDetailView: View {
 
     private var heroHeight: CGFloat {
         #if os(tvOS)
-        500
+        520
         #else
-        390
+        460
         #endif
     }
 
     private func content(_ d: ItemDetail) -> some View {
         let item = d.item
-        return ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                // The Hero Stage: starts from line 0, with top degrade, center play button, bottom degrade, and title & facts
-                heroStage(d)
+        let backdropPath = item.isEpisode ? item.landscapeImage : item.backdrop ?? d.meta?.backdrop ?? item.art?.backdrop
 
-                // Action Buttons Row: [Trailer] and [Mark as watched] side-by-side
-                actionButtons(item)
+        return ZStack {
+            AmbientBackdropWash(path: backdropPath)
 
-                if let fraction = item.fraction {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ProgressBar(fraction: fraction)
-                        if item.resumeSec > 0 {
-                            Text("Resume from \(Format.clock(item.resumeSec))")
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.secondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    // The Hero Stage: starts from line 0, with top degrade, center play button, bottom degrade, and title & facts
+                    heroStage(d)
+
+                    // Action Buttons Row: [Trailer] and [Mark as watched] side-by-side
+                    actionButtons(item)
+
+                    if let fraction = item.fraction {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ProgressBar(fraction: fraction)
+                            if item.resumeSec > 0 {
+                                Text("Resume from \(Format.clock(item.resumeSec))")
+                                    .font(.caption2.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                            }
                         }
+                        .padding(.horizontal)
                     }
-                    .padding(.horizontal)
-                }
 
-                if let collection = d.meta?.collection, d.meta?.collections?.isEmpty ?? true {
-                    NavigationLink(value: Route.collection(collection.id, collection.name)) {
-                        Label(collection.name, systemImage: "rectangle.stack").font(.subheadline)
-                    }
-                    .padding(.horizontal)
-                } else {
-                    ForEach(d.meta?.collections ?? [], id: \.id) { collection in
+                    if let collection = d.meta?.collection, d.meta?.collections?.isEmpty ?? true {
                         NavigationLink(value: Route.collection(collection.id, collection.name)) {
                             Label(collection.name, systemImage: "rectangle.stack").font(.subheadline)
                         }
                         .padding(.horizontal)
-                    }
-                }
-
-                if !item.isEpisode, let titleId = item.titleId {
-                    let versions = connection.library.movies.filter { $0.titleId == titleId }
-                    if versions.count > 1 {
-                        versionsSection(versions, currentId: item.id)
-                    }
-                }
-
-                tracks(d).padding(.horizontal)
-                #if os(iOS)
-                airplay(item).padding(.horizontal)
-                #endif
-
-                VStack(alignment: .leading, spacing: 8) {
-                    if let tagline = d.meta?.tagline, !tagline.isEmpty, !item.isEpisode {
-                        Text(tagline).font(.callout.italic()).foregroundStyle(.secondary)
-                    }
-                    if let overview = d.overview {
-                        Text(overview).font(.callout)
-                    }
-                    if let genres = d.meta?.genres, !genres.isEmpty {
-                        Text(genres.map(\.name).joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.horizontal)
-
-                if let cast = d.meta?.cast, !cast.isEmpty {
-                    Shelf("Cast") {
-                        ForEach(cast.prefix(20), id: \.self) { member in
-                            NavigationLink(value: Route.person(member.personId)) {
-                                CastCard(member: member)
+                    } else {
+                        ForEach(d.meta?.collections ?? [], id: \.id) { collection in
+                            NavigationLink(value: Route.collection(collection.id, collection.name)) {
+                                Label(collection.name, systemImage: "rectangle.stack").font(.subheadline)
                             }
-                            .buttonStyle(.plain)
+                            .padding(.horizontal)
+                        }
+                    }
+
+                    if !item.isEpisode, let titleId = item.titleId {
+                        let versions = connection.library.movies.filter { $0.titleId == titleId }
+                        if versions.count > 1 {
+                            versionsSection(versions, currentId: item.id)
+                        }
+                    }
+
+                    tracks(d).padding(.horizontal)
+                    #if os(iOS)
+                    airplay(item).padding(.horizontal)
+                    #endif
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let tagline = d.meta?.tagline, !tagline.isEmpty, !item.isEpisode {
+                            Text(tagline).font(.callout.italic()).foregroundStyle(.secondary)
+                        }
+                        if let overview = d.overview {
+                            Text(overview).font(.callout)
+                        }
+                        if let genres = d.meta?.genres, !genres.isEmpty {
+                            Text(genres.map(\.name).joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.horizontal)
+
+                    if let cast = d.meta?.cast, !cast.isEmpty {
+                        Shelf("Cast") {
+                            ForEach(cast.prefix(20), id: \.self) { member in
+                                NavigationLink(value: Route.person(member.personId)) {
+                                    CastCard(member: member)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+
+                    if let crew = d.meta?.crew, !crew.isEmpty {
+                        Shelf("Crew") {
+                            ForEach(crew.prefix(20), id: \.self) { member in
+                                NavigationLink(value: Route.person(member.personId)) {
+                                    CrewCard(member: member)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                     }
                 }
-
-                if let crew = d.meta?.crew, !crew.isEmpty {
-                    Shelf("Crew") {
-                        ForEach(crew.prefix(20), id: \.self) { member in
-                            NavigationLink(value: Route.person(member.personId)) {
-                                CrewCard(member: member)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
+                .padding(.bottom, 32)
             }
-            .padding(.bottom, 32)
+            #if os(iOS)
+            .ignoresSafeArea(edges: .top)
+            .toolbarBackground(.hidden, for: .navigationBar)
+            #endif
         }
-        #if os(iOS)
-        .ignoresSafeArea(edges: .top)
-        .toolbarBackground(.hidden, for: .navigationBar)
-        #endif
     }
 
     @ViewBuilder
@@ -145,12 +151,15 @@ struct ItemDetailView: View {
         let backdropPath = item.isEpisode ? item.landscapeImage : item.backdrop ?? d.meta?.backdrop ?? item.art?.backdrop
 
         ZStack(alignment: .bottomLeading) {
-            // Full-bleed Artwork from line 0
+            // Full-bleed Artwork from line 0, darkened for rich cinematic contrast
             RemoteImage(path: backdropPath, placeholder: "photo")
                 .aspectRatio(contentMode: .fill)
                 .frame(maxWidth: .infinity)
                 .frame(height: heroHeight)
                 .clipped()
+                .brightness(-0.1)
+                .overlay(Color.black.opacity(0.28).allowsHitTesting(false))
+                .allowsHitTesting(false)
 
             // Top Degrade / Vignette
             LinearGradient(
@@ -162,35 +171,9 @@ struct ItemDetailView: View {
                 startPoint: .top,
                 endPoint: .center
             )
+            .allowsHitTesting(false)
 
-            // Center Cinematic Play Button
-            Button {
-                let start = item.resumeSec > 0 ? item.resumeSec : 0
-                play(from: start)
-            } label: {
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.orange, Color.red.opacity(0.85)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 64, height: 64)
-                        .shadow(color: Color.orange.opacity(0.55), radius: 14, y: 6)
-
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundStyle(.white)
-                        .offset(x: 2)
-                }
-            }
-            .buttonStyle(.plain)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            .padding(.top, 24)
-
-            // Bottom Degrade (darkening into pure black, finishing after title & facts)
+            // Bottom Degrade (darkening into ambient black, finishing after title & facts)
             LinearGradient(
                 colors: [
                     Color.clear,
@@ -202,6 +185,7 @@ struct ItemDetailView: View {
                 startPoint: .center,
                 endPoint: .bottom
             )
+            .allowsHitTesting(false)
 
             // Title & Facts inside bottom of hero
             VStack(alignment: .leading, spacing: 6) {
@@ -239,6 +223,41 @@ struct ItemDetailView: View {
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 16)
+
+            // Center Cinematic Play Button (on top of all backgrounds and gradients)
+            ZStack {
+                Button {
+                    #if os(iOS)
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    #endif
+                    let start = item.resumeSec > 0 ? item.resumeSec : 0
+                    play(from: start)
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.orange, Color.red.opacity(0.85)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 64, height: 64)
+                            .shadow(color: Color.orange.opacity(0.55), radius: 14, y: 6)
+
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundStyle(.white)
+                            .offset(x: 2)
+                    }
+                    .frame(width: 76, height: 76)
+                    .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .contentShape(Circle())
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .zIndex(10)
         }
         .frame(height: heroHeight)
         .frame(maxWidth: .infinity)
