@@ -1,5 +1,18 @@
 import SwiftUI
 
+/// The ply brand mark, in display serif italic.
+struct PlyBrand: View {
+    var size: CGFloat = 26
+
+    var body: some View {
+        Text("Ply")
+            .font(.system(size: size, weight: .regular, design: .serif).italic())
+            .tracking(-0.5)
+            .foregroundStyle(.primary)
+            .accessibilityLabel("Ply")
+    }
+}
+
 /// Where a navigation link goes, in every tab.
 enum Route: Hashable {
     case item(Int64)
@@ -26,6 +39,15 @@ let shelfCardWidth: CGFloat = {
     240
     #else
     120
+    #endif
+}()
+
+/// The width of a 16:9 landscape or upcoming card in a shelf.
+let shelfWideCardWidth: CGFloat = {
+    #if os(tvOS)
+    360
+    #else
+    240
     #endif
 }()
 
@@ -266,16 +288,24 @@ struct LandscapeCard: View {
 /// A titled row that scrolls sideways.
 struct Shelf<Content: View>: View {
     let title: String
+    var subtitle: String?
     @ViewBuilder let content: Content
 
-    init(_ title: String, @ViewBuilder content: () -> Content) {
+    init(_ title: String, subtitle: String? = nil, @ViewBuilder content: () -> Content) {
         self.title = title
+        self.subtitle = subtitle
         self.content = content()
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.title3.bold()).padding(.horizontal)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.title3.bold())
+                if let subtitle, !subtitle.isEmpty {
+                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal)
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: shelfSpacing) { content }
                     .padding(.horizontal)

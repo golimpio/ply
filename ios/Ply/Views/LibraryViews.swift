@@ -1,39 +1,194 @@
 import SwiftUI
 
+/// An editorial hero banner at the top of Programme, highlighting an in-progress or featured film.
+struct HeroBanner: View {
+    let item: Item
+    @Environment(AppModel.self) private var model
+    @Environment(PlaybackScene.self) private var playbackScene
+
+    private var kicker: String {
+        if item.resumeSec > 0 {
+            return "Continue Watching"
+        }
+        return item.isEpisode ? "Featured Series" : "Featured Film"
+    }
+
+    private var titleText: String {
+        item.isEpisode ? (item.show ?? item.title) : item.title
+    }
+
+    private var metaFacts: String {
+        let durationOrEpisode = item.isEpisode
+            ? Format.facts(item.episodeCode, item.episodeTitle)
+            : (item.durationSec > 0 ? Format.runtime(Double(item.durationSec)) : nil)
+        return Format.facts(item.year.map(String.init), durationOrEpisode, item.rating?.label)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            NavigationLink(value: Route.item(item.id)) {
+                ZStack(alignment: .bottomLeading) {
+                    RemoteImage(path: item.backdrop ?? item.landscapeImage, placeholder: "film")
+                        .aspectRatio(16 / 9, contentMode: .fit)
+                        .clipShape(.rect(cornerRadius: 12))
+                        .overlay {
+                            LinearGradient(
+                                colors: [.clear, .black.opacity(0.85)],
+                                startPoint: .center,
+                                endPoint: .bottom
+                            )
+                            .clipShape(.rect(cornerRadius: 12))
+                        }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(Color.accentColor)
+                                .frame(width: 7, height: 7)
+                            Text(kicker.uppercased())
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Text(titleText)
+                            .font(.system(size: 24, weight: .bold, design: .serif))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                    }
+                    .padding(14)
+                }
+            }
+            .buttonStyle(.plain)
+            .hoverEffect()
+
+            VStack(alignment: .leading, spacing: 8) {
+                if !metaFacts.isEmpty {
+                    Text(metaFacts)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+
+                if let overview = item.overview, !overview.isEmpty {
+                    Text(overview)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+
+                HStack(spacing: 12) {
+                    Button {
+                        let start = item.resumeSec > 0 ? item.resumeSec : 0
+                        model.play(PlayRequest(itemId: item.id, startSec: start), in: playbackScene)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "play.fill")
+                            Text(item.resumeSec > 0 ? "Resume" : "Play")
+                                .fontWeight(.semibold)
+                        }
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 18)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .clipShape(Capsule())
+
+                    NavigationLink(value: Route.item(item.id)) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "info.circle")
+                            Text("Details")
+                                .fontWeight(.medium)
+                        }
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 16)
+                    }
+                    .buttonStyle(.bordered)
+                    .clipShape(Capsule())
+                }
+                .padding(.top, 2)
+            }
+            .padding(.horizontal, 4)
+        }
+        .padding(.horizontal)
+    }
+}
+
 struct HomeView: View {
     @Environment(Connection.self) private var connection
+    @Environment(AppModel.self) private var model
+    @Environment(PlaybackScene.self) private var playbackScene
+
+    private var featuredItem: Item? {
+        let library = connection.library
+        if let continueItem = library.continueWatching.first {
+            return continueItem
+        }
+        if let movieWithBackdrop = library.recentMovies.first(where: { $0.backdrop != nil }) {
+            return movieWithBackdrop
+        }
+        return library.recentMovies.first ?? library.movies.first
+    }
 
     var body: some View {
         let library = connection.library
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
+                    #if os(tvOS)
+                    HStack(spacing: 12) {
+                        PlyBrand(size: 36)
+                        Text("Programme")
+                            .font(.title2.weight(.medium))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                    #endif
+
+                    if let featured = featuredItem {
+                        HeroBanner(item: featured)
+                    }
+
                     if !library.continueWatching.isEmpty {
-                        Shelf("Continue Watching") {
+                        Shelf("Continue Watching", subtitle: "Pick up where you left off") {
                             ForEach(library.continueWatching) { item in
                                 NavigationLink(value: Route.item(item.id)) {
-                                    LandscapeCard(item: item).frame(width: 240)
+                                    LandscapeCard(item: item).frame(width: shelfWideCardWidth)
                                 }
                                 .buttonStyle(.plain)
                             }
                         }
                     }
+
                     if !library.upcoming.isEmpty {
-                        Shelf("Coming Up") {
+                        Shelf("Coming Up", subtitle: "Next in series") {
                             ForEach(library.upcoming) { item in
                                 NavigationLink(value: Route.show(item.show)) {
-                                    UpcomingCard(upcoming: item).frame(width: 240)
+                                    UpcomingCard(upcoming: item).frame(width: shelfWideCardWidth)
                                 }
                                 .buttonStyle(.plain)
                             }
                         }
                     }
+
                     if !library.movies.isEmpty {
-                        Shelf("Recently Added Movies") {
+                        Shelf("Recently Added Films", subtitle: "Latest additions to your archive") {
                             ForEach(library.recentMovies) { movie in
                                 NavigationLink(value: Route.item(movie.id)) {
                                     PosterCard(title: movie.title, caption: movie.year.map(String.init), image: movie.poster,
                                                watched: movie.isWatched, fraction: movie.fraction)
+                                        .frame(width: shelfCardWidth)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+
+                    if !library.shows.isEmpty {
+                        Shelf("Series", subtitle: "Television series in your library") {
+                            ForEach(library.shows) { show in
+                                NavigationLink(value: Route.show(show.show)) {
+                                    PosterCard(title: show.show, caption: show.episodeCount == 1 ? "1 episode" : "\(show.episodeCount) episodes",
+                                               image: show.poster, watched: show.allWatched)
                                         .frame(width: shelfCardWidth)
                                 }
                                 .buttonStyle(.plain)
@@ -45,7 +200,15 @@ struct HomeView: View {
             }
             .overlay { LibraryStatus(library: library, isEmpty: library.movies.isEmpty && library.shows.isEmpty) }
             .plyRefreshable { await library.reload() }
-            .navigationTitle(connection.info.name)
+            .toolbar {
+                #if os(iOS)
+                ToolbarItem(placement: .topBarLeading) {
+                    PlyBrand(size: 28)
+                }
+                #endif
+            }
+            .navigationTitle("")
+            .plyInlineTitle()
             .plyDestinations()
         }
     }
@@ -105,7 +268,7 @@ struct MoviesView: View {
                 #if os(tvOS)
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Search movies", text: $query)
+                    TextField("Search films", text: $query)
                 }
                 .font(.headline)
                 .padding(.horizontal)
@@ -145,14 +308,14 @@ struct MoviesView: View {
             }
             .overlay {
                 if (!query.isEmpty || only4K || onlyHDR || onlyUnwatched) && filteredMovies.isEmpty {
-                    ContentUnavailableView.search(text: query.isEmpty ? "filtered movies" : query)
+                    ContentUnavailableView.search(text: query.isEmpty ? "filtered films" : query)
                 } else {
                     LibraryStatus(library: library, isEmpty: library.movies.isEmpty)
                 }
             }
-            .plySearchable($query, prompt: "Movies")
+            .plySearchable($query, prompt: "Films")
             .plyRefreshable { await library.reload() }
-            .navigationTitle("Movies")
+            .navigationTitle("Films")
             .plyDestinations()
         }
     }
@@ -215,7 +378,7 @@ struct ShowsView: View {
                 #if os(tvOS)
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Search shows", text: $query)
+                    TextField("Search series", text: $query)
                 }
                 .font(.headline)
                 .padding(.horizontal)
@@ -256,18 +419,18 @@ struct ShowsView: View {
             }
             .overlay {
                 if (!query.isEmpty || onlyUnwatched) && filteredShows.isEmpty {
-                    ContentUnavailableView.search(text: query.isEmpty ? "filtered shows" : query)
+                    ContentUnavailableView.search(text: query.isEmpty ? "filtered series" : query)
                 } else {
                     LibraryStatus(library: library, isEmpty: library.shows.isEmpty)
                 }
             }
-            .plySearchable($query, prompt: "Shows")
+            .plySearchable($query, prompt: "Series")
             .plyRefreshable { await library.reload() }
             // Newest first is a show's newest file, which the episodes list says; fetch it only when
             // that sort is chosen, and again after a reload has forgotten it.
             .task(id: sort) { if sort == .added { await library.ensureEpisodes() } }
             .task(id: library.generation) { if sort == .added { await library.ensureEpisodes() } }
-            .navigationTitle("Shows")
+            .navigationTitle("Series")
             .plyDestinations()
         }
     }

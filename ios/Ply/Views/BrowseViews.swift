@@ -527,11 +527,17 @@ struct CreditCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            TitlePoster(card: entry.card, caption: entry.card.yearText, width: 120)
+            TitlePoster(card: entry.card, caption: entry.card.yearText, width: shelfCardWidth)
             if !entry.detail.isEmpty {
-                Text(entry.detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                Text(entry.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .frame(width: shelfCardWidth, alignment: .leading)
     }
 }
 
@@ -541,11 +547,16 @@ struct FilmographyCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             PosterCard(title: entry.title, caption: entry.yearText, image: entry.poster)
-                .frame(width: shelfCardWidth)
             if let desc = entry.roleDescription {
-                Text(desc).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                Text(desc)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .frame(width: shelfCardWidth, alignment: .leading)
     }
 }
 
