@@ -96,7 +96,7 @@ struct ItemDetailView: View {
                         }
                     }
 
-                    tracks(d).padding(.horizontal)
+                    tracks(d)
                     #if os(iOS)
                     airplay(item).padding(.horizontal)
                     #endif
@@ -321,33 +321,171 @@ struct ItemDetailView: View {
         }
     }
 
+    private func currentAudioLabel(_ audio: [MediaStream]) -> String {
+        if let audioIndex, let match = audio.first(where: { $0.index == audioIndex }) {
+            return match.label
+        }
+        if let defaultAudio = audio.first(where: { $0.default == true }) {
+            return defaultAudio.label
+        }
+        if let first = audio.first {
+            return first.label
+        }
+        return "Default"
+    }
+
+    private func currentSubtitleLabel(_ subtitles: [(Subtitle, SubtitleChoice)]) -> String {
+        if let subtitle {
+            switch subtitle {
+            case let .text(key, _):
+                if let match = subtitles.first(where: { $0.0.key == key }) {
+                    return match.0.label
+                }
+                return "On"
+            case let .burnIn(index):
+                if let match = subtitles.first(where: { $0.0.key == String(index) }) {
+                    return "\(match.0.label) (burned in)"
+                }
+                return "Burned in"
+            }
+        }
+        return "Off"
+    }
+
     @ViewBuilder
     private func tracks(_ d: ItemDetail) -> some View {
         let audio = d.audioStreams
         let subtitles = d.subtitles.compactMap { s in Self.choice(s).map { (s, $0) } }
-        if audio.count > 1 || !subtitles.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-                if audio.count > 1 {
-                    Picker(selection: $audioIndex) {
+
+        VStack(spacing: 0) {
+            // Language Row
+            if audio.count > 1 {
+                Menu {
+                    Picker("Language", selection: $audioIndex) {
                         Text("Default").tag(Int?.none)
-                        ForEach(audio, id: \.index) { Text($0.label).tag(Optional($0.index)) }
-                    } label: {
-                        Label("Audio", systemImage: "speaker.wave.2")
+                        ForEach(audio, id: \.index) { stream in
+                            Text(stream.label).tag(Optional(stream.index))
+                        }
                     }
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "speaker.wave.2")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Color.orange)
+                            .frame(width: 22)
+
+                        Text("Language")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.primary)
+
+                        Spacer()
+
+                        Text(currentAudioLabel(audio))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption2.bold())
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 13)
+                    .contentShape(Rectangle())
                 }
-                if !subtitles.isEmpty {
-                    Picker(selection: $subtitle) {
+                .buttonStyle(.plain)
+            } else {
+                HStack(spacing: 12) {
+                    Image(systemName: "speaker.wave.2")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color.orange)
+                        .frame(width: 22)
+
+                    Text("Language")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+
+                    Spacer()
+
+                    Text(currentAudioLabel(audio))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 13)
+            }
+
+            Divider()
+                .padding(.leading, 50)
+                .opacity(0.15)
+
+            // Subtitles Row
+            if !subtitles.isEmpty {
+                Menu {
+                    Picker("Subtitles", selection: $subtitle) {
                         Text("Off").tag(SubtitleChoice?.none)
                         ForEach(subtitles, id: \.0.key) { s, choice in
                             Text(s.image ? "\(s.label) (burned in)" : s.label).tag(Optional(choice))
                         }
-                    } label: {
-                        Label("Subtitles", systemImage: "captions.bubble")
                     }
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "captions.bubble")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Color.orange)
+                            .frame(width: 22)
+
+                        Text("Subtitles")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.primary)
+
+                        Spacer()
+
+                        Text(currentSubtitleLabel(subtitles))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption2.bold())
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 13)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+            } else {
+                HStack(spacing: 12) {
+                    Image(systemName: "captions.bubble")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color.orange)
+                        .frame(width: 22)
+
+                    Text("Subtitles")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+
+                    Spacer()
+
+                    Text("None")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 13)
             }
-            .plyPagePicker()
         }
+        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.8)
+        )
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+        .padding(.bottom, 2)
     }
 
     /// A text track is drawn from its WebVTT; a bitmap one can only be burned in by the server.
@@ -417,8 +555,8 @@ struct ItemDetailView: View {
             let d = try await connection.api.item(id)
             detail = d
             error = nil
-            if audioIndex == nil, d.audioStreams.count > 1 {
-                audioIndex = d.audioStreams.first { $0.default == true }?.index
+            if audioIndex == nil {
+                audioIndex = d.audioStreams.first { $0.default == true }?.index ?? d.audioStreams.first?.index
             }
             if let titleId = d.meta?.id ?? d.item.titleId {
                 trailers = (try? await connection.api.trailers(titleId: titleId)) ?? []
