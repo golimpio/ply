@@ -62,6 +62,8 @@ struct PlayRequest {
     private weak var shownIn: PlaybackScene?
     /// The windows that can show a play: held weakly, so a window the person closed is not kept alive.
     private var windows = PlaybackWindows()
+    /// How many windows can show a play.
+    var windowCount: Int { windows.count }
     private var handledCommands: Set<Int64> = []
     /// The newest command this device acted on for this server, across launches.
     private var lastHandledSeq: Int64 = 0
@@ -266,9 +268,9 @@ struct PlayRequest {
         windows.add(scene)
     }
 
-    /// The window went away (its scene disconnected, or it left the screen). A play it was showing ends
+    /// The window went away (its scene disconnected). A play it was showing ends
     /// here — the player is closed and its progress sent — but it is not dismissed: there is no window
-    /// left to dismiss it into. Called more than once, it does nothing the second time.
+    /// left to dismiss it into.
     func unregister(_ scene: PlaybackScene) {
         windows.remove(scene)
         scene.windowScene = nil

@@ -450,10 +450,13 @@ started the test host suspended and never resumed it, so a run hung until it tim
   shown, and a remote command's play lands in the window that started the last one, or the newest to appear. The
   presenter resolves its window from the scene (`PlaybackScene.windowScene`, handed over by a `WindowSceneReader` in
   `RootView`), never from whichever window UIKit calls active — and never guesses between two. Closing a window
-  ends its play there: the scene's disconnect notification (the one UIKit always sends) and the view leaving the
-  window both call `AppModel.unregister`, which closes the player, sends its progress and forgets the presentation
-  without dismissing into a window that is gone. `PlaybackPresentationTests` and `PlaybackWindowsTests` pin the
-  per-window state and the window registry; two windows at once cannot be driven from a terminal.
+  ends its play there: the scene's disconnect notification (the one UIKit always sends) calls
+  `AppModel.unregister`, which closes the player, sends its progress and forgets the presentation without
+  dismissing into a window that is gone. Only that notification counts: the full-screen player takes the root's
+  views out of the window (SwiftUI's `onDisappear` fires too), and taking that for a closing window ended every
+  play as its player came up. `PlaybackPresentationTests` and `PlaybackWindowsTests` pin the per-window state and
+  the window registry, `WindowSceneProbeTests` (in the app) the full-screen case; two windows at once cannot be
+  driven from a terminal.
 - **Tests and CI:** `make test` runs the Foundation-only core on this Mac as a macOS logic test: no simulator and no
   test host, so it is quick and runs anywhere. It covers the SSE and WebVTT parsers, RFC
   3339 and path handling, the API client's requests and answers (with a URLProtocol stub), the models the server
@@ -464,7 +467,8 @@ started the test host suspended and never resumed it, so a run hung until it tim
   window's hold on the play (`PlaybackPresentationTests`). What only the built app can show is in `PlyAppTests`,
   hosted in the iPhone/iPad app (`make app-test`, on `SIM`, the iPhone 18 Pro by default) and in the Apple TV app
   (`make tv-test`, on `TVSIM`, the Apple TV 4K by default): that its Info.plist lists the Bonjour type `Discovery`
-  browses for, asks for the local network, and allows plain HTTP to it. They are the test action of the `Ply` and
+  browses for, asks for the local network, and allows plain HTTP to it, and that a full-screen player over a
+  window is not that window closing. They are the test action of the `Ply` and
   `PlyTV` schemes, so Xcode's own test runner finds them too; `make check` runs all three suites. A simulator name is
   matched exactly, on the newest runtime that has it; when the default devices are missing (an older Xcode), the
   newest iPhone and Apple TV are used, while a name given as `SIM=`/`TVSIM=` must exist. Agents run these through
