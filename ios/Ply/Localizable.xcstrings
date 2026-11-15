@@ -1,261 +1,258 @@
 {
-  "sourceLanguage": "en",
-  "strings": {
-    "%lld titles in your library": {
-      "extractionState": "extracted"
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%lld" : {
+
     },
-    "1 title in your library": {
-      "extractionState": "extracted"
+    "%lld titles in your library" : {
+
     },
-    "192.168.1.10 or nas.local:8420": {
-      "extractionState": "extracted"
+    "1 title in your library" : {
+
     },
-    "6-digit code": {
-      "extractionState": "extracted"
+    "6-digit code" : {
+
     },
-    "API": {
-      "extractionState": "extracted"
+    "192.168.1.10 or nas.local:8420" : {
+
     },
-    "Add folders to the library on ply's web page.": {
-      "extractionState": "extracted"
+    "Add folders to the library on ply's web page." : {
+
     },
-    "Address": {
-      "extractionState": "extracted"
+    "Address" : {
+
     },
-    "Audio": {
-      "extractionState": "extracted"
+    "API" : {
+
     },
-    "Browse": {
-      "extractionState": "extracted"
+    "Audio" : {
+
     },
-    "Cannot load %@": {
-      "extractionState": "extracted"
+    "Browse" : {
+
     },
-    "Cannot load the library": {
-      "extractionState": "extracted"
+    "Cannot load %@" : {
+
     },
-    "Cannot load this collection": {
-      "extractionState": "extracted"
+    "Cannot load the library" : {
+
     },
-    "Cannot load this genre": {
-      "extractionState": "extracted"
+    "Cannot load this collection" : {
+
     },
-    "Cannot load this item": {
-      "extractionState": "extracted"
+    "Cannot load this genre" : {
+
     },
-    "Cannot load this person": {
-      "extractionState": "extracted"
+    "Cannot load this item" : {
+
     },
-    "Choose another server": {
-      "extractionState": "extracted"
+    "Cannot load this person" : {
+
     },
-    "Connect": {
-      "extractionState": "extracted"
+    "Choose another server" : {
+
     },
-    "Connect to another server": {
-      "extractionState": "extracted"
+    "Connect" : {
+
     },
-    "Connect to ply": {
-      "extractionState": "extracted"
+    "Connect to another server" : {
+
     },
-    "Default": {
-      "extractionState": "extracted"
+    "Connect to ply" : {
+
     },
-    "Device id": {
-      "extractionState": "extracted"
+    "Default" : {
+
     },
-    "Done": {
-      "extractionState": "extracted"
+    "Device id" : {
+
     },
-    "Downloading subtitles…": {
-      "extractionState": "extracted"
+    "Done" : {
+
     },
-    "Forget this server": {
-      "extractionState": "extracted"
+    "Downloading subtitles…" : {
+
     },
-    "Forgetting the server removes this device's token; the owner can also revoke it in Settings › Devices.": {
-      "extractionState": "extracted"
+    "Forget this server" : {
+
     },
-    "From the start": {
-      "extractionState": "extracted"
+    "Forgetting the server removes this device's token; the owner can also revoke it in Settings › Devices." : {
+
     },
-    "Genres": {
-      "extractionState": "extracted"
+    "From the start" : {
+
     },
-    "Home": {
-      "extractionState": "extracted"
+    "Genres" : {
+
     },
-    "Looking for ply servers…": {
-      "extractionState": "extracted"
+    "Home" : {
+
     },
-    "Mark as watched": {
-      "extractionState": "extracted"
+    "Looking for ply servers…" : {
+
     },
-    "Mark season watched": {
-      "extractionState": "extracted"
+    "Mark as watched" : {
+
     },
-    "Mark show watched": {
-      "extractionState": "extracted"
+    "Mark season watched" : {
+
     },
-    "Movies": {
-      "extractionState": "extracted"
+    "Mark show watched" : {
+
     },
-    "Name": {
-      "extractionState": "extracted"
+    "Movies" : {
+
     },
-    "No genres or collections yet": {
-      "extractionState": "extracted"
+    "Name" : {
+
     },
-    "No title in this genre is in the library.": {
-      "extractionState": "extracted"
+    "No genres or collections yet" : {
+
     },
-    "No titles here yet": {
-      "extractionState": "extracted"
+    "No title in this genre is in the library." : {
+
     },
-    "None of their work is in the library right now.": {
-      "extractionState": "extracted"
+    "No titles here yet" : {
+
     },
-    "Nothing here yet": {
-      "extractionState": "extracted"
+    "None of their work is in the library right now." : {
+
     },
-    "OK": {
-      "extractionState": "extracted"
+    "Nothing here yet" : {
+
     },
-    "Off": {
-      "extractionState": "extracted"
+    "Off" : {
+
     },
-    "On ply's web page, open Settings › Devices › Pair a device, and type the code it shows.": {
-      "extractionState": "extracted"
+    "OK" : {
+
     },
-    "On this network": {
-      "extractionState": "extracted"
+    "On ply's web page, open Settings › Devices › Pair a device, and type the code it shows." : {
+
     },
-    "Pair": {
-      "extractionState": "extracted"
+    "On this network" : {
+
     },
-    "Pair this device": {
-      "extractionState": "extracted"
+    "Pair" : {
+
     },
-    "Pair with %@": {
-      "extractionState": "extracted"
+    "Pair this device" : {
+
     },
-    "Paired": {
-      "extractionState": "extracted"
+    "Pair with %@" : {
+
     },
-    "People": {
-      "extractionState": "extracted"
+    "Paired" : {
+
     },
-    "People come from the titles in your library.": {
-      "extractionState": "extracted"
+    "People" : {
+
     },
-    "People search failed: %@": {
-      "extractionState": "extracted"
+    "People come from the titles in your library." : {
+
     },
-    "Play": {
-      "extractionState": "extracted"
+    "People search failed: %@" : {
+
     },
-    "Play on Apple TV": {
-      "extractionState": "extracted"
+    "Play" : {
+
     },
-    "Ply": {
-      "extractionState": "extracted"
+    "Play on Apple TV" : {
+
     },
-    "Resume from %@": {
-      "extractionState": "extracted"
+    "ply" : {
+
     },
-    "Search": {
-      "extractionState": "extracted"
+    "Resume from %@" : {
+
     },
-    "Search for a person": {
-      "extractionState": "extracted"
+    "Search" : {
+
     },
-    "Search movies": {
-      "extractionState": "extracted"
+    "Search for a person" : {
+
     },
-    "Search people": {
-      "extractionState": "extracted"
+    "Search movies" : {
+
     },
-    "Search shows": {
-      "extractionState": "extracted"
+    "Search people" : {
+
     },
-    "Search the people in your library": {
-      "extractionState": "extracted"
+    "Search shows" : {
+
     },
-    "Season": {
-      "extractionState": "extracted"
+    "Search the people in your library" : {
+
     },
-    "Season watched": {
-      "extractionState": "extracted"
+    "Season" : {
+
     },
-    "Server": {
-      "extractionState": "extracted"
+    "Season watched" : {
+
     },
-    "Settings": {
-      "extractionState": "extracted"
+    "Server" : {
+
     },
-    "Show watched": {
-      "extractionState": "extracted"
+    "Settings" : {
+
     },
-    "Shows": {
-      "extractionState": "extracted"
+    "Show watched" : {
+
     },
-    "Some of the browse lists could not be loaded": {
-      "extractionState": "extracted"
+    "Shows" : {
+
     },
-    "Sort": {
-      "extractionState": "extracted"
+    "Some of the browse lists could not be loaded" : {
+
     },
-    "Starts the play for that TV, subtitles included. Pick the same one in the player's AirPlay button.": {
-      "extractionState": "extracted"
+    "Sort" : {
+
     },
-    "Subtitles": {
-      "extractionState": "extracted"
+    "Starts the play for that TV, subtitles included. Pick the same one in the player's AirPlay button." : {
+
     },
-    "Subtitles could not be loaded": {
-      "extractionState": "extracted"
+    "Subtitles" : {
+
     },
-    "The episodes could not be loaded": {
-      "extractionState": "extracted"
+    "Subtitles could not be loaded" : {
+
     },
-    "The search failed: %@": {
-      "extractionState": "extracted"
+    "The episodes could not be loaded" : {
+
     },
-    "They come from the library's metadata. The search and the People page work already.": {
-      "extractionState": "extracted"
+    "The search failed: %@" : {
+
     },
-    "This device": {
-      "extractionState": "extracted"
+    "They come from the library's metadata. The search and the People page work already." : {
+
     },
-    "Titles, shows, episodes, people, genres": {
-      "extractionState": "extracted"
+    "This device" : {
+
     },
-    "Trailer": {
-      "extractionState": "extracted"
+    "Titles, shows, episodes, people, genres" : {
+
     },
-    "Try again": {
-      "extractionState": "extracted"
+    "Trailer" : {
+
     },
-    "Use another server": {
-      "extractionState": "extracted"
+    "Try again" : {
+
     },
-    "Version": {
-      "extractionState": "extracted"
+    "Use another server" : {
+
     },
-    "Versions": {
-      "extractionState": "extracted"
+    "Version" : {
+
     },
-    "Watched": {
-      "extractionState": "extracted"
+    "Versions" : {
+
     },
-    "Without a port, ply's own (%@) is used.": {
-      "extractionState": "extracted"
+    "Watched" : {
+
     },
-    "ply": {
-      "extractionState": "extracted"
-    },
-    "ply finds and plays from the ply server on your home network.": {
-      "extractionState": "extracted"
+    "Without a port, ply's own (%@) is used." : {
+
     }
   },
-  "version": "1.0"
+  "version" : "1.0"
 }

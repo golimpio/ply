@@ -176,6 +176,19 @@ lint: ## golangci-lint, when it is installed
 .PHONY: verify
 verify: check test test-race test-integration e2e build ## Everything a change should pass before commit
 
+# ---- iOS & tvOS -----------------------------------------------------------------
+
+.PHONY: test-ios
+test-ios: ## iOS core unit tests (macOS unit test bundle)
+	cd ios && $(MAKE) test
+
+.PHONY: build-ios
+build-ios: ## Build iOS and tvOS simulator apps
+	cd ios && $(MAKE) build tv
+
+.PHONY: check-ios
+check-ios: test-ios build-ios ## Test and build iOS and tvOS apps
+
 # ---- install --------------------------------------------------------------------
 
 .PHONY: install
