@@ -495,10 +495,17 @@ func TestShows(t *testing.T) {
 		episode("/m/2.mkv", "Beta", 1, 2),
 		episode("/m/3.mkv", "Beta", 3, 1),
 		episode("/m/4.mkv", "alpha", 0, 1), // specials
+		episode("/m/6.mkv", "Beta", 1, 1), // a second file of an episode
 		movie("/m/5.mp4", "Not a show"),
 	} {
 		if _, err := s.UpsertItem(ctx, it, nil); err != nil {
 			t.Fatalf("item %d: %v", i, err)
+		}
+	}
+	// UpsertItem stamps added_at with the wall clock; pin it so the newest episode is deterministic.
+	for path, at := range map[string]int64{"/m/1.mkv": 10, "/m/2.mkv": 20, "/m/3.mkv": 30, "/m/4.mkv": 40, "/m/6.mkv": 50} {
+		if _, err := s.rw.ExecContext(ctx, `UPDATE items SET added_at = ? WHERE path = ?`, at, path); err != nil {
+			t.Fatal(err)
 		}
 	}
 	got, err := s.Shows(ctx)
@@ -506,9 +513,9 @@ func TestShows(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []Show{
-		{Name: "alpha", Seasons: []int{0}, EpisodeCount: 1,
+		{Name: "alpha", Seasons: []int{0}, EpisodeCount: 1, LatestAddedAt: 40,
 			BySeason: map[int]EpisodeCounts{0: {EpisodeCount: 1}}},
-		{Name: "Beta", Seasons: []int{1, 3}, EpisodeCount: 3,
+		{Name: "Beta", Seasons: []int{1, 3}, EpisodeCount: 3, LatestAddedAt: 50,
 			BySeason: map[int]EpisodeCounts{1: {EpisodeCount: 2}, 3: {EpisodeCount: 1}}},
 	}
 	if !reflect.DeepEqual(got, want) {

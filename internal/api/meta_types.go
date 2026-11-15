@@ -262,8 +262,9 @@ type SeasonInfo struct {
 type ShowDetail struct {
 	Show string `json:"show"`
 	EpisodeCounts
-	Year     *int   `json:"year,omitempty"`
-	Overview string `json:"overview,omitempty"`
+	LatestAddedAt int64  `json:"latestAddedAt"`
+	Year          *int   `json:"year,omitempty"`
+	Overview      string `json:"overview,omitempty"`
 	MetaFields
 	Meta    *TitleDetail `json:"meta,omitempty"`
 	Seasons []SeasonInfo `json:"seasons"`

@@ -423,7 +423,7 @@ func (s *Server) handleShows(w http.ResponseWriter, r *http.Request) {
 		row, hasRow := rows[sh.Name]
 		b, hasBrief := briefs[row.TitleID]
 		m, year, overview := s.showMeta(sh.Name, row, hasRow, b, hasBrief && row.TitleID != 0, primary)
-		out[i] = ShowSummary{Show: sh.Name, Seasons: sh.Seasons, EpisodeCounts: episodeCounts(sh.EpisodeCounts), Year: year, Overview: overview, MetaFields: m}
+		out[i] = ShowSummary{Show: sh.Name, Seasons: sh.Seasons, EpisodeCounts: episodeCounts(sh.EpisodeCounts), LatestAddedAt: sh.LatestAddedAt, Year: year, Overview: overview, MetaFields: m}
 	}
 	out = applyRatingQuery(out, rq, func(sh ShowSummary) *RatingEntry { return sh.Rating })
 	writeList(w, etag, out, degraded)
@@ -464,7 +464,7 @@ func (s *Server) showDetail(ctx context.Context, sh store.Show) (ShowDetail, err
 		}
 	}
 	m, year, overview := s.showMeta(sh.Name, row, hasRow, brief, hasBrief, primary)
-	out := ShowDetail{Show: sh.Name, EpisodeCounts: episodeCounts(sh.EpisodeCounts), Year: year, Overview: overview, MetaFields: m, Meta: detail,
+	out := ShowDetail{Show: sh.Name, EpisodeCounts: episodeCounts(sh.EpisodeCounts), LatestAddedAt: sh.LatestAddedAt, Year: year, Overview: overview, MetaFields: m, Meta: detail,
 		Seasons: []SeasonInfo{}}
 
 	for _, n := range sh.Seasons {

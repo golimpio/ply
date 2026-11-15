@@ -130,6 +130,9 @@ type ShowSummary struct {
 	Show    string `json:"show"`
 	Seasons []int  `json:"seasons"`
 	EpisodeCounts
+	// LatestAddedAt is the newest added_at of the show's episode files (unix seconds), for the
+	// clients' "recently updated" order. Unlike the episode counts it includes the specials.
+	LatestAddedAt int64 `json:"latestAddedAt"`
 
 	Year     *int   `json:"year,omitempty"`
 	Overview string `json:"overview,omitempty"`

@@ -584,11 +584,11 @@ func TestShows(t *testing.T) {
 	e := newEnv(t, "")
 	shows := decode[[]ShowSummary](t, e.get("/api/shows"))
 	if len(shows) != 1 || shows[0].Show != "Cool Show" || len(shows[0].Seasons) != 1 || shows[0].Seasons[0] != 1 ||
-		shows[0].EpisodeCount != 1 {
+		shows[0].EpisodeCount != 1 || shows[0].LatestAddedAt <= 0 {
 		t.Errorf("shows = %+v", shows)
 	}
 	raw := e.get("/api/shows").Body.String()
-	for _, k := range []string{`"show"`, `"seasons"`, `"episodeCount"`} {
+	for _, k := range []string{`"show"`, `"seasons"`, `"episodeCount"`, `"latestAddedAt"`} {
 		if !strings.Contains(raw, k) {
 			t.Errorf("shows JSON %s lacks %s", raw, k)
 		}

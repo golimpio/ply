@@ -88,6 +88,8 @@ type Show struct {
 	Seasons []int
 	EpisodeCounts
 	BySeason map[int]EpisodeCounts
+	// LatestAddedAt is the newest added_at of the show's episode files (unix seconds).
+	LatestAddedAt int64
 }
 
 const itemCols = `id, kind, title, year, show, season, episode, path, root, size, mtime,
@@ -395,7 +397,37 @@ func (s *Store) Shows(ctx context.Context) ([]Show, error) {
 	for i := range shows {
 		shows[i].EpisodeCounts = totalOf(shows[i].BySeason)
 	}
+	latest, err := s.latestAddedAtByShow(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range shows {
+		shows[i].LatestAddedAt = latest[shows[i].Name]
+	}
 	return shows, rows.Err()
+}
+
+// latestAddedAtByShow returns each show's newest episode file's added_at, for the
+// clients' "recently updated" order. It is a second query so that episodeCountsSQL,
+// shared with the watch state, keeps one shape.
+func (s *Store) latestAddedAtByShow(ctx context.Context) (map[string]int64, error) {
+	rows, err := s.ro.QueryContext(ctx, `SELECT show, MAX(added_at) FROM items WHERE kind = ? GROUP BY show`, KindEpisode)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int64{}
+	for rows.Next() {
+		var (
+			show string
+			at   int64
+		)
+		if err := rows.Scan(&show, &at); err != nil {
+			return nil, err
+		}
+		out[show] = at
+	}
+	return out, rows.Err()
 }
 
 // FileStates returns every item's change-detection state keyed by raw path, with

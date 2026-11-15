@@ -251,7 +251,7 @@ func TestShowsListAndDetail(t *testing.T) {
 		t.Fatalf("shows = %+v", list)
 	}
 	sh := list[0]
-	if sh.Show != "Cool Show" || sh.EpisodeCount != 1 || !slices.Equal(sh.Seasons, []int{1}) {
+	if sh.Show != "Cool Show" || sh.EpisodeCount != 1 || !slices.Equal(sh.Seasons, []int{1}) || sh.LatestAddedAt <= 0 {
 		t.Errorf("show = %+v", sh)
 	}
 	if sh.TitleID == nil || *sh.TitleID != m.showTitle || sh.Poster != withTok("/api/images/tmdb/w342/show.jpg") ||
@@ -261,7 +261,7 @@ func TestShowsListAndDetail(t *testing.T) {
 	}
 
 	d := decode[ShowDetail](t, m.get("/api/shows/Cool%20Show"))
-	if d.Show != "Cool Show" || d.EpisodeCount != 1 || d.Meta == nil || d.Meta.ID != m.showTitle || d.Poster == "" || d.MatchState != "matched" {
+	if d.Show != "Cool Show" || d.EpisodeCount != 1 || d.Meta == nil || d.Meta.ID != m.showTitle || d.Poster == "" || d.MatchState != "matched" || d.LatestAddedAt != sh.LatestAddedAt {
 		t.Errorf("detail = %+v", d)
 	}
 	if len(d.Seasons) != 1 {
