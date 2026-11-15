@@ -60,8 +60,8 @@ struct PlayRequest {
     private var playback: PlaybackController?
     /// The window showing the play, when one is: one play at a time, in the window that started it.
     private weak var shownIn: PlaybackScene?
-    /// The windows there are, held weakly: a play nobody started goes in the newest of them.
-    private var scenes: [WeakScene] = []
+    /// The windows that can show a play: held weakly, so a window the person closed is not kept alive.
+    private var windows = PlaybackWindows()
     private var handledCommands: Set<Int64> = []
     /// The newest command this device acted on for this server, across launches.
     private var lastHandledSeq: Int64 = 0
@@ -224,17 +224,20 @@ struct PlayRequest {
                 // A play from another device lands in the window that started the last one, or the
                 // newest window there is. Only the play this command started may answer it.
                 let before = playback
-                if let scene = shownIn ?? lastWindow {
-                    play(PlayRequest(itemId: id, startSec: command.positionSec), in: scene)
+                let window = shownIn ?? lastWindow
+                if let window {
+                    play(PlayRequest(itemId: id, startSec: command.positionSec), in: window)
                 }
-                if playback !== before, let p = playback {
+                let result = PlayCommandResult.after(hasServer: connection != nil, hadWindow: window != nil,
+                                                     started: playback !== before)
+                if case .started = result, let p = playback {
                     p.onStart = { [weak c] error in
                         guard let c else { return }
                         Task { try? await c.api.ack(command.seq, ok: error == nil, error: error) }
                     }
                     answered = true
                 } else {
-                    failure = connection == nil ? "No server to play from" : "No window to play in"
+                    failure = result.failure
                 }
             } else {
                 failure = "play needs an itemId"
@@ -260,16 +263,15 @@ struct PlayRequest {
     /// A window says it is here, so that a play from another device lands in one (the newest window
     /// to appear).
     func register(_ scene: PlaybackScene) {
-        scenes.removeAll { $0.scene == nil }
-        if !scenes.contains(where: { $0.scene === scene }) {
-            scenes.append(WeakScene(scene: scene))
-        }
+        windows.add(scene)
     }
 
-    /// The window went away. A play it was showing ends here — the player is closed and its progress
-    /// sent — but it is not dismissed: there is no window left to dismiss it into.
+    /// The window went away (its scene disconnected, or it left the screen). A play it was showing ends
+    /// here — the player is closed and its progress sent — but it is not dismissed: there is no window
+    /// left to dismiss it into. Called more than once, it does nothing the second time.
     func unregister(_ scene: PlaybackScene) {
-        scenes.removeAll { $0.scene == nil || $0.scene === scene }
+        windows.remove(scene)
+        scene.windowScene = nil
         guard scene.presentation.shown else { return }
         scene.forget()
         guard let p = playback, shownIn === scene else { return }
@@ -279,8 +281,13 @@ struct PlayRequest {
         connection?.library.scheduleReload()
     }
 
+    /// Whether a window is still there (a play that was to continue in it may find it gone).
+    private func isLive(_ scene: PlaybackScene) -> Bool {
+        windows.contains(scene)
+    }
+
     /// The newest window there is, for a play nobody started.
-    private var lastWindow: PlaybackScene? { scenes.last?.scene }
+    private var lastWindow: PlaybackScene? { windows.newest as? PlaybackScene }
 
     func play(_ request: PlayRequest, in scene: PlaybackScene) {
         guard let c = connection else { return }
@@ -325,7 +332,7 @@ struct PlayRequest {
     private func autoplayNextEpisode(after current: ItemDetail, in scene: PlaybackScene?) {
         guard let show = current.item.show, !show.isEmpty, let scene, let c = connection else { return }
         Task { @MainActor [weak self] in
-            guard let self, self.connection === c, scene.windowScene != nil else { return }
+            guard let self, self.connection === c, self.isLive(scene) else { return }
             do {
                 let episodes = try await c.api.episodes(show: show)
                 guard let next = NextEpisodeSelection.after(current.item, in: episodes) else { return }
@@ -335,9 +342,4 @@ struct PlayRequest {
             }
         }
     }
-}
-
-/// A window held weakly: a scene whose window the person closed does not stay alive in the registry.
-private struct WeakScene {
-    weak var scene: PlaybackScene?
 }

@@ -63,7 +63,15 @@ final class PlayerPresenter: NSObject, AVPlayerViewControllerDelegate, UIAdaptiv
         self.onDismiss = onDismiss
         let show: () -> Void = { [weak self] in
             self?.afterTransitions { [weak self] in
-                guard let self, self.current === vc, let top = self.top() else { return }
+                guard let self, self.current === vc else { return }
+                guard let top = self.top() else {
+                    // There is no window to show it in: the play ends rather than running unseen.
+                    let onDismiss = self.onDismiss
+                    self.current = nil
+                    self.onDismiss = nil
+                    onDismiss?()
+                    return
+                }
                 top.present(vc, animated: true) { [weak self] in
                     vc.presentationController?.delegate = self
                 }
@@ -169,11 +177,11 @@ final class PlayerPresenter: NSObject, AVPlayerViewControllerDelegate, UIAdaptiv
         }
     }
 
-    /// The root of this presenter's window; a presenter asked before its window says which one, or
-    /// one whose window has gone, falls back to whatever UIKit calls the active scene.
+    /// The root of this presenter's window. A window that is not the key one still has a root, and a
+    /// presenter that was never told which window it belongs to will not guess between two.
     private func root() -> UIViewController? {
-        let scene = hostScene ?? Self.activeScene()
-        return scene?.keyWindow?.rootViewController
+        guard let scene = hostScene ?? Self.soleScene() else { return nil }
+        return (scene.keyWindow ?? scene.windows.first)?.rootViewController
     }
 
     private func top() -> UIViewController? {
@@ -184,9 +192,11 @@ final class PlayerPresenter: NSObject, AVPlayerViewControllerDelegate, UIAdaptiv
         return vc
     }
 
-    private static func activeScene() -> UIWindowScene? {
+    /// The one window there is, when this presenter was not told which one; with two windows open it
+    /// does not choose. (tvOS has one; a phone has one.)
+    private static func soleScene() -> UIWindowScene? {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        return scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        return scenes.count == 1 ? scenes.first : nil
     }
 
     /// Runs action once no presentation or dismissal is under way: UIKit drops one asked for during

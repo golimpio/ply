@@ -45,3 +45,6 @@ import UIKit
 }
 
 extension PlayerPresenter: PlaybackPresenting {}
+
+/// A scene is one of the windows a play can be shown in, for the registry `AppModel` keeps.
+extension PlaybackScene: PlaybackWindow {}

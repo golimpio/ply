@@ -90,6 +90,9 @@ struct ShowView: View {
                         NavigationLink(value: Route.item(episode.id)) {
                             EpisodeRow(episode: episode)
                         }
+                        // The badge and the bar are hidden in the row, and the link is the element
+                        // VoiceOver reads, so the watch state goes on the link.
+                        .accessibilityValue(EpisodeRow.spoken(episode))
                         .buttonStyle(.plain)
                     }
                 }
@@ -206,13 +209,11 @@ struct EpisodeRow: View {
             Spacer(minLength: 0)
         }
         .contentShape(.rect)
-        // The badge and the bar are hidden in the shared components, so the row says what they showed.
-        .accessibilityElement(children: .combine)
-        .accessibilityValue(spoken)
     }
 
-    /// The episode's watch state, in words: the row's own text already says which episode and how long.
-    private var spoken: String {
+    /// The row's watch state in words: its badge and bar are hidden from VoiceOver, and the link
+    /// around the row carries what they showed.
+    static func spoken(_ episode: Item) -> String {
         if episode.isWatched { return "Watched" }
         if episode.fraction != nil { return "In progress" }
         return ""

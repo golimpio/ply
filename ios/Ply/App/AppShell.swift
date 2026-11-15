@@ -37,7 +37,10 @@ struct RootView: View {
         .environment(playbackScene)
         .onAppear { model.register(playbackScene) }
         .onDisappear { model.unregister(playbackScene) }
-        .background(WindowSceneReader { playbackScene.windowScene = $0 }.frame(width: 0, height: 0))
+        .background(WindowSceneReader(
+            onScene: { playbackScene.windowScene = $0 },
+            onGone: { model.unregister(playbackScene) }
+        ).frame(width: 0, height: 0))
         .alert("ply", isPresented: Binding { model.alert != nil } set: { if !$0 { model.alert = nil } }) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -47,28 +50,60 @@ struct RootView: View {
 }
 
 /// The window this view is in, handed to its playback scene so that a play is presented in this
-/// window and not in whichever window UIKit calls active.
+/// window and not in whichever window UIKit calls active. A window closing is reported twice over:
+/// the scene disconnecting (the documented signal) and the view leaving its window.
 private struct WindowSceneReader: UIViewRepresentable {
     let onScene: @MainActor (UIWindowScene?) -> Void
+    let onGone: @MainActor () -> Void
 
     func makeUIView(context: Context) -> WindowSceneProbe {
         let view = WindowSceneProbe()
         view.isUserInteractionEnabled = false
         view.onScene = onScene
+        view.onGone = onGone
         return view
     }
 
     func updateUIView(_ view: WindowSceneProbe, context: Context) {
         view.onScene = onScene
+        view.onGone = onGone
     }
 }
 
 private final class WindowSceneProbe: UIView {
     var onScene: (@MainActor (UIWindowScene?) -> Void)?
+    var onGone: (@MainActor () -> Void)?
+
+    private weak var watched: UIWindowScene?
+    private var disconnectObserver: (any NSObjectProtocol)?
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        onScene?(window?.windowScene)
+        let scene = window?.windowScene
+        onScene?(scene)
+        observe(scene)
+        if scene == nil { onGone?() }
+    }
+
+    override func willMove(toWindow newWindow: UIWindow?) {
+        super.willMove(toWindow: newWindow)
+        // The window is going: stop listening, whether or not the scene says it disconnected.
+        if newWindow == nil { observe(nil) }
+    }
+
+    /// A scene that disconnects is not guaranteed to call the view's life-cycle methods, so the
+    /// notification is the one that always arrives.
+    private func observe(_ scene: UIWindowScene?) {
+        guard scene !== watched else { return }
+        if let disconnectObserver { NotificationCenter.default.removeObserver(disconnectObserver) }
+        disconnectObserver = nil
+        watched = scene
+        guard let scene else { return }
+        disconnectObserver = NotificationCenter.default.addObserver(
+            forName: UIScene.didDisconnectNotification, object: scene, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.onGone?() }
+        }
     }
 }
 

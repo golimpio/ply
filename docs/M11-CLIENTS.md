@@ -448,16 +448,19 @@ checks both.
   connection, feed, remote commands and play; a play started in one window ends the one in another where it was
   shown, and a remote command's play lands in the window that started the last one, or the newest to appear. The
   presenter resolves its window from the scene (`PlaybackScene.windowScene`, handed over by a `WindowSceneReader` in
-  `RootView`), never from whichever window UIKit calls active, and closing a window ends its play there
-  (`AppModel.unregister` — the player is closed and its progress sent, and there is no window to dismiss into).
-  `PlaybackPresentationTests` pins the per-window state machine; two windows at once cannot be driven from a terminal.
+  `RootView`), never from whichever window UIKit calls active — and never guesses between two. Closing a window
+  ends its play there: the scene's disconnect notification (the one UIKit always sends) and the view leaving the
+  window both call `AppModel.unregister`, which closes the player, sends its progress and forgets the presentation
+  without dismissing into a window that is gone. `PlaybackPresentationTests` and `PlaybackWindowsTests` pin the
+  per-window state and the window registry; two windows at once cannot be driven from a terminal.
 - **Tests and CI:** `make test` runs the Foundation-only core on this Mac as a macOS logic test: no simulator, no
   test host, so it works where Xcode 27's simulator test launch does not. It covers the SSE and WebVTT parsers, RFC
   3339 and path handling, the API client's requests and answers (with a URLProtocol stub), the models the server
   sends, the AirPlay play plan, next-episode selection, connect-failure classification, command history, discovery
   dedupe, the feed's own reconnect with `Last-Event-ID`, the search matcher (the web's own fixtures, so that both
-  clients rank a search alike), a show's newest file, and that the episodes are fetched once, when a page asks,
-  not with Home (`LibraryModelTests`). The app-hosted XCTest target is not used. CI runs these
+  clients rank a search alike), a show's newest file, that the episodes are fetched once, when a page asks, not
+  with Home (`LibraryModelTests`), the window registry and a remote play's outcome (`PlaybackWindowsTests`), and a
+  window's hold on the play (`PlaybackPresentationTests`). The app-hosted XCTest target is not used. CI runs these
   tests and a generic iOS and tvOS build with Xcode 26+ (`make ci-build tv`).
 - **Distribution:** the apps ship as `com.ply.ios` and `com.ply.tvos` (`MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` in
   `project.yml`), with the icon family (light, dark and tinted in `Ply/Assets.xcassets/AppIcon.appiconset`, the TV's
