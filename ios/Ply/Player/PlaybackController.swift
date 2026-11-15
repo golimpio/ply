@@ -525,10 +525,16 @@ enum PlaybackEnd {
                   let image = UIImage(data: data) else { return }
             await MainActor.run { [weak self] in
                 guard let self, !self.closed else { return }
-                self.nowPlayingArtwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+                self.nowPlayingArtwork = Self.artwork(for: image)
                 self.updateNowPlayingInfo()
             }
         }
+    }
+
+    /// The lock-screen artwork. MediaRemote asks its handler for an image on its own queue, so the
+    /// handler must not inherit the main actor's isolation (that trips a main-queue assertion).
+    nonisolated static func artwork(for image: UIImage) -> MPMediaItemArtwork {
+        MPMediaItemArtwork(boundsSize: image.size) { _ in image }
     }
 
     private func clearRemoteCommands() {
