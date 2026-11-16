@@ -225,7 +225,7 @@ code {
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  min-height: 2.5rem;
+  min-height: var(--control-h);
   padding: 0.5rem 1.1rem;
   font: inherit;
   font-weight: var(--fw-semibold);
@@ -275,7 +275,7 @@ code {
   opacity: 0.9;
 }
 .btn.icon {
-  width: 2.5rem;
+  width: var(--control-h);
   padding: 0;
 }
 .btn.pill {

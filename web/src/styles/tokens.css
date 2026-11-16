@@ -396,8 +396,11 @@
   /* Layout. */
   --gutter: clamp(1rem, 4vw, 3rem);
   --gutter-player: clamp(0.75rem, 2.5vw, 1.5rem); /* the player's bars, from the window's edges */
-  --bar-h: 3.5rem;
-  --bar-pad-y: 0.625rem; /* vertical breathing room inside the header bar (10px) */
+  --control-h: 2.5rem; /* a .btn's height; an icon button is as wide */
+  --bar-pad-y: 0.9375rem; /* vertical breathing room inside the header bar (15px) */
+  --bar-line: 1px; /* the header bar's bottom rule, shown once the page scrolls under it */
+  /* The header bar: its tallest controls (the icon buttons), the room above and below them, its rule. */
+  --bar-h: calc(var(--control-h) + 2 * var(--bar-pad-y) + var(--bar-line));
   --shelf-pad-y: 2.25rem; /* vertical padding between a shelf and its divider line */
   /* Between the posters of every poster grid (.poster-grid, the library's .grid.posters): rows, columns. */
   --poster-gap: 2.2rem 1.6rem;
@@ -579,7 +582,7 @@
 
 @media (max-width: 600px) {
   :root {
-    --bar-h: 3.25rem;
+    --bar-pad-y: 0.34375rem; /* 5.5px: a phone keeps its 52px bar */
     --season-poster-h: calc(var(--season-w-narrow) * 1.5);
     --poster-gap: 1.5rem 0.9rem;
   }
