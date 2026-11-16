@@ -651,18 +651,15 @@ Svelte 5 (runes) + Vite + TypeScript, hls.js. No UI framework; small hand-writte
   `lib/rowstore.svelte.browser.test.ts`, `lib/details.test.ts`, `lib/library.jsdom.test.ts`,
   `lib/palette-search.browser.test.ts` and `e2e/library-ui.mjs` (a Movies revisit sends only the card request, then a
   304).
-- **Trailers** (`components/TrailerButton.svelte`, `lib/trailers.ts`): a film's page (not an episode's: its
-  title is the show's) and a show's have a Trailer button in the hero, after Play, once
-  `GET /api/titles/{id}/trailers` has one that can be played (none, an error, lookups off: no button). It opens
-  a `Dialog` (`video`: 16:9, as wide as the window allows) with the site's player in an `<iframe>` made on the
-  click: `youtube-nocookie.com/embed/<key>?autoplay=1&rel=0&playsinline=1` or
-  `player.vimeo.com/video/<key>?autoplay=1&dnt=1`, `referrerpolicy=strict-origin-when-cross-origin` (YouTube
-  refuses an embed with no referrer), full screen allowed. Several are chips under it (`aria-pressed`); each one
-  picked gets a new iframe (a new `src` in the same one would add a history entry that Back would spend). Closing
-  the dialog (✕, Escape, the backdrop) removes the iframe, which stops the video, and gives the focus back to the
-  button. The key is checked again before the address is built. The button is keyed by the title id: after a
-  fixed match the old title's trailers are gone at once. Tested by `lib/trailers.test.ts` and
-  `e2e/trailers-ui.mjs` (the players' sites answered by the test: nothing leaves the machine).
+- **Trailers** (`components/TrailerButton.svelte`, `lib/trailers.ts`; M13, `docs/M13-TRAILERS.md`): a film's page (not
+  an episode's: its title is the show's) and a show's have a Trailer button in the hero, after Play, from
+  `GET /api/titles/{id}/trailers` (`buttonState`). A trailer on disk: a link to `#/play/<itemId>`, ply's own player
+  (titled with the film, subtitle "Trailer"; the server keeps no progress for it), the others in a `Menu` ("More
+  trailers"). A download the server is making: the same button disabled, a `.spinner` in place of the icon
+  ("Downloading trailer"); the job's end in `activity.snap.history` (the live feed), or a `library` change, asks the
+  list again, which makes it playable or takes it away. None, or a failed download: no button. Nothing is loaded from
+  YouTube or Vimeo. Keyed by the title id: after a fixed match the old title's are gone at once. Tested by
+  `lib/trailers.test.ts` and `e2e/trailers-ui.mjs`.
 - Dev: `vite` proxy `/api` → `http://localhost:8420`. `npm run build` → `web/dist`, embedded by `web/embed.go`.
   Keep `web/dist/.gitkeep` so `go build` works before the first web build (`all:dist`).
 

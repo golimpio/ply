@@ -667,7 +667,11 @@
 
   const title = $derived(item.kind === 'episode' ? item.episodeTitle || item.title : item.title);
   const subtitle = $derived(
-    item.kind === 'episode' ? [item.show, episodeLabel(item.season, item.episode)].filter(Boolean).join(' · ') : '',
+    item.kind === 'episode'
+      ? [item.show, episodeLabel(item.season, item.episode)].filter(Boolean).join(' · ')
+      : item.kind === 'trailer'
+        ? 'Trailer'
+        : '',
   );
   /**
    * The picture the item's own page opens on. It stands in while the stream is prepared: on a NAS

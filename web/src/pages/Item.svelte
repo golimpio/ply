@@ -375,7 +375,7 @@
         <a class="btn primary" href={href.play(item.id)}><Icon name="play" />Play{#if endsAt} · {endsAt}{/if}</a>
       {/if}
       <!-- A film's own; an episode's meta is its show's, whose trailer is on the show's page. -->
-      {#if !isEpisode && meta}{#key meta.id}<TrailerButton titleId={meta.id} {title} />{/key}{/if}
+      {#if !isEpisode && meta}{#key meta.id}<TrailerButton titleId={meta.id} />{/key}{/if}
       <span class="pair">
         <button class="btn" aria-disabled={marking} onclick={toggleWatched}>
           <Icon name="check" />{item.watched ? 'Mark as unwatched' : 'Mark as watched'}

@@ -2,7 +2,7 @@
 import { DEVICE_HEADER, deviceId, nextAttempt } from './device';
 import { normaliseRating, normaliseRatings, RATING_SOURCES } from './ratings';
 
-export type Kind = 'movie' | 'episode';
+export type Kind = 'movie' | 'episode' | 'trailer';
 export type Method = 'direct' | 'remux' | 'transcode';
 export type Action = 'copy' | 'transcode';
 
@@ -407,16 +407,25 @@ export interface PersonCredit {
   title: TitleCard;
 }
 
-/** A trailer or teaser of a title (GET /api/titles/{id}/trailers), by its key at the site that plays it. */
-export interface Trailer {
-  site: 'youtube' | 'vimeo';
-  key: string;
-  name?: string;
-  type?: 'trailer' | 'teaser';
-  language?: string;
-  official: boolean;
-  /** YYYY-MM-DD */
-  publishedAt?: string;
+/** A trailer file of a title: an item played as a film is (GET /api/titles/{id}/trailers). */
+export interface LocalTrailer {
+  itemId: number;
+  /** The file's name without its extension. */
+  name: string;
+  durationSec: number;
+}
+
+/** The server downloading a title's trailer (docs/M13-TRAILERS.md). */
+export interface TrailerDownload {
+  state: 'queued' | 'running' | 'failed';
+  jobId?: number;
+  error?: string;
+}
+
+/** GET /api/titles/{id}/trailers: the trailers on disk, and the download of one when there are none. */
+export interface TitleTrailers {
+  local: LocalTrailer[];
+  download?: TrailerDownload;
 }
 
 export interface Person extends PersonCard {
@@ -1458,9 +1467,9 @@ export const api = {
     return (await request<PersonFilmographyEntry[] | null>('GET', `/api/people/${id}/filmography`)) ?? [];
   },
 
-  /** A title's trailers, best first; [] when it has none or online lookups are off. */
-  async trailers(titleId: number): Promise<Trailer[]> {
-    return (await request<Trailer[] | null>('GET', `/api/titles/${titleId}/trailers`)) ?? [];
+  /** A title's trailers on disk; asking queues the download of one when it has none. */
+  async trailers(titleId: number): Promise<TitleTrailers> {
+    return request<TitleTrailers>('GET', `/api/titles/${titleId}/trailers`);
   },
 
   async genres(): Promise<GenreCount[]> {

@@ -256,7 +256,7 @@
           <Icon name="cc" />Subtitles
         </button>
       {/if}
-      {#if meta}{#key meta.id}<TrailerButton titleId={meta.id} title={meta.title || show} />{/key}{/if}
+      {#if meta}{#key meta.id}<TrailerButton titleId={meta.id} />{/key}{/if}
       <span class="pair">
         <button class="btn" aria-disabled={marking} onclick={() => mark({ show }, !showDone, 'show')}>
           <Icon name="check" />{showDone ? 'Mark show as unwatched' : 'Mark show as watched'}
