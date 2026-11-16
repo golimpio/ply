@@ -82,10 +82,10 @@ Rules for reading (`internal/library`, beside `ParseNameIn`):
   behaviour (episode 0, not for review: `reExtrasDir`, which gains the Plex names).
 
 Rules for writing (the download's destination):
-- A film in its own folder: `<folder>/<folder name>-trailer.mp4` (the folder is named like Plex's `Title (Year)`,
-  whatever the files are called).
-- A loose film in a shared folder: `<folder>/<Title> (<Year>)-trailer.mp4`, Title and Year as `parseMovie` reads them
-  from the film's file (not TMDB's title: reading it back must attribute it to the same film). No year: `<Title>-trailer.mp4`.
+- A film, in its own folder or loose in a shared one: `<folder of its first file>/<Title> (<Year>)-trailer.mp4`, Title
+  and Year as the name of the film's first file (lowest id) reads (`parseMovie`; for `movie.mkv` the folder's): not
+  TMDB's title, so that reading it back attributes it to the same film in a shared folder. In a Plex-named folder this is
+  the folder's name. No year: `<Title>-trailer.mp4`. (Built: `trailers.Destination`.)
 - A show: `<show folder>/<show folder name>-trailer.mp4`.
 - Characters a file name cannot hold on SMB or HFS (`/ \ : * ? " < > |`) become a space; the name is NFC.
 - An existing file of that name is never overwritten (then the title has a trailer: nothing is downloaded).
@@ -163,7 +163,8 @@ each surface with a trailer present (and a positive control: the trailer exists)
 - Failure: the job fails with the reason in words ("YouTube asks to sign in: age-restricted video", "The folder is
   read-only", ...). It is remembered for the title as provider failures are (`fetchFailure`): a "not available" kind
   for a day, others 5 min doubling to an hour. Retrying from Activity clears it.
-- Online lookups switched off cancels queued downloads.
+- Online lookups off: nothing is queued; a queued download whose turn comes with lookups off fails at once ("Online
+  lookups are off"), and that failure is not remembered for the title.
 
 ### The downloader (`internal/trailerdl`)
 One package, no dependency beyond the standard library, ffmpeg for muxing.

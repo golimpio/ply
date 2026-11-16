@@ -290,7 +290,7 @@ func run() error {
 	if subGen != nil {
 		subsFeed = newSubsFeeder(st, queue, subGen, log)
 	}
-	newTrailers(cfg.Data, ffmpegBin, st, queue, scanner, worker, settings, hw, log)
+	trailerSvc := newTrailers(cfg.Data, ffmpegBin, st, queue, scanner, worker, settings, hw, log)
 	// The schedules (docs/M12-SCHEDULES.md): which background tasks run, at what time of night and on
 	// which days, kept in the database so that a restart neither repeats a run nor loses one. Each
 	// queues a kind the queue already has, so a scheduled run is the job a button would queue.
@@ -430,6 +430,7 @@ func run() error {
 		Subs:              subGen,
 
 		Metadata:  worker,
+		Trailers:  trailerSvc,
 		Settings:  settings,
 		Images:    images,
 		Ratings:   ratings,

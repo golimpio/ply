@@ -236,7 +236,7 @@ bad input → 400, TMDB unreachable → 502, lookups off (no key / `-metadata=fa
 | PUT | `/api/items/{id}/match` | `{tmdbId}` or `{imdbId}` (a movie; episodes → 400) → `manual`; returns ItemDetail |
 | DELETE | `/api/items/{id}/match` | unmatch; returns ItemDetail |
 | PATCH | `/api/titles/{id}` | `{title?, sortTitle?, year?, overview?, tagline?}` (at least one) → title `locked`; returns TitleDetail |
-| GET | `/api/titles/{id}/trailers` | `[{site: youtube\|vimeo, key, name?, type?: trailer\|teaser, language?, official, publishedAt?}]` best first; fetched the first time it is asked, kept 30 days (`docs/M6-METADATA.md`, "Trailers"); `[]` when there are none, the fetch failed or online lookups are off; unknown title → 404, no metadata subsystem → 503 |
+| GET | `/api/titles/{id}/trailers` | (M13) `{local: [{itemId, name, durationSec}], download?: {state: queued\|running\|failed, jobId?, error?}}`: the trailers on disk (`docs/M13-TRAILERS.md`), played as items; none: the download is queued when it can be (a video at YouTube or Vimeo, online lookups on, no failure remembered) and `download` says how it goes; unknown title → 404 |
 | GET | `/api/people?q=` | `[PersonCard]` (≥1 title in the library, max 20; blank q → `[]`) |
 | GET | `/api/people/{id}` | `Person` (details fetched from TMDB on first visit, with `wikidataId`, `imdbId`) with `credits` for library titles, newest first |
 | GET | `/api/people/{id}/filmography` | `[PersonFilmographyEntry]` external titles best first, cached locally; empty with lookups off; 404 unknown person |

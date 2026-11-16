@@ -26,6 +26,7 @@ import (
 	"ply/internal/stream"
 	"ply/internal/subs"
 	"ply/internal/tier"
+	"ply/internal/trailers"
 	"ply/internal/watch"
 )
 
@@ -71,6 +72,11 @@ type Options struct {
 	Metadata *metadata.Worker   // matching, refreshing, fixing matches
 	Settings *metadata.Settings // the TMDB and TVDB keys, the privacy switch, the language
 	Images   *metadata.ImageCache
+	// Trailers (M13) downloads a title's trailer when its page is opened and it has none on disk;
+	// nil: the trailers on disk are listed, and none is downloaded.
+	Trailers interface {
+		Ensure(ctx context.Context, titleID int64) (*trailers.Download, error)
+	}
 	// Ratings (M10) fetches IMDb's and MDBList's ratings; the API asks it which sources it can
 	// give, when the IMDb dataset was last downloaded, and tells it to look for work when a key
 	// or a choice changes. nil: ratings are what the store already has.

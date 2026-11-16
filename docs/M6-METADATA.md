@@ -206,7 +206,8 @@ ffprobe format tags as hints and as an offline source: `title`, `date`, `descrip
 `season_number`, `episode_sort`, `episode_id`, and an `attached_pic` stream (iTunes/mkv cover) as a local poster.
 
 ## Trailers (`internal/metadata/trailers.go`, migration `013_title_videos.sql`)
-A film's and a show's trailers, played from their page in the site's own player (YouTube, Vimeo).
+A film's and a show's trailers at YouTube or Vimeo: since M13 (`docs/M13-TRAILERS.md`) they are no longer played from
+the site but are the source of the download, and the API sends only the trailers on disk. What follows is the list.
 - **Fetched when first wanted**, as a person's details: `GET /api/titles/{id}/trailers` asks for them the first
   time a page does (`Worker.Trailers`, 8 s at most), stores them, and asks again once they are 30 days old or
   the title's id at its provider or the language changed (`titles.videos_ref`, `'tmdb:603@en-US'`;
@@ -231,8 +232,8 @@ A film's and a show's trailers, played from their page in the site's own player 
 
 ## Later (not M6)
 NFO write-back after a manual fix (`-nfo-write`); chapters (`-show_chapters`) for skip-intro / up-next;
-nameparse: multi-episode files (S01E01-E02), date-based episodes, anime absolute numbering. Local trailer files
-(`<name>-trailer.mkv`, `Trailers/`), played in ply's own player: today a file named so is a version of the film.
+nameparse: multi-episode files (S01E01-E02), date-based episodes, anime absolute numbering. (Local trailer files: done
+in M13, `docs/M13-TRAILERS.md`.)
 
 ## HTTP API additions
 All image URLs are relative and carry `?token=` like other media URLs.

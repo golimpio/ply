@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -188,30 +189,38 @@ func (s *Server) handlePersonFilmography(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, out)
 }
 
-// handleTitleTrailers lists a title's trailers, best first. They are fetched the first time the
-// title's page asks; a fetch that fails only means fewer (or none). With online lookups off the list
-// is empty: playing a trailer reaches YouTube or Vimeo, which the privacy switch keeps away.
+// handleTitleTrailers lists a title's trailers on disk (docs/M13-TRAILERS.md, "API"), played as
+// items. A title with none has its download asked for (Trailers.Ensure queues it when it can),
+// and the answer says how it goes; the trailers on disk are listed with online lookups off too.
 func (s *Server) handleTitleTrailers(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseID(w, r, "title")
-	if !ok || s.metadataOff(w) {
+	if !ok {
 		return
 	}
-	videos, err := s.Metadata.Trailers(r.Context(), id)
-	switch {
-	case errors.Is(err, store.ErrNotFound):
+	if _, err := s.Store.GetTitle(r.Context(), id); errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "title not found")
 		return
-	case errors.Is(err, metadata.ErrLookupsOff):
-		videos = nil
-	case r.Context().Err() != nil:
-		return // the client went away
-	case err != nil:
-		s.Logger.Debug("metadata: trailers", "title", id, "err", err)
+	} else if err != nil {
+		s.internalError(w, r, err)
+		return
 	}
-	out := make([]Trailer, 0, len(videos))
-	for _, v := range videos {
-		out = append(out, Trailer{Site: v.Site, Key: v.Key, Name: v.Name, Type: v.Type, Language: v.Language,
-			Official: v.Official, PublishedAt: v.PublishedAt})
+	local, err := s.Store.TitleTrailers(r.Context(), id)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	out := TitleTrailers{Local: make([]LocalTrailer, 0, len(local))}
+	for _, it := range local {
+		name := filepath.Base(it.Path)
+		out.Local = append(out.Local, LocalTrailer{ItemID: it.ID, Name: strings.TrimSuffix(name, filepath.Ext(name)), DurationSec: it.DurationSec})
+	}
+	if len(out.Local) == 0 && s.Trailers != nil {
+		if out.Download, err = s.Trailers.Ensure(r.Context(), id); err != nil {
+			if r.Context().Err() != nil {
+				return // the client went away
+			}
+			s.Logger.Warn("trailers: download", "title", id, "err", err)
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
 }

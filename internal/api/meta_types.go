@@ -6,6 +6,7 @@ import (
 
 	"ply/internal/metadata"
 	"ply/internal/store"
+	"ply/internal/trailers"
 )
 
 // Sizes of TMDB images the API links to, per use. (TMDB's own size names.)
@@ -181,16 +182,18 @@ type PersonFilmographyEntry struct {
 	InLibrary     bool    `json:"inLibrary"`
 }
 
-// Trailer is an entry of GET /api/titles/{id}/trailers: a video at a site that plays it, by its
-// key there (a client builds the player's address, or opens the site's app).
-type Trailer struct {
-	Site        string `json:"site"` // youtube | vimeo
-	Key         string `json:"key"`
-	Name        string `json:"name,omitempty"`
-	Type        string `json:"type,omitempty"` // trailer | teaser
-	Language    string `json:"language,omitempty"`
-	Official    bool   `json:"official"`
-	PublishedAt string `json:"publishedAt,omitempty"`
+// TitleTrailers is GET /api/titles/{id}/trailers (docs/M13-TRAILERS.md, "API"): the title's
+// trailers on disk, played as items, and the download of one when it has none.
+type TitleTrailers struct {
+	Local    []LocalTrailer     `json:"local"` // never null
+	Download *trailers.Download `json:"download,omitempty"`
+}
+
+// LocalTrailer is a trailer file: an item a client plays as it plays a film.
+type LocalTrailer struct {
+	ItemID      int64   `json:"itemId"`
+	Name        string  `json:"name"` // the file's name without its extension
+	DurationSec float64 `json:"durationSec"`
 }
 
 // GenreCount is an entry of GET /api/genres.
@@ -211,6 +214,7 @@ type CollectionCard struct {
 	MovieCount  int    `json:"movieCount,omitempty"`
 	SeriesCount int    `json:"seriesCount,omitempty"`
 }
+
 // CollectionDetail is GET /api/collections/{id}.
 type CollectionDetail struct {
 	ID       int64       `json:"id"`
