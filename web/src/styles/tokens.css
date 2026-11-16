@@ -61,6 +61,8 @@
   --mint-300: #7fd19b;
   --mint-950: #0a2412;
   --amber-200: #ffcf70;
+  --amber-400: #fa9e38;
+  --amber-600: #eb681c;
   --amber-950: #1d1400;
   --umber-950: #15110c;
   --tomato-500: #f0674a;
@@ -210,6 +212,7 @@
   --size-1300: 1.3rem;
   --size-1450: 1.45rem;
   --size-1650: 1.65rem;
+  --size-1700: 1.7rem;
   --size-1850: 1.85rem;
   --size-2200: 2.2rem;
   --size-2600: 2.6rem;
@@ -285,6 +288,10 @@
   --accent-wash: var(--tungsten-400-a08);
   --on-accent: var(--paper-100);
   --tint: var(--accent); /* set per page from artwork; see lib/ambient */
+  --brand-play-start: var(--amber-400);
+  --brand-play-end: var(--amber-600);
+  --brand-logo-h: var(--size-1700);
+  --brand-gate-h: var(--size-2200);
   --danger: var(--coral-300);
   --on-danger: var(--coral-950);
   --ok: var(--mint-300);
