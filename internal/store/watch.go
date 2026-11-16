@@ -172,7 +172,7 @@ func (s *Store) setWatched(ctx context.Context, watched bool, pick func(tx *sql.
 			}
 			_, err := tx.ExecContext(ctx, `
 				INSERT INTO progress (item_id, position_sec, duration_sec, watched_at, play_count, updated_at)
-				SELECT id, 0, duration_sec, ?, 1, ? FROM items WHERE id IN (`+in+`)
+				SELECT id, 0, duration_sec, ?, 1, ? FROM items WHERE kind <> 'trailer' AND id IN (`+in+`)
 				ON CONFLICT (item_id) DO UPDATE SET position_sec = 0, updated_at = excluded.updated_at,
 					watched_at = CASE WHEN progress.watched_at = 0 THEN excluded.watched_at ELSE progress.watched_at END,
 					play_count = MAX(progress.play_count, 1)`,

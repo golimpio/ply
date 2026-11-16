@@ -182,9 +182,9 @@ func (s *Store) UpsertFlagFolder(ctx context.Context, path, kind, guess string) 
 	return f, changed, nil
 }
 
-// CountItemsByRoot returns the number of items under each root that has any.
+// CountItemsByRoot returns the number of films and episodes under each root that has any.
 func (s *Store) CountItemsByRoot(ctx context.Context) (map[string]int, error) {
-	rows, err := s.ro.QueryContext(ctx, `SELECT root, COUNT(*) FROM items GROUP BY root`)
+	rows, err := s.ro.QueryContext(ctx, `SELECT root, COUNT(*) FROM items WHERE kind <> ? GROUP BY root`, KindTrailer)
 	if err != nil {
 		return nil, err
 	}
@@ -256,7 +256,7 @@ func (s *Store) ItemsBelow(ctx context.Context, dir string) ([]RootItem, error) 
 
 func (s *Store) rootItems(ctx context.Context, where string, args ...any) ([]RootItem, error) {
 	rows, err := s.ro.QueryContext(ctx, `
-		SELECT id, path, root, added_at, kind, title, year, show, season, episode, needs_review
+		SELECT id, path, root, added_at, kind, title, year, show, season, episode, needs_review, owner_dir
 		FROM items `+where+` ORDER BY id`, args...)
 	if err != nil {
 		return nil, err
@@ -266,7 +266,7 @@ func (s *Store) rootItems(ctx context.Context, where string, args ...any) ([]Roo
 	for rows.Next() {
 		var it RootItem
 		if err := rows.Scan(&it.ID, &it.Path, &it.Root, &it.AddedAt, &it.Kind, &it.Title, &it.Year, &it.Show, &it.Season,
-			&it.Episode, &it.NeedsReview); err != nil {
+			&it.Episode, &it.NeedsReview, &it.OwnerDir); err != nil {
 			return nil, err
 		}
 		out = append(out, it)
@@ -528,13 +528,14 @@ func (s *Store) ArchivedProgress(ctx context.Context) (map[string]bool, error) {
 // that come from its path.
 type ParsedRow struct {
 	ID          int64
-	Kind        string // KindMovie | KindEpisode
+	Kind        string // KindMovie | KindEpisode | KindTrailer
 	Title       string
 	Year        int
 	Show        string
 	Season      int
 	Episode     int
-	NeedsReview bool // an episode with no number in its name
+	NeedsReview bool   // an episode with no number in its name
+	OwnerDir    string // a trailer's: the folder of its film or show
 }
 
 // SetParsed stores a new reading of items' names, for when their folder's type
@@ -563,7 +564,7 @@ type ParsedRow struct {
 // until PruneMetadata, if the call does not get to its end.)
 func (s *Store) SetParsed(ctx context.Context, rows []ParsedRow) error {
 	for _, r := range rows {
-		if r.Kind != KindMovie && r.Kind != KindEpisode {
+		if r.Kind != KindMovie && r.Kind != KindEpisode && r.Kind != KindTrailer {
 			return fmt.Errorf("store: item kind %q", r.Kind)
 		}
 	}
@@ -772,16 +773,26 @@ func setParsedRow(ctx context.Context, tx *sql.Tx, r ParsedRow, now int64, shows
 	}
 	reset := ``
 	if !keep {
-		reset = `, title_id = NULL, match_state = 'pending', needs_review = ?, match_score = 0,
+		reset = `, title_id = NULL, match_state = ?, needs_review = ?, match_score = 0,
 			match_attempts = 0, next_attempt_at = 0`
 	}
-	args := []any{r.Kind, r.Title, r.Year, r.Show, r.Season, r.Episode, now}
+	args := []any{r.Kind, r.Title, r.Year, r.Show, r.Season, r.Episode, r.OwnerDir, now}
 	if !keep {
-		args = append(args, r.NeedsReview)
+		// A trailer is never matched on its own: its title is its owner's (TitleTrailers).
+		state := MatchPending
+		if r.Kind == KindTrailer {
+			state = MatchDisabled
+		}
+		args = append(args, state, r.NeedsReview && r.Kind != KindTrailer)
 	}
-	_, err = tx.ExecContext(ctx, `
-		UPDATE items SET kind = ?, title = ?, year = ?, show = ?, season = ?, episode = ?,
-			updated_at = ?`+reset+` WHERE id = ?`, append(args, r.ID)...)
+	if _, err = tx.ExecContext(ctx, `
+		UPDATE items SET kind = ?, title = ?, year = ?, show = ?, season = ?, episode = ?, owner_dir = ?,
+			updated_at = ?`+reset+` WHERE id = ?`, append(args, r.ID)...); err != nil {
+		return err
+	}
+	if r.Kind == KindTrailer && oldKind != KindTrailer { // a trailer has no progress
+		_, err = tx.ExecContext(ctx, `DELETE FROM progress WHERE item_id = ?`, r.ID)
+	}
 	return err
 }
 

@@ -14,10 +14,13 @@ import (
 const (
 	KindMovie   = "movie"
 	KindEpisode = "episode"
+	// KindTrailer is a film's or a show's trailer (docs/M13-TRAILERS.md): played, never listed.
+	KindTrailer = "trailer"
 )
 
 // Item is one library file. For episodes Title is the episode title (possibly
-// empty); for movies Show, Season and Episode are zero.
+// empty); for movies Show, Season and Episode are zero. A trailer's Title and Year
+// are its film's as its name says, its Show its show's, and OwnerDir their folder.
 type Item struct {
 	ID          int64
 	Kind        string
@@ -47,6 +50,9 @@ type Item struct {
 
 	// Fingerprint is computed by the scanner and written by UpsertItem.
 	Fingerprint string
+
+	// OwnerDir is a trailer's: the folder of the film or show it belongs to ("" = nobody's).
+	OwnerDir string
 }
 
 // Entry is an item with its streams. GetEntry also fills External (sidecar
@@ -94,7 +100,7 @@ type Show struct {
 
 const itemCols = `id, kind, title, year, show, season, episode, path, root, size, mtime,
 	container, duration_sec, bitrate, added_at, updated_at, title_id, match_state, needs_review,
-	local_poster, local_backdrop, local_thumb, fingerprint`
+	local_poster, local_backdrop, local_thumb, fingerprint, owner_dir`
 
 const streamCols = `idx, type, codec, codec_tag, profile, width, height, pix_fmt, color_transfer,
 	channels, language, title, is_default, forced, dovi`
@@ -109,7 +115,7 @@ func scanItem(sc scanner) (Item, error) {
 	err := sc.Scan(&it.ID, &it.Kind, &it.Title, &it.Year, &it.Show, &it.Season, &it.Episode,
 		&it.Path, &it.Root, &it.Size, &it.MTime, &it.Container, &it.DurationSec, &it.Bitrate,
 		&it.AddedAt, &it.UpdatedAt, &titleID, &it.MatchState, &it.NeedsReview,
-		&it.LocalPoster, &it.LocalBackdrop, &it.LocalThumb, &it.Fingerprint)
+		&it.LocalPoster, &it.LocalBackdrop, &it.LocalThumb, &it.Fingerprint, &it.OwnerDir)
 	it.TitleID = titleID.Int64
 	return it, err
 }
@@ -146,8 +152,8 @@ func upsertItemTx(ctx context.Context, tx *sql.Tx, it *Item, streams []probe.Str
 	var id int64
 	err := tx.QueryRowContext(ctx, `
 		INSERT INTO items (kind, title, year, show, season, episode, path, root, size, mtime,
-			container, duration_sec, bitrate, added_at, updated_at, fingerprint, needs_review)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			container, duration_sec, bitrate, added_at, updated_at, fingerprint, needs_review, owner_dir)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (path) DO UPDATE SET
 			-- What the path says (kind, title, year, show, season, episode) is not here
 			-- either: the path of a row that exists has not changed, and what it says is
@@ -164,7 +170,7 @@ func upsertItemTx(ctx context.Context, tx *sql.Tx, it *Item, streams []probe.Str
 			fingerprint = excluded.fingerprint
 		RETURNING id`,
 		it.Kind, it.Title, it.Year, it.Show, it.Season, it.Episode, it.Path, it.Root, it.Size, it.MTime,
-		it.Container, it.DurationSec, it.Bitrate, now, now, it.Fingerprint, it.NeedsReview).Scan(&id)
+		it.Container, it.DurationSec, it.Bitrate, now, now, it.Fingerprint, it.NeedsReview, it.OwnerDir).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -260,6 +266,8 @@ func listItems(ctx context.Context, q queryer, f ListFilter) ([]Entry, error) {
 	if f.Kind != "" {
 		where = append(where, "i.kind = ?")
 		args = append(args, f.Kind)
+	} else {
+		where = append(where, "i.kind <> '"+KindTrailer+"'")
 	}
 	if f.Show != "" {
 		where = append(where, "i.show = ? COLLATE NOCASE")
@@ -502,9 +510,9 @@ func (s *Store) SetItemRoot(ctx context.Context, id int64, root string) error {
 	return err
 }
 
-// CountItems returns the number of items in the library.
+// CountItems returns the number of films and episodes in the library (trailers are not counted).
 func (s *Store) CountItems(ctx context.Context) (int, error) {
 	var n int
-	err := s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM items`).Scan(&n)
+	err := s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM items WHERE kind <> ?`, KindTrailer).Scan(&n)
 	return n, err
 }
