@@ -1,0 +1,4 @@
+{"playabilityStatus":{"status":"OK"},"videoDetails":{"videoId":"vKQi3bBA1y8"},
+ "streamingData":{"adaptiveFormats":[
+  {"itag":137,"signatureCipher":"s=AAA&sp=sig&url=https%3A%2F%2Fx","mimeType":"video/mp4; codecs=\"avc1.640028\"","bitrate":4000000,"width":1920,"height":1080},
+  {"itag":140,"signatureCipher":"s=BBB&sp=sig&url=https%3A%2F%2Fy","mimeType":"audio/mp4; codecs=\"mp4a.40.2\"","bitrate":130000}]}}

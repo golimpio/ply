@@ -1,0 +1,14 @@
+{"playabilityStatus":{"status":"OK"},
+ "videoDetails":{"videoId":"vKQi3bBA1y8","title":"The Matrix - Trailer"},
+ "streamingData":{"adaptiveFormats":[
+  {"itag":399,"url":"MEDIA/av01-1080","mimeType":"video/mp4; codecs=\"av01.0.08M.08\"","bitrate":2500000,"width":1920,"height":1080,"contentLength":"21906091"},
+  {"itag":137,"url":"MEDIA/avc1-1080","mimeType":"video/mp4; codecs=\"avc1.640028\"","bitrate":4000000,"width":1920,"height":1080,"contentLength":"31906091"},
+  {"itag":136,"url":"MEDIA/avc1-720","mimeType":"video/mp4; codecs=\"avc1.4d401f\"","bitrate":2000000,"width":1280,"height":720,"contentLength":"11906091"},
+  {"itag":313,"url":"MEDIA/vp9-2160","mimeType":"video/webm; codecs=\"vp9\"","bitrate":18000000,"width":3840,"height":2160,"contentLength":"91906091"},
+  {"itag":251,"url":"MEDIA/opus","mimeType":"audio/webm; codecs=\"opus\"","bitrate":160000,"audioQuality":"AUDIO_QUALITY_MEDIUM","contentLength":"2159733"},
+  {"itag":140,"url":"MEDIA/aac","mimeType":"audio/mp4; codecs=\"mp4a.40.2\"","bitrate":130000,"audioQuality":"AUDIO_QUALITY_MEDIUM","contentLength":"2059733"}
+ ]},
+ "adPlacements":[{"adPlacementRenderer":{"config":{"adPlacementConfig":{"kind":"AD_PLACEMENT_KIND_START"}},
+   "renderer":{"instreamVideoAdRenderer":{"skipOffsetMilliseconds":5000,"playerVars":"length_seconds=15&video_id=x"}}}},
+  {"adPlacementRenderer":{"config":{"adPlacementConfig":{"kind":"AD_PLACEMENT_KIND_END"}},
+   "renderer":{"instreamVideoAdRenderer":{"playerVars":"length_seconds=30"}}}}]}
