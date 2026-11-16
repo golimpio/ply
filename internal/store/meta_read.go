@@ -426,7 +426,9 @@ type GenreCount struct {
 // CollectionCount is a collection and the number of library titles in it.
 type CollectionCount struct {
 	Collection
-	Count int
+	Count       int
+	MovieCount  int
+	SeriesCount int
 }
 
 // Collections lists the collections of library titles with how many titles each
@@ -434,7 +436,10 @@ type CollectionCount struct {
 // title in several collections counts in each.
 func (s *Store) Collections(ctx context.Context) ([]CollectionCount, error) {
 	rows, err := s.ro.QueryContext(ctx, `
-		SELECT `+collectionCols+`, COUNT(*) FROM collections c
+		SELECT `+collectionCols+`, COUNT(*),
+			COALESCE(SUM(CASE WHEN t.kind = 'movie' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN t.kind = 'series' THEN 1 ELSE 0 END), 0)
+		FROM collections c
 		JOIN (
 			SELECT collection_id, id AS title_id FROM titles WHERE collection_id IS NOT NULL
 			UNION
@@ -449,12 +454,17 @@ func (s *Store) Collections(ctx context.Context) ([]CollectionCount, error) {
 	defer rows.Close()
 	var out []CollectionCount
 	for rows.Next() {
-		var count int
-		c, err := scanCollection(rows.Scan, &count)
+		var count, movieCount, seriesCount int
+		c, err := scanCollection(rows.Scan, &count, &movieCount, &seriesCount)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, CollectionCount{Collection: c, Count: count})
+		out = append(out, CollectionCount{
+			Collection:  c,
+			Count:       count,
+			MovieCount:  movieCount,
+			SeriesCount: seriesCount,
+		})
 	}
 	return out, rows.Err()
 }

@@ -446,7 +446,8 @@ func TestGenresTitlesAndCollections(t *testing.T) {
 
 	list := decode[[]CollectionCard](t, m.get("/api/collections"))
 	if len(list) != 1 || list[0].ID != m.collectionID || list[0].Name != "The Matrix Collection" ||
-		list[0].Count != 1 || list[0].Poster != withTok("/api/images/tmdb/w342/cp.jpg") {
+		list[0].Count != 1 || list[0].MovieCount != 1 || list[0].SeriesCount != 0 ||
+		list[0].Poster != withTok("/api/images/tmdb/w342/cp.jpg") {
 		t.Errorf("collections = %+v", list)
 	}
 

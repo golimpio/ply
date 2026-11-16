@@ -12,8 +12,15 @@ func (s *Server) handleCollections(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]CollectionCard, len(collections))
 	for i, c := range collections {
-		out[i] = CollectionCard{ID: c.ID, Name: c.Name, Poster: s.imageURL(c.Poster, posterSize),
-			Backdrop: s.imageURL(c.Backdrop, backdropSize), Count: c.Count}
+		out[i] = CollectionCard{
+			ID:          c.ID,
+			Name:        c.Name,
+			Poster:      s.imageURL(c.Poster, posterSize),
+			Backdrop:    s.imageURL(c.Backdrop, backdropSize),
+			Count:       c.Count,
+			MovieCount:  c.MovieCount,
+			SeriesCount: c.SeriesCount,
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
 }

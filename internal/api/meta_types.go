@@ -203,13 +203,14 @@ type GenreCount struct {
 // CollectionCard is an entry of GET /api/collections: a collection and how many
 // library titles are in it.
 type CollectionCard struct {
-	ID       int64  `json:"id"`
-	Name     string `json:"name"`
-	Poster   string `json:"poster,omitempty"`
-	Backdrop string `json:"backdrop,omitempty"`
-	Count    int    `json:"count"`
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Poster      string `json:"poster,omitempty"`
+	Backdrop    string `json:"backdrop,omitempty"`
+	Count       int    `json:"count"`
+	MovieCount  int    `json:"movieCount,omitempty"`
+	SeriesCount int    `json:"seriesCount,omitempty"`
 }
-
 // CollectionDetail is GET /api/collections/{id}.
 type CollectionDetail struct {
 	ID       int64       `json:"id"`
