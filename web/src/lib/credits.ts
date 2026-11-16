@@ -1,7 +1,7 @@
 // The pure logic behind the person, genre and collection pages: a person's
 // credits sorted into the groups the page shows, how a title card links and
 // reads, and the dates of a life.
-import type { PersonCredit, TitleCard } from './api';
+import type { PersonCredit, PersonFilmographyEntry, RatingEntry, TitleCard } from './api';
 import { ratingScore } from './ratings';
 import { href } from './router.svelte';
 
@@ -121,6 +121,13 @@ export function tmdbTitleUrl(kind: string, tmdbId?: number): string {
   if (!tmdbId || tmdbId <= 0) return '';
   const media = kind === 'series' ? 'tv' : 'movie';
   return `https://www.themoviedb.org/${media}/${tmdbId}`;
+}
+
+/** A filmography credit's TMDB score as a rating entry (linking to TMDB, else IMDb), or null when it has none. */
+export function entryRating(e: Pick<PersonFilmographyEntry, 'kind' | 'rating' | 'tmdbId' | 'imdbId'>): RatingEntry | null {
+  if (!e.rating) return null;
+  const url = e.tmdbId ? tmdbTitleUrl(e.kind, e.tmdbId) : imdbTitleUrl(e.imdbId);
+  return { source: 'tmdb', value: e.rating, scale: 10, score100: Math.round(e.rating * 10), url, fetchedAt: '' };
 }
 
 /** Sort key where a larger value is newer; a title with no year (0, or less) ranks lowest. */

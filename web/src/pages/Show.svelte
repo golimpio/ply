@@ -22,9 +22,8 @@
   import HeroTitle from '../components/HeroTitle.svelte';
   import Icon from '../components/Icon.svelte';
   import Menu from '../components/Menu.svelte';
-  import PersonCard from '../components/PersonCard.svelte';
+  import CreditRails from '../components/CreditRails.svelte';
   import SubtitleManager from '../components/SubtitleManager.svelte';
-  import Rail from '../components/Rail.svelte';
   import Rating from '../components/Rating.svelte';
   import Ratings from '../components/Ratings.svelte';
   import SeasonRow, { type SeasonCard } from '../components/SeasonRow.svelte';
@@ -388,13 +387,9 @@
     <CollectionsSection {collections} />
   </div>
 
-  {#if meta?.cast.length}
+  {#if meta?.cast.length || meta?.crew.length}
     <div class="cast">
-      <Rail title="Cast" items={meta.cast.slice(0, 30)} key={(c) => c.personId} size="person">
-        {#snippet card(c)}
-          <PersonCard id={c.personId} name={c.name} profile={c.profile} role={c.character} />
-        {/snippet}
-      </Rail>
+      <CreditRails {meta} />
     </div>
   {/if}
 

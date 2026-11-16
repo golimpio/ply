@@ -347,7 +347,7 @@
   --radius-kbd: var(--radius-4);
   --radius-item: var(--radius-10); /* rows of a menu, search hits, thumbnails */
   --radius-row: var(--radius-4); /* rows of a list, the token field */
-  --radius: var(--radius-2); /* poster and still frames */
+  --radius: var(--radius-6); /* poster and still frames */
   --radius-lg: var(--radius-18); /* panels, dialogs */
   --radius-panel: var(--radius-18);
   --radius-pill: 999px;
@@ -399,6 +399,13 @@
   --bar-h: 3.5rem;
   --bar-pad-y: 0.625rem; /* vertical breathing room inside the header bar (10px) */
   --shelf-pad-y: 2.25rem; /* vertical padding between a shelf and its divider line */
+  /* Between the posters of every poster grid (.poster-grid, the library's .grid.posters): rows, columns. */
+  --poster-gap: 2.2rem 1.6rem;
+  /* The .spinner ring: beside a line of text, and over the picture (the player's buffering). */
+  --spinner-size: 1.1rem;
+  --spinner-line: 2px;
+  --spinner-size-lg: 2.75rem;
+  --spinner-line-lg: 3px;
   --settings-list-gap: var(--space-5); /* between the panels of a list in Settings */
   --settings-row-gap: var(--space-8); /* between what a settings panel says and its button */
   --volume-w: 5.5rem; /* the player's volume slider, open */
@@ -574,5 +581,6 @@
   :root {
     --bar-h: 3.25rem;
     --season-poster-h: calc(var(--season-w-narrow) * 1.5);
+    --poster-gap: 1.5rem 0.9rem;
   }
 }

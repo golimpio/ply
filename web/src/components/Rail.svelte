@@ -168,7 +168,7 @@
     gap: clamp(16px, 2vw, 26px);
   }
   ul.person {
-    grid-auto-columns: clamp(110px, 10vw, 150px);
+    grid-auto-columns: clamp(100px, 9vw, 136px);
   }
   ul::-webkit-scrollbar {
     display: none;

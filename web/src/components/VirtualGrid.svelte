@@ -320,7 +320,7 @@
   }
   .grid.posters {
     grid-template-columns: repeat(auto-fill, minmax(min(160px, 42vw), 1fr));
-    gap: 1.75rem 1.1rem;
+    gap: var(--poster-gap);
   }
   /* Where the gutter is narrower than the rail (phones, 601 to 700 px), the cards make room. */
   .vgrid.railed {

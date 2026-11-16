@@ -3,6 +3,7 @@ import type { PersonCredit, RatingEntry, RatingSource, TitleCard } from './api';
 import {
   cardHref,
   countUniqueTitles,
+  entryRating,
   formatDate,
   groupCredits,
   groupOf,
@@ -304,5 +305,23 @@ describe('external URL helpers', () => {
     expect(tmdbTitleUrl('series', 1396)).toBe('https://www.themoviedb.org/tv/1396');
     expect(tmdbTitleUrl('movie', 0)).toBe('');
     expect(tmdbTitleUrl('movie', undefined)).toBe('');
+  });
+});
+
+describe('entryRating', () => {
+  it('is the TMDB score out of 10, linking to TMDB, else to IMDb', () => {
+    expect(entryRating({ kind: 'series', rating: 7.94, tmdbId: 1396 })).toMatchObject({
+      source: 'tmdb',
+      value: 7.94,
+      scale: 10,
+      score100: 79,
+      url: 'https://www.themoviedb.org/tv/1396',
+    });
+    expect(entryRating({ kind: 'movie', rating: 6, imdbId: 'tt0065571' })?.url).toBe('https://www.imdb.com/title/tt0065571/');
+  });
+
+  it('is null for a credit with no score', () => {
+    expect(entryRating({ kind: 'movie', rating: 0, tmdbId: 8416 })).toBeNull();
+    expect(entryRating({ kind: 'movie', tmdbId: 8416 })).toBeNull();
   });
 });

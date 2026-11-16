@@ -4,6 +4,7 @@ import {
   airLabel,
   backdropImg,
   CREDIT_LINES,
+  crewRail,
   crewWith,
   filmPasses,
   groupByTitle,
@@ -253,6 +254,30 @@ describe('labels', () => {
     ]);
     expect(titleCollections({ collection: null })).toEqual([]);
     expect(titleCollections(undefined)).toEqual([]);
+  });
+});
+
+describe('crewRail', () => {
+  it('shows each person once, where they first appear, with all their jobs', () => {
+    const crew = [
+      { personId: 1, name: 'B. Bertolucci', job: 'Director' },
+      { personId: 2, name: 'V. Storaro', job: 'Director of Photography' },
+      { personId: 1, name: 'B. Bertolucci', job: 'Screenplay' },
+      { personId: 1, name: 'B. Bertolucci', job: 'Screenplay' },
+    ];
+    expect(crewRail(crew, (c) => c.personId).map((c) => [c.personId, c.jobs])).toEqual([
+      [1, 'Director, Screenplay'],
+      [2, 'Director of Photography'],
+    ]);
+    expect(crewRail([], (c: { name: string; job: string }) => c.name)).toEqual([]);
+  });
+
+  it('a first credit with no job takes the next one’s without a stray comma', () => {
+    const crew = [
+      { name: 'A', job: '' },
+      { name: 'A', job: 'Writer' },
+    ];
+    expect(crewRail(crew, (c) => c.name).map((c) => c.jobs)).toEqual(['Writer']);
   });
 });
 

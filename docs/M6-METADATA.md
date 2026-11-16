@@ -251,6 +251,7 @@ All image URLs are relative and carry `?token=` like other media URLs.
 | GET | `/api/collections/{id}` | `{id, name, overview, poster, backdrop, titles:[TitleCard]}` (release order) |
 | GET | `/api/upcoming` | `[{titleId, show, poster?, backdrop?, nextAirDate, nextEpisode?: {season, episode, name}}]` — series with a file in the library whose `next_air_date` is today (server's local date) or later, soonest first (by name within a day), at most 50; `nextEpisode` is absent when TMDB did not say which episode; `[]` when none |
 | GET | `/api/metadata/search?kind=movie\|series&q=&year=` | `[{tmdbId, title, originalTitle, year, overview, poster, score}]` for the fix dialog |
+| GET | `/api/metadata/preview/{movie\|series}/{tmdbId}` | `TitlePreview {kind, tmdbId, imdbId?, title, originalTitle?, year, overview?, tagline?, releaseDate?, endDate?, status?, runtimeMin?, certification?, poster?, backdrop?, genres:[name], cast:[{tmdbId?, name, role?, profile?}] /*12 best billed*/, crew:[…] /*creators, directors, writers; role = job*/}`: a title outside the library, asked of TMDB each time (10 s at most) and never stored; a request the client drops stops the fetch |
 | PUT | `/api/items/{id}/match` | `{tmdbId}` or `{imdbId}` → re-match this movie file, `match_state=manual`, returns ItemDetail |
 | PUT | `/api/shows/{name}/match` | same for a whole show |
 | DELETE | `/api/items/{id}/match`, `/api/shows/{name}/match` | unmatch (back to filename data), `manual`, no auto re-match |
@@ -276,13 +277,19 @@ Mutating endpoints need the token like everything else. Unknown ids → 404. Bad
 - Posters (2:3) on cards with `srcset` (w185/w342/w500), backdrop + logo in the hero, frame-grab fallback.
 - Movies grouped by `titleId` (several files = one card, a version picker on the item page).
 - Item page: overview, tagline, year · certification · runtime · rating, genre chips (→ genre page), director/
-  writer links, cast rail with photos (→ person page), collection link, versions, "Fix match" and "Edit" in a
-  "…" menu, "Refresh metadata".
+  writer links, Cast and Crew rails of round portraits as in the iOS app (→ person page; a crew member once,
+  with all their jobs), collection link, versions, "Fix match" and "Edit" in a "…" menu, "Refresh metadata".
+  The show page has the same two rails.
 - Fix match dialog: search box prefilled with title/year, results with poster/year/overview, one click to apply;
   also paste a TMDB/IMDb URL or id. Works for movies and whole shows.
-- Person page `#/person/<id>`: photo, bio, "In your films" and "In your series" grids grouped Acting /
-  Directing / Writing, then "More films with …" and "More series with …" shelves of the external
-  filmography (a shelf per kind, so no card is labelled with it).
+- Person page `#/person/<id>`: a round portrait beside the name and facts, the biography below it, "In your
+  films" and "In your series" grids grouped Acting / Directing / Writing, then "More films with …" and "More
+  series with …" shelves of the external filmography (a shelf per kind, so no card is labelled with it). A
+  card there opens a dialog: the poster top left and the title beside it, with what the filmography says at
+  once; the rest (plot, credits, genres, cast) loads from `/api/metadata/preview` in the background under
+  "Loading details…", and the dialog widens when it is in. Closing it drops the request.
+- Every poster grid (`.poster-grid`, the library's `.grid.posters`) has the gap `--poster-gap`; poster and
+  still frames have the radius `--radius` (6 px).
 - Genre `#/genre/<id>`, collection `#/collection/<id>` pages; Shows page with series posters; show page with
   season tabs, episode stills and overviews.
 - Search palette also finds people, genres and collections.

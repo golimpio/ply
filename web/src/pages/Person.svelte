@@ -3,12 +3,11 @@
   import {
     cardHref,
     countUniqueTitles,
+    entryRating,
     groupCredits,
     imdbPersonUrl,
-    imdbTitleUrl,
     lifeSpan,
     splitCreditsByMedia,
-    tmdbTitleUrl,
     wikipediaUrl,
   } from '../lib/credits';
   import { backdropOf, posterImg, prefersPosters, profileImg } from '../lib/meta';
@@ -17,10 +16,9 @@
   import { openSearch } from '../lib/palette.svelte';
   import { titleBadge } from '../lib/library.svelte';
   import BackButton from '../components/BackButton.svelte';
-  import Dialog from '../components/Dialog.svelte';
+  import CreditPreview from '../components/CreditPreview.svelte';
   import MediaCard from '../components/MediaCard.svelte';
   import Picture from '../components/Picture.svelte';
-  import Rating from '../components/Rating.svelte';
 
   let { id }: { id: number } = $props();
 
@@ -137,7 +135,7 @@
     <BackButton />
     <header class="head">
       <div class="portrait">
-        <Picture img={profileImg(person)} ratio="2 / 3" label={person.name} sizes="192px" eager />
+        <Picture img={profileImg(person)} ratio="1 / 1" label={person.name} sizes="176px" eager />
       </div>
       <div class="who">
         <h1>{person.name}</h1>
@@ -153,29 +151,29 @@
             {#if wikiUrl}
               <a class="chip ext-link" href={wikiUrl} target="_blank" rel="noopener noreferrer">
                 <span>Wikipedia</span>
-                <span class="arrow" aria-hidden="true">↗</span>
+                <span class="ext-arrow" aria-hidden="true">↗</span>
               </a>
             {/if}
             {#if imdbUrl}
               <a class="chip ext-link" href={imdbUrl} target="_blank" rel="noopener noreferrer">
                 <span>IMDb</span>
-                <span class="arrow" aria-hidden="true">↗</span>
+                <span class="ext-arrow" aria-hidden="true">↗</span>
               </a>
-            {/if}
-          </div>
-        {/if}
-        {#if person.biography}
-          <div class="bio">
-            <p id="bio" bind:this={bioEl} class:clamped={!expanded}>{person.biography}</p>
-            {#if clipped}
-              <button class="more link" aria-expanded={expanded} aria-controls="bio" onclick={() => (expanded = !expanded)}>
-                {expanded ? 'Read less' : 'Read more'}
-              </button>
             {/if}
           </div>
         {/if}
       </div>
     </header>
+    {#if person.biography}
+      <div class="bio">
+        <p id="bio" bind:this={bioEl} class:clamped={!expanded}>{person.biography}</p>
+        {#if clipped}
+          <button class="more link" aria-expanded={expanded} aria-controls="bio" onclick={() => (expanded = !expanded)}>
+            {expanded ? 'Read less' : 'Read more'}
+          </button>
+        {/if}
+      </div>
+    {/if}
 
     {#if filmSections.length > 0}
       <section class="shelf" aria-labelledby="shelf-films">
@@ -244,7 +242,7 @@
               href={`#filmography-${entry.tmdbId || entry.tvdbId || entry.title}`}
               title={entry.title}
               sub={[entry.year || undefined, entry.character || entry.job || entry.department]}
-              rating={entry.rating ? { source: 'tmdb', value: entry.rating, scale: 10, score100: Math.round(entry.rating * 10), url: entry.tmdbId ? tmdbTitleUrl(entry.kind, entry.tmdbId) : (entry.imdbId ? imdbTitleUrl(entry.imdbId) : '') } : null}
+              rating={entryRating(entry)}
               onclick={() => openDetails(entry)}
             />
           {/each}
@@ -254,64 +252,22 @@
   </div>
 
   {#if selectedEntry}
-    <Dialog bind:open={dialogOpen} title={selectedEntry.title}>
-      <div class="entry-modal">
-        <div class="entry-poster">
-          <Picture img={posterImg(selectedEntry)} ratio="2 / 3" label={selectedEntry.title} sizes="160px" />
-        </div>
-        <div class="entry-info">
-          <div class="entry-meta">
-            <span class="badge">{selectedEntry.kind === 'series' ? 'Series' : 'Film'}</span>
-            {#if selectedEntry.year}<span>{selectedEntry.year}</span>{/if}
-            {#if selectedEntry.rating}
-              <Rating entry={{ source: 'tmdb', value: selectedEntry.rating, scale: 10, score100: Math.round(selectedEntry.rating * 10), url: selectedEntry.tmdbId ? tmdbTitleUrl(selectedEntry.kind, selectedEntry.tmdbId) : (selectedEntry.imdbId ? imdbTitleUrl(selectedEntry.imdbId) : '') }} />
-            {/if}
-            {#if selectedEntry.episodeCount}
-              <span>{selectedEntry.episodeCount} episodes</span>
-            {/if}
-          </div>
-          {#if selectedEntry.character}
-            <p class="entry-role"><strong>Role:</strong> {selectedEntry.character}</p>
-          {:else if selectedEntry.job}
-            <p class="entry-role"><strong>Role:</strong> {selectedEntry.job}</p>
-          {/if}
-          {#if selectedEntry.originalTitle && selectedEntry.originalTitle !== selectedEntry.title}
-            <p class="entry-orig">Original title: <em>{selectedEntry.originalTitle}</em></p>
-          {/if}
-          <div class="entry-actions">
-            {#if selectedEntry.imdbId}
-              <a class="btn pill subtle" href={imdbTitleUrl(selectedEntry.imdbId)} target="_blank" rel="noopener noreferrer">
-                <span>IMDb</span>
-                <span class="arrow" aria-hidden="true">↗</span>
-              </a>
-            {/if}
-            {#if selectedEntry.tmdbId}
-              <a class="btn pill subtle" href={tmdbTitleUrl(selectedEntry.kind, selectedEntry.tmdbId)} target="_blank" rel="noopener noreferrer">
-                <span>TMDB</span>
-                <span class="arrow" aria-hidden="true">↗</span>
-              </a>
-            {/if}
-            <button class="btn pill" onclick={() => { dialogOpen = false; openSearch(); }}>
-              Search library
-            </button>
-          </div>
-        </div>
-      </div>
-    </Dialog>
+    <CreditPreview entry={selectedEntry} bind:open={dialogOpen} />
   {/if}
 {/if}
 
 <style>
+  /* The round portrait beside the name and the facts; the biography below, on the left. */
   .head {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 1.5rem 2.5rem;
-    margin-bottom: 2.75rem;
+    margin-bottom: 2rem;
   }
   .portrait {
     flex: none;
-    width: 12rem;
-    border-radius: var(--radius);
+    width: 11rem;
+    border-radius: var(--radius-round);
     overflow: hidden;
     box-shadow: var(--ring-hairline);
   }
@@ -337,18 +293,15 @@
     min-height: 1.85rem;
     padding: 0.2rem 0.75rem;
   }
-  .arrow {
-    font-size: var(--fs-xs);
-    opacity: 0.7;
-  }
   .bio {
     display: grid;
     justify-items: start;
-    gap: 0.5rem;
+    gap: 0.75rem;
+    margin-bottom: 3rem;
   }
   .bio p {
     margin: 0;
-    max-width: 65ch;
+    max-width: 72ch;
     line-height: var(--lh-relaxed);
     white-space: pre-line;
   }
@@ -373,7 +326,7 @@
     margin-top: var(--shelf-pad-y);
   }
   .library {
-    margin-bottom: 1.5rem;
+    margin-bottom: 1.75rem;
   }
   .group + .group {
     margin-top: 2.5rem;
@@ -390,7 +343,7 @@
     font-variant-numeric: tabular-nums;
   }
   .sk-portrait {
-    aspect-ratio: 2 / 3;
+    aspect-ratio: 1 / 1;
   }
   .sk-name {
     height: 2.6rem;
@@ -404,75 +357,24 @@
     width: 60%;
   }
 
-  .entry-modal {
-    display: flex;
-    gap: 1.5rem;
-    align-items: flex-start;
-  }
-  .entry-poster {
-    flex: none;
-    width: 9rem;
-    border-radius: var(--radius);
-    overflow: hidden;
-    box-shadow: var(--ring-hairline);
-  }
-  .entry-info {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-  .entry-meta {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.65rem;
-    font-size: var(--fs-sm);
-    color: var(--text-muted);
-  }
-  .entry-role,
-  .entry-orig {
-    margin: 0;
-    font-size: var(--fs-sm);
-    color: var(--text-muted);
-  }
-  .entry-role strong {
-    color: var(--text);
-  }
-  .entry-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.65rem;
-    margin-top: 0.5rem;
-  }
-
   @media (max-width: 700px) {
     .head {
       flex-direction: column;
-      margin-bottom: 2.25rem;
+      align-items: flex-start;
+      margin-bottom: 1.75rem;
     }
     .portrait {
-      width: 9.5rem;
+      width: 8.5rem;
     }
     .who {
       width: 100%;
     }
+    .bio {
+      margin-bottom: 2.25rem;
+    }
     /* As the shared .poster-grid below 600 px, from 700 px here (the head stacks there too). */
     .poster-grid {
       grid-template-columns: repeat(auto-fill, minmax(min(140px, 100%), 1fr));
-      gap: 1.25rem 0.75rem;
-    }
-  }
-
-  @media (max-width: 600px) {
-    .entry-modal {
-      flex-direction: column;
-      align-items: center;
-      text-align: center;
-    }
-    .entry-actions {
-      justify-content: center;
     }
   }
 </style>

@@ -4,7 +4,8 @@
 
   // A modal over the page (the native <dialog>: focus is kept inside, Escape
   // closes it). `open` is bound; closing by any means sets it false. `video` is
-  // wider still, for a 16:9 player (a trailer).
+  // wider still, for a 16:9 player (a trailer). `head` replaces the title in the
+  // header (artwork beside it): it must hold the heading, with id="dialog-title".
   let {
     open = $bindable(false),
     title,
@@ -12,7 +13,9 @@
     video = false,
     children,
     footer,
-  }: { open: boolean; title: string; wide?: boolean; video?: boolean; children: Snippet; footer?: Snippet } = $props();
+    head,
+  }: { open: boolean; title: string; wide?: boolean; video?: boolean; children: Snippet; footer?: Snippet; head?: Snippet } =
+    $props();
 
   let dialog = $state<HTMLDialogElement>();
   // A click on the backdrop closes it, but only one that also began there: a
@@ -40,8 +43,8 @@
   }}
 >
   {#if open}
-    <header>
-      <h2 id="dialog-title">{title}</h2>
+    <header class:head>
+      {#if head}{@render head()}{:else}<h2 id="dialog-title">{title}</h2>{/if}
       <button class="btn icon" aria-label="Close" onclick={() => (open = false)}><Icon name="close" /></button>
     </header>
     <div class="body">{@render children()}</div>
@@ -62,6 +65,8 @@
     border: 1px solid var(--line-overlay);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-dialog);
+    /* A dialog that grows once what it waited for is in (wide set then) does so smoothly. */
+    transition: width var(--motion-morph) var(--ease);
   }
   dialog[open] {
     display: grid;
@@ -84,7 +89,12 @@
     gap: 1rem;
     padding: 0.9rem 0.9rem 0.6rem 1.25rem;
   }
+  header.head {
+    align-items: flex-start;
+    padding: 1.25rem 0.9rem 0.75rem 1.25rem;
+  }
   header .btn {
+    flex: none;
     margin-left: auto;
     background: transparent;
     border-color: transparent;
@@ -111,6 +121,7 @@
       border-radius: var(--radius-lg) var(--radius-lg) 0 0;
       padding-bottom: env(safe-area-inset-bottom);
     }
+    dialog.wide,
     dialog.video {
       width: 100vw;
     }

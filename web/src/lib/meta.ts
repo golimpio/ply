@@ -175,6 +175,20 @@ export function crewWith(meta: Pick<TitleDetail, 'crew'> | undefined | null, job
   return out;
 }
 
+/**
+ * The crew as a rail shows them: each person once, where they first appear (the server lists the
+ * crew most important job first), with all their jobs ("Director, Screenplay").
+ */
+export function crewRail<T extends { name: string; job: string }>(crew: T[], key: (c: T) => string | number): (T & { jobs: string })[] {
+  const out = new Map<string | number, T & { jobs: string }>();
+  for (const c of crew) {
+    const had = out.get(key(c));
+    if (!had) out.set(key(c), { ...c, jobs: c.job });
+    else if (c.job && !had.jobs.split(', ').includes(c.job)) had.jobs = had.jobs ? `${had.jobs}, ${c.job}` : c.job;
+  }
+  return [...out.values()];
+}
+
 /** Crew jobs grouped into the credit lines a title page shows. */
 export const CREDIT_LINES: { label: string; plural: string; jobs: string[] }[] = [
   { label: 'Director', plural: 'Directors', jobs: ['Director'] },

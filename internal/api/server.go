@@ -236,6 +236,7 @@ func New(o Options) *Server {
 	mux.HandleFunc("GET /api/images/tvdb/{size}/{path...}", s.handleTVDBImage)
 	mux.HandleFunc("GET /api/images/local/{kind}/{id}/{slot}", s.handleLocalImage)
 	mux.HandleFunc("GET /api/metadata/search", s.handleMetadataSearch)
+	mux.HandleFunc("GET /api/metadata/preview/{kind}/{id}", s.handleTitlePreview)
 	mux.HandleFunc("GET /api/metadata/status", s.handleMetadataStatus)
 	mux.HandleFunc("GET /api/metadata/review", s.handleReview)
 	mux.HandleFunc("POST /api/metadata/refresh", s.handleRefreshAll)

@@ -29,8 +29,7 @@
   import HeroTitle from '../components/HeroTitle.svelte';
   import Icon from '../components/Icon.svelte';
   import Menu from '../components/Menu.svelte';
-  import PersonCard from '../components/PersonCard.svelte';
-  import Rail from '../components/Rail.svelte';
+  import CreditRails from '../components/CreditRails.svelte';
   import Ratings from '../components/Ratings.svelte';
   import SourceBadge from '../components/SourceBadge.svelte';
   import TrailerButton from '../components/TrailerButton.svelte';
@@ -455,13 +454,7 @@
     {/if}
   </div>
 
-  {#if meta?.cast.length}
-    <Rail title="Cast" items={meta.cast.slice(0, 30)} key={(c) => c.personId} size="person">
-      {#snippet card(c)}
-        <PersonCard id={c.personId} name={c.name} profile={c.profile} role={c.character} />
-      {/snippet}
-    </Rail>
-  {/if}
+  <CreditRails {meta} />
 
   <!-- Busy until the details are in: a scroll restored on Back waits for them (lib/router). -->
   <div class="body" aria-busy={!detail.data && !detail.error}>

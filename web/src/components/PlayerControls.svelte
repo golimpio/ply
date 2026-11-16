@@ -788,21 +788,13 @@
   .subtitle {
     font-size: var(--fs-sm);
   }
+  /* The shared .spinner (app.css), large, in the middle of the picture. */
   .spinner {
+    --spinner-size: var(--spinner-size-lg);
+    --spinner-line: var(--spinner-line-lg);
     grid-row: 2;
     place-self: center;
-    width: 2.75rem;
-    height: 2.75rem;
-    border: 3px solid var(--line-spinner);
-    border-top-color: var(--text);
-    border-radius: var(--radius-round);
-    animation: spin var(--motion-spin) var(--ease-linear) infinite;
     pointer-events: none;
-  }
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
   }
   .scrubber {
     position: relative;

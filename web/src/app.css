@@ -195,7 +195,28 @@ code {
 .poster-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(170px, 100%), 1fr));
-  gap: 1.75rem 1.25rem;
+  gap: var(--poster-gap);
+}
+
+/* Something on its way: a spinning ring, --spinner-size wide (set it to --spinner-size-lg for a big one). */
+.spinner {
+  flex: none;
+  width: var(--spinner-size);
+  height: var(--spinner-size);
+  border: var(--spinner-line) solid var(--line-spinner);
+  border-top-color: var(--text);
+  border-radius: var(--radius-round);
+  animation: spin var(--motion-spin) var(--ease-linear) infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* The ↗ after a link that leaves ply (Wikipedia, IMDb, TMDB). */
+.ext-arrow {
+  font-size: var(--fs-xs);
+  opacity: 0.7;
 }
 
 /* Buttons */
@@ -971,7 +992,6 @@ a.score-chip:hover {
   }
   .poster-grid {
     grid-template-columns: repeat(auto-fill, minmax(min(140px, 100%), 1fr));
-    gap: 1.25rem 0.75rem;
   }
   .credits {
     grid-template-columns: 1fr;

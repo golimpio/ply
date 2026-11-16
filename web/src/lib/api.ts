@@ -454,6 +454,39 @@ export interface PersonFilmographyEntry {
   inLibrary: boolean;
 }
 
+/** A person of a TitlePreview: not one of the library's, so with no page of their own. */
+export interface PreviewCredit {
+  tmdbId?: number;
+  name: string;
+  /** The character played, or the crew job. */
+  role?: string;
+  profile?: string;
+}
+
+/** A title outside the library as TMDB describes it (GET /api/metadata/preview/{kind}/{tmdbId}). Nothing is stored. */
+export interface TitlePreview {
+  kind: 'movie' | 'series';
+  tmdbId: number;
+  imdbId?: string;
+  title: string;
+  originalTitle?: string;
+  year: number;
+  overview?: string;
+  tagline?: string;
+  releaseDate?: string;
+  endDate?: string;
+  status?: string;
+  runtimeMin?: number;
+  certification?: string;
+  poster?: string;
+  backdrop?: string;
+  genres: string[];
+  /** The best billed, at most a dozen. */
+  cast: PreviewCredit[];
+  /** Creators, directors and writers (role is the job), a person once per job. */
+  crew: PreviewCredit[];
+}
+
 export interface GenreCount extends Genre {
   count: number;
 }
@@ -1190,9 +1223,17 @@ export const NO_ANSWER = 'The server didn’t answer.';
 
 /**
  * timeoutMs (optional, 0 for none): give up on a request the server has not answered by then, as
- * ApiError(0, NO_ANSWER). The answer's body is read within the same time.
+ * ApiError(0, NO_ANSWER). The answer's body is read within the same time. signal (optional): the
+ * caller's own, to drop a request it no longer wants (the server stops working on it too).
  */
-async function request<T>(method: string, path: string, body?: unknown, keepalive = false, timeoutMs = 0): Promise<T> {
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  keepalive = false,
+  timeoutMs = 0,
+  signal?: AbortSignal,
+): Promise<T> {
   const headers: Record<string, string> = { [DEVICE_HEADER]: deviceId() };
   if (token) headers.Authorization = `Bearer ${token}`;
   if (body !== undefined && !(typeof FormData !== 'undefined' && body instanceof FormData)) {
@@ -1202,7 +1243,8 @@ async function request<T>(method: string, path: string, body?: unknown, keepaliv
   const abort = timeoutMs > 0 ? new AbortController() : null;
   const timer = abort ? setTimeout(() => abort.abort(), timeoutMs) : undefined;
   try {
-    return await send<T>(method, path, headers, body, keepalive, abort?.signal);
+    const signals = [abort?.signal, signal].filter((s): s is AbortSignal => !!s);
+    return await send<T>(method, path, headers, body, keepalive, signals.length > 1 ? AbortSignal.any(signals) : signals[0]);
   } catch (e) {
     if (abort?.signal.aborted) throw new ApiError(0, NO_ANSWER);
     throw e;
@@ -1403,6 +1445,13 @@ export const api = {
     const p = await request<Person>('GET', `/api/people/${id}`);
     return { ...p, credits: (p.credits ?? []).map((c) => ({ ...c, title: normaliseRow(c.title) })) };
   },
+
+  /**
+   * A title outside the library, fetched from TMDB as it is asked for and not stored. Aborting
+   * `signal` (the dialog closed) drops the request, and the server's fetch with it.
+   */
+  titlePreview: (kind: 'movie' | 'series', tmdbId: number, signal?: AbortSignal) =>
+    request<TitlePreview>('GET', `/api/metadata/preview/${kind}/${tmdbId}`, undefined, false, 0, signal),
 
   /** External filmography for a person; [] when none or online lookups are off. */
   async personFilmography(id: number): Promise<PersonFilmographyEntry[]> {

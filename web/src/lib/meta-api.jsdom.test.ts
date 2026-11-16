@@ -273,6 +273,17 @@ describe('metadata requests', () => {
     expect((await m.api.show('S')).seasons).toEqual([]);
   });
 
+  it('previews a title outside the library with the caller’s signal, so that closing the dialog drops it', async () => {
+    const fn = stubFetch(json({ kind: 'movie', tmdbId: 8416, title: 'The Conformist', year: 1970, genres: [], cast: [], crew: [] }));
+    const stop = new AbortController();
+    expect((await m.api.titlePreview('movie', 8416, stop.signal)).title).toBe('The Conformist');
+    expect(call(fn)[0]).toBe('/api/metadata/preview/movie/8416');
+    const sent = call(fn)[1].signal!;
+    expect(sent.aborted).toBe(false);
+    stop.abort();
+    expect(sent.aborted).toBe(true);
+  });
+
   it('fetches a person, a collection, genres', async () => {
     let fn = stubFetch(json({ id: 7, name: 'P', credits: [] }));
     await m.api.person(7);
