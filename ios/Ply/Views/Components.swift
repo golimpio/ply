@@ -1141,7 +1141,7 @@ struct HeroBackdropArtwork: View {
         .init(color: Color.white.opacity(0.66), location: 0.74),
         .init(color: Color.white.opacity(0.34), location: 0.85),
         .init(color: Color.white.opacity(0.10), location: 0.94),
-        .init(color: Color.white, location: 1.0)
+        .init(color: Color.clear, location: 1.0)
     ]
 
     var body: some View {
@@ -1319,11 +1319,13 @@ struct DetailBackdropScaffold<Content: View>: View {
             }
             .contentMargins(.bottom, bottomClearance, for: .scrollContent)
             #if os(iOS)
+            .ignoresSafeArea(edges: .top)
             .toolbarBackground(.hidden, for: .navigationBar)
             #endif
         }
         .coordinateSpace(name: coordinateSpaceName)
         #if os(iOS)
+        .ignoresSafeArea(edges: .top)
         .navigationTitle("")
         #endif
         .plyInlineTitle()
