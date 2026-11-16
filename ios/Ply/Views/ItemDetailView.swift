@@ -1,7 +1,4 @@
 import SwiftUI
-#if canImport(WebKit)
-import WebKit
-#endif
 
 /// A movie or an episode: what it is, and how to play it.
 struct ItemDetailView: View {
@@ -19,8 +16,6 @@ struct ItemDetailView: View {
     @State private var audioIndex: Int?
     @State private var subtitle: SubtitleChoice?
     @State private var receivers: [Receiver] = []
-    @State private var trailers: [Trailer] = []
-    @State private var selectedTrailer: Trailer?
     @State private var portalDragOffset: CGFloat = 0
 
     private var routableReceivers: [Receiver] { receivers.filter(\.canRoute) }
@@ -52,9 +47,6 @@ struct ItemDetailView: View {
         #if os(iOS)
         .task { await loadReceivers() }
         #endif
-        .sheet(item: $selectedTrailer) { trailer in
-            TrailerSheet(trailer: $selectedTrailer, all: trailers)
-        }
     }
 
     private func content(item: Item, detail d: ItemDetail?) -> some View {
@@ -220,10 +212,9 @@ struct ItemDetailView: View {
     @ViewBuilder
     private func actionButtons(_ item: Item) -> some View {
         HStack(spacing: 12) {
-            if !trailers.isEmpty {
-                DetailActionButton(title: "Trailer", systemImage: "film") {
-                    selectedTrailer = trailers.first
-                }
+            // A film's own; an episode's title is its show's, whose trailer is on the show's page.
+            if item.kind == "movie", let titleId = item.titleId {
+                TrailerButton(titleId: titleId)
             }
 
             DetailActionButton(
@@ -434,119 +425,9 @@ struct ItemDetailView: View {
             if audioIndex == nil {
                 audioIndex = d.audioStreams.first { $0.default == true }?.index ?? d.audioStreams.first?.index
             }
-            if let titleId = d.meta?.id ?? d.item.titleId {
-                trailers = (try? await connection.api.trailers(titleId: titleId)) ?? []
-            }
         } catch is CancellationError {
         } catch {
             self.error = error.localizedDescription
-        }
-    }
-}
-
-#if canImport(WebKit)
-struct WebTrailerView: UIViewRepresentable {
-    let trailer: Trailer
-
-    func makeUIView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
-        config.allowsInlineMediaPlayback = true
-        config.mediaTypesRequiringUserActionForPlayback = []
-        let webView = WKWebView(frame: .zero, configuration: config)
-        webView.isOpaque = false
-        webView.backgroundColor = .black
-        webView.scrollView.isScrollEnabled = false
-        loadContent(into: webView)
-        return webView
-    }
-
-    func updateUIView(_ uiView: WKWebView, context: Context) {
-        loadContent(into: uiView)
-    }
-
-    private func loadContent(into webView: WKWebView) {
-        if trailer.site == "youtube" {
-            let html = """
-            <!DOCTYPE html>
-            <html>
-            <head>
-            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-            <style>
-              * { margin: 0; padding: 0; box-sizing: border-box; background: #000; }
-              html, body { width: 100%; height: 100%; overflow: hidden; display: flex; align-items: center; justify-content: center; }
-              iframe { width: 100%; height: 100%; border: 0; }
-            </style>
-            </head>
-            <body>
-              <iframe src="https://www.youtube-nocookie.com/embed/\(trailer.key)?autoplay=1&playsinline=1&rel=0&modestbranding=1"
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                      allowfullscreen>
-              </iframe>
-            </body>
-            </html>
-            """
-            webView.loadHTMLString(html, baseURL: URL(string: "https://www.youtube.com"))
-        } else if let url = trailer.embedURL {
-            webView.load(URLRequest(url: url))
-        }
-    }
-}
-#endif
-
-struct TrailerSheet: View {
-    @Binding var trailer: Trailer?
-    let all: [Trailer]
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.black.ignoresSafeArea()
-                VStack(spacing: 20) {
-                    if let t = trailer {
-                        #if canImport(WebKit)
-                        WebTrailerView(trailer: t)
-                            .aspectRatio(16 / 9, contentMode: .fit)
-                            .clipShape(RoundedRectangle(cornerRadius: 16))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 16)
-                                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
-                            )
-                            .shadow(color: .black.opacity(0.8), radius: 24, y: 12)
-                            .padding(.horizontal)
-                        #else
-                        Text(t.label(in: all)).font(.headline).foregroundStyle(.white)
-                        #endif
-                    }
-                    if all.count > 1 {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 10) {
-                                ForEach(all) { t in
-                                    Button {
-                                        trailer = t
-                                    } label: {
-                                        Text(t.label(in: all))
-                                            .font(.subheadline.weight(.medium))
-                                            .padding(.horizontal, 14)
-                                            .padding(.vertical, 8)
-                                            .background(t.id == trailer?.id ? Color.white : Color.white.opacity(0.12), in: .capsule)
-                                            .foregroundStyle(t.id == trailer?.id ? Color.black : Color.white)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            .padding(.horizontal)
-                        }
-                    }
-                    Spacer()
-                }
-                .padding(.top, 16)
-            }
-            .navigationTitle(trailer?.label(in: all) ?? "Trailer")
-            .plyInlineTitle()
-            .plyCloseToolbar(accessibilityLabel: "Close trailer") {
-                dismiss()
-            }
         }
     }
 }

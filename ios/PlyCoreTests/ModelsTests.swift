@@ -233,16 +233,21 @@ private func decode<T: Decodable>(_ json: String) throws -> T {
 }
 
 @Suite struct NewFeaturesModelTests {
-    @Test func trailersDecodeAndHaveLabels() throws {
-        let trailers: [Trailer] = try decode(#"""
-        [{"site":"youtube","key":"vKQi3bBA1y8","name":"Official Trailer","type":"trailer","official":true},
-         {"site":"vimeo","key":"123456","name":"","type":"teaser","official":false}]
+    @Test func titleTrailersDecodeAndState() throws {
+        let two: TitleTrailers = try decode(#"""
+        {"local":[{"itemId":8,"name":"Vivre sa vie (1962)-trailer","durationSec":128.5},{"itemId":9,"name":"Teaser-trailer","durationSec":60}],
+         "download":{"state":"running","jobId":3}}
         """#)
-        #expect(trailers.count == 2)
-        #expect(trailers[0].embedURL?.absoluteString == "https://www.youtube-nocookie.com/embed/vKQi3bBA1y8?autoplay=1&rel=0&playsinline=1")
-        #expect(trailers[0].label(in: trailers) == "Official Trailer")
-        #expect(trailers[1].embedURL?.absoluteString == "https://player.vimeo.com/video/123456?autoplay=1&dnt=1")
-        #expect(trailers[1].label(in: trailers) == "Teaser")
+        #expect(two.buttonState == .play(two.local))
+        #expect(two.local[0].id == 8)
+        let queued: TitleTrailers = try decode(#"{"local":[],"download":{"state":"queued","jobId":3}}"#)
+        #expect(queued.buttonState == .downloading)
+        let running: TitleTrailers = try decode(#"{"local":[],"download":{"state":"running","jobId":3}}"#)
+        #expect(running.buttonState == .downloading)
+        let failed: TitleTrailers = try decode(#"{"local":[],"download":{"state":"failed","jobId":3,"error":"YouTube: Sign in"}}"#)
+        #expect(failed.buttonState == .none)
+        let none: TitleTrailers = try decode(#"{"local":[]}"#)
+        #expect(none.buttonState == .none)
     }
 
     @Test func upcomingShowsDecodeWithNextEpisode() throws {
@@ -281,5 +286,12 @@ private func decode<T: Decodable>(_ json: String) throws -> T {
         #expect(item.is4K)
         #expect(item.isHDR)
         #expect(item.versionLabel == "4K HDR10, MKV")
+    }
+}
+
+@Suite struct TrailerItemTests {
+    @Test func aTrailerItemIsATrailer() throws {
+        let it: Item = try decode(#"{"id":50,"kind":"trailer","title":"Vivre sa vie","durationSec":128}"#)
+        #expect(it.isTrailer && !it.isEpisode)
     }
 }

@@ -530,7 +530,7 @@ enum PlaybackEnd {
 
         let artistItem = AVMutableMetadataItem()
         artistItem.identifier = .commonIdentifierArtist
-        artistItem.value = (item.isEpisode ? (item.show ?? "") : item.year.map(String.init) ?? "") as (NSCopying & NSObjectProtocol)
+        artistItem.value = (item.isEpisode ? (item.show ?? "") : item.isTrailer ? "Trailer" : item.year.map(String.init) ?? "") as (NSCopying & NSObjectProtocol)
         metadata.append(artistItem)
 
         playerItem.externalMetadata = metadata
@@ -546,6 +546,8 @@ enum PlaybackEnd {
             if let code = item.episodeCode {
                 info[MPMediaItemPropertyAlbumTitle] = code
             }
+        } else if item.isTrailer {
+            info[MPMediaItemPropertyArtist] = "Trailer"
         } else if let year = item.year {
             info[MPMediaItemPropertyArtist] = String(year)
         }
