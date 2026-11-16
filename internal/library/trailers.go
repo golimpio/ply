@@ -1,6 +1,10 @@
 package library
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -94,4 +98,45 @@ func isPlexExtra(r Root, path string) bool {
 	}
 	dir := filepath.Dir(path)
 	return reExtraDir.MatchString(filepath.Base(dir)) && filepath.Clean(filepath.Dir(dir)) != filepath.Clean(r.Path)
+}
+
+// ErrNotInRoot is IndexFile's answer for a file no library folder holds.
+var ErrNotInRoot = errors.New("library: the file is in no library folder")
+
+// IndexFile indexes one file ply has just written (a downloaded trailer), at once: it does
+// not wait for the file to settle, as a scan does for a file someone may still be writing.
+// It returns the item's id, and says the library changed.
+func (s *Scanner) IndexFile(ctx context.Context, path string) (int64, error) {
+	if err := s.acquire(ctx); err != nil {
+		return 0, err
+	}
+	defer s.release()
+	s.enter()
+	defer s.leave()
+	roots, _ := s.snapshot()
+	var root Root
+	for _, r := range roots { // the deepest folder that holds it, as a scan's claimant
+		if within(r.Path, path) && len(r.Path) > len(root.Path) {
+			root = r
+		}
+	}
+	if root.Path == "" {
+		return 0, fmt.Errorf("%w: %s", ErrNotInRoot, path)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, err
+	}
+	id, err := s.index(ctx, job{path: path, root: root.Path, kind: root.Kind, size: info.Size(), mtime: info.ModTime().UnixNano()})
+	if err != nil {
+		return 0, err
+	}
+	if id == 0 {
+		return 0, fmt.Errorf("library: %s has no video stream", path)
+	}
+	s.fireChanged()
+	if ParseNameIn(root, path).Kind != store.KindTrailer { // a trailer is not matched, nor its subtitles read
+		s.notify([]int64{id}, nil)
+	}
+	return id, nil
 }

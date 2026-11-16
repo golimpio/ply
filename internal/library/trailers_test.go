@@ -1,8 +1,11 @@
 package library
 
 import (
+	"context"
+	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"ply/internal/store"
 )
@@ -128,5 +131,41 @@ func TestRereadTurnsOldRowsIntoTrailers(t *testing.T) {
 	e.s.Wait()
 	if kind, owner := kindOf(e, path); rerr != nil || kind != store.KindTrailer || owner != filepath.Dir(path) {
 		t.Errorf("after the reread: %s, %s, %v", kind, owner, rerr)
+	}
+}
+
+// A file ply wrote itself is indexed at once, not after the settle time a scan waits for.
+func TestIndexFileSkipsSettle(t *testing.T) {
+	e := newEnv(t)
+	root := filepath.Join(t.TempDir(), "Movies")
+	write(t, filepath.Join(root, "Film (2000)", "Film (2000).mkv"), "f")
+	e.setRoots(movies(root))
+	e.s.SetSettle(time.Hour)
+	changed := 0
+	e.s.OnChanged(func() { changed++ })
+	path := filepath.Join(root, "Film (2000)", "Film (2000)-trailer.mp4")
+	write(t, path, "t")
+	if _, err := e.s.ScanDirs(context.Background(), []Dir{{Path: filepath.Dir(path)}}); err != nil {
+		t.Fatal(err)
+	}
+	if n := e.countRaw(`SELECT COUNT(*) FROM items WHERE path = ?`, path); n != 0 {
+		t.Fatal("control: a scan indexed a file written just now")
+	}
+	id, err := e.s.IndexFile(context.Background(), path)
+	if err != nil || id == 0 {
+		t.Fatalf("IndexFile = %d, %v", id, err)
+	}
+	if kind, owner := kindOf(e, path); kind != store.KindTrailer || owner != filepath.Dir(path) || changed != 1 {
+		t.Errorf("indexed: %s, %s; library changed %d times, want 1", kind, owner, changed)
+	}
+}
+
+func TestIndexFileOutsideRoots(t *testing.T) {
+	e := newEnv(t)
+	e.setRoots(movies(filepath.Join(t.TempDir(), "Movies")))
+	path := filepath.Join(t.TempDir(), "elsewhere.mp4")
+	write(t, path, "x")
+	if _, err := e.s.IndexFile(context.Background(), path); !errors.Is(err, ErrNotInRoot) {
+		t.Errorf("IndexFile outside the folders: %v, want ErrNotInRoot", err)
 	}
 }

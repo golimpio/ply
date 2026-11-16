@@ -309,6 +309,9 @@ func run() error {
 	// (the log says how many items change).
 	scanner.SetRoots(previousRoots(roots, before))
 	scanner.SetRoots(roots)
+	if err := markTrailerRereads(ctx, st, roots); err != nil { // once: trailers taken for films
+		log.Warn("noting the folders to read again for trailers", "err", err)
+	}
 	rereadPending(ctx, st, scanner, log)
 	// Files left pending by the last run are looked up again (what worker.Run did first).
 	if err := st.ReleasePending(ctx); err != nil && ctx.Err() == nil {
