@@ -169,3 +169,13 @@ func TestIndexFileOutsideRoots(t *testing.T) {
 		t.Errorf("IndexFile outside the folders: %v, want ErrNotInRoot", err)
 	}
 }
+
+// Roots are the folders the scanner has now, with their types.
+func TestScannerRoots(t *testing.T) {
+	e := newEnv(t)
+	m := movies(filepath.Join(t.TempDir(), "Movies"))
+	e.setRoots(m)
+	if got := e.s.Roots(); len(got) != 1 || got[0] != m {
+		t.Errorf("Roots = %v, want [%v]", got, m)
+	}
+}

@@ -201,6 +201,16 @@ const (
 	maxFetchFailed  = 1024 // entries remembered per kind; the oldest give way
 )
 
+// RetryAfter is how long a fetch that failed attempts times before is left alone: a day for
+// what the source does not have (missing), else 5 min doubling with each failure, at most an
+// hour. The trailers' downloads go by it too.
+func RetryAfter(attempts int, missing bool) time.Duration {
+	if missing {
+		return fetchMissingTTL
+	}
+	return min(fetchRetryBase<<min(attempts, 10), fetchRetryMax)
+}
+
 // fetchFailure is why a person's details, or a title's trailers, are not asked for
 // again until.
 type fetchFailure struct {
@@ -286,11 +296,7 @@ func (w *Worker) noteFailure(ctx context.Context, failed map[int64]fetchFailure,
 		return
 	}
 	f := fetchFailure{attempts: attempts + 1, err: err, ref: ref}
-	if IsNotFound(err) {
-		f.until = now.Add(fetchMissingTTL)
-	} else {
-		f.until = now.Add(min(fetchRetryBase<<min(attempts, 10), fetchRetryMax))
-	}
+	f.until = now.Add(RetryAfter(attempts, IsNotFound(err)))
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if len(failed) >= maxFetchFailed {

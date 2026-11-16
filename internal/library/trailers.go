@@ -140,3 +140,9 @@ func (s *Scanner) IndexFile(ctx context.Context, path string) (int64, error) {
 	}
 	return id, nil
 }
+
+// Roots are the library folders the scanner has now, with their types.
+func (s *Scanner) Roots() []Root {
+	roots, _ := s.snapshot()
+	return roots
+}
