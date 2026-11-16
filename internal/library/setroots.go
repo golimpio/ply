@@ -204,7 +204,7 @@ func readings(root, kind string, items []store.RootItem) []store.ParsedRow {
 	for _, it := range items {
 		p := ParseNameIn(r, it.Path)
 		row := store.ParsedRow{ID: it.ID, Kind: p.Kind, Title: p.Title, Year: p.Year, Show: p.Show,
-			Season: p.Season, Episode: p.Episode, NeedsReview: p.NeedsReview}
+			Season: p.Season, Episode: p.Episode, NeedsReview: p.NeedsReview, OwnerDir: p.OwnerDir}
 		have := it.ParsedRow
 		have.NeedsReview = row.NeedsReview
 		if have != row {

@@ -835,6 +835,9 @@ func (p *pass) visit(ctx context.Context, path string, d fs.DirEntry, claimant f
 	if !info.Mode().IsRegular() {
 		return nil
 	}
+	if r := claimant(path); r != "" && isPlexExtra(Root{Path: r, Kind: p.kinds[r]}, path) {
+		return nil // a featurette, a deleted scene: not a film (a row an earlier version made goes)
+	}
 	p.seen[path] = struct{}{}
 	root, ok := p.owners[path]
 	if !ok {
@@ -1554,6 +1557,7 @@ func itemFor(j job) store.Item {
 		Season:      p.Season,
 		Episode:     p.Episode,
 		NeedsReview: p.NeedsReview,
+		OwnerDir:    p.OwnerDir,
 		Path:        j.path,
 		Root:        j.root,
 		Size:        j.size,
