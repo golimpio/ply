@@ -46,7 +46,8 @@ func trailerOf(r Root, path string) (Parsed, bool) {
 	p := Parsed{Kind: store.KindTrailer}
 	if r.Kind == KindShows {
 		p.OwnerDir = ShowDir(r.Path, path)
-		p.Show = showOf(r.Path, p.OwnerDir)
+		p.Show = ShowName(r.Path, p.OwnerDir)
+		p.Title = p.Show // what the player calls it
 		return p, true
 	}
 	name := ""
@@ -66,7 +67,8 @@ func trailerOf(r Root, path string) (Parsed, bool) {
 
 // ShowDir is the folder of the show a file of a shows root belongs to: the first folder
 // below the root that is not a Season folder, or the root itself when it is the show's
-// own folder (as parseEpisodeIn decides the show).
+// own folder. (An episode straight in a root named after its file is not in a folder of
+// its show's: ShowName of the root is then not its show.)
 func ShowDir(root, path string) string {
 	dirs, under := dirsBelow(root, path)
 	switch {
@@ -78,8 +80,8 @@ func ShowDir(root, path string) string {
 	return filepath.Dir(path)
 }
 
-// showOf is the show a show's folder names (as parseEpisodeIn names it).
-func showOf(root, showDir string) string {
+// ShowName is the show a show's folder names (as parseEpisodeIn names it from the folder).
+func ShowName(root, showDir string) string {
 	if filepath.Clean(showDir) == filepath.Clean(root) {
 		return rootShow(root)
 	}

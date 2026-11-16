@@ -63,9 +63,10 @@ type Options struct {
 
 // Service queues and runs the downloads.
 type Service struct {
-	o      Options
-	mu     sync.Mutex
-	failed map[int64]failure // by title id
+	o        Options
+	ensureMu sync.Mutex // one Ensure at a time: the check for a job and the enqueue are one step
+	mu       sync.Mutex
+	failed   map[int64]failure // by title id
 }
 
 // failure is a title's last failed download, not tried again until.
@@ -112,8 +113,11 @@ func (s *Service) Spec() jobs.Spec {
 // download goes, and queues it when there is none and one can be made. nil: no download (no
 // video to download, online lookups off, the title has a trailer or no files).
 func (s *Service) Ensure(ctx context.Context, titleID int64) (*Download, error) {
+	s.ensureMu.Lock()
+	defer s.ensureMu.Unlock()
 	key := Key(titleID)
-	for _, j := range append(s.o.Queue.Snapshot().Running, s.o.Queue.Snapshot().Queued...) {
+	snap := s.o.Queue.Snapshot()
+	for _, j := range append(snap.Running, snap.Queued...) {
 		if j.Kind == Kind && j.Key == key {
 			state := "queued"
 			if j.State == jobs.Running {
@@ -169,22 +173,35 @@ func (s *Service) run(ctx context.Context, r *jobs.Run) error {
 		return jobs.Permanent(err)
 	}
 	err := s.download(ctx, r, pl.TitleID)
+	if errors.Is(context.Cause(ctx), jobs.ErrCancelled) {
+		// A person stopped it in Activity: the page must not queue it again at once.
+		s.remember(pl.TitleID, r.ID(), errors.New("Cancelled in Activity"), false)
+		return err
+	}
 	if ctx.Err() != nil {
-		return err // cancelled, or ply stopping (the queue runs it again at the next start)
+		return err // ply stopping: the queue runs it again at the next start
 	}
 	if errors.Is(err, errLookupsOff) {
 		return jobs.Permanent(err) // not a failure of the title's
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if err == nil {
+		s.mu.Lock()
 		delete(s.failed, pl.TitleID)
+		s.mu.Unlock()
 		return nil
 	}
-	f := s.failed[pl.TitleID]
-	s.failed[pl.TitleID] = failure{attempts: f.attempts + 1, job: r.ID(), err: err.Error(),
-		until: s.o.Now().Add(metadata.RetryAfter(f.attempts, errors.Is(err, trailerdl.ErrUnavailable)))}
+	s.remember(pl.TitleID, r.ID(), err, errors.Is(err, trailerdl.ErrUnavailable))
 	return jobs.Permanent(err)
+}
+
+// remember notes a title's failed download (job), not tried again until metadata.RetryAfter:
+// a day for a video the site will not give (missing).
+func (s *Service) remember(titleID, job int64, err error, missing bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f := s.failed[titleID]
+	s.failed[titleID] = failure{attempts: f.attempts + 1, job: job, err: err.Error(),
+		until: s.o.Now().Add(metadata.RetryAfter(f.attempts, missing))}
 }
 
 var errLookupsOff = errors.New("Online lookups are off")
@@ -209,8 +226,7 @@ func (s *Service) download(ctx context.Context, r *jobs.Run, titleID int64) erro
 	}
 	final := filepath.Join(dir, name)
 	if _, err := os.Stat(final); err == nil { // never overwritten: it is the title's trailer
-		_, err := s.o.Scanner.IndexFile(ctx, final)
-		return err
+		return s.indexed(ctx, titleID, final)
 	}
 	videos, err := s.o.Videos(ctx, titleID)
 	if err != nil {
@@ -250,14 +266,33 @@ func (s *Service) download(ctx context.Context, r *jobs.Run, titleID int64) erro
 	if err := place(out, dir, name); err != nil {
 		return err
 	}
-	_, err = s.o.Scanner.IndexFile(ctx, final)
-	return err
+	return s.indexed(ctx, titleID, final)
+}
+
+// indexed indexes the trailer at path and checks it is the title's: one the scanner gives to
+// another title (or to none) would be downloaded again at every visit of the page.
+func (s *Service) indexed(ctx context.Context, titleID int64, path string) error {
+	id, err := s.o.Scanner.IndexFile(ctx, path)
+	if err != nil {
+		return err
+	}
+	local, err := s.o.Store.TitleTrailers(ctx, titleID)
+	if err != nil {
+		return err
+	}
+	for _, it := range local {
+		if it.ID == id {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s was written, but it reads as another title's trailer: %w", path, trailerdl.ErrUnavailable)
 }
 
 // place copies the file at from into dir as name: through a hidden file that the scanner and
 // Plex skip, synced, then renamed. Nothing is left behind on a failure, and nothing is replaced.
 func place(from, dir, name string) (err error) {
 	part := filepath.Join(dir, "."+name+".part")
+	_ = os.Remove(part) // ply's own name: one a run that died left behind
 	out, err := os.OpenFile(part, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if errors.Is(err, os.ErrPermission) {
 		return fmt.Errorf("The folder is read-only: %s", dir)
@@ -318,6 +353,10 @@ func Destination(files []store.Item, roots []library.Root) (dir, name string, er
 			return "", "", fmt.Errorf("no library folder holds %s", first.Path)
 		}
 		dir = library.ShowDir(root.Path, first.Path)
+		if library.ShowName(root.Path, dir) != first.Show {
+			return "", "", fmt.Errorf("no folder of %s's own to put its trailer in (its episodes are in %s): %w",
+				first.Show, dir, trailerdl.ErrUnavailable)
+		}
 		return dir, fileName(filepath.Base(dir)) + "-trailer.mp4", nil
 	}
 	return filepath.Dir(first.Path), fileName(filmName(first.Title, first.Year)) + "-trailer.mp4", nil

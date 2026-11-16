@@ -23,7 +23,7 @@ func TestDestination(t *testing.T) {
 	film := func(id int64, path, title string, year int) store.Item {
 		return store.Item{ID: id, Kind: store.KindMovie, Path: path, Title: title, Year: year}
 	}
-	ep := func(id int64, path string) store.Item { return store.Item{ID: id, Kind: store.KindEpisode, Path: path} }
+	ep := func(id int64, path, show string) store.Item { return store.Item{ID: id, Kind: store.KindEpisode, Path: path, Show: show} }
 	for _, c := range []struct {
 		name  string
 		roots []library.Root
@@ -39,9 +39,9 @@ func TestDestination(t *testing.T) {
 		{"no year", []library.Root{m}, []store.Item{film(1, "/m/Heat.mkv", "Heat", 0)}, "/m/Heat-trailer.mp4"},
 		{"names a file cannot hold", []library.Root{m}, []store.Item{film(1, "/m/ACDC/x.mkv", `AC/DC: Live?`, 1991)},
 			"/m/ACDC/AC DC Live (1991)-trailer.mp4"},
-		{"a show", []library.Root{tv}, []store.Item{ep(1, "/tv/The Wire/Season 1/x.mkv")}, "/tv/The Wire/The Wire-trailer.mp4"},
+		{"a show", []library.Root{tv}, []store.Item{ep(1, "/tv/The Wire/Season 1/x.mkv", "The Wire")}, "/tv/The Wire/The Wire-trailer.mp4"},
 		{"a show that is the root", []library.Root{{Path: "/tv/Lost", Kind: library.KindShows}},
-			[]store.Item{ep(1, "/tv/Lost/Season 1/x.mkv")}, "/tv/Lost/Lost-trailer.mp4"},
+			[]store.Item{ep(1, "/tv/Lost/Season 1/x.mkv", "Lost")}, "/tv/Lost/Lost-trailer.mp4"},
 		{"versions in two folders: the first file's", []library.Root{m, {Path: "/other", Kind: library.KindMovies}}, []store.Item{
 			film(4, "/m/Heat (1995)/Heat (1995).mkv", "Heat", 1995), film(9, "/other/Heat (1995).mkv", "Heat", 1995)},
 			"/m/Heat (1995)/Heat (1995)-trailer.mp4"},
@@ -53,6 +53,13 @@ func TestDestination(t *testing.T) {
 	}
 	if _, _, err := Destination(nil, []library.Root{m}); err == nil {
 		t.Error("a title with no files has a destination")
+	}
+	// Episodes straight in a shows root have no show folder: a trailer there would be the root's.
+	for _, path := range []string{"/tv/The.Wire.S01E01.mkv", "/tv/Season 1/The Wire S01E01.mkv"} {
+		loose := store.Item{ID: 1, Kind: store.KindEpisode, Path: path, Show: "The Wire"}
+		if dir, name, err := Destination([]store.Item{loose}, []library.Root{tv}); err == nil {
+			t.Errorf("loose episode %s: destination %s", path, filepath.Join(dir, name))
+		}
 	}
 }
 
@@ -89,6 +96,7 @@ type env struct {
 	fail    map[string]error
 	block   chan struct{} // a fetch waits for it when set
 	indexed []string
+	orphan  bool // IndexFile reads the file as nobody's trailer
 }
 
 // IndexFile stores the trailer as the scanner would.
@@ -96,7 +104,11 @@ func (e *env) IndexFile(ctx context.Context, path string) (int64, error) {
 	e.mu.Lock()
 	e.indexed = append(e.indexed, path)
 	e.mu.Unlock()
-	return e.st.UpsertItem(ctx, &store.Item{Kind: store.KindTrailer, OwnerDir: filepath.Dir(path), Title: "Vivre sa vie", Year: 1962,
+	owner := filepath.Dir(path)
+	if e.orphan {
+		owner = ""
+	}
+	return e.st.UpsertItem(ctx, &store.Item{Kind: store.KindTrailer, OwnerDir: owner, Title: "Vivre sa vie", Year: 1962,
 		Path: path, Root: filepath.Dir(e.dir), Size: 1, MTime: 1}, nil)
 }
 
@@ -378,5 +390,92 @@ func TestEnsureLookupsOff(t *testing.T) {
 	e.online = false
 	if d := e.ensure(); d != nil || len(e.q.Snapshot().Queued) != 0 {
 		t.Errorf("Ensure with lookups off = %+v", d)
+	}
+}
+
+// A trailer written but read back as another title's (or nobody's) is a failure, remembered: the
+// page would otherwise queue it again and again.
+func TestDownloadThatDoesNotAttachIsAFailure(t *testing.T) {
+	e := newEnv(t)
+	e.orphan = true
+	j := e.wait(e.ensure().JobID)
+	if j.State != jobs.Failed || !strings.Contains(j.Error, "reads as another title's trailer") {
+		t.Fatalf("job %s: %q", j.State, j.Error)
+	}
+	if d := e.ensure(); d == nil || d.State != "failed" {
+		t.Errorf("Ensure after it: %+v, want the failure", d)
+	}
+}
+
+// A .part an earlier run left (ply killed, the share gone mid-copy) does not block the title.
+func TestDownloadClearsAStalePart(t *testing.T) {
+	e := newEnv(t)
+	part := filepath.Join(e.dir, ".Vivre sa vie (1962)-trailer.mp4.part")
+	if err := os.WriteFile(part, []byte("half"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	j := e.wait(e.ensure().JobID)
+	if _, err := os.Stat(filepath.Join(e.dir, "Vivre sa vie (1962)-trailer.mp4")); j.State != jobs.Done || err != nil {
+		t.Errorf("job %s (%s), final: %v", j.State, j.Error, err)
+	}
+	if _, err := os.Stat(part); err == nil {
+		t.Error("the stale .part is still there")
+	}
+}
+
+// Two pages at once (the web and a phone): one job.
+func TestEnsureConcurrent(t *testing.T) {
+	e := newEnv(t)
+	e.block = make(chan struct{})
+	defer close(e.block)
+	var wg sync.WaitGroup
+	ids := make([]int64, 8)
+	for i := range ids {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if d, err := e.s.Ensure(context.Background(), e.title); err == nil && d != nil {
+				ids[i] = d.JobID
+			}
+		}()
+	}
+	wg.Wait()
+	snap := e.q.Snapshot()
+	n := 0
+	for _, j := range append(snap.Running, snap.Queued...) {
+		if j.Kind == Kind {
+			n++
+		}
+	}
+	for _, id := range ids {
+		if id == 0 || id != ids[0] {
+			t.Fatalf("job ids %v, want one", ids)
+		}
+	}
+	if n != 1 {
+		t.Errorf("%d jobs, want 1", n)
+	}
+}
+
+// A download a person cancelled in Activity is not queued again by the page at once.
+func TestCancelIsRemembered(t *testing.T) {
+	e := newEnv(t)
+	e.block = make(chan struct{})
+	defer close(e.block)
+	d := e.ensure()
+	for range 200 {
+		if e.q.Started(Kind) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := e.q.Cancel(d.JobID); err != nil {
+		t.Fatal(err)
+	}
+	if j := e.wait(d.JobID); j.State != jobs.Cancelled {
+		t.Fatalf("control: the job is %s", j.State)
+	}
+	if again := e.ensure(); again == nil || again.State != "failed" || again.JobID != d.JobID {
+		t.Errorf("Ensure after a cancel: %+v, want the cancel remembered", again)
 	}
 }

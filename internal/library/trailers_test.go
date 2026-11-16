@@ -17,7 +17,7 @@ func TestTrailerOf(t *testing.T) {
 		return Parsed{Kind: store.KindTrailer, Title: title, Year: year, OwnerDir: dir}
 	}
 	show := func(name string) Parsed {
-		return Parsed{Kind: store.KindTrailer, Show: name, OwnerDir: "/tv/" + name}
+		return Parsed{Kind: store.KindTrailer, Title: name, Show: name, OwnerDir: "/tv/" + name} // titled after the show: the player says so
 	}
 	for _, c := range []struct {
 		root Root
