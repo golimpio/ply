@@ -13,14 +13,6 @@ struct ShowView: View {
     @State private var trailers: [Trailer] = []
     @State private var selectedTrailer: Trailer?
 
-    private var heroHeight: CGFloat {
-        #if os(tvOS)
-        520
-        #else
-        460
-        #endif
-    }
-
     private var nextEpisodeToPlay: Item? {
         episodes.first(where: { !$0.isWatched }) ?? episodes.first
     }
@@ -43,120 +35,82 @@ struct ShowView: View {
     }
 
     var body: some View {
-        let backdropPath = detail?.backdrop ?? detail?.meta?.backdrop
+        let backdropPath = detail?.backdrop ?? detail?.meta?.backdrop ?? detail?.poster
 
-        return ZStack {
-            AmbientBackdropWash(path: backdropPath)
+        DetailBackdropScaffold(backdropPath: backdropPath) {
+            heroStage(detail)
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    heroStage(detail)
-
-                    HStack(spacing: 12) {
-                        if !trailers.isEmpty {
-                            Button { selectedTrailer = trailers.first } label: {
-                                Label("Trailer", systemImage: "film")
-                                    .font(.subheadline.weight(.semibold))
-                            }
-                            .buttonStyle(.bordered)
-                        }
-
-                        Button {
-                            setShowWatched(!allShowWatched)
-                        } label: {
-                            Label(allShowWatched ? "Show watched" : "Mark show watched",
-                                  systemImage: allShowWatched ? "checkmark.circle.fill" : "checkmark.circle")
-                                .font(.subheadline.weight(.semibold))
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(allShowWatched ? .orange : .white)
-
-                        Spacer()
-                    }
-                    .padding(.horizontal)
-
-                    if let overview = detail?.overview ?? detail?.meta?.overview {
-                        Text(overview).font(.callout).padding(.horizontal)
-                    }
-
-                    HStack {
-                        if seasons.count > 1 {
-                            Picker("Season", selection: $season) {
-                                ForEach(seasons, id: \.self) { n in
-                                    Text(seasonName(n)).tag(Optional(n))
-                                }
-                            }
-                            .pickerStyle(.menu)
-                        } else if let n = seasons.first {
-                            Text(seasonName(n)).font(.headline)
-                        }
-                        Spacer()
-                        if season != nil, !seasonEpisodes.isEmpty {
-                            Button {
-                                setSeasonWatched(!allSeasonWatched)
-                            } label: {
-                                Label(allSeasonWatched ? "Season watched" : "Mark season watched",
-                                      systemImage: allSeasonWatched ? "checkmark.circle.fill" : "checkmark.circle")
-                                    .font(.footnote)
-                            }
-                            .buttonStyle(.borderless)
-                        }
-                    }
-                    .padding(.horizontal)
-
-                    LazyVStack(spacing: 14) {
-                        ForEach(seasonEpisodes) { episode in
-                            NavigationLink(value: Route.item(episode.id)) {
-                                EpisodeRow(episode: episode)
-                            }
-                            // The badge and the bar are hidden in the row, and the link is the element
-                            // VoiceOver reads, so the watch state goes on the link.
-                            .accessibilityValue(EpisodeRow.spoken(episode))
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.horizontal)
-
-                    if let cast = detail?.meta?.cast, !cast.isEmpty {
-                        Shelf("Cast") {
-                            ForEach(cast.prefix(20), id: \.self) { member in
-                                NavigationLink(value: Route.person(member.personId)) {
-                                    CastCard(member: member)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-
-                    if let crew = detail?.meta?.crew, !crew.isEmpty {
-                        Shelf("Crew") {
-                            ForEach(crew.prefix(20), id: \.self) { member in
-                                NavigationLink(value: Route.person(member.personId)) {
-                                    CrewCard(member: member)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
+            HStack(spacing: 12) {
+                if !trailers.isEmpty {
+                    DetailActionButton(title: "Trailer", systemImage: "film") {
+                        selectedTrailer = trailers.first
                     }
                 }
-                .padding(.bottom, 32)
+
+                DetailActionButton(
+                    title: allShowWatched ? "Show watched" : "Mark show watched",
+                    systemImage: allShowWatched ? "checkmark.circle.fill" : "checkmark.circle",
+                    tint: allShowWatched ? .orange : .white
+                ) {
+                    setShowWatched(!allShowWatched)
+                }
+
+                Spacer()
             }
-            #if os(iOS)
-            .ignoresSafeArea(edges: .top)
-            .toolbarBackground(.hidden, for: .navigationBar)
-            #endif
-            .overlay {
-                if let error, episodes.isEmpty {
-                    ContentUnavailableView("Cannot load \(name)", systemImage: "exclamationmark.triangle", description: Text(error))
-                } else if detail == nil && episodes.isEmpty {
-                    ProgressView()
+            .padding(.horizontal)
+
+            if let overview = detail?.overview ?? detail?.meta?.overview {
+                Text(overview).font(.callout).padding(.horizontal)
+            }
+
+            HStack {
+                if seasons.count > 1 {
+                    Picker("Season", selection: $season) {
+                        ForEach(seasons, id: \.self) { n in
+                            Text(seasonName(n)).tag(Optional(n))
+                        }
+                    }
+                    .pickerStyle(.menu)
+                } else if let n = seasons.first {
+                    Text(seasonName(n)).font(.headline)
                 }
+                Spacer()
+                if season != nil, !seasonEpisodes.isEmpty {
+                    Button {
+                        setSeasonWatched(!allSeasonWatched)
+                    } label: {
+                        Label(allSeasonWatched ? "Season watched" : "Mark season watched",
+                              systemImage: allSeasonWatched ? "checkmark.circle.fill" : "checkmark.circle")
+                            .font(.footnote)
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            .padding(.horizontal)
+
+            LazyVStack(spacing: 14) {
+                ForEach(seasonEpisodes) { episode in
+                    NavigationLink(value: Route.item(episode.id)) {
+                        EpisodeRow(episode: episode)
+                    }
+                    // The badge and the bar are hidden in the row, and the link is the element
+                    // VoiceOver reads, so the watch state goes on the link.
+                    .accessibilityValue(EpisodeRow.spoken(episode))
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal)
+
+            DetailCreditShelves(cast: detail?.meta?.cast, crew: detail?.meta?.crew)
+        }
+        .overlay {
+            if let error, episodes.isEmpty {
+                ContentUnavailableView("Cannot load \(name)", systemImage: "exclamationmark.triangle", description: Text(error))
+            } else if detail == nil && episodes.isEmpty {
+                ProgressView()
             }
         }
-        #if os(iOS)
-        .navigationTitle("")
-        .plyInlineTitle()
-        #else
+        #if os(tvOS)
         .navigationTitle(name)
         #endif
         .task(id: connection.library.generation) { await load() }
@@ -167,106 +121,25 @@ struct ShowView: View {
 
     @ViewBuilder
     private func heroStage(_ d: ShowDetail?) -> some View {
-        let backdropPath = d?.backdrop ?? d?.meta?.backdrop
+        let backdropPath = d?.backdrop ?? d?.meta?.backdrop ?? d?.poster
+        let facts = Format.facts(
+            d?.year.map(String.init),
+            d?.meta?.certification,
+            d?.rating?.label
+        )
 
-        ZStack(alignment: .bottomLeading) {
-            // Full-bleed Artwork from line 0, darkened for rich cinematic contrast
-            RemoteImage(path: backdropPath, placeholder: "photo")
-                .aspectRatio(contentMode: .fill)
-                .frame(maxWidth: .infinity)
-                .frame(height: heroHeight)
-                .clipped()
-                .brightness(-0.1)
-                .overlay(Color.black.opacity(0.28).allowsHitTesting(false))
-                .allowsHitTesting(false)
-
-            // Top Degrade / Vignette
-            LinearGradient(
-                colors: [
-                    Color.black.opacity(0.85),
-                    Color.black.opacity(0.4),
-                    Color.clear
-                ],
-                startPoint: .top,
-                endPoint: .center
-            )
-            .allowsHitTesting(false)
-
-            // Bottom Degrade (darkening into ambient black, finishing after title & facts)
-            LinearGradient(
-                colors: [
-                    Color.clear,
-                    Color.black.opacity(0.25),
-                    Color.black.opacity(0.75),
-                    Color.black.opacity(0.96),
-                    Color.black
-                ],
-                startPoint: .center,
-                endPoint: .bottom
-            )
-            .allowsHitTesting(false)
-
-            // Title & Facts inside bottom of hero
-            VStack(alignment: .leading, spacing: 6) {
-                Text(name)
-                    .font(.system(size: 28, weight: .bold, design: .serif))
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-
-                let facts = Format.facts(
-                    d?.year.map(String.init),
-                    d?.meta?.certification,
-                    d?.rating?.label
-                )
-                if !facts.isEmpty {
-                    Text(facts)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.75))
-                        .lineLimit(1)
+        DetailHeroStage(
+            backdropPath: backdropPath,
+            title: name,
+            facts: facts,
+            playAccessibilityLabel: nextEpisodeToPlay.map { $0.resumeSec > 0 ? "Resume" : "Play" },
+            onPlay: nextEpisodeToPlay.map { nextEp in
+                {
+                    let start = nextEp.resumeSec > 0 ? nextEp.resumeSec : 0
+                    model.play(PlayRequest(itemId: nextEp.id, startSec: start), in: playbackScene)
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 16)
-
-            // Center Cinematic Play Button (plays next unwatched episode)
-            if let nextEp = nextEpisodeToPlay {
-                ZStack {
-                    Button {
-                        #if os(iOS)
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        #endif
-                        let start = nextEp.resumeSec > 0 ? nextEp.resumeSec : 0
-                        model.play(PlayRequest(itemId: nextEp.id, startSec: start), in: playbackScene)
-                    } label: {
-                        ZStack {
-                            Circle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [Color.orange, Color.red.opacity(0.85)],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                                .frame(width: 64, height: 64)
-                                .shadow(color: Color.orange.opacity(0.55), radius: 14, y: 6)
-
-                            Image(systemName: "play.fill")
-                                .font(.system(size: 24, weight: .bold))
-                                .foregroundStyle(.white)
-                                .offset(x: 2)
-                        }
-                        .frame(width: 76, height: 76)
-                        .contentShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .contentShape(Circle())
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                .zIndex(10)
-            }
-        }
-        .frame(height: heroHeight)
-        .frame(maxWidth: .infinity)
+        )
     }
 
     private func setShowWatched(_ watched: Bool) {

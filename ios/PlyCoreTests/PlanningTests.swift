@@ -53,6 +53,31 @@ private let livingRoom = Receiver(id: "AA:BB:CC:DD", name: "Living Room", model:
         #expect(plan == PlaybackPlan(profile: "avplayer", receiver: nil, subtitleIndex: nil,
                                      subtitleKey: nil, drawsSubtitles: false))
     }
+
+    @Test func subtitleChoiceBuildsTextAndBurnInVariants() {
+        let textSub = Subtitle(key: "ext0", language: "en", title: nil, format: "vtt",
+                               image: false, forced: nil, url: "/api/items/1/subtitles/ext0.vtt")
+        #expect(textSub.choice == .text(key: "ext0", url: "/api/items/1/subtitles/ext0.vtt"))
+
+        let bitmapSub = Subtitle(key: "3", language: "ja", title: nil, format: "pgs",
+                                 image: true, forced: nil, url: nil)
+        #expect(bitmapSub.choice == .burnIn(index: 3))
+    }
+
+    @Test func canSwapTextSubtitlesInPlaceLocallyButNotBurnInOrAirPlay() {
+        let en = SubtitleChoice.text(key: "ext0", url: "/en.vtt")
+        let pt = SubtitleChoice.text(key: "ext1", url: "/pt.vtt")
+        let pgs = SubtitleChoice.burnIn(index: 3)
+
+        #expect(PlaybackPlanning.canSwapSubtitleInPlace(from: nil, to: en, receiver: nil, externalPlayback: false))
+        #expect(PlaybackPlanning.canSwapSubtitleInPlace(from: en, to: pt, receiver: nil, externalPlayback: false))
+        #expect(PlaybackPlanning.canSwapSubtitleInPlace(from: en, to: nil, receiver: nil, externalPlayback: false))
+
+        #expect(!PlaybackPlanning.canSwapSubtitleInPlace(from: nil, to: pgs, receiver: nil, externalPlayback: false))
+        #expect(!PlaybackPlanning.canSwapSubtitleInPlace(from: pgs, to: en, receiver: nil, externalPlayback: false))
+        #expect(!PlaybackPlanning.canSwapSubtitleInPlace(from: nil, to: en, receiver: livingRoom, externalPlayback: false))
+        #expect(!PlaybackPlanning.canSwapSubtitleInPlace(from: en, to: pt, receiver: nil, externalPlayback: true))
+    }
 }
 
 @Suite struct ConnectFailureTests {

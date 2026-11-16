@@ -36,6 +36,16 @@ enum PlaybackEnd {
     private var request: PlayRequest
     private var item: ItemDetail?
     var itemDetail: ItemDetail? { item }
+    var availableAudioStreams: [MediaStream] { item?.audioStreams ?? [] }
+    var availableSubtitles: [(Subtitle, SubtitleChoice)] {
+        (item?.subtitles ?? []).compactMap { s in s.choice.map { (s, $0) } }
+    }
+    var activeAudioIndex: Int? {
+        request.audioIndex
+            ?? availableAudioStreams.first(where: { $0.default == true })?.index
+            ?? availableAudioStreams.first?.index
+    }
+    var selectedSubtitle: SubtitleChoice? { request.subtitle }
     private var sessionID: String?
     /// Position the current stream was asked to start at, and the last that counted.
     private var resumeAt = 0.0
@@ -119,6 +129,42 @@ enum PlaybackEnd {
                 self?.beat()
             }
         }
+    }
+
+    /// Switches to another audio stream, re-opening the server session at the current position.
+    func selectAudio(_ index: Int?) async {
+        guard !closed, index != activeAudioIndex else { return }
+        let at = position
+        request.audioIndex = index
+        await open(at: at)
+    }
+
+    /// Switches subtitles: text WebVTT tracks swap instantaneously; bitmap burn-in or AirPlay renditions re-open.
+    func selectSubtitle(_ choice: SubtitleChoice?) async {
+        guard !closed, choice != request.subtitle else { return }
+        let previous = request.subtitle
+        request.subtitle = choice
+
+        if PlaybackPlanning.canSwapSubtitleInPlace(
+            from: previous,
+            to: choice,
+            receiver: request.receiver,
+            externalPlayback: player.isExternalPlaybackActive
+        ) {
+            subtitleTask?.cancel()
+            subtitleTask = nil
+            subtitles = WebVTT()
+            subtitleText = nil
+            subtitleError = nil
+            subtitleLoading = false
+            if case let .text(_, url) = choice {
+                subtitleTask = Task { [weak self] in await self?.loadSubtitles(url) }
+            }
+            return
+        }
+
+        let at = position
+        await open(at: at)
     }
 
     /// Ends the play: reports where it got to and lets the server go of its session.
@@ -401,7 +447,9 @@ enum PlaybackEnd {
         subtitleError = nil
         do {
             try await Self.readSubtitles(try await api.stream(at: url)) { [weak self] block in
-                self?.subtitles.add(block: block)
+                guard let self else { return }
+                self.subtitles.add(block: block)
+                self.showSubtitle(at: self.player.currentTime().seconds)
             }
             subtitleLoading = false
         } catch is CancellationError {

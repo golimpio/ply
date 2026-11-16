@@ -216,4 +216,65 @@ struct LibraryModelTests {
         #expect(library.episodesError == nil)
         #expect(library.episodes.count == 2)
     }
+
+    @Test @MainActor func homeCurationMatchesWebCategoriesAndDeduplicatesVersions() async throws {
+        LibraryStub.reset { req in
+            switch req.url?.path {
+            case "/api/items":
+                return .json(#"""
+                [
+                  {"id":1,"kind":"movie","title":"Chungking Express","durationSec":6120,"addedAt":20,"titleId":100,"height":1080,"rating":{"source":"imdb","value":8.0,"scale":10,"score100":80}},
+                  {"id":2,"kind":"movie","title":"Chungking Express","durationSec":6120,"addedAt":21,"titleId":100,"height":2160,"rating":{"source":"imdb","value":8.0,"scale":10,"score100":80}},
+                  {"id":3,"kind":"movie","title":"Breathless","durationSec":5400,"addedAt":10,"titleId":101,"height":1080,"rating":{"source":"rt_critics","value":96,"scale":100,"score100":96}},
+                  {"id":4,"kind":"movie","title":"Long Epic","durationSec":9000,"addedAt":30,"titleId":102,"height":1080,"rating":{"source":"imdb","value":7.2,"scale":10,"score100":72}},
+                  {"id":5,"kind":"movie","title":"Brief Encounter","durationSec":5160,"addedAt":15,"titleId":103,"height":1080,"rating":{"source":"imdb","value":8.1,"scale":10,"score100":81}}
+                ]
+                """#)
+            case "/api/shows", "/api/continue", "/api/upcoming":
+                return .json("[]")
+            default:
+                return .json("[]")
+            }
+        }
+        let library = LibraryModel(api: libraryClient())
+        await library.reload()
+
+        // Multiple files for titleId 100 collapse to the 4K file (id 2).
+        #expect(library.uniqueFilms.count == 4)
+        #expect(library.uniqueFilms.first { $0.titleId == 100 }?.id == 2)
+
+        // World & Auteur Cinema ranks highest rated first (Breathless 96, Brief Encounter 81, Chungking Express 80, Long Epic 72).
+        #expect(library.acclaimedFilms.map(\.title) == ["Breathless", "Brief Encounter", "Chungking Express", "Long Epic"])
+
+        // Acclaimed & Under 100 Minutes excludes > 6100s features (Chungking Express 6120s, Long Epic 9000s).
+        #expect(library.shortFeatures.map(\.title) == ["Breathless", "Brief Encounter"])
+
+        // Recently Added keeps unique films newest-first.
+        #expect(library.recentMovies.map(\.title) == ["Long Epic", "Chungking Express", "Brief Encounter", "Breathless"])
+    }
+
+    @Test func topHomeGenresSelectsTopThreeWithAtLeastFourTitlesAndDeduplicates() throws {
+        let genresData = Data(#"""
+        [
+          {"id":1,"name":"Drama","count":12},
+          {"id":2,"name":"Short","count":3},
+          {"id":3,"name":"Sci-Fi","count":8},
+          {"id":4,"name":"Thriller","count":15},
+          {"id":5,"name":"Comedy","count":5}
+        ]
+        """#.utf8)
+        let genres = try JSONDecoder().decode([GenreCount].self, from: genresData)
+        let top = LibraryModel.topHomeGenres(genres)
+        #expect(top.map(\.name) == ["Thriller", "Drama", "Sci-Fi"])
+
+        let titlesData = Data(#"""
+        [
+          {"id":1,"kind":"movie","title":"Heat","year":1995},
+          {"id":1,"kind":"movie","title":"Heat","year":1995},
+          {"id":2,"kind":"series","title":"Lost","year":2004}
+        ]
+        """#.utf8)
+        let titles = try JSONDecoder().decode([TitleCard].self, from: titlesData)
+        #expect(LibraryModel.uniqueTitles(titles).map(\.title) == ["Heat", "Lost"])
+    }
 }

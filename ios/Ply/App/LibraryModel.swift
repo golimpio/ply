@@ -36,9 +36,70 @@ import Observation
         self.api = api
     }
 
-    /// The newest movies first.
+    /// One representative file per matched film (preferring started, then highest resolution),
+    /// preserving `movies` order.
+    var uniqueFilms: [Item] {
+        Self.uniqueFilms(movies)
+    }
+
+    nonisolated static func uniqueFilms(_ items: [Item]) -> [Item] {
+        var indexByKey: [String: Int] = [:]
+        var result: [Item] = []
+        func rank(_ item: Item) -> Int {
+            let started = item.resumeSec > 0 ? 1 : 0
+            return started * 1_000_000 + (item.height ?? 0)
+        }
+        for item in items {
+            let key = item.titleId.map { "t\($0)" } ?? "i\(item.id)"
+            if let existingIdx = indexByKey[key] {
+                if rank(item) > rank(result[existingIdx]) {
+                    result[existingIdx] = item
+                }
+            } else {
+                indexByKey[key] = result.count
+                result.append(item)
+            }
+        }
+        return result
+    }
+
+    /// Curated Chapter 01 (matching web Home): films sorted by rating score, capped at 30.
+    var acclaimedFilms: [Item] {
+        Array(
+            uniqueFilms
+                .sorted { ($0.rating?.score ?? -1) > ($1.rating?.score ?? -1) }
+                .prefix(30)
+        )
+    }
+
+    /// Curated Chapter 02 (matching web Home): feature films under ~100 minutes, capped at 16.
+    var shortFeatures: [Item] {
+        Array(
+            uniqueFilms
+                .filter { $0.durationSec > 0 && $0.durationSec <= 6100 }
+                .prefix(16)
+        )
+    }
+
+    /// The newest films first (one entry per matched title).
     var recentMovies: [Item] {
-        Array(movies.sorted { ($0.addedAt ?? 0) > ($1.addedAt ?? 0) }.prefix(20))
+        Array(uniqueFilms.sorted { ($0.addedAt ?? 0) > ($1.addedAt ?? 0) }.prefix(24))
+    }
+
+    /// Top 3 genres with at least 4 titles for Home showcase rails.
+    nonisolated static func topHomeGenres(_ genres: [GenreCount]) -> [GenreCount] {
+        Array(
+            genres
+                .filter { $0.count >= 4 }
+                .sorted { $0.count > $1.count || ($0.count == $1.count && $0.name.localizedStandardCompare($1.name) == .orderedAscending) }
+                .prefix(3)
+        )
+    }
+
+    /// Deduplicates `TitleCard` lists by `(kind, id)` while preserving order.
+    nonisolated static func uniqueTitles(_ list: [TitleCard]) -> [TitleCard] {
+        var seen: Set<String> = []
+        return list.filter { seen.insert("\($0.kind):\($0.id)").inserted }
     }
 
     func reload() async {

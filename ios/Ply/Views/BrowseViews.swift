@@ -61,32 +61,21 @@ struct BrowseView: View {
         let library = connection.library
         NavigationStack {
             ScrollView {
-                #if os(tvOS)
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Titles, shows, episodes, people, genres", text: $query)
+                VStack(alignment: .leading, spacing: 20) {
+                    PlySearchField(text: $query, prompt: "Titles, shows, episodes, people, genres")
+                        .frame(maxWidth: 360)
+                        .padding(.horizontal, 24)
+                        .frame(maxWidth: .infinity)
+
+                    if trimmed.isEmpty {
+                        browseHome(browse)
+                    } else {
+                        results(browse, library)
+                    }
                 }
-                .font(.headline)
-                .padding(.horizontal)
-                .padding(.top, 10)
-                #elseif os(iOS)
-                HStack {
-                    PlyLogo(size: 24)
-                    Spacer()
-                }
-                .padding(.horizontal)
                 .padding(.top, 4)
-                #endif
-                if trimmed.isEmpty {
-                    browseHome(browse)
-                } else {
-                    results(browse, library)
-                }
-                #if os(iOS)
-                Spacer().frame(height: 74)
-                #endif
             }
-            .plySearchable($query, prompt: "Titles, shows, episodes, people, genres")
+            .plyTabBarBottomClearance()
             .plyRefreshable {
                 await library.reload()
                 await browse.load()
@@ -98,10 +87,10 @@ struct BrowseView: View {
             }
             .task(id: query) { await connection.browse.searchPeople(trimmed) }
             #if os(iOS)
-            .navigationTitle("")
-            .plyInlineTitle()
+            .plyMainPageLogo()
             #else
             .navigationTitle("Search")
+            .plyInlineTitle()
             #endif
             .plyDestinations()
         }
@@ -109,19 +98,23 @@ struct BrowseView: View {
 
     @ViewBuilder
     private func browseHome(_ browse: BrowseModel) -> some View {
-        VStack(alignment: .leading, spacing: 28) {
+        VStack(alignment: .leading, spacing: 26) {
             if let error = browse.error {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Some of the browse lists could not be loaded")
-                        .font(.subheadline.weight(.semibold))
-                    Text(error).font(.caption).foregroundStyle(.secondary)
-                    Button("Try again") { Task { await browse.load() } }
-                        .font(.caption)
-                }
-                .padding(.horizontal)
+                InlineErrorBanner(
+                    title: "Some of the browse lists could not be loaded",
+                    message: error,
+                    retry: { Task { await browse.load() } }
+                )
             }
             if !browse.collections.isEmpty {
                 Shelf("Collections") {
+                    NavigationLink(value: Route.collections) {
+                        Text("Show All")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color.orange)
+                    }
+                    .buttonStyle(.plain)
+                } content: {
                     ForEach(browse.collections) { collection in
                         NavigationLink(value: Route.collection(collection.id, collection.name)) {
                             PosterCard(title: collection.name,
@@ -133,38 +126,26 @@ struct BrowseView: View {
                     }
                 }
             }
-            // Always offered: the server has no list of people, but its search always works.
-            VStack(alignment: .leading, spacing: 10) {
-                Text("People").font(.title3.bold()).padding(.horizontal)
-                NavigationLink(value: Route.people) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "person.2.fill").foregroundStyle(.secondary)
-                        Text("Search the people in your library")
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right").foregroundStyle(.tertiary)
-                    }
-                    .font(.subheadline)
-                    .padding(12)
-                    .background(.quaternary, in: .rect(cornerRadius: 8))
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal)
-            }
             EpisodesFailure()
             if !browse.genres.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 12) {
                     Text("Genres").font(.title3.bold()).padding(.horizontal)
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: genreTileWidth), spacing: 8)], spacing: 8) {
+                    WrappingFlowLayout(spacing: 8, lineSpacing: 8) {
                         ForEach(browse.genres) { genre in
                             NavigationLink(value: Route.genre(genre.id, genre.name)) {
-                                HStack {
-                                    Text(genre.name).lineLimit(1)
-                                    Spacer(minLength: 0)
-                                    Text("\(genre.count)").foregroundStyle(.secondary)
+                                HStack(spacing: 6) {
+                                    Text(genre.name)
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(1)
+                                    Text("\(genre.count)")
+                                        .font(.caption.weight(.semibold))
+                                        .monospacedDigit()
+                                        .foregroundStyle(.secondary)
                                 }
-                                .font(.subheadline)
-                                .padding(10)
-                                .background(.quaternary, in: .rect(cornerRadius: 8))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .plySubtleCapsule()
                             }
                             .buttonStyle(.plain)
                         }
@@ -174,12 +155,11 @@ struct BrowseView: View {
             }
             if browse.loaded, browse.collections.isEmpty, browse.genres.isEmpty, browse.error == nil {
                 ContentUnavailableView("No genres or collections yet", systemImage: "square.grid.2x2",
-                                       description: Text("They come from the library's metadata. The search and the People page work already."))
+                                       description: Text("They come from the library's metadata. Search above works for everything already."))
             } else if !browse.loaded {
                 ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
             }
         }
-        .padding(.vertical)
     }
 
     @ViewBuilder
@@ -314,20 +294,14 @@ struct PeopleView: View {
 
     var body: some View {
         ScrollView {
-            #if os(tvOS)
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search people", text: $query)
-            }
-            .font(.headline)
-            .padding(.horizontal)
-            .padding(.top, 10)
-            #endif
+            PlySearchField(text: $query, prompt: "Search people")
+                .padding(.horizontal)
+                .padding(.top, 8)
             content
         }
+        .plyTabBarBottomClearance()
         .navigationTitle("People")
         .plyInlineTitle()
-        .plySearchable($query, prompt: "People")
         .task(id: query) { await search() }
         .plyDestinations()
     }
@@ -431,9 +405,9 @@ struct PersonView: View {
                         }
                     }
                 }
-                .padding(.bottom, 32)
             }
         }
+        .plyTabBarBottomClearance()
         .navigationTitle(person?.name ?? "Person")
         .plyInlineTitle()
         .overlay {
@@ -470,7 +444,8 @@ struct PersonView: View {
             // Centralized Name & Metadata
             VStack(spacing: 6) {
                 Text(person.name)
-                    .font(.system(size: 26, weight: .bold, design: .serif))
+                    .font(.system(size: 26, weight: .semibold))
+                    .tracking(-0.5)
                     .foregroundStyle(.primary)
                     .multilineTextAlignment(.center)
 
@@ -642,8 +617,9 @@ struct GenreView: View {
     var body: some View {
         ScrollView {
             titleGrid(titles)
-                .padding()
+                .padding([.horizontal, .top])
         }
+        .plyTabBarBottomClearance()
         .navigationTitle(name)
         .plyInlineTitle()
         .overlay {
@@ -696,9 +672,9 @@ struct CollectionView: View {
                     titleGrid(collection.titles)
                         .padding(.horizontal)
                 }
-                .padding(.bottom)
             }
         }
+        .plyTabBarBottomClearance()
         .navigationTitle(name)
         .plyInlineTitle()
         .overlay {
@@ -719,6 +695,139 @@ struct CollectionView: View {
         } catch is CancellationError {
         } catch {
             self.error = error.localizedDescription
+        }
+    }
+}
+
+/// Full-grid browser for all collections with a top `( Films | Series )` filter.
+struct AllCollectionsView: View {
+    @Environment(Connection.self) private var connection
+    @State private var kind: CollectionKindFilter = .films
+    #if os(iOS)
+    @State private var isScrubberVisible = false
+    @State private var scrubProgress: CGFloat = 0
+    @State private var currentScrubLabel = ""
+    @State private var hideTask: Task<Void, Never>? = nil
+    #endif
+
+    private var filteredCollections: [CollectionCard] {
+        connection.browse.collections(for: kind)
+    }
+
+    #if os(iOS)
+    private func handleScroll(offset: CGFloat) {
+        guard filteredCollections.count >= 8 else { return }
+        if !isScrubberVisible {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isScrubberVisible = true
+            }
+        }
+        let rows = CGFloat((filteredCollections.count + 2) / 3)
+        let estHeight = max(1, rows * 210)
+        let p = max(0, min(1, -offset / estHeight))
+        scrubProgress = p
+        let idx = max(0, min(filteredCollections.count - 1, Int(p * CGFloat(filteredCollections.count - 1))))
+        currentScrubLabel = alphabetLetter(of: filteredCollections[idx].name)
+
+        hideTask?.cancel()
+        hideTask = Task {
+            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            if !Task.isCancelled {
+                withAnimation(.easeOut(duration: 0.35)) {
+                    isScrubberVisible = false
+                }
+            }
+        }
+    }
+    #endif
+
+    var body: some View {
+        let browse = connection.browse
+        ScrollViewReader { proxy in
+            ZStack(alignment: .trailing) {
+                ScrollView {
+                    #if os(iOS)
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: ScrollOffsetPreferenceKey.self,
+                            value: geo.frame(in: .named("CollectionsScroll")).minY
+                        )
+                    }
+                    .frame(height: 0)
+                    #endif
+
+                    VStack(spacing: 16) {
+                        Picker("Collection Type", selection: $kind) {
+                            ForEach(CollectionKindFilter.allCases) { option in
+                                Text(option.rawValue).tag(option)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 360)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 8)
+
+                        LazyVGrid(columns: posterColumns, spacing: 16) {
+                            ForEach(filteredCollections) { collection in
+                                NavigationLink(value: Route.collection(collection.id, collection.name)) {
+                                    PosterCard(
+                                        title: collection.name,
+                                        caption: collection.count == 1 ? "1 title" : "\(collection.count) titles",
+                                        image: collection.poster
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                .id(collection.id)
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
+                }
+                .plyTabBarBottomClearance()
+                .coordinateSpace(name: "CollectionsScroll")
+                #if os(iOS)
+                .onPreferenceChange(ScrollOffsetPreferenceKey.self) { offset in
+                    handleScroll(offset: offset)
+                }
+                #endif
+
+                #if os(iOS)
+                if filteredCollections.count >= 8 {
+                    FastScrollScrubber(
+                        itemCount: filteredCollections.count,
+                        currentLabel: currentScrubLabel,
+                        onScrub: { index in
+                            let collection = filteredCollections[index]
+                            currentScrubLabel = alphabetLetter(of: collection.name)
+                            proxy.scrollTo(collection.id, anchor: .top)
+                        },
+                        isVisible: $isScrubberVisible,
+                        progress: $scrubProgress
+                    )
+                }
+                #endif
+            }
+        }
+        .overlay {
+            if browse.loaded && filteredCollections.isEmpty {
+                ContentUnavailableView(
+                    "No \(kind.rawValue.lowercased()) collections",
+                    systemImage: "rectangle.stack",
+                    description: Text("Collections with \(kind.rawValue.lowercased()) titles in your library will appear here.")
+                )
+            } else if !browse.loaded || (browse.resolvingCollectionKinds && filteredCollections.isEmpty) {
+                ProgressView()
+            }
+        }
+        .navigationTitle("Collections")
+        .plyInlineTitle()
+        .plyRefreshable {
+            await browse.load()
+            await browse.resolveCollectionKindsIfNeeded()
+        }
+        .task(id: browse.collections.count) {
+            if !browse.loaded { await browse.load() }
+            await browse.resolveCollectionKindsIfNeeded()
         }
     }
 }

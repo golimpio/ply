@@ -1,39 +1,434 @@
 import SwiftUI
 
-/// The authentic ply brand logo: a warm amber-orange play mark and modern clean wordmark.
+// MARK: - Brand Palette & Gradients
+
+nonisolated extension Color {
+    static let plyAmberHighlight = Color(red: 0.98, green: 0.62, blue: 0.22)
+    static let plyAmberDeep = Color(red: 0.92, green: 0.41, blue: 0.11)
+}
+
+nonisolated extension LinearGradient {
+    /// Warm amber-orange gradient shared by the ply brand wordmark, hero play buttons, and accents.
+    static var plyAmber: LinearGradient {
+        LinearGradient(
+            colors: [.plyAmberHighlight, .plyAmberDeep],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    static var plyAmberHorizontal: LinearGradient {
+        LinearGradient(
+            colors: [.plyAmberHighlight, .plyAmberDeep],
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+    }
+}
+
+/// The official ply brand logo: lowercase geometric wordmark with a rounded amber-orange play triangle inside `p`.
 struct PlyLogo: View {
-    var size: CGFloat = 22
+    var size: CGFloat = 28.6
+    var color: Color = .primary
+
+    private static let aspectRatio: CGFloat = 698.0 / 488.0
 
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "play.fill")
-                .font(.system(size: size * 0.68, weight: .bold))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.98, green: 0.62, blue: 0.22),
-                            Color(red: 0.92, green: 0.44, blue: 0.14)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .shadow(color: Color.orange.opacity(0.35), radius: 4, y: 1)
+        ZStack {
+            PlyLogoWordmarkShape()
+                .fill(color)
 
-            Text("ply")
-                .font(.system(size: size, weight: .bold, design: .rounded))
-                .tracking(-0.5)
-                .foregroundStyle(.white)
+            PlyLogoPlayShape()
+                .fill(LinearGradient.plyAmber)
         }
+        .frame(width: size * Self.aspectRatio, height: size)
+        .fixedSize()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Ply")
+    }
+}
+
+nonisolated struct PlyLogoWordmarkShape: Shape {
+    func path(in rect: CGRect) -> SwiftUI.Path {
+        var path = SwiftUI.Path()
+        // p
+        path.move(to: CGPoint(x: 0, y: 109))
+        path.addQuadCurve(to: CGPoint(x: 12, y: 97), control: CGPoint(x: 0, y: 97))
+        path.addLine(to: CGPoint(x: 66, y: 97))
+        path.addQuadCurve(to: CGPoint(x: 78, y: 109), control: CGPoint(x: 78, y: 97))
+        path.addLine(to: CGPoint(x: 78, y: 115))
+        path.addCurve(to: CGPoint(x: 158, y: 93), control1: CGPoint(x: 100, y: 98), control2: CGPoint(x: 128, y: 93))
+        path.addCurve(to: CGPoint(x: 292, y: 230.5), control1: CGPoint(x: 234, y: 93), control2: CGPoint(x: 292, y: 151))
+        path.addCurve(to: CGPoint(x: 158, y: 368), control1: CGPoint(x: 292, y: 310), control2: CGPoint(x: 234, y: 368))
+        path.addCurve(to: CGPoint(x: 78, y: 346), control1: CGPoint(x: 128, y: 368), control2: CGPoint(x: 100, y: 363))
+        path.addLine(to: CGPoint(x: 78, y: 475))
+        path.addQuadCurve(to: CGPoint(x: 66, y: 487), control: CGPoint(x: 78, y: 487))
+        path.addLine(to: CGPoint(x: 12, y: 487))
+        path.addQuadCurve(to: CGPoint(x: 0, y: 475), control: CGPoint(x: 0, y: 487))
+        path.closeSubpath()
+
+        // l
+        path.addRoundedRect(in: CGRect(x: 318, y: 0, width: 78, height: 364), cornerSize: CGSize(width: 12, height: 12))
+
+        // straight-tail y
+        path.move(to: CGPoint(x: 422, y: 112))
+        path.addQuadCurve(to: CGPoint(x: 433, y: 97), control: CGPoint(x: 418, y: 97))
+        path.addLine(to: CGPoint(x: 486, y: 97))
+        path.addQuadCurve(to: CGPoint(x: 502, y: 108), control: CGPoint(x: 497, y: 97))
+        path.addLine(to: CGPoint(x: 556, y: 241))
+        path.addQuadCurve(to: CGPoint(x: 562, y: 241), control: CGPoint(x: 559, y: 247))
+        path.addLine(to: CGPoint(x: 616, y: 108))
+        path.addQuadCurve(to: CGPoint(x: 632, y: 97), control: CGPoint(x: 621, y: 97))
+        path.addLine(to: CGPoint(x: 685, y: 97))
+        path.addQuadCurve(to: CGPoint(x: 695, y: 112), control: CGPoint(x: 700, y: 97))
+        path.addLine(to: CGPoint(x: 548, y: 475))
+        path.addQuadCurve(to: CGPoint(x: 531, y: 487), control: CGPoint(x: 543, y: 487))
+        path.addLine(to: CGPoint(x: 478, y: 487))
+        path.addQuadCurve(to: CGPoint(x: 469, y: 473), control: CGPoint(x: 464, y: 487))
+        path.addLine(to: CGPoint(x: 517, y: 361))
+        path.closeSubpath()
+
+        return path.applying(CGAffineTransform(scaleX: rect.width / 698.0, y: rect.height / 488.0))
+    }
+}
+
+nonisolated struct PlyLogoPlayShape: Shape {
+    func path(in rect: CGRect) -> SwiftUI.Path {
+        var path = SwiftUI.Path()
+        path.move(to: CGPoint(x: 84, y: 230.5))
+        path.addArc(tangent1End: CGPoint(x: 84, y: 139.08), tangent2End: CGPoint(x: 256.43, y: 230.5), radius: 18)
+        path.addArc(tangent1End: CGPoint(x: 256.43, y: 230.5), tangent2End: CGPoint(x: 84, y: 321.92), radius: 18)
+        path.addArc(tangent1End: CGPoint(x: 84, y: 321.92), tangent2End: CGPoint(x: 84, y: 139.08), radius: 18)
+        path.closeSubpath()
+
+        return path.applying(CGAffineTransform(scaleX: rect.width / 698.0, y: rect.height / 488.0))
     }
 }
 
 /// The ply brand mark (alias to PlyLogo for consistent authentic branding across all views).
 typealias PlyBrand = PlyLogo
 
-/// Where a navigation link goes, in every tab.
+/// Unified custom vector icons for the iOS floating pill tab bar, aligned to a shared 24×24 optical grid.
+struct PlyTabIcon: View {
+    nonisolated enum Kind: String, CaseIterable, Sendable {
+        case home
+        case films
+        case series
+        case search
+        case settings
+    }
+
+    var kind: Kind
+    var isFilled: Bool = false
+    var size: CGFloat = 20
+
+    var body: some View {
+        Canvas { context, canvasSize in
+            let rect = CGRect(origin: .zero, size: canvasSize)
+            let primaryStroke = StrokeStyle(
+                lineWidth: max(1.5, size * 0.088),
+                lineCap: .round,
+                lineJoin: .round
+            )
+            let secondaryStroke = StrokeStyle(
+                lineWidth: max(1.2, size * 0.062),
+                lineCap: .round,
+                lineJoin: .round
+            )
+            let layers = Self.layers(for: kind, in: rect, isFilled: isFilled)
+
+            if !layers.evenOddFill.isEmpty {
+                context.fill(layers.evenOddFill, with: .foreground, style: FillStyle(eoFill: true))
+            }
+            if !layers.primaryStroke.isEmpty {
+                context.stroke(layers.primaryStroke, with: .foreground, style: primaryStroke)
+            }
+            if !layers.secondaryStroke.isEmpty {
+                context.stroke(layers.secondaryStroke, with: .foreground, style: secondaryStroke)
+            }
+            if !layers.heavyStroke.isEmpty {
+                let heavy = StrokeStyle(
+                    lineWidth: primaryStroke.lineWidth * (isFilled ? 1.32 : 1.14),
+                    lineCap: .round,
+                    lineJoin: .round
+                )
+                context.stroke(layers.heavyStroke, with: .foreground, style: heavy)
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+
+    nonisolated struct Layers {
+        var evenOddFill = SwiftUI.Path()
+        var primaryStroke = SwiftUI.Path()
+        var secondaryStroke = SwiftUI.Path()
+        var heavyStroke = SwiftUI.Path()
+
+        var combinedBounds: CGRect {
+            let paths = [evenOddFill, primaryStroke, secondaryStroke, heavyStroke].filter { !$0.isEmpty }
+            guard let first = paths.first else { return .zero }
+            return paths.dropFirst().reduce(first.boundingRect) { $0.union($1.boundingRect) }
+        }
+    }
+
+    nonisolated static func layers(for kind: Kind, in rect: CGRect, isFilled: Bool) -> Layers {
+        var layers = Layers()
+
+        switch kind {
+        case .home:
+            let house = homeSilhouettePath()
+            let window = SwiftUI.Path(
+                roundedRect: CGRect(x: 9.5, y: 12.1, width: 5.0, height: 5.0),
+                cornerRadius: 1.6,
+                style: .continuous
+            )
+            if isFilled {
+                layers.evenOddFill.addPath(house)
+                layers.evenOddFill.addPath(window)
+            } else {
+                layers.primaryStroke.addPath(house)
+                layers.secondaryStroke.addPath(window)
+            }
+
+        case .films:
+            let leftReel = SwiftUI.Path(ellipseIn: CGRect(x: 4.1, y: 3.4, width: 6.6, height: 6.6))
+            let rightReel = SwiftUI.Path(ellipseIn: CGRect(x: 10.9, y: 3.4, width: 6.6, height: 6.6))
+            let body = SwiftUI.Path(
+                roundedRect: CGRect(x: 3.8, y: 11.4, width: 12.4, height: 9.2),
+                cornerRadius: 2.1,
+                style: .continuous
+            )
+            if isFilled {
+                layers.evenOddFill.addPath(leftReel)
+                layers.evenOddFill.addEllipse(in: CGRect(x: 6.3, y: 5.6, width: 2.2, height: 2.2))
+                layers.evenOddFill.addPath(rightReel)
+                layers.evenOddFill.addEllipse(in: CGRect(x: 13.1, y: 5.6, width: 2.2, height: 2.2))
+                layers.evenOddFill.addPath(body)
+                layers.evenOddFill.addPath(projectorLensPath(closed: true))
+            } else {
+                layers.primaryStroke.addPath(leftReel)
+                layers.primaryStroke.addPath(rightReel)
+                layers.primaryStroke.addPath(body)
+                layers.primaryStroke.addPath(projectorLensPath(closed: false))
+            }
+
+        case .series:
+            let cabinet = SwiftUI.Path(
+                roundedRect: CGRect(x: 3.0, y: 3.5, width: 18.0, height: 17.0),
+                cornerRadius: 4.8,
+                style: .continuous
+            )
+            if isFilled {
+                let screen = SwiftUI.Path(
+                    roundedRect: CGRect(x: 6.5, y: 6.3, width: 11.0, height: 7.8),
+                    cornerRadius: 2.0,
+                    style: .continuous
+                )
+                let chinPill = SwiftUI.Path(
+                    roundedRect: CGRect(x: 9.6, y: 17.15, width: 4.8, height: 1.2),
+                    cornerRadius: 0.6,
+                    style: .continuous
+                )
+                layers.evenOddFill.addPath(cabinet)
+                layers.evenOddFill.addPath(screen)
+                layers.evenOddFill.addPath(chinPill)
+            } else {
+                let screen = SwiftUI.Path(
+                    roundedRect: CGRect(x: 5.8, y: 6.1, width: 12.4, height: 9.2),
+                    cornerRadius: 2.5,
+                    style: .continuous
+                )
+                layers.primaryStroke.addPath(cabinet)
+                layers.secondaryStroke.addPath(screen)
+                layers.secondaryStroke.move(to: CGPoint(x: 9.6, y: 18.0))
+                layers.secondaryStroke.addLine(to: CGPoint(x: 14.4, y: 18.0))
+            }
+
+        case .search:
+            if isFilled {
+                layers.evenOddFill.addEllipse(in: CGRect(x: 3.5, y: 3.5, width: 13.8, height: 13.8))
+                layers.evenOddFill.addEllipse(in: CGRect(x: 7.0, y: 7.0, width: 6.8, height: 6.8))
+                layers.heavyStroke.move(to: CGPoint(x: 15.5, y: 15.5))
+                layers.heavyStroke.addLine(to: CGPoint(x: 20.4, y: 20.4))
+            } else {
+                layers.primaryStroke.addEllipse(in: CGRect(x: 3.7, y: 3.7, width: 13.4, height: 13.4))
+                layers.heavyStroke.move(to: CGPoint(x: 15.4, y: 15.4))
+                layers.heavyStroke.addLine(to: CGPoint(x: 20.4, y: 20.4))
+            }
+
+        case .settings:
+            let sliders: [(x: CGFloat, y: CGFloat)] = [(15.1, 5.8), (8.9, 12.0), (15.1, 18.2)]
+            let radius: CGFloat = isFilled ? 2.45 : 2.15
+            for knob in sliders {
+                let knobRect = CGRect(
+                    x: knob.x - radius,
+                    y: knob.y - radius,
+                    width: radius * 2,
+                    height: radius * 2
+                )
+                if isFilled {
+                    layers.heavyStroke.move(to: CGPoint(x: 3.5, y: knob.y))
+                    layers.heavyStroke.addLine(to: CGPoint(x: 20.5, y: knob.y))
+                    layers.evenOddFill.addEllipse(in: knobRect)
+                } else {
+                    layers.primaryStroke.move(to: CGPoint(x: 3.5, y: knob.y))
+                    layers.primaryStroke.addLine(to: CGPoint(x: knob.x - radius, y: knob.y))
+                    layers.primaryStroke.move(to: CGPoint(x: knob.x + radius, y: knob.y))
+                    layers.primaryStroke.addLine(to: CGPoint(x: 20.5, y: knob.y))
+                    layers.primaryStroke.addEllipse(in: knobRect)
+                }
+            }
+        }
+
+        let scale = CGAffineTransform(translationX: rect.minX, y: rect.minY)
+            .scaledBy(x: rect.width / 24.0, y: rect.height / 24.0)
+        layers.evenOddFill = layers.evenOddFill.applying(scale)
+        layers.primaryStroke = layers.primaryStroke.applying(scale)
+        layers.secondaryStroke = layers.secondaryStroke.applying(scale)
+        layers.heavyStroke = layers.heavyStroke.applying(scale)
+        return layers
+    }
+
+    private nonisolated static func homeSilhouettePath() -> SwiftUI.Path {
+        var path = SwiftUI.Path()
+        path.move(to: CGPoint(x: 3.6, y: 10.6))
+        path.addLine(to: CGPoint(x: 12.0, y: 3.3))
+        path.addLine(to: CGPoint(x: 20.4, y: 10.6))
+        path.addLine(to: CGPoint(x: 20.4, y: 19.2))
+        path.addArc(tangent1End: CGPoint(x: 20.4, y: 20.7), tangent2End: CGPoint(x: 5.1, y: 20.7), radius: 1.5)
+        path.addLine(to: CGPoint(x: 5.1, y: 20.7))
+        path.addArc(tangent1End: CGPoint(x: 3.6, y: 20.7), tangent2End: CGPoint(x: 3.6, y: 10.6), radius: 1.5)
+        path.closeSubpath()
+        return path
+    }
+
+    private nonisolated static func projectorLensPath(closed: Bool) -> SwiftUI.Path {
+        var path = SwiftUI.Path()
+        path.move(to: CGPoint(x: 16.2, y: 13.8))
+        path.addLine(to: CGPoint(x: 20.5, y: 12.0))
+        path.addLine(to: CGPoint(x: 20.5, y: 20.0))
+        path.addLine(to: CGPoint(x: 16.2, y: 18.2))
+        if closed {
+            path.closeSubpath()
+        }
+        return path
+    }
+}
+
+/// An inline top search bar that avoids the system bottom search bar collision with `FloatingTabBar`.
+struct PlySearchField: View {
+    @Binding var text: String
+    var prompt: String
+    @FocusState private var isFocused: Bool
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+
+            TextField(prompt, text: $text)
+                .font(.subheadline)
+                .focused($isFocused)
+                .autocorrectionDisabled()
+                #if os(iOS)
+                .textInputAutocapitalization(.never)
+                .submitLabel(.search)
+                #endif
+
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        #if os(iOS)
+        .plySubtleCapsule(strokeOpacity: 0.14)
+        #else
+        .background(.quaternary, in: .rect(cornerRadius: 12))
+        #endif
+        .onChange(of: isEnabled) { _, enabled in
+            if !enabled { isFocused = false }
+        }
+    }
+}
+
+/// Wraps variable-width items onto horizontal rows sized to each item's intrinsic width.
+struct WrappingFlowLayout: Layout {
+    var spacing: CGFloat = 8
+    var lineSpacing: CGFloat = 8
+
+    nonisolated static func computeLayout(
+        sizes: [CGSize],
+        maxWidth: CGFloat,
+        spacing: CGFloat,
+        lineSpacing: CGFloat
+    ) -> (frames: [CGRect], totalSize: CGSize) {
+        var frames: [CGRect] = []
+        frames.reserveCapacity(sizes.count)
+
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var maxRowWidth: CGFloat = 0
+
+        for size in sizes {
+            if x > 0 && x + size.width > maxWidth {
+                maxRowWidth = max(maxRowWidth, x - spacing)
+                x = 0
+                y += rowHeight + lineSpacing
+                rowHeight = 0
+            }
+            frames.append(CGRect(origin: CGPoint(x: x, y: y), size: size))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+
+        if x > 0 {
+            maxRowWidth = max(maxRowWidth, x - spacing)
+        }
+        let totalHeight = sizes.isEmpty ? 0 : y + rowHeight
+        let resolvedWidth = maxWidth.isFinite ? maxWidth : maxRowWidth
+        return (frames, CGSize(width: resolvedWidth, height: totalHeight))
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        return Self.computeLayout(
+            sizes: sizes,
+            maxWidth: proposal.width ?? .infinity,
+            spacing: spacing,
+            lineSpacing: lineSpacing
+        ).totalSize
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let frames = Self.computeLayout(
+            sizes: sizes,
+            maxWidth: bounds.width,
+            spacing: spacing,
+            lineSpacing: lineSpacing
+        ).frames
+
+        for (subview, frame) in zip(subviews, frames) {
+            subview.place(
+                at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
+                proposal: ProposedViewSize(frame.size)
+            )
+        }
+    }
+}
 enum Route: Hashable {
     case item(Int64)
     case show(String)
@@ -41,6 +436,7 @@ enum Route: Hashable {
     case people
     case genre(Int64, String)
     case collection(Int64, String)
+    case collections
 }
 
 /// The poster grid of the library and browse pages: a phone's cards, or the TV's, watched from across
@@ -139,7 +535,7 @@ struct FastScrollScrubber: View {
 
                         if isDragging && !currentLabel.isEmpty {
                             Text(currentLabel)
-                                .font(.system(size: 20, weight: .bold, design: .serif))
+                                .font(.system(size: 20, weight: .bold))
                                 .foregroundStyle(Color.black)
                         } else {
                             Circle()
@@ -214,6 +610,7 @@ extension View {
             case .people: PeopleView()
             case let .genre(id, name): GenreView(id: id, name: name)
             case let .collection(id, name): CollectionView(id: id, name: name)
+            case .collections: AllCollectionsView()
             }
         }
     }
@@ -311,47 +708,17 @@ struct RemoteImage: View {
     }
 }
 
-/// An ambient blurred chromatic wash behind detail views, tinted by the item's backdrop.
+/// An ambient living chromatic wash behind detail views, driven by the artwork's palette.
 struct AmbientBackdropWash: View {
     @Environment(Connection.self) private var connection
     let path: String?
+    @State private var palette: PosterPalette = .fallback
 
     var body: some View {
-        GeometryReader { proxy in
-            ZStack {
-                Color.black
-
-                if let path, !path.isEmpty {
-                    AsyncImage(url: connection.api.url(path)) { phase in
-                        if let image = phase.image {
-                            image
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: proxy.size.width, height: proxy.size.height)
-                                .clipped()
-                                .blur(radius: 70)
-                                .saturation(1.6)
-                                .brightness(-0.1)
-                                .opacity(0.38)
-                        }
-                    }
-
-                    LinearGradient(
-                        colors: [
-                            Color.black.opacity(0.15),
-                            Color.black.opacity(0.55),
-                            Color.black.opacity(0.85),
-                            Color.black.opacity(0.95)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                }
+        LivingMeshBackdrop(palette: palette)
+            .task(id: path) {
+                palette = await PosterPaletteExtractor.shared.palette(for: connection.api.url(path))
             }
-        }
-        .ignoresSafeArea()
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
     }
 }
 
@@ -463,25 +830,36 @@ struct LandscapeCard: View {
     }
 }
 
-/// A titled row that scrolls sideways.
-struct Shelf<Content: View>: View {
+/// A titled row that scrolls sideways, with an optional trailing header action.
+struct Shelf<Content: View, Trailing: View>: View {
     let title: String
     var subtitle: String?
+    @ViewBuilder let trailing: Trailing
     @ViewBuilder let content: Content
 
-    init(_ title: String, subtitle: String? = nil, @ViewBuilder content: () -> Content) {
+    init(
+        _ title: String,
+        subtitle: String? = nil,
+        @ViewBuilder trailing: () -> Trailing,
+        @ViewBuilder content: () -> Content
+    ) {
         self.title = title
         self.subtitle = subtitle
+        self.trailing = trailing()
         self.content = content()
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.title3.bold())
-                if let subtitle, !subtitle.isEmpty {
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.title3.bold())
+                    if let subtitle, !subtitle.isEmpty {
+                        Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                    }
                 }
+                Spacer(minLength: 8)
+                trailing
             }
             .padding(.horizontal)
             ScrollView(.horizontal, showsIndicators: false) {
@@ -489,6 +867,12 @@ struct Shelf<Content: View>: View {
                     .padding(.horizontal)
             }
         }
+    }
+}
+
+extension Shelf where Trailing == EmptyView {
+    init(_ title: String, subtitle: String? = nil, @ViewBuilder content: () -> Content) {
+        self.init(title, subtitle: subtitle, trailing: { EmptyView() }, content: content)
     }
 }
 
@@ -537,6 +921,26 @@ struct Backdrop: View {
     }
 }
 
+/// Reusable inline error banner with a "Try again" action.
+struct InlineErrorBanner: View {
+    let title: String
+    let message: String
+    let retry: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button("Try again", action: retry)
+                .font(.caption)
+        }
+        .padding(.horizontal)
+    }
+}
+
 /// Says the episodes could not be loaded, with a way to ask again: the Browse search reads them, and
 /// so does a show's newest file (the Shows "Recently updated" sort).
 struct EpisodesFailure: View {
@@ -544,14 +948,582 @@ struct EpisodesFailure: View {
 
     var body: some View {
         if let error = connection.library.episodesError {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("The episodes could not be loaded")
-                    .font(.subheadline.weight(.semibold))
-                Text(error).font(.caption).foregroundStyle(.secondary)
-                Button("Try again") { Task { await connection.library.ensureEpisodes() } }
-                    .font(.caption)
-            }
-            .padding(.horizontal)
+            InlineErrorBanner(
+                title: "The episodes could not be loaded",
+                message: error,
+                retry: { Task { await connection.library.ensureEpisodes() } }
+            )
         }
+    }
+}
+
+// MARK: - Glass Surfaces, Play & Close Controls
+
+extension View {
+    @ViewBuilder func plyGlassCircle(tintOpacity: Double = 0.18) -> some View {
+        #if os(iOS)
+        if #available(iOS 26.0, *) {
+            self
+                .background(Color.black.opacity(tintOpacity), in: Circle())
+                .glassEffect(.regular.interactive(), in: .circle)
+        } else {
+            self
+                .background(.ultraThinMaterial, in: Circle())
+                .background(Color.black.opacity(tintOpacity), in: Circle())
+                .overlay(Circle().strokeBorder(.white.opacity(0.24), lineWidth: 0.85))
+                .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
+        }
+        #else
+        self
+            .background(.ultraThinMaterial, in: Circle())
+            .background(Color.black.opacity(tintOpacity), in: Circle())
+            .overlay(Circle().strokeBorder(.white.opacity(0.24), lineWidth: 0.85))
+            .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
+        #endif
+    }
+
+    @ViewBuilder func plyGlassCapsule(
+        tintOpacity: Double = 0,
+        strokeOpacity: Double = 0.14
+    ) -> some View {
+        self
+            .background(.ultraThinMaterial, in: Capsule())
+            .background(Color.black.opacity(tintOpacity), in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.white.opacity(strokeOpacity), lineWidth: 0.75))
+    }
+
+    @ViewBuilder func plySubtleCapsule(
+        fillOpacity: Double = 0.08,
+        strokeOpacity: Double = 0.12
+    ) -> some View {
+        self
+            .background(Color.white.opacity(fillOpacity), in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.white.opacity(strokeOpacity), lineWidth: 0.75))
+    }
+
+    @ViewBuilder func plyDetailCard() -> some View {
+        self
+            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: PlyDesign.panelCornerRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: PlyDesign.panelCornerRadius)
+                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.8)
+            )
+    }
+
+    @ViewBuilder func plyMicroSpecsStyle(opacity: Double = 0.68) -> some View {
+        self
+            .font(.system(size: 11, weight: .semibold))
+            .tracking(1.6)
+            .monospacedDigit()
+            .foregroundStyle(.white.opacity(opacity))
+    }
+
+    @ViewBuilder func plyHeroTitleStyle(size: CGFloat = 30) -> some View {
+        self
+            .font(.system(size: size, weight: .semibold))
+            .tracking(-0.5)
+            .foregroundStyle(.white)
+            .lineLimit(2)
+    }
+}
+
+/// Standard frosted-glass circular play button with the amber-orange mark centered on hero art and cards.
+struct HeroPlayButton: View {
+    var accessibilityLabel: String = "Play"
+    var progress: Double? = nil
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Image(systemName: "play.fill")
+                    .font(.system(size: PlyDesign.heroPlayGlyphSize, weight: .bold))
+                    .foregroundStyle(LinearGradient.plyAmber)
+                    .shadow(color: Color.black.opacity(0.28), radius: 3, y: 1)
+                    .offset(x: 2)
+                    .frame(width: PlyDesign.heroPlaySize, height: PlyDesign.heroPlaySize)
+                    .plyGlassCircle(tintOpacity: 0.20)
+
+                if let progress, progress > 0 {
+                    Circle()
+                        .trim(from: 0, to: min(1, progress))
+                        .stroke(
+                            Color.plyAmberHighlight,
+                            style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(-90))
+                        .frame(width: PlyDesign.heroPlaySize, height: PlyDesign.heroPlaySize)
+                }
+            }
+            .frame(width: PlyDesign.heroPlayTouchSize, height: PlyDesign.heroPlayTouchSize)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .contentShape(Circle())
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+/// Standard-sized 44×44 glass circular icon label for top-right overlay controls.
+struct GlassCircleIconLabel: View {
+    let systemImage: String
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.system(size: PlyDesign.iconButtonGlyphSize, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: PlyDesign.iconButtonSize, height: PlyDesign.iconButtonSize)
+            .plyGlassCircle(tintOpacity: 0.16)
+            .contentShape(Circle())
+    }
+}
+
+/// Standard-sized 44×44 interactive circular glass icon button placed at top-right of overlays.
+struct GlassIconButton: View {
+    let systemImage: String
+    let accessibilityLabel: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            GlassCircleIconLabel(systemImage: systemImage)
+        }
+        .buttonStyle(.plain)
+        .contentShape(Circle())
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+/// Standard-sized 44×44 glass dismiss button with a close (`xmark`) icon.
+struct GlassCloseButton: View {
+    var accessibilityLabel: String = "Close"
+    var action: () -> Void
+
+    var body: some View {
+        GlassIconButton(systemImage: "xmark", accessibilityLabel: accessibilityLabel, action: action)
+    }
+}
+
+/// Preference key reporting `HeroBackdropArtwork`'s global `minY` for layout verification.
+nonisolated struct HeroBackdropMinYKey: PreferenceKey {
+    static let defaultValue: CGFloat? = nil
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
+        value = nextValue() ?? value
+    }
+}
+
+/// Full-bleed hero artwork with a dark top degrade and a smooth alpha fade into the ambient backdrop.
+struct HeroBackdropArtwork: View {
+    let path: String?
+    let height: CGFloat
+    let coordinateSpaceName: String
+
+    /// Soft top vignette so status bar items, back button, and AirPlay/close controls stay readable over bright art.
+    nonisolated static let topVignetteStops: [Gradient.Stop] = [
+        .init(color: Color.black.opacity(0.66), location: 0.0),
+        .init(color: Color.black.opacity(0.34), location: 0.16),
+        .init(color: Color.black.opacity(0.08), location: 0.30),
+        .init(color: Color.clear, location: 0.42)
+    ]
+
+    /// Subtle lower-hero darkening applied inside the alpha mask so white titles stay crisp without leaving a dark seam.
+    nonisolated static let lowerLegibilityStops: [Gradient.Stop] = [
+        .init(color: Color.clear, location: 0.44),
+        .init(color: Color.black.opacity(0.22), location: 0.66),
+        .init(color: Color.black.opacity(0.42), location: 1.0)
+    ]
+
+    /// Smooth eased alpha mask so the artwork dissolves seamlessly into the `LivingMeshBackdrop` below it.
+    nonisolated static let bottomAlphaMaskStops: [Gradient.Stop] = [
+        .init(color: Color.white, location: 0.0),
+        .init(color: Color.white, location: 0.50),
+        .init(color: Color.white.opacity(0.90), location: 0.62),
+        .init(color: Color.white.opacity(0.66), location: 0.74),
+        .init(color: Color.white.opacity(0.34), location: 0.85),
+        .init(color: Color.white.opacity(0.10), location: 0.94),
+        .init(color: Color.white, location: 1.0)
+    ]
+
+    var body: some View {
+        GeometryReader { geo in
+            let minY = geo.frame(in: .named(coordinateSpaceName)).minY
+            let extraTop = max(0, minY)
+
+            ZStack {
+                RemoteImage(path: path, placeholder: "photo")
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: geo.size.width, height: height + extraTop)
+                    .clipped()
+                    .brightness(-0.08)
+                    .overlay(Color.black.opacity(0.20))
+
+                LinearGradient(stops: Self.topVignetteStops, startPoint: .top, endPoint: .bottom)
+
+                LinearGradient(stops: Self.lowerLegibilityStops, startPoint: .top, endPoint: .bottom)
+            }
+            .mask(
+                LinearGradient(stops: Self.bottomAlphaMaskStops, startPoint: .top, endPoint: .bottom)
+            )
+            .frame(width: geo.size.width, height: height + extraTop)
+            .offset(y: -extraTop)
+            .preference(key: HeroBackdropMinYKey.self, value: geo.frame(in: .global).minY - extraTop)
+        }
+        .frame(height: height)
+        .frame(maxWidth: .infinity)
+        .allowsHitTesting(false)
+    }
+}
+
+/// Frosted glass pill badge for deck telemetry (codec/resolution specs, ratings).
+struct PlyGlassPillBadge: View {
+    let text: String
+    var systemImage: String? = nil
+    var iconColor: Color = .plyAmberHighlight
+    var textOpacity: Double = 0.86
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10))
+                    .foregroundStyle(iconColor)
+            }
+            Text(text)
+                .font(systemImage == nil ? .caption.weight(.medium) : .caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(textOpacity))
+        }
+        .padding(.horizontal, PlyDesign.capsuleHorizontalPadding)
+        .padding(.vertical, PlyDesign.capsuleVerticalPadding)
+        .plyGlassCapsule()
+    }
+}
+
+/// Reusable bordered detail action button (`Trailer`, `Mark as watched`, `From start`, etc.).
+struct DetailActionButton: View {
+    let title: String
+    let systemImage: String
+    var tint: Color? = nil
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.subheadline.weight(.semibold))
+        }
+        .buttonStyle(.bordered)
+        .tint(tint)
+    }
+}
+
+/// Standard metadata row chrome shared by interactive pickers and static value rows on detail screens.
+struct DetailRowContent: View {
+    let systemImage: String
+    let title: String
+    let value: String
+    var showsPickerIndicator: Bool = false
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color.orange)
+                .frame(width: 22)
+
+            Text(title)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.primary)
+
+            Spacer()
+
+            Text(value)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            if showsPickerIndicator {
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption2.bold())
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
+        .contentShape(Rectangle())
+    }
+}
+
+/// Shared circular cast/crew credit card.
+struct PersonCreditCard: View {
+    let name: String
+    let subtitle: String?
+    let profile: String?
+
+    var body: some View {
+        VStack(spacing: 4) {
+            RemoteImage(path: profile, placeholder: "person.fill")
+                .frame(width: 80, height: 80)
+                .clipShape(.circle)
+            Text(name).font(.caption.weight(.medium)).lineLimit(1)
+            if let subtitle, !subtitle.isEmpty {
+                Text(subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+        .frame(width: 90)
+    }
+}
+
+/// Shared Cast and Crew horizontal shelves for film, series, and episode detail views.
+struct DetailCreditShelves: View {
+    let cast: [CastMember]?
+    let crew: [CrewMember]?
+
+    var body: some View {
+        if let cast, !cast.isEmpty {
+            Shelf("Cast") {
+                ForEach(cast.prefix(20), id: \.self) { member in
+                    NavigationLink(value: Route.person(member.personId)) {
+                        PersonCreditCard(name: member.name, subtitle: member.character, profile: member.profile)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        if let crew, !crew.isEmpty {
+            Shelf("Crew") {
+                ForEach(crew.prefix(20), id: \.self) { member in
+                    NavigationLink(value: Route.person(member.personId)) {
+                        PersonCreditCard(name: member.name, subtitle: member.job, profile: member.profile)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+}
+
+/// Shared edge-to-edge ambient backdrop and scrolling container for film, series, and episode detail views.
+struct DetailBackdropScaffold<Content: View>: View {
+    let backdropPath: String?
+    var coordinateSpaceName: String = PlyDesign.detailCoordinateSpace
+    var bottomClearance: CGFloat = PlyDesign.defaultDetailBottomClearance
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        ZStack {
+            AmbientBackdropWash(path: backdropPath)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    content()
+                }
+            }
+            .contentMargins(.bottom, bottomClearance, for: .scrollContent)
+            #if os(iOS)
+            .toolbarBackground(.hidden, for: .navigationBar)
+            #endif
+        }
+        .coordinateSpace(name: coordinateSpaceName)
+        #if os(iOS)
+        .navigationTitle("")
+        #endif
+        .plyInlineTitle()
+    }
+}
+
+/// Shared hero artwork, title/specs, and centered glass play control used across film, series, and episode details.
+struct DetailHeroStage<Eyebrow: View>: View {
+    let backdropPath: String?
+    let title: String
+    let facts: String
+    var coordinateSpaceName: String = PlyDesign.detailCoordinateSpace
+    var playAccessibilityLabel: String? = "Play"
+    var onPlay: (() -> Void)? = nil
+    var portalNamespace: Namespace.ID? = nil
+    var matchedItemId: Int64? = nil
+    @ViewBuilder let eyebrow: () -> Eyebrow
+
+    @State private var playImpactTrigger = 0
+
+    private var activeNamespace: Namespace.ID? {
+        matchedItemId == nil ? nil : portalNamespace
+    }
+
+    private func matchedId(_ prefix: String) -> String {
+        matchedItemId.map { "\(prefix)-\($0)" } ?? prefix
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            HeroBackdropArtwork(
+                path: backdropPath,
+                height: PlyDesign.heroHeight,
+                coordinateSpaceName: coordinateSpaceName
+            )
+            .spatialMatchedGeometry(id: matchedId("spatial-art"), in: activeNamespace)
+
+            VStack(alignment: .leading, spacing: 6) {
+                eyebrow()
+
+                Text(title)
+                    .plyHeroTitleStyle()
+                    .spatialMatchedGeometry(id: matchedId("spatial-title"), in: activeNamespace)
+
+                if !facts.isEmpty {
+                    Text(facts.uppercased())
+                        .plyMicroSpecsStyle(opacity: 0.75)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 16)
+
+            if let onPlay, let playAccessibilityLabel {
+                HeroPlayButton(accessibilityLabel: playAccessibilityLabel) {
+                    playImpactTrigger += 1
+                    onPlay()
+                }
+                .spatialMatchedGeometry(id: matchedId("spatial-play"), in: activeNamespace)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                .zIndex(10)
+            }
+        }
+        .frame(height: PlyDesign.heroHeight)
+        .frame(maxWidth: .infinity)
+        #if os(iOS)
+        .sensoryFeedback(.impact(weight: .medium, intensity: 0.85), trigger: playImpactTrigger)
+        #endif
+    }
+}
+
+extension DetailHeroStage where Eyebrow == EmptyView {
+    init(
+        backdropPath: String?,
+        title: String,
+        facts: String,
+        coordinateSpaceName: String = PlyDesign.detailCoordinateSpace,
+        playAccessibilityLabel: String? = "Play",
+        onPlay: (() -> Void)? = nil,
+        portalNamespace: Namespace.ID? = nil,
+        matchedItemId: Int64? = nil
+    ) {
+        self.init(
+            backdropPath: backdropPath,
+            title: title,
+            facts: facts,
+            coordinateSpaceName: coordinateSpaceName,
+            playAccessibilityLabel: playAccessibilityLabel,
+            onPlay: onPlay,
+            portalNamespace: portalNamespace,
+            matchedItemId: matchedItemId,
+            eyebrow: { EmptyView() }
+        )
+    }
+}
+
+/// Standard spacing and chrome metrics shared across the ply iOS and tvOS interfaces.
+nonisolated enum PlyDesign {
+    static let detailCoordinateSpace = "PlyDetailRoot"
+    /// Standard height for the top-left `PlyLogo` in every main page navigation bar on iOS.
+    static let headerLogoSize: CGFloat = 28.6
+    /// Apple HIG standard touch target for top-bar circular icon buttons (`GlassCloseButton`, `GlassIconButton`).
+    static let iconButtonSize: CGFloat = 44
+    static let iconButtonGlyphSize: CGFloat = 17
+    /// Unified size of all hero glass play buttons across Home, Film, Episode, and Series detail screens.
+    static let heroPlaySize: CGFloat = 68
+    static let heroPlayTouchSize: CGFloat = 76
+    static let heroPlayGlyphSize: CGFloat = 26
+    /// Unified height of detail hero stages on iOS (`460pt`) and tvOS (`520pt`).
+    static let heroHeight: CGFloat = {
+        #if os(tvOS)
+        520
+        #else
+        460
+        #endif
+    }()
+    static let overlayTopOffset: CGFloat = 8
+    static let overlayTrailingPadding: CGFloat = 16
+    static let overlayButtonSpacing: CGFloat = 10
+    static let capsuleHorizontalPadding: CGFloat = 12
+    static let capsuleVerticalPadding: CGFloat = 6
+    static let panelCornerRadius: CGFloat = 14
+    static let heroCardCornerRadius: CGFloat = 32
+    static let floatingTabBarItemHeight: CGFloat = 52
+    static let floatingTabBarVerticalPadding: CGFloat = 3
+    /// Total height of `FloatingTabBar` (`58pt`) plus its bottom offset (`8pt`).
+    static let floatingTabBarBottomInset: CGFloat = 8
+    static let floatingTabBarHeight: CGFloat = floatingTabBarItemHeight + floatingTabBarVerticalPadding * 2
+    /// Generous breathing gap above the floating dock when scrolled all the way to the bottom.
+    static let floatingTabBarBreathingGap: CGFloat = 36
+    /// Standard scroll-content bottom clearance on iOS (`102pt`), shared across all tabs and pushed pages.
+    static let tabBarBottomClearance: CGFloat = floatingTabBarHeight + floatingTabBarBottomInset + floatingTabBarBreathingGap
+    /// Standard scroll-content bottom clearance on tvOS and modal surfaces without the floating dock.
+    static let standardBottomClearance: CGFloat = 36
+    /// Default bottom clearance for pushed detail screens (clears the floating dock on iOS).
+    static let defaultDetailBottomClearance: CGFloat = {
+        #if os(iOS)
+        tabBarBottomClearance
+        #else
+        standardBottomClearance
+        #endif
+    }()
+}
+
+extension View {
+    /// Places `PlyLogo` in the exact same top-left toolbar slot across all main tabs on iOS.
+    @ViewBuilder func plyMainPageLogo(color: Color = .primary, hidden: Bool = false) -> some View {
+        #if os(iOS)
+        self
+            .navigationTitle("")
+            .plyInlineTitle()
+            .toolbar {
+                if #available(iOS 26.0, *) {
+                    ToolbarItem(placement: .topBarLeading) {
+                        PlyLogo(size: PlyDesign.headerLogoSize, color: color)
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                } else {
+                    ToolbarItem(placement: .topBarLeading) {
+                        PlyLogo(size: PlyDesign.headerLogoSize, color: color)
+                    }
+                }
+            }
+            .toolbar(hidden ? .hidden : .visible, for: .navigationBar)
+        #else
+        self
+        #endif
+    }
+
+    /// Places the standard top-right `GlassCloseButton` inside a modal or sheet navigation bar.
+    /// Using `.topBarTrailing` keeps close placement consistent with portal overlays and hides the
+    /// extra UIKit system pill background on iOS 26 so there is never a nested double circle.
+    @ViewBuilder func plyCloseToolbar(
+        accessibilityLabel: String = "Close",
+        action: @escaping () -> Void
+    ) -> some View {
+        #if os(iOS)
+        toolbar {
+            if #available(iOS 26.0, *) {
+                ToolbarItem(placement: .topBarTrailing) {
+                    GlassCloseButton(accessibilityLabel: accessibilityLabel, action: action)
+                }
+                .sharedBackgroundVisibility(.hidden)
+            } else {
+                ToolbarItem(placement: .topBarTrailing) {
+                    GlassCloseButton(accessibilityLabel: accessibilityLabel, action: action)
+                }
+            }
+        }
+        #else
+        self
+        #endif
+    }
+
+    /// Applies the standard bottom scroll-content clearance so scrolled pages never collide with `FloatingTabBar`.
+    @ViewBuilder func plyTabBarBottomClearance() -> some View {
+        #if os(iOS)
+        contentMargins(.bottom, PlyDesign.tabBarBottomClearance, for: .scrollContent)
+        #else
+        contentMargins(.bottom, PlyDesign.standardBottomClearance, for: .scrollContent)
+        #endif
     }
 }

@@ -8,6 +8,7 @@ import UIKit
 final class PlayerPresenter: NSObject, AVPlayerViewControllerDelegate, UIAdaptivePresentationControllerDelegate {
     private var current: AVPlayerViewController?
     private var overlay: UIViewController?
+    private var trackHost: UIViewController?
     private var onDismiss: (() -> Void)?
     /// The window this presenter belongs to: with two iPad windows open, the play goes in this one, not
     /// in whichever UIKit calls active first.
@@ -28,6 +29,8 @@ final class PlayerPresenter: NSObject, AVPlayerViewControllerDelegate, UIAdaptiv
         vc.allowsPictureInPicturePlayback = true
         vc.canStartPictureInPictureAutomaticallyFromInline = true
         vc.updatesNowPlayingInfoCenter = false
+        #elseif os(tvOS)
+        vc.transportBarCustomMenuItems = Self.tvTransportMenus(for: playback)
         #endif
         pipActive = false
         pipRestoring = false
@@ -58,6 +61,10 @@ final class PlayerPresenter: NSObject, AVPlayerViewControllerDelegate, UIAdaptiv
             self.closed(vc)
         })
 
+        #if os(iOS)
+        installTrackBar(playback: playback, on: vc)
+        #endif
+
         let old = current
         current = vc
         self.onDismiss = onDismiss
@@ -72,6 +79,9 @@ final class PlayerPresenter: NSObject, AVPlayerViewControllerDelegate, UIAdaptiv
                     onDismiss?()
                     return
                 }
+                #if os(iOS)
+                top.view.window?.endEditing(true)
+                #endif
                 top.present(vc, animated: true) { [weak self] in
                     vc.presentationController?.delegate = self
                 }
@@ -92,6 +102,7 @@ final class PlayerPresenter: NSObject, AVPlayerViewControllerDelegate, UIAdaptiv
         }
         current = nil
         overlay = nil
+        trackHost = nil
         onDismiss = nil
         pipActive = false
         pipRestoring = false
@@ -167,6 +178,7 @@ final class PlayerPresenter: NSObject, AVPlayerViewControllerDelegate, UIAdaptiv
         let done = onDismiss
         current = nil
         overlay = nil
+        trackHost = nil
         onDismiss = nil
         done?()
     }
@@ -282,3 +294,237 @@ struct SubtitleOverlay: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
+
+#if os(iOS)
+private extension PlayerPresenter {
+    func installTrackBar(playback: PlaybackController, on vc: AVPlayerViewController) {
+        let chrome = PlayerTrackChrome(player: playback.player)
+        let container = PassThroughOverlayView {
+            chrome.wake()
+        }
+        container.translatesAutoresizingMaskIntoConstraints = false
+        vc.view.addSubview(container)
+        NSLayoutConstraint.activate([
+            container.leadingAnchor.constraint(equalTo: vc.view.leadingAnchor),
+            container.trailingAnchor.constraint(equalTo: vc.view.trailingAnchor),
+            container.topAnchor.constraint(equalTo: vc.view.topAnchor),
+            container.bottomAnchor.constraint(equalTo: vc.view.bottomAnchor),
+        ])
+
+        let host = UIHostingController(rootView: PlayerTrackPill(playback: playback, chrome: chrome))
+        host.view.backgroundColor = .clear
+        host.view.translatesAutoresizingMaskIntoConstraints = false
+        vc.addChild(host)
+        container.addSubview(host.view)
+        NSLayoutConstraint.activate([
+            host.view.topAnchor.constraint(equalTo: vc.view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            host.view.trailingAnchor.constraint(equalTo: vc.view.safeAreaLayoutGuide.trailingAnchor, constant: -66),
+        ])
+        trackHost = host
+        host.didMove(toParent: vc)
+    }
+}
+
+@Observable @MainActor
+private final class PlayerTrackChrome {
+    var visible = true
+    private var hideTask: Task<Void, Never>?
+    private var statusObservation: NSKeyValueObservation?
+    private weak var player: AVPlayer?
+
+    init(player: AVPlayer) {
+        self.player = player
+        statusObservation = player.observe(\.timeControlStatus, options: [.initial, .new]) { [weak self] p, _ in
+            let paused = p.timeControlStatus == .paused
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if paused {
+                    self.hideTask?.cancel()
+                    withAnimation(.easeInOut(duration: 0.2)) { self.visible = true }
+                } else {
+                    self.scheduleHide()
+                }
+            }
+        }
+        scheduleHide()
+    }
+
+    func wake() {
+        hideTask?.cancel()
+        if !visible {
+            withAnimation(.easeInOut(duration: 0.2)) { visible = true }
+        }
+        if player?.timeControlStatus != .paused {
+            scheduleHide()
+        }
+    }
+
+    private func scheduleHide() {
+        hideTask?.cancel()
+        hideTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3.5))
+            guard !Task.isCancelled, let self else { return }
+            if self.player?.timeControlStatus != .paused {
+                withAnimation(.easeInOut(duration: 0.25)) { self.visible = false }
+            }
+        }
+    }
+}
+
+/// Transparent full-frame overlay that passes all touches outside the compact pill straight to AVKit.
+private final class PassThroughOverlayView: UIView {
+    private let onActivity: () -> Void
+
+    init(onActivity: @escaping () -> Void) {
+        self.onActivity = onActivity
+        super.init(frame: .zero)
+        backgroundColor = .clear
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        let hit = super.hitTest(point, with: event)
+        if let hit, hit !== self {
+            onActivity()
+            return hit
+        }
+        if event?.type == .touches {
+            onActivity()
+        }
+        return nil
+    }
+}
+
+/// Compact frosted glass pill in AVPlayerViewController's top bar for Audio Channels and Subtitles (CC).
+private struct PlayerTrackPill: View {
+    let playback: PlaybackController
+    let chrome: PlayerTrackChrome
+
+    var body: some View {
+        let audio = playback.availableAudioStreams
+        let subtitles = playback.availableSubtitles
+        let hasActiveSubtitle = playback.selectedSubtitle != nil
+
+        HStack(spacing: 0) {
+            Menu {
+                if audio.isEmpty {
+                    Text("Default Audio")
+                } else {
+                    ForEach(audio, id: \.index) { stream in
+                        Button {
+                            Task { await playback.selectAudio(stream.index) }
+                        } label: {
+                            if playback.activeAudioIndex == stream.index {
+                                Label(stream.label, systemImage: "checkmark")
+                            } else {
+                                Text(stream.label)
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: "speaker.wave.2")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 38)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Audio")
+
+            Divider()
+                .frame(height: 16)
+                .overlay(Color.white.opacity(0.22))
+
+            Menu {
+                Button {
+                    Task { await playback.selectSubtitle(nil) }
+                } label: {
+                    if playback.selectedSubtitle == nil {
+                        Label("Off", systemImage: "checkmark")
+                    } else {
+                        Text("Off")
+                    }
+                }
+
+                if subtitles.isEmpty {
+                    Text("No Subtitles Available")
+                } else {
+                    ForEach(subtitles, id: \.0.key) { sub, choice in
+                        let title = sub.image ? "\(sub.label) (burned in)" : sub.label
+                        Button {
+                            Task { await playback.selectSubtitle(choice) }
+                        } label: {
+                            if playback.selectedSubtitle == choice {
+                                Label(title, systemImage: "checkmark")
+                            } else {
+                                Text(title)
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: hasActiveSubtitle ? "captions.bubble.fill" : "captions.bubble")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(hasActiveSubtitle ? Color.orange : Color.white)
+                    .frame(width: 40, height: 38)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Subtitles")
+        }
+        .plyGlassCapsule(strokeOpacity: 0.18)
+        .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
+        .opacity(chrome.visible ? 1 : 0)
+        .allowsHitTesting(chrome.visible)
+    }
+}
+#elseif os(tvOS)
+private extension PlayerPresenter {
+    static func tvTransportMenus(for playback: PlaybackController) -> [UIMenuElement] {
+        let audioMenu = UIMenu(
+            title: "Audio",
+            image: UIImage(systemName: "waveform"),
+            options: .singleSelection,
+            children: [
+                UIDeferredMenuElement.uncached { [weak playback] completion in
+                    guard let playback else { completion([]); return }
+                    let actions = playback.availableAudioStreams.map { stream in
+                        UIAction(
+                            title: stream.label,
+                            state: playback.activeAudioIndex == stream.index ? .on : .off
+                        ) { [weak playback] _ in
+                            Task { await playback?.selectAudio(stream.index) }
+                        }
+                    }
+                    completion(actions)
+                }
+            ]
+        )
+
+        let subtitleMenu = UIMenu(
+            title: "Subtitles",
+            image: UIImage(systemName: "captions.bubble"),
+            options: .singleSelection,
+            children: [
+                UIDeferredMenuElement.uncached { [weak playback] completion in
+                    guard let playback else { completion([]); return }
+                    var actions: [UIAction] = [
+                        UIAction(title: "Off", state: playback.selectedSubtitle == nil ? .on : .off) { [weak playback] _ in
+                            Task { await playback?.selectSubtitle(nil) }
+                        }
+                    ]
+                    actions += playback.availableSubtitles.map { sub, choice in
+                        let title = sub.image ? "\(sub.label) (burned in)" : sub.label
+                        return UIAction(title: title, state: playback.selectedSubtitle == choice ? .on : .off) { [weak playback] _ in
+                            Task { await playback?.selectSubtitle(choice) }
+                        }
+                    }
+                    completion(actions)
+                }
+            ]
+        )
+
+        return [audioMenu, subtitleMenu]
+    }
+}
+#endif

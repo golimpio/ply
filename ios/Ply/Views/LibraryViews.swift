@@ -1,10 +1,17 @@
 import SwiftUI
-/// The Cinema Canvas & Peeking Deck spotlighting featured, in-progress, and recent items on Home.
+
+/// The Spatial Canvas & Peeking Deck spotlighting featured, in-progress, and recent items on Home.
 struct PeekingCanvasDeckView: View {
     let items: [Item]
+    var portalNamespace: Namespace.ID? = nil
+    var expandedItemId: Int64? = nil
+    var onOpenPortal: ((Item) -> Void)? = nil
+    var onActiveItemChange: ((Item) -> Void)? = nil
+
     @Environment(AppModel.self) private var model
     @Environment(PlaybackScene.self) private var playbackScene
     @State private var activeItemId: Int64?
+    @State private var playImpactTrigger = 0
 
     private var activeItem: Item? {
         if let id = activeItemId, let item = items.first(where: { $0.id == id }) {
@@ -17,7 +24,7 @@ struct PeekingCanvasDeckView: View {
         #if os(tvOS)
         340
         #else
-        260
+        272
         #endif
     }
 
@@ -25,28 +32,32 @@ struct PeekingCanvasDeckView: View {
         #if os(tvOS)
         480
         #else
-        375
+        408
         #endif
     }
 
+    private var cornerRadius: CGFloat { PlyDesign.heroCardCornerRadius }
+
     var body: some View {
         if !items.isEmpty, let active = activeItem {
-            VStack(spacing: 16) {
-                // The Horizontal Peeking Canvas Carousel
+            VStack(spacing: 18) {
                 GeometryReader { proxy in
                     let screenWidth = proxy.size.width
                     let sideInset = max(16, (screenWidth - cardWidth) / 2)
 
                     ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 14) {
+                        LazyHStack(spacing: 16) {
                             ForEach(items) { item in
                                 canvasCard(item, isCenter: item.id == active.id)
                                     .id(item.id)
                                     .scrollTransition(.interactive, axis: .horizontal) { content, phase in
-                                        content
-                                            .scaleEffect(phase.isIdentity ? 1.0 : 0.92)
-                                            .opacity(phase.isIdentity ? 1.0 : 0.55)
-                                            .brightness(phase.isIdentity ? 0.0 : -0.06)
+                                        let dist = min(1.0, abs(phase.value))
+                                        return content
+                                            .scaleEffect(1.0 - dist * 0.14)
+                                            .offset(y: dist * 16)
+                                            .saturation(1.0 - dist * 0.55)
+                                            .blur(radius: dist * 2.2)
+                                            .opacity(1.0 - dist * 0.42)
                                     }
                             }
                         }
@@ -55,94 +66,50 @@ struct PeekingCanvasDeckView: View {
                     .scrollTargetBehavior(.viewAligned)
                     .safeAreaPadding(.horizontal, sideInset)
                     .scrollPosition(id: $activeItemId)
+                    .scrollClipDisabled()
                 }
-                .frame(height: cardHeight + 20)
+                .frame(height: cardHeight + 44)
 
-                // Title & Metadata Block (matching reference specification)
+                // Editorial Title & Wide-Tracked Metadata Block
                 VStack(spacing: 8) {
-                    // Release Year
-                    if let year = active.year {
-                        Text(String(year))
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Color(white: 0.6))
+                    let microSpecs = Format.facts(
+                        active.year.map(String.init),
+                        active.genres?.first ?? active.episodeCode,
+                        active.durationSec > 0 ? Format.runtime(active.durationSec) : nil
+                    )
+                    if !microSpecs.isEmpty {
+                        Text(microSpecs.uppercased())
+                            .plyMicroSpecsStyle(opacity: 0.60)
                     }
 
-                    // Main Title (Bold clean sans-serif)
                     Text(active.isEpisode ? (active.show ?? active.title) : active.title)
-                        .font(.system(size: 26, weight: .bold, design: .default))
-                        .foregroundStyle(.white)
+                        .plyHeroTitleStyle(size: 28)
                         .lineLimit(1)
                         .multilineTextAlignment(.center)
+                        .spatialMatchedGeometry(
+                            id: "spatial-title-\(active.id)",
+                            in: portalNamespace,
+                            isSource: expandedItemId != active.id
+                        )
 
-                    // Frosted Glass Metadata Pills Row
+                    // Subtle Glass Telemetry Pills (Rating + Technical Badge)
                     HStack(spacing: 8) {
-                        // Genre Pill
-                        if let genres = active.genres, let first = genres.first {
-                            Text(first)
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(.white.opacity(0.9))
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 7)
-                                .background(
-                                    Capsule()
-                                        .fill(Color.white.opacity(0.10))
-                                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
-                                )
-                        } else if active.isEpisode, let code = active.episodeCode {
-                            Text(code)
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(.white.opacity(0.9))
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 7)
-                                .background(
-                                    Capsule()
-                                        .fill(Color.white.opacity(0.10))
-                                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
-                                )
+                        if !active.versionLabel.isEmpty {
+                            PlyGlassPillBadge(text: active.versionLabel)
                         }
 
-                        // Duration Pill
-                        if active.durationSec > 0 {
-                            Text(Format.runtime(active.durationSec))
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(.white.opacity(0.9))
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 7)
-                                .background(
-                                    Capsule()
-                                        .fill(Color.white.opacity(0.10))
-                                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
-                                )
-                        }
-
-                        // Star Rating Pill
                         if let rating = active.rating {
-                            HStack(spacing: 4) {
-                                Image(systemName: "star.fill")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(Color.yellow)
-                                Text(rating.label)
-                                    .font(.subheadline.weight(.bold))
-                                    .foregroundStyle(.white)
-                            }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 7)
-                            .background(
-                                Capsule()
-                                    .fill(Color.white.opacity(0.10))
-                                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
-                            )
+                            PlyGlassPillBadge(text: rating.label, systemImage: "star.fill", textOpacity: 1.0)
                         }
                     }
                     .padding(.top, 2)
 
-                    // Pagination Dots
                     if items.count > 1 {
                         HStack(spacing: 6) {
-                            ForEach(Array(items.prefix(8).enumerated()), id: \.element.id) { index, item in
+                            ForEach(Array(items.prefix(8).enumerated()), id: \.element.id) { _, item in
                                 if item.id == active.id {
                                     Capsule()
-                                        .fill(Color.orange)
+                                        .fill(LinearGradient.plyAmberHorizontal)
                                         .frame(width: 22, height: 5)
                                 } else {
                                     Circle()
@@ -152,9 +119,6 @@ struct PeekingCanvasDeckView: View {
                                             withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                                                 activeItemId = item.id
                                             }
-                                            #if os(iOS)
-                                            UISelectionFeedbackGenerator().selectionChanged()
-                                            #endif
                                         }
                                 }
                             }
@@ -162,77 +126,97 @@ struct PeekingCanvasDeckView: View {
                         .padding(.top, 6)
                     }
                 }
-                .animation(.easeInOut(duration: 0.2), value: active.id)
+                .animation(.spring(response: 0.38, dampingFraction: 0.86), value: active.id)
                 .padding(.horizontal, 20)
                 .frame(maxWidth: .infinity, alignment: .center)
             }
             .frame(maxWidth: .infinity, alignment: .center)
+            #if os(iOS)
+            .sensoryFeedback(.selection, trigger: activeItemId)
+            .sensoryFeedback(.impact(weight: .medium, intensity: 0.85), trigger: playImpactTrigger)
+            #endif
             .onAppear {
                 if activeItemId == nil {
                     activeItemId = items.first?.id
+                }
+                onActiveItemChange?(active)
+            }
+            .onChange(of: activeItemId) { _, _ in
+                if let current = activeItem {
+                    onActiveItemChange?(current)
                 }
             }
         }
     }
 
+    @ViewBuilder
     private func canvasCard(_ item: Item, isCenter: Bool) -> some View {
-        NavigationLink(value: Route.item(item.id)) {
-            ZStack(alignment: .bottom) {
-                RemoteImage(path: item.poster, placeholder: "film")
-                    .aspectRatio(2 / 3, contentMode: .fill)
-                    .frame(width: cardWidth, height: cardHeight)
-                    .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 28, style: .continuous)
-                            .strokeBorder(Color.white.opacity(isCenter ? 0.16 : 0.08), lineWidth: 1)
-                    )
-
-                // Bottom subtle scrim for contrast
-                LinearGradient(
-                    colors: [.clear, .black.opacity(0.65)],
-                    startPoint: .center,
-                    endPoint: .bottom
+        let cardBody = ZStack {
+            RemoteImage(path: item.poster, placeholder: "film")
+                .aspectRatio(2 / 3, contentMode: .fill)
+                .frame(width: cardWidth, height: cardHeight)
+                .clipShape(.rect(cornerRadius: cornerRadius, style: .continuous))
+                .spatialMatchedGeometry(
+                    id: "spatial-art-\(item.id)",
+                    in: portalNamespace,
+                    isSource: expandedItemId != item.id
                 )
-                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-                .allowsHitTesting(false)
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [.white.opacity(isCenter ? 0.30 : 0.10), .clear],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 1
+                        )
+                )
 
-                // Centered Bottom Play Pill (like in reference image)
-                Button {
-                    #if os(iOS)
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                    #endif
-                    let start = item.resumeSec > 0 ? item.resumeSec : 0
-                    model.play(PlayRequest(itemId: item.id, startSec: start), in: playbackScene)
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(Color.orange)
-                        Text(item.resumeSec > 0 ? "Resume" : "Play")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.white)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
-                    .background(
-                        Capsule()
-                            .fill(Color.black.opacity(0.70))
-                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.8))
-                    )
-                }
-                .buttonStyle(.plain)
-                .padding(.bottom, 16)
-                .opacity(isCenter ? 1.0 : 0.0)
-                .animation(.easeInOut(duration: 0.2), value: isCenter)
+            HeroPlayButton(
+                accessibilityLabel: item.resumeSec > 0 ? "Resume" : "Play",
+                progress: item.fraction
+            ) {
+                playImpactTrigger += 1
+                let start = item.resumeSec > 0 ? item.resumeSec : 0
+                model.play(PlayRequest(itemId: item.id, startSec: start), in: playbackScene)
             }
-            .contentShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-            .shadow(
-                color: Color.black.opacity(isCenter ? 0.65 : 0.35),
-                radius: isCenter ? 22 : 10,
-                y: isCenter ? 12 : 5
+            .spatialMatchedGeometry(
+                id: "spatial-play-\(item.id)",
+                in: portalNamespace,
+                isSource: expandedItemId != item.id
             )
+            .opacity(isCenter ? 1.0 : 0.0)
+            .animation(.easeInOut(duration: 0.2), value: isCenter)
         }
-        .buttonStyle(.plain)
+        .contentShape(.rect(cornerRadius: cornerRadius, style: .continuous))
+        .shadow(
+            color: Color.black.opacity(isCenter ? 0.44 : 0.22),
+            radius: isCenter ? 20 : 10,
+            y: isCenter ? 10 : 5
+        )
+
+        #if os(iOS)
+        if let onOpenPortal {
+            cardBody
+                .onTapGesture {
+                    if isCenter {
+                        onOpenPortal(item)
+                    } else {
+                        withAnimation(.spring(response: 0.38, dampingFraction: 0.84)) {
+                            activeItemId = item.id
+                        }
+                    }
+                }
+                .accessibilityAddTraits(.isButton)
+        } else {
+            NavigationLink(value: Route.item(item.id)) { cardBody }
+                .buttonStyle(.plain)
+        }
+        #else
+        NavigationLink(value: Route.item(item.id)) { cardBody }
+            .buttonStyle(.plain)
+        #endif
     }
 }
 
@@ -243,6 +227,12 @@ struct HomeView: View {
     @Environment(Connection.self) private var connection
     @Environment(AppModel.self) private var model
     @Environment(PlaybackScene.self) private var playbackScene
+    @Environment(SpatialPortalState.self) private var portalState: SpatialPortalState?
+
+    @Namespace private var spatialPortalNS
+    @State private var activeHeroItem: Item?
+    @State private var backdropPalette: PosterPalette = .fallback
+    @State private var portalFeedbackTrigger = 0
 
     private var featuredItems: [Item] {
         let library = connection.library
@@ -264,100 +254,190 @@ struct HomeView: View {
         return list
     }
 
+    private var isPortalOpen: Bool {
+        #if os(iOS)
+        portalState?.expandedItem != nil
+        #else
+        false
+        #endif
+    }
+
     var body: some View {
         let library = connection.library
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 28) {
-                    #if os(iOS)
-                    HStack {
-                        PlyLogo(size: 24)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 4)
-                    #elseif os(tvOS)
-                    HStack(spacing: 12) {
-                        PlyLogo(size: 36)
-                        Text("Home")
-                            .font(.title2.weight(.medium))
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                    }
-                    .padding(.horizontal)
-                    .padding(.top, 8)
-                    #endif
+        let activeArtworkPath = (activeHeroItem ?? featuredItems.first)?.poster
+            ?? (activeHeroItem ?? featuredItems.first)?.landscapeImage
 
-                    if !featuredItems.isEmpty {
-                        PeekingCanvasDeckView(items: featuredItems)
+        NavigationStack {
+            ZStack {
+                LivingMeshBackdrop(palette: backdropPalette)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 28) {
+                        #if os(tvOS)
+                        HStack(spacing: 12) {
+                            PlyLogo(size: 36, color: .white)
+                            Text("Home")
+                                .font(.title2.weight(.medium))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .padding(.horizontal)
+                        .padding(.top, 8)
+                        #endif
+
+                        if !featuredItems.isEmpty {
+                            PeekingCanvasDeckView(
+                                items: featuredItems,
+                                portalNamespace: spatialPortalNS,
+                                expandedItemId: portalState?.expandedItem?.id,
+                                onOpenPortal: { item in
+                                    portalFeedbackTrigger += 1
+                                    withAnimation(.spring(response: 0.52, dampingFraction: 0.84)) {
+                                        portalState?.open(item)
+                                    }
+                                },
+                                onActiveItemChange: { item in
+                                    activeHeroItem = item
+                                }
+                            )
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.top, 4)
                             .padding(.bottom, 6)
-                    }
+                        }
 
-                    if !library.continueWatching.isEmpty {
-                        Shelf("Continue Watching", subtitle: "Pick up where you left off") {
-                            ForEach(library.continueWatching) { item in
-                                NavigationLink(value: Route.item(item.id)) {
-                                    LandscapeCard(item: item).frame(width: shelfWideCardWidth)
+                        if !library.continueWatching.isEmpty {
+                            Shelf("Continue Watching", subtitle: "Pick up where you left off") {
+                                ForEach(library.continueWatching) { item in
+                                    NavigationLink(value: Route.item(item.id)) {
+                                        LandscapeCard(item: item).frame(width: shelfWideCardWidth)
+                                    }
+                                    .buttonStyle(.plain)
                                 }
-                                .buttonStyle(.plain)
+                            }
+                        }
+
+                        if library.acclaimedFilms.count >= 2 {
+                            filmShelf(
+                                "World & Auteur Cinema",
+                                subtitle: "Godard, Wong Kar-wai, Wenders, Song, Kaurismäki",
+                                items: library.acclaimedFilms
+                            ) { movie in
+                                Format.facts(movie.year.map(String.init), movie.rating?.label)
+                            }
+                        }
+
+                        if library.shortFeatures.count >= 2 {
+                            filmShelf(
+                                "Acclaimed & Under 100 Minutes",
+                                subtitle: "Finishes before 22:00",
+                                items: library.shortFeatures
+                            ) { movie in
+                                Format.facts(
+                                    movie.year.map(String.init),
+                                    movie.durationSec > 0 ? Format.runtime(movie.durationSec) : nil
+                                )
+                            }
+                        }
+
+                        if !library.recentMovies.isEmpty {
+                            filmShelf(
+                                "Recently Added",
+                                subtitle: "Latest additions to your archive",
+                                items: library.recentMovies
+                            ) { movie in
+                                movie.year.map(String.init)
+                            }
+                        }
+
+                        if !library.upcoming.isEmpty {
+                            Shelf("Coming Up", subtitle: "Next in series") {
+                                ForEach(library.upcoming) { item in
+                                    NavigationLink(value: Route.show(item.show)) {
+                                        UpcomingCard(upcoming: item).frame(width: shelfWideCardWidth)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+
+                        ForEach(connection.browse.homeGenreRails) { rail in
+                            Shelf(rail.genre.name, trailing: {
+                                NavigationLink(value: Route.genre(rail.genre.id, rail.genre.name)) {
+                                    Text("All \(rail.genre.count)")
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }) {
+                                ForEach(rail.titles.prefix(30)) { card in
+                                    TitlePoster(card: card, width: shelfCardWidth)
+                                }
                             }
                         }
                     }
-
-                    if !library.upcoming.isEmpty {
-                        Shelf("Coming Up", subtitle: "Next in series") {
-                            ForEach(library.upcoming) { item in
-                                NavigationLink(value: Route.show(item.show)) {
-                                    UpcomingCard(upcoming: item).frame(width: shelfWideCardWidth)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-
-                    if !library.movies.isEmpty {
-                        Shelf("Recently Added Films", subtitle: "Latest additions to your archive") {
-                            ForEach(library.recentMovies) { movie in
-                                NavigationLink(value: Route.item(movie.id)) {
-                                    PosterCard(title: movie.title, caption: movie.year.map(String.init), image: movie.poster,
-                                               watched: movie.isWatched, fraction: movie.fraction)
-                                        .frame(width: shelfCardWidth)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-
-                    if !library.shows.isEmpty {
-                        Shelf("Series", subtitle: "Television series in your library") {
-                            ForEach(library.shows) { show in
-                                NavigationLink(value: Route.show(show.show)) {
-                                    PosterCard(title: show.show, caption: show.episodeCount == 1 ? "1 episode" : "\(show.episodeCount) episodes",
-                                               image: show.poster, watched: show.allWatched)
-                                        .frame(width: shelfCardWidth)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
+                    .padding(.top)
                 }
-                .padding(.top)
+                .plyTabBarBottomClearance()
+                .blur(radius: isPortalOpen ? 12 : 0)
+                .scaleEffect(isPortalOpen ? 0.94 : 1.0)
+                .opacity(isPortalOpen ? 0.35 : 1.0)
+                .allowsHitTesting(!isPortalOpen)
+                .overlay { LibraryStatus(library: library, isEmpty: library.movies.isEmpty && library.shows.isEmpty) }
+                .plyRefreshable { await library.reload() }
+
                 #if os(iOS)
-                .padding(.bottom, 74)
-                #else
-                .padding(.bottom)
+                if let expanded = portalState?.expandedItem {
+                    ItemDetailView(
+                        id: expanded.id,
+                        seedItem: expanded,
+                        portalNamespace: spatialPortalNS,
+                        onDismissPortal: {
+                            portalFeedbackTrigger += 1
+                            withAnimation(.spring(response: 0.48, dampingFraction: 0.86)) {
+                                portalState?.dismiss()
+                            }
+                        }
+                    )
+                    .transition(.opacity.animation(.easeOut(duration: 0.18)))
+                    .zIndex(10)
+                }
                 #endif
             }
-            .overlay { LibraryStatus(library: library, isEmpty: library.movies.isEmpty && library.shows.isEmpty) }
-            .plyRefreshable { await library.reload() }
+            .task(id: activeArtworkPath) {
+                backdropPalette = await PosterPaletteExtractor.shared.palette(for: connection.api.url(activeArtworkPath))
+            }
+            .task(id: library.generation) {
+                await connection.browse.loadHomeGenreRails()
+            }
             #if os(iOS)
-            .toolbar(.hidden, for: .navigationBar)
+            .sensoryFeedback(.impact(flexibility: .soft, intensity: 0.8), trigger: portalFeedbackTrigger)
+            .toolbarBackground(.hidden, for: .navigationBar)
             #endif
-            .navigationTitle("")
-            .plyInlineTitle()
+            .plyMainPageLogo(color: .white, hidden: isPortalOpen)
             .plyDestinations()
+        }
+    }
+
+    @ViewBuilder
+    private func filmShelf(
+        _ title: String,
+        subtitle: String? = nil,
+        items: [Item],
+        caption: @escaping (Item) -> String?
+    ) -> some View {
+        Shelf(title, subtitle: subtitle) {
+            ForEach(items) { movie in
+                NavigationLink(value: Route.item(movie.id)) {
+                    PosterCard(
+                        title: movie.title,
+                        caption: caption(movie),
+                        image: movie.poster,
+                        watched: movie.isWatched,
+                        fraction: movie.fraction
+                    )
+                    .frame(width: shelfCardWidth)
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 }
@@ -387,7 +467,6 @@ struct MoviesView: View {
     @State private var currentScrubLabel = ""
     @State private var hideTask: Task<Void, Never>? = nil
     #endif
-
     private var availableGenres: [String] {
         let all = connection.library.movies.flatMap { $0.genres ?? [] }
         return Array(Set(all)).sorted()
@@ -497,20 +576,9 @@ struct MoviesView: View {
                         #endif
 
                         #if os(tvOS)
-                        HStack(spacing: 8) {
-                            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                            TextField("Search films", text: $query)
-                        }
-                        .font(.headline)
-                        .padding(.horizontal)
-                        .padding(.top, 10)
-                        #elseif os(iOS)
-                        HStack {
-                            PlyLogo(size: 24)
-                            Spacer()
-                        }
-                        .padding(.horizontal)
-                        .padding(.top, 4)
+                        PlySearchField(text: $query, prompt: "Search films")
+                            .padding(.horizontal)
+                            .padding(.top, 10)
                         #endif
 
                         ScrollView(.horizontal, showsIndicators: false) {
@@ -563,11 +631,9 @@ struct MoviesView: View {
                                 .id(movie.id)
                             }
                         }
-                        .padding()
-                        #if os(iOS)
-                        .padding(.bottom, 74)
-                        #endif
+                        .padding([.horizontal, .top])
                     }
+                    .plyTabBarBottomClearance()
                     .coordinateSpace(name: "MoviesScroll")
                     #if os(iOS)
                     .onPreferenceChange(ScrollOffsetPreferenceKey.self) { offset in
@@ -599,7 +665,6 @@ struct MoviesView: View {
                     LibraryStatus(library: library, isEmpty: library.movies.isEmpty)
                 }
             }
-            .plySearchable($query, prompt: "Films")
             .plyRefreshable { await library.reload() }
             .toolbar {
                 #if os(iOS)
@@ -650,8 +715,7 @@ struct MoviesView: View {
                 #endif
             }
             #if os(iOS)
-            .navigationTitle("")
-            .plyInlineTitle()
+            .plyMainPageLogo()
             #else
             .navigationTitle("Films")
             #endif
@@ -777,20 +841,9 @@ struct ShowsView: View {
                         #endif
 
                         #if os(tvOS)
-                        HStack(spacing: 8) {
-                            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                            TextField("Search series", text: $query)
-                        }
-                        .font(.headline)
-                        .padding(.horizontal)
-                        .padding(.top, 10)
-                        #elseif os(iOS)
-                        HStack {
-                            PlyLogo(size: 24)
-                            Spacer()
-                        }
-                        .padding(.horizontal)
-                        .padding(.top, 4)
+                        PlySearchField(text: $query, prompt: "Search series")
+                            .padding(.horizontal)
+                            .padding(.top, 10)
                         #endif
 
                         ScrollView(.horizontal, showsIndicators: false) {
@@ -838,11 +891,9 @@ struct ShowsView: View {
                                 .id(show.show)
                             }
                         }
-                        .padding()
-                        #if os(iOS)
-                        .padding(.bottom, 74)
-                        #endif
+                        .padding([.horizontal, .top])
                     }
+                    .plyTabBarBottomClearance()
                     .coordinateSpace(name: "ShowsScroll")
                     #if os(iOS)
                     .onPreferenceChange(ScrollOffsetPreferenceKey.self) { offset in
@@ -874,7 +925,6 @@ struct ShowsView: View {
                     LibraryStatus(library: library, isEmpty: library.shows.isEmpty)
                 }
             }
-            .plySearchable($query, prompt: "Series")
             .plyRefreshable { await library.reload() }
             // Newest first is a show's newest file, which the episodes list says; fetch it only when
             // that sort is chosen, and again after a reload has forgotten it.
@@ -916,8 +966,7 @@ struct ShowsView: View {
                 #endif
             }
             #if os(iOS)
-            .navigationTitle("")
-            .plyInlineTitle()
+            .plyMainPageLogo()
             #else
             .navigationTitle("Series")
             #endif
@@ -939,9 +988,26 @@ struct SettingsView: View {
         let info = connection.info
         NavigationStack {
             Form {
+                #if os(iOS)
+                Section {} header: {
+                    Text("Settings")
+                        .font(.title2.bold())
+                        .foregroundStyle(.primary)
+                        .textCase(nil)
+                }
+                #endif
+
                 Section("Server") {
                     LabeledContent("Name", value: info.name)
-                    LabeledContent("Address", value: connection.base.absoluteString)
+                    LabeledContent("Address") {
+                        Text(connection.base.absoluteString)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            #if os(iOS)
+                            .textSelection(.enabled)
+                            #endif
+                    }
                     LabeledContent("Version", value: info.version)
                     LabeledContent("API", value: "\(info.api) (this app: \(clientAPIVersion))")
                 }
@@ -951,6 +1017,7 @@ struct SettingsView: View {
                     LabeledContent("Device id") {
                         Text(Device.id)
                             .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
                             #if os(iOS)
                             .textSelection(.enabled)
                             #endif
@@ -959,11 +1026,18 @@ struct SettingsView: View {
                 Section {
                     Button("Connect to another server") { model.chooseServer() }
                     Button("Forget this server", role: .destructive) { model.disconnect() }
+                } header: {
+                    Text("Connection")
                 } footer: {
                     Text("Forgetting the server removes this device's token; the owner can also revoke it in Settings › Devices.")
                 }
             }
+            .plyTabBarBottomClearance()
+            #if os(iOS)
+            .plyMainPageLogo()
+            #else
             .navigationTitle("Settings")
+            #endif
         }
     }
 }
@@ -1024,28 +1098,15 @@ struct ActiveFilterChip: View {
     }
 }
 
-/// A glass capsule label for the top-trailing Filter button in library navigation bars.
+/// Icon-only label for the top-trailing Filter button in library navigation bars.
 struct FilterButtonLabel: View {
     let hasActive: Bool
 
     var body: some View {
-        HStack(spacing: 5) {
-            Image(systemName: hasActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-                .font(.system(size: 14, weight: .semibold))
-            Text("Filter")
-                .font(.subheadline.weight(.medium))
-        }
-        .foregroundStyle(hasActive ? Color.orange : Color.white)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(
-            Capsule()
-                .fill(hasActive ? Color.orange.opacity(0.18) : Color.white.opacity(0.08))
-                .overlay(
-                    Capsule()
-                        .strokeBorder(hasActive ? Color.orange.opacity(0.4) : Color.white.opacity(0.12), lineWidth: 0.8)
-                )
-        )
+        Image(systemName: "line.3.horizontal.decrease")
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(hasActive ? Color.orange : Color.primary)
+            .accessibilityLabel("Filter")
     }
 }
 

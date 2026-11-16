@@ -13,10 +13,16 @@
     "1 title in your library" : {
 
     },
+    "192.168.1.10 or nas.local:8420" : {
+
+    },
+    "4K UHD" : {
+
+    },
     "6-digit code" : {
 
     },
-    "192.168.1.10 or nas.local:8420" : {
+    "API" : {
 
     },
     "Add folders to the library on ply's web page." : {
@@ -25,7 +31,13 @@
     "Address" : {
 
     },
-    "API" : {
+    "All %lld" : {
+
+    },
+    "All Genres" : {
+
+    },
+    "Attributes" : {
 
     },
     "Audio" : {
@@ -52,6 +64,24 @@
     "Choose another server" : {
 
     },
+    "Clear all" : {
+
+    },
+    "Clear search" : {
+
+    },
+    "Close details" : {
+
+    },
+    "Collection Type" : {
+
+    },
+    "Collections" : {
+
+    },
+    "Collections with %@ titles in your library will appear here." : {
+
+    },
     "Connect" : {
 
     },
@@ -61,7 +91,13 @@
     "Connect to ply" : {
 
     },
+    "Connection" : {
+
+    },
     "Default" : {
+
+    },
+    "Default Audio" : {
 
     },
     "Device id" : {
@@ -70,7 +106,13 @@
     "Downloading subtitles…" : {
 
     },
+    "Era" : {
+
+    },
     "Films" : {
+
+    },
+    "Filter" : {
 
     },
     "Forget this server" : {
@@ -82,10 +124,19 @@
     "From start" : {
 
     },
+    "Genre" : {
+
+    },
     "Genres" : {
 
     },
+    "HDR" : {
+
+    },
     "Home" : {
+
+    },
+    "Language" : {
 
     },
     "Looking for ply servers…" : {
@@ -106,6 +157,12 @@
     "Name" : {
 
     },
+    "No %@ collections" : {
+
+    },
+    "No Subtitles Available" : {
+
+    },
     "No genres or collections yet" : {
 
     },
@@ -115,16 +172,19 @@
     "No titles here yet" : {
 
     },
+    "None" : {
+
+    },
     "None of their work is in the library right now." : {
 
     },
     "Nothing here yet" : {
 
     },
-    "Off" : {
+    "OK" : {
 
     },
-    "OK" : {
+    "Off" : {
 
     },
     "On ply's web page, open Settings › Devices › Pair a device, and type the code it shows." : {
@@ -154,13 +214,25 @@
     "People search failed: %@" : {
 
     },
+    "Play" : {
+
+    },
     "Play on Apple TV" : {
 
     },
-    "ply" : {
+    "Ply" : {
 
     },
-    "Ply" : {
+    "Read more" : {
+
+    },
+    "Release Era" : {
+
+    },
+    "Reset Filters" : {
+
+    },
+    "Resume" : {
 
     },
     "Resume from %@" : {
@@ -169,13 +241,16 @@
     "Search" : {
 
     },
+    "Search films" : {
+
+    },
     "Search for a person" : {
 
     },
     "Search people" : {
 
     },
-    "Search the people in your library" : {
+    "Search series" : {
 
     },
     "Season" : {
@@ -193,6 +268,12 @@
     "Settings" : {
 
     },
+    "Show All" : {
+
+    },
+    "Show less" : {
+
+    },
     "Show watched" : {
 
     },
@@ -205,7 +286,7 @@
     "Sort" : {
 
     },
-    "Starts the play for that TV, subtitles included. Pick the same one in the player's AirPlay button." : {
+    "Sort By" : {
 
     },
     "Subtitles" : {
@@ -220,7 +301,7 @@
     "The search failed: %@" : {
 
     },
-    "They come from the library's metadata. The search and the People page work already." : {
+    "They come from the library's metadata. Search above works for everything already." : {
 
     },
     "This device" : {
@@ -233,6 +314,12 @@
 
     },
     "Try again" : {
+
+    },
+    "Unwatched" : {
+
+    },
+    "Unwatched Only" : {
 
     },
     "Use another server" : {
@@ -248,6 +335,9 @@
 
     },
     "Without a port, ply's own (%@) is used." : {
+
+    },
+    "ply" : {
 
     }
   },

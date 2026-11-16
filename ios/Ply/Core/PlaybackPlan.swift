@@ -7,6 +7,14 @@ nonisolated enum SubtitleChoice: Hashable, Sendable {
     case burnIn(index: Int)
 }
 
+extension Subtitle {
+    /// A text track draws from its WebVTT; a bitmap one can only be burned in by the server.
+    nonisolated var choice: SubtitleChoice? {
+        if image { return Int(key).map(SubtitleChoice.burnIn) }
+        return url.map { SubtitleChoice.text(key: key, url: $0) }
+    }
+}
+
 /// How one play is asked of the server: the profile, the receiver's URLs, and the subtitle.
 nonisolated struct PlaybackPlan: Equatable, Sendable {
     /// `avplayer` for this device, `airplay` for a TV (MPEG-TS HLS, which older Apple TVs play).
@@ -43,5 +51,17 @@ nonisolated enum PlaybackPlanning {
                             subtitleIndex: subtitleIndex,
                             subtitleKey: subtitleKey,
                             drawsSubtitles: draws)
+    }
+
+    /// True when switching subtitles mid-playback can swap the client WebVTT overlay without restarting the stream.
+    static func canSwapSubtitleInPlace(from previous: SubtitleChoice?,
+                                       to next: SubtitleChoice?,
+                                       receiver: Receiver?,
+                                       externalPlayback: Bool) -> Bool {
+        let oldPlan = plan(subtitle: previous, receiver: receiver, externalPlayback: externalPlayback)
+        let newPlan = plan(subtitle: next, receiver: receiver, externalPlayback: externalPlayback)
+        return oldPlan.profile == newPlan.profile
+            && oldPlan.subtitleIndex == newPlan.subtitleIndex
+            && oldPlan.subtitleKey == newPlan.subtitleKey
     }
 }

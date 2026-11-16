@@ -128,8 +128,27 @@ nonisolated struct CollectionCard: Decodable, Sendable, Hashable, Identifiable {
     let poster: String?
     let backdrop: String?
     let count: Int
-}
+    let movieCount: Int?
+    let seriesCount: Int?
 
+    init(
+        id: Int64,
+        name: String,
+        poster: String? = nil,
+        backdrop: String? = nil,
+        count: Int,
+        movieCount: Int? = nil,
+        seriesCount: Int? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.poster = poster
+        self.backdrop = backdrop
+        self.count = count
+        self.movieCount = movieCount
+        self.seriesCount = seriesCount
+    }
+}
 /// GET /api/collections/{id}.
 nonisolated struct CollectionDetail: Decodable, Sendable {
     let id: Int64
