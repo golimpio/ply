@@ -281,6 +281,12 @@ final class APIClient {
         try await list("/api/people/\(id)/filmography")
     }
 
+    /// Online metadata preview for a credit outside the library.
+    func titlePreview(kind: String, tmdbId: Int64) async throws -> TitlePreview {
+        let media = kind == "series" ? "series" : "movie"
+        return try await get("/api/metadata/preview/\(media)/\(tmdbId)")
+    }
+
     /// A title's trailers, best first; [] when it has none or online lookups are off.
     func trailers(titleId: Int64) async throws -> [Trailer] {
         try await list("/api/titles/\(titleId)/trailers")

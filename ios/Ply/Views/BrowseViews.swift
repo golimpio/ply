@@ -360,48 +360,62 @@ struct PersonView: View {
     @Environment(Connection.self) private var connection
     @State private var person: Person?
     @State private var filmography: [PersonFilmographyEntry] = []
+    @State private var filmographyLoading = false
     @State private var error: String?
     @State private var isBioExpanded = false
-
-    private var externalFilms: [PersonFilmographyEntry] {
-        filmography.filter { !$0.isSeries && $0.isExternal }
-    }
-
-    private var externalSeries: [PersonFilmographyEntry] {
-        filmography.filter { $0.isSeries && $0.isExternal }
-    }
+    @State private var selectedEntry: PersonFilmographyEntry?
 
     var body: some View {
         ScrollView {
             if let person {
+                let media = person.openableMediaCredits
+                let filmSections = CreditSection.sections(media.films)
+                let seriesSections = CreditSection.sections(media.series)
+                let external = person.externalFilmography(from: filmography)
+
                 VStack(spacing: 28) {
                     header(person)
 
                     VStack(alignment: .leading, spacing: 24) {
-                        ForEach(CreditSection.sections(person.credits)) { section in
-                            Shelf(section.title) {
-                                ForEach(section.entries) { entry in
-                                    CreditCard(entry: entry)
-                                }
-                            }
+                        if !filmSections.isEmpty {
+                            mediaShelf(
+                                title: "In your films",
+                                totalCount: CreditSection.uniqueTitleCount(media.films),
+                                sections: filmSections
+                            )
                         }
-                        if !externalFilms.isEmpty {
-                            Shelf("Other Films") {
-                                ForEach(externalFilms) { entry in
-                                    FilmographyCard(entry: entry)
-                                }
-                            }
+
+                        if !seriesSections.isEmpty {
+                            mediaShelf(
+                                title: "In your series",
+                                totalCount: CreditSection.uniqueTitleCount(media.series),
+                                sections: seriesSections
+                            )
                         }
-                        if !externalSeries.isEmpty {
-                            Shelf("Other Series") {
-                                ForEach(externalSeries) { entry in
-                                    FilmographyCard(entry: entry)
-                                }
-                            }
+
+                        if filmSections.isEmpty && seriesSections.isEmpty {
+                            Text("None of their work is in your library right now.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal)
                         }
-                        if person.credits.isEmpty && externalFilms.isEmpty && externalSeries.isEmpty {
-                            Text("None of their work is in the library right now.")
-                                .font(.callout).foregroundStyle(.secondary).padding(.horizontal)
+
+                        if filmographyLoading && external.films.isEmpty && external.series.isEmpty {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                Text("Loading filmography…")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal)
+                        }
+
+                        if !external.films.isEmpty {
+                            externalShelf(title: "More films with \(person.name)", entries: external.films)
+                        }
+
+                        if !external.series.isEmpty {
+                            externalShelf(title: "More series with \(person.name)", entries: external.series)
                         }
                     }
                 }
@@ -419,6 +433,52 @@ struct PersonView: View {
             }
         }
         .task { await load() }
+        .sheet(item: $selectedEntry) { entry in
+            CreditPreviewSheet(entry: entry)
+        }
+    }
+
+    @ViewBuilder
+    private func mediaShelf(title: String, totalCount: Int, sections: [CreditSection]) -> some View {
+        if sections.count == 1, let only = sections.first {
+            Shelf(title, count: totalCount) {
+                ForEach(only.entries) { entry in
+                    CreditCard(entry: entry)
+                }
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(title).font(.title3.bold())
+                    Text("\(totalCount)")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                .padding(.horizontal)
+
+                ForEach(sections) { section in
+                    Shelf(section.title, count: section.entries.count) {
+                        ForEach(section.entries) { entry in
+                            CreditCard(entry: entry)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func externalShelf(title: String, entries: [PersonFilmographyEntry]) -> some View {
+        Shelf(title, count: entries.count) {
+            ForEach(entries) { entry in
+                Button {
+                    selectedEntry = entry
+                } label: {
+                    FilmographyCard(entry: entry)
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 
     private func header(_ person: Person) -> some View {
@@ -450,9 +510,9 @@ struct PersonView: View {
                     .multilineTextAlignment(.center)
 
                 let facts = Format.facts(
-                    person.knownFor.map { "Known for \($0)" },
-                    Self.life(person),
-                    person.placeOfBirth
+                    person.lifeSpan,
+                    person.placeOfBirth,
+                    person.knownFor.map { "Known for \($0.lowercased())" }
                 )
                 if !facts.isEmpty {
                     Text(facts)
@@ -461,6 +521,20 @@ struct PersonView: View {
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 24)
                 }
+
+                #if os(iOS)
+                if person.wikipediaURL != nil || person.imdbURL != nil {
+                    HStack(spacing: 8) {
+                        if let wikiURL = person.wikipediaURL {
+                            ExternalLinkPill(title: "Wikipedia", url: wikiURL)
+                        }
+                        if let imdbURL = person.imdbURL {
+                            ExternalLinkPill(title: "IMDb", url: imdbURL)
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+                #endif
             }
 
             // Centralized Biography with Read More
@@ -470,7 +544,7 @@ struct PersonView: View {
                         .font(.callout)
                         .foregroundStyle(.white.opacity(0.85))
                         .multilineTextAlignment(.center)
-                        .lineLimit(isBioExpanded ? nil : 5)
+                        .lineLimit(isBioExpanded ? nil : 6)
                         .lineSpacing(3)
 
                     if biography.count > 250 {
@@ -479,7 +553,7 @@ struct PersonView: View {
                                 isBioExpanded.toggle()
                             }
                         } label: {
-                            Text(isBioExpanded ? "Show less" : "Read more")
+                            Text(isBioExpanded ? "Read less" : "Read more")
                                 .font(.footnote.weight(.semibold))
                                 .foregroundStyle(Color.orange)
                         }
@@ -495,73 +569,20 @@ struct PersonView: View {
         .padding(.top, 8)
     }
 
-    /// "Born 2003", "1930–2004".
-    private static func life(_ person: Person) -> String? {
-        guard let born = person.birthday?.prefix(4), !born.isEmpty else { return nil }
-        if let died = person.deathday?.prefix(4), !died.isEmpty { return "\(born)–\(died)" }
-        return "Born \(born)"
-    }
-
     private func load() async {
         do {
-            async let p = connection.api.person(id)
-            async let f = connection.api.personFilmography(id)
-            self.person = try await p
-            self.filmography = (try? await f) ?? []
+            // Await the person first so TVDB -> TMDB merges resolve and TMDB metadata is populated
+            // before asking for their external filmography.
+            let loaded = try await connection.api.person(id)
+            self.person = loaded
             error = nil
+
+            filmographyLoading = true
+            defer { filmographyLoading = false }
+            self.filmography = (try? await connection.api.personFilmography(loaded.id)) ?? []
         } catch is CancellationError {
         } catch {
             self.error = error.localizedDescription
-        }
-    }
-}
-
-enum CreditGroup: String, CaseIterable {
-    case acting = "Acting"
-    case directing = "Directing"
-    case writing = "Writing"
-    case other = "Other"
-}
-
-struct CreditSection: Identifiable {
-    struct Entry: Identifiable {
-        let card: TitleCard
-        let detail: String
-        var id: Int64 { card.id }
-    }
-
-    let group: CreditGroup
-    let entries: [Entry]
-    var id: String { group.rawValue }
-    var title: String { group.rawValue }
-
-    static func sections(_ credits: [PersonCredit]) -> [CreditSection] {
-        var byGroup: [CreditGroup: [Int64: (card: TitleCard, details: [String])]] = [:]
-        for credit in credits {
-            let group = group(of: credit)
-            var titles = byGroup[group] ?? [:]
-            var entry = titles[credit.title.id] ?? (card: credit.title, details: [])
-            let detail = ((credit.kind == "cast" ? credit.character : credit.job) ?? "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !detail.isEmpty, !entry.details.contains(detail) { entry.details.append(detail) }
-            titles[credit.title.id] = entry
-            byGroup[group] = titles
-        }
-        return CreditGroup.allCases.compactMap { group in
-            guard let titles = byGroup[group] else { return nil }
-            let entries = titles.values
-                .map { Entry(card: $0.card, detail: $0.details.joined(separator: ", ")) }
-                .sorted { $0.card.year > $1.card.year }
-            return CreditSection(group: group, entries: entries)
-        }
-    }
-
-    private static func group(of credit: PersonCredit) -> CreditGroup {
-        if credit.kind == "cast" { return .acting }
-        switch (credit.job ?? "").trimmingCharacters(in: .whitespaces).lowercased() {
-        case "director": return .directing
-        case "writer", "screenplay", "story", "novel", "creator": return .writing
-        default: return .other
         }
     }
 }
@@ -571,7 +592,11 @@ struct CreditCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            TitlePoster(card: entry.card, caption: entry.card.yearText, width: shelfCardWidth)
+            TitlePoster(
+                card: entry.card,
+                caption: Format.facts(entry.card.yearText, entry.card.rating?.label),
+                width: shelfCardWidth
+            )
             if !entry.detail.isEmpty {
                 Text(entry.detail)
                     .font(.caption2)
@@ -590,7 +615,11 @@ struct FilmographyCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            PosterCard(title: entry.title, caption: entry.yearText, image: entry.poster)
+            PosterCard(
+                title: entry.title,
+                caption: Format.facts(entry.yearText, entry.ratingLabel.map { "★ \($0)" }),
+                image: entry.poster
+            )
             if let desc = entry.roleDescription {
                 Text(desc)
                     .font(.caption2)
@@ -601,6 +630,188 @@ struct FilmographyCard: View {
             }
         }
         .frame(width: shelfCardWidth, alignment: .leading)
+        .contentShape(.rect)
+    }
+}
+
+/// Preview sheet for an off-library credit, loading synopsis, credits, genres, and cast from TMDB.
+struct CreditPreviewSheet: View {
+    let entry: PersonFilmographyEntry
+
+    @Environment(Connection.self) private var connection
+    @Environment(\.dismiss) private var dismiss
+    @State private var preview: TitlePreview?
+    @State private var loading = false
+    @State private var failed = false
+
+    private var imdbURL: URL? {
+        ExternalLinks.imdbTitleURL(entry.imdbId ?? preview?.imdbId)
+    }
+
+    private var runtimeText: String? {
+        guard let min = preview?.runtimeMin, min > 0 else { return nil }
+        return Format.runtime(Double(min * 60))
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    header
+
+                    if loading {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                            Text("Loading details…")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal)
+                    } else if failed {
+                        Text("More details couldn’t be loaded right now.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal)
+                    }
+
+                    if let preview {
+                        previewBody(preview)
+                    }
+                }
+                .padding(.vertical)
+            }
+            .navigationTitle(entry.title)
+            .plyInlineTitle()
+            .plyCloseToolbar(accessibilityLabel: "Close preview") {
+                dismiss()
+            }
+            .task(id: entry.id) {
+                await loadPreview()
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: 16) {
+            RemoteImage(path: entry.poster, placeholder: entry.isSeries ? "tv" : "film")
+                .aspectRatio(2 / 3, contentMode: .fit)
+                .frame(width: 112)
+                .clipShape(.rect(cornerRadius: 10))
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(entry.title)
+                    .font(.title3.bold())
+
+                if let orig = entry.originalTitle, !orig.isEmpty, orig != entry.title {
+                    Text(orig)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                let specs = Format.facts(
+                    entry.isSeries ? "Series" : "Film",
+                    entry.yearText,
+                    runtimeText,
+                    preview?.certification,
+                    entry.episodeCount.map { $0 == 1 ? "1 episode" : "\($0) episodes" },
+                    entry.ratingLabel.map { "TMDB \($0)" }
+                )
+                if !specs.isEmpty {
+                    Text(specs)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+
+                if let role = entry.roleDescription {
+                    Text("\(entry.character != nil ? "As" : "Job"): \(role)")
+                        .font(.subheadline)
+                        .foregroundStyle(.primary.opacity(0.9))
+                }
+
+                #if os(iOS)
+                if imdbURL != nil || entry.tmdbURL != nil {
+                    HStack(spacing: 8) {
+                        if let imdbURL {
+                            ExternalLinkPill(title: "IMDb", url: imdbURL)
+                        }
+                        if let tmdbURL = entry.tmdbURL {
+                            ExternalLinkPill(title: "TMDB", url: tmdbURL)
+                        }
+                    }
+                    .padding(.top, 2)
+                }
+                #endif
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal)
+    }
+
+    @ViewBuilder
+    private func previewBody(_ preview: TitlePreview) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let tagline = preview.tagline, !tagline.isEmpty {
+                Text(tagline)
+                    .font(.callout.italic())
+                    .foregroundStyle(.secondary)
+            }
+            if let overview = preview.overview, !overview.isEmpty {
+                Text(overview)
+                    .font(.callout)
+            }
+        }
+        .padding(.horizontal)
+
+        let lines = preview.creditLines
+        if !lines.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(lines, id: \.label) { line in
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(line.label)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 105, alignment: .leading)
+                        Text(line.names.joined(separator: ", "))
+                            .font(.subheadline)
+                    }
+                }
+            }
+            .padding(.horizontal)
+        }
+
+        if !preview.genres.isEmpty {
+            WrappingFlowLayout(spacing: 8, lineSpacing: 8) {
+                ForEach(preview.genres, id: \.self) { genre in
+                    Text(genre)
+                        .font(.caption.weight(.medium))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .plySubtleCapsule()
+                }
+            }
+            .padding(.horizontal)
+        }
+
+        if !preview.cast.isEmpty {
+            Shelf("Cast") {
+                ForEach(Array(preview.cast.enumerated()), id: \.offset) { _, member in
+                    PersonCreditCard(name: member.name, subtitle: member.role, profile: member.profile)
+                }
+            }
+        }
+    }
+
+    private func loadPreview() async {
+        guard let tmdbId = entry.tmdbId, tmdbId > 0 else { return }
+        loading = true
+        failed = false
+        defer { loading = false }
+        do {
+            preview = try await connection.api.titlePreview(kind: entry.kind, tmdbId: tmdbId)
+        } catch is CancellationError {
+        } catch {
+            failed = true
+        }
     }
 }
 

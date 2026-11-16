@@ -830,21 +830,24 @@ struct LandscapeCard: View {
     }
 }
 
-/// A titled row that scrolls sideways, with an optional trailing header action.
+/// A titled row that scrolls sideways, with an optional count and trailing header action.
 struct Shelf<Content: View, Trailing: View>: View {
     let title: String
     var subtitle: String?
+    var count: Int?
     @ViewBuilder let trailing: Trailing
     @ViewBuilder let content: Content
 
     init(
         _ title: String,
         subtitle: String? = nil,
+        count: Int? = nil,
         @ViewBuilder trailing: () -> Trailing,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
         self.subtitle = subtitle
+        self.count = count
         self.trailing = trailing()
         self.content = content()
     }
@@ -853,7 +856,15 @@ struct Shelf<Content: View, Trailing: View>: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.title3.bold())
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(title).font(.title3.bold())
+                        if let count {
+                            Text("\(count)")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                    }
                     if let subtitle, !subtitle.isEmpty {
                         Text(subtitle).font(.caption).foregroundStyle(.secondary)
                     }
@@ -871,8 +882,32 @@ struct Shelf<Content: View, Trailing: View>: View {
 }
 
 extension Shelf where Trailing == EmptyView {
-    init(_ title: String, subtitle: String? = nil, @ViewBuilder content: () -> Content) {
-        self.init(title, subtitle: subtitle, trailing: { EmptyView() }, content: content)
+    init(_ title: String, subtitle: String? = nil, count: Int? = nil, @ViewBuilder content: () -> Content) {
+        self.init(title, subtitle: subtitle, count: count, trailing: { EmptyView() }, content: content)
+    }
+}
+
+/// Subtle pill link for external references (Wikipedia, IMDb, TMDB) on iOS.
+struct ExternalLinkPill: View {
+    let title: String
+    let url: URL
+
+    var body: some View {
+        #if os(iOS)
+        Link(destination: url) {
+            HStack(spacing: 4) {
+                Text(title)
+                Image(systemName: "arrow.up.right")
+                    .font(.caption2.weight(.semibold))
+            }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.primary.opacity(0.88))
+            .padding(.horizontal, PlyDesign.capsuleHorizontalPadding)
+            .padding(.vertical, PlyDesign.capsuleVerticalPadding)
+            .plySubtleCapsule()
+        }
+        .buttonStyle(.plain)
+        #endif
     }
 }
 

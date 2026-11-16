@@ -302,4 +302,33 @@ struct APIClientTests {
         let seasonBody = try #require(object(StubURL.recorder.bodies.last ?? nil))
         #expect(seasonBody["watched"] as? Bool == true)
     }
+
+    @Test func personFollowsMergeAndTitlePreviewRequestsCorrectEndpoint() async throws {
+        StubURL.reset { req in
+            switch req.url?.path {
+            case "/api/people/10":
+                return .json(#"{"error":"merged","into":20}"#, status: 404)
+            case "/api/people/20":
+                return .json(#"{"id":20,"name":"Maia Mitchell","wikidataId":"Q256145","credits":[]}"#)
+            case "/api/people/20/filmography":
+                return .json(#"[{"kind":"movie","tmdbId":101,"title":"Teen Beach Movie","year":2013,"inLibrary":false}]"#)
+            case "/api/metadata/preview/movie/101":
+                return .json(#"{"kind":"movie","tmdbId":101,"title":"Teen Beach Movie","year":2013,"genres":["Musical"],"cast":[],"crew":[]}"#)
+            default:
+                return .json(#"{"error":"unexpected"}"#, status: 404)
+            }
+        }
+        let client = makeClient()
+        let person = try await client.person(10)
+        #expect(person.id == 20)
+        #expect(person.wikidataId == "Q256145")
+
+        let filmography = try await client.personFilmography(person.id)
+        #expect(filmography.count == 1)
+        #expect(filmography.first?.title == "Teen Beach Movie")
+
+        let preview = try await client.titlePreview(kind: "movie", tmdbId: 101)
+        #expect(preview.title == "Teen Beach Movie")
+        #expect(preview.genres == ["Musical"])
+    }
 }

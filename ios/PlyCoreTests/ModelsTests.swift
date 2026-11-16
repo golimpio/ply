@@ -282,4 +282,77 @@ private func decode<T: Decodable>(_ json: String) throws -> T {
         #expect(item.isHDR)
         #expect(item.versionLabel == "4K HDR10, MKV")
     }
+
+    @Test func personMetadataLinksDatesAndMediaSplitting() throws {
+        let person: Person = try decode(#"""
+        {"id":42,"name":"Jean-Paul Belmondo","knownFor":"Acting","biography":"French actor.",
+         "birthday":"1933-04-09","deathday":"2021-09-06","placeOfBirth":"Neuilly-sur-Seine, France",
+         "imdbId":"nm0000901","wikidataId":"Q106255","tmdbId":3784,
+         "credits":[
+           {"titleId":1,"kind":"cast","character":"Michel","title":{"id":1,"kind":"movie","title":"Breathless","sortTitle":"Breathless","year":1960,"itemId":10}},
+           {"titleId":2,"kind":"cast","character":"Alfred","title":{"id":2,"kind":"movie","title":"A Woman Is a Woman","sortTitle":"Woman Is a Woman, A","year":1961,"itemId":11}},
+           {"titleId":2,"kind":"crew","job":"Director","title":{"id":2,"kind":"movie","title":"A Woman Is a Woman","sortTitle":"Woman Is a Woman, A","year":1961,"itemId":11}},
+           {"titleId":3,"kind":"cast","character":"Cameo","title":{"id":3,"kind":"series","title":"Some Show","sortTitle":"Some Show","year":1970,"show":"Some Show"}},
+           {"titleId":4,"kind":"cast","character":"Unlinked","title":{"id":4,"kind":"movie","title":"No File","sortTitle":"No File","year":1975}}
+         ]}
+        """#)
+
+        #expect(person.lifeSpan == "1933–2021")
+        #expect(person.wikipediaURL?.absoluteString == "https://www.wikidata.org/wiki/Special:GoToLinkedPage/enwiki/Q106255")
+        #expect(person.imdbURL?.absoluteString == "https://www.imdb.com/name/nm0000901/")
+
+        let media = person.openableMediaCredits
+        #expect(CreditSection.uniqueTitleCount(media.films) == 2)
+        #expect(CreditSection.uniqueTitleCount(media.series) == 1)
+
+        let filmSections = CreditSection.sections(media.films)
+        #expect(filmSections.map(\.group) == [.acting, .directing])
+        #expect(filmSections[0].entries.map(\.card.title) == ["A Woman Is a Woman", "Breathless"])
+
+        let filmography: [PersonFilmographyEntry] = try decode(#"""
+        [{"kind":"movie","tmdbId":603,"title":"Breathless","year":1960,"inLibrary":true},
+         {"kind":"movie","tmdbId":999,"title":"Pierrot le Fou","year":1965,"rating":7.6,"imdbId":"tt0059592","inLibrary":false},
+         {"kind":"series","tmdbId":888,"title":"TV Special","year":1968,"episodeCount":3,"inLibrary":false}]
+        """#)
+        let external = person.externalFilmography(from: filmography)
+        #expect(external.films.map(\.title) == ["Pierrot le Fou"])
+        #expect(external.films.first?.ratingLabel == "7.6")
+        #expect(external.films.first?.imdbURL?.absoluteString == "https://www.imdb.com/title/tt0059592/")
+        #expect(external.films.first?.tmdbURL?.absoluteString == "https://www.themoviedb.org/movie/999")
+        #expect(external.series.map(\.title) == ["TV Special"])
+        #expect(external.series.first?.tmdbURL?.absoluteString == "https://www.themoviedb.org/tv/888")
+    }
+
+    @Test func personDateFormattingAndWikiSearchFallback() {
+        #expect(PersonDates.lifeSpan(birthday: "1993-08-18", deathday: nil) == "Born 18 August 1993")
+        #expect(PersonDates.lifeSpan(birthday: "1961-03", deathday: nil) == "Born March 1961")
+        #expect(PersonDates.lifeSpan(birthday: "1961", deathday: nil) == "Born 1961")
+        #expect(PersonDates.lifeSpan(birthday: nil, deathday: "2023-07-04") == "Died 4 July 2023")
+        #expect(PersonDates.lifeSpan(birthday: "1990-13-01", deathday: nil) == nil)
+
+        let fallback = ExternalLinks.wikipediaURL(name: "Maia Mitchell", wikidataId: nil)
+        #expect(fallback?.absoluteString == "https://en.wikipedia.org/wiki/Special:Search?search=Maia%20Mitchell")
+    }
+
+    @Test func titlePreviewDecodesAndBuildsCreditLines() throws {
+        let preview: TitlePreview = try decode(#"""
+        {"kind":"movie","tmdbId":999,"imdbId":"tt0059592","title":"Pierrot le Fou","originalTitle":"Pierrot le fou",
+         "year":1965,"overview":"Ferdinand flees Paris.","tagline":"Godard in color.",
+         "runtimeMin":110,"certification":"NR","genres":["Crime","Drama"],
+         "cast":[{"tmdbId":3784,"name":"Jean-Paul Belmondo","role":"Ferdinand Griffon","profile":"/api/images/jp.jpg"}],
+         "crew":[{"name":"Jean-Luc Godard","role":"Director"},
+                 {"name":"Jean-Luc Godard","role":"Screenplay"},
+                 {"name":"Georges Delerue","role":"Original Music Composer"},
+                 {"name":"Raoul Coutard","role":"Director of Photography"}]}
+        """#)
+        #expect(preview.title == "Pierrot le Fou")
+        #expect(preview.genres == ["Crime", "Drama"])
+        #expect(preview.cast.count == 1)
+        let lines = preview.creditLines
+        #expect(lines.map(\.label) == ["Director", "Writer", "Music", "Cinematography"])
+        #expect(lines[0].names == ["Jean-Luc Godard"])
+        #expect(lines[1].names == ["Jean-Luc Godard"])
+        #expect(lines[2].names == ["Georges Delerue"])
+        #expect(lines[3].names == ["Raoul Coutard"])
+    }
 }
