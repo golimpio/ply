@@ -72,9 +72,33 @@
           {#if runtime}<span>{runtime}</span>{/if}
           {#if preview?.certification}<span class="badge">{preview.certification}</span>{/if}
           {#if entry.episodeCount}<span>{entry.episodeCount} episodes</span>{/if}
-          {#if rating}<Rating entry={rating} />{/if}
+          <!-- Only the score: the TMDB link is the button below. -->
+          {#if rating}<Rating entry={rating} compact />{/if}
         </div>
         {#if role}<p class="role"><strong>{entry.character ? 'As' : 'Job'}</strong> {role}</p>{/if}
+        <div class="actions">
+          {#if imdbId}
+            <a class="btn pill subtle" href={imdbTitleUrl(imdbId)} target="_blank" rel="noopener noreferrer">
+              <span>IMDb</span>
+              <span class="ext-arrow" aria-hidden="true">↗</span>
+            </a>
+          {/if}
+          {#if entry.tmdbId}
+            <a class="btn pill subtle" href={tmdbTitleUrl(entry.kind, entry.tmdbId)} target="_blank" rel="noopener noreferrer">
+              <span>TMDB</span>
+              <span class="ext-arrow" aria-hidden="true">↗</span>
+            </a>
+          {/if}
+          <button
+            class="btn pill"
+            onclick={() => {
+              open = false;
+              openSearch();
+            }}
+          >
+            Search library
+          </button>
+        </div>
       </div>
     </div>
   {/snippet}
@@ -114,29 +138,6 @@
       {/if}
     {/if}
 
-    <div class="actions">
-      {#if imdbId}
-        <a class="btn pill subtle" href={imdbTitleUrl(imdbId)} target="_blank" rel="noopener noreferrer">
-          <span>IMDb</span>
-          <span class="ext-arrow" aria-hidden="true">↗</span>
-        </a>
-      {/if}
-      {#if entry.tmdbId}
-        <a class="btn pill subtle" href={tmdbTitleUrl(entry.kind, entry.tmdbId)} target="_blank" rel="noopener noreferrer">
-          <span>TMDB</span>
-          <span class="ext-arrow" aria-hidden="true">↗</span>
-        </a>
-      {/if}
-      <button
-        class="btn pill"
-        onclick={() => {
-          open = false;
-          openSearch();
-        }}
-      >
-        Search library
-      </button>
-    </div>
   </div>
 </Dialog>
 

@@ -38,6 +38,22 @@ function render(entry: PersonFilmographyEntry) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('CreditPreview', () => {
+  it('shows the TMDB score as text, and the links under the part played, in the head', () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})));
+    const d = render({ ...red, rating: 7.9, character: 'The Judge' });
+    try {
+      const head = document.querySelector('dialog header')!;
+      const score = head.querySelector('.score-chip');
+      expect(score?.textContent).toContain('7.9'); // positive control: the score is there
+      expect(score?.tagName).toBe('SPAN');
+      const links = [...head.querySelectorAll<HTMLAnchorElement>('.actions a')].map((a) => a.textContent?.trim());
+      expect(links).toEqual(['TMDB ↗']);
+      expect(head.querySelector('.role')!.compareDocumentPosition(head.querySelector('.actions')!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    } finally {
+      d.close();
+    }
+  });
+
   it('shows nothing of the last credit for one TMDB cannot be asked about', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => answer()));
     const d = render(red);
