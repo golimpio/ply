@@ -98,6 +98,33 @@ export function channelLabel(n?: number): string {
   return known[n] ?? `${n}ch`;
 }
 
+export function formatVideoSpec(v: {
+  width?: number;
+  height?: number;
+  hdr?: boolean | string | null;
+  videoCodec?: string;
+}): string {
+  const res = resolutionLabel(v.width, v.height);
+  const hdr = hdrLabel(v.hdr);
+  const picture = [res, hdr].filter(Boolean).join(' ');
+  const codec = codecLabel(v.videoCodec);
+  if (picture && codec) return `${picture} (${codec})`;
+  return picture || codec || '';
+}
+
+export function formatAudioTrack(s: {
+  language?: string;
+  title?: string;
+  codec?: string;
+  channels?: number;
+}): string {
+  const lang = languageLabel(s.language) || 'Unknown';
+  const codec = [codecLabel(s.codec), channelLabel(s.channels)].filter(Boolean).join(' ');
+  const title = s.title?.trim();
+  const detail = [codec, title && title.toLowerCase() !== lang.toLowerCase() ? title : ''].filter(Boolean).join(' · ');
+  return detail ? `${lang} (${detail})` : lang;
+}
+
 export function methodLabel(m: Method): string {
   switch (m) {
     case 'direct':

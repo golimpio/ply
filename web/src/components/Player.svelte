@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type HlsType from 'hls.js';
-  import { api, ApiError, mediaUrl, type ItemDetail, type Playback, type Receiver, type Subtitle } from '../lib/api';
-  import { channelLabel, codecLabel, episodeLabel, languageLabel, methodLabel } from '../lib/format';
+  import { api, ApiError, mediaUrl, type ItemDetail, type Playback, type Receiver, type Stream, type Subtitle } from '../lib/api';
+  import { episodeLabel, formatAudioTrack, languageLabel, methodLabel } from '../lib/format';
   import { needsReceiverChoice, observeAirPlay, reachesTarget, showAirPlay, supportsAirPlay } from '../lib/airplay';
   import { Heartbeat } from '../lib/heartbeat';
   import { applyProgress } from '../lib/library.svelte';
@@ -123,10 +123,7 @@
       .filter((s) => s.type === 'audio')
       .map((s) => ({
         id: s.index,
-        label:
-          [languageLabel(s.language) || 'Unknown', s.title, codecLabel(s.codec), channelLabel(s.channels)]
-            .filter(Boolean)
-            .join(' · '),
+        label: formatAudioTrack(s),
       })),
   );
   const subtitleTracks = $derived<Track[]>(
@@ -143,6 +140,14 @@
         .join(' · '),
     })),
   );
+
+  function defaultAudio(streams: Stream[]): number | undefined {
+    if (!item?.id) return undefined;
+    const stored = sessionStorage.getItem(`ply_audio_${item.id}`);
+    if (stored === null) return undefined;
+    const index = Number(stored);
+    return streams.some((s) => s.type === 'audio' && s.index === index) ? index : undefined;
+  }
 
   /**
    * The file's own choice: a track marked default, else a forced one. Only text tracks qualify: a
@@ -269,6 +274,7 @@
   function selectAudio(id: Track['id']) {
     if (id === (audioIndex ?? playback?.audioIndex)) return;
     audioIndex = Number(id);
+    if (item?.id) sessionStorage.setItem(`ply_audio_${item.id}`, String(audioIndex));
     restart();
   }
 
@@ -606,6 +612,7 @@
     const onTimeUpdate = () => progress.update();
     v.addEventListener('timeupdate', onTimeUpdate);
     v.textTracks.addEventListener('addtrack', showNativeSubtitle);
+    audioIndex = defaultAudio(item.streams);
     subKey = defaultSubtitle(item.subtitles);
     void start(startSec);
     void loadReceivers();

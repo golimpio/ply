@@ -5,10 +5,12 @@
     channelLabel,
     codecLabel,
     episodeLabel,
+    formatAudioTrack,
     formatBitrate,
     formatBytes,
     formatClock,
     formatDuration,
+    formatVideoSpec,
     languageLabel,
     methodLabel,
   } from '../lib/format';
@@ -16,7 +18,7 @@
   import { ensureLibrary, episodesOf, findItem, markWatched, versionsOf, type LibraryRow } from '../lib/library.svelte';
   import { CREDIT_LINES, crewWith, logoSrc, ratingLabel, runtimeLabel, titleCollections, versionLabel, yearOf } from '../lib/meta';
   import { titleRatings } from '../lib/ratings';
-  import { href } from '../lib/router.svelte';
+  import { href, redirect } from '../lib/router.svelte';
   import { app } from '../lib/state.svelte';
   import { artOf, progressOf } from '../lib/ui-types';
   import { WATCHED } from '../lib/watched';
@@ -257,27 +259,52 @@
   const d = $derived(detail.data);
 
   const videoStream = $derived(d?.streams?.find((s) => s.type === 'video'));
-  const audioStream = $derived(
-    d?.streams?.find((s) => s.type === 'audio' && s.default) ??
-    d?.streams?.find((s) => s.type === 'audio'),
+  const audioStreams = $derived(d?.streams?.filter((s) => s.type === 'audio') ?? []);
+  const defaultAudioStream = $derived(
+    audioStreams.find((s) => s.default) ?? audioStreams[0],
   );
 
   const videoInfo = $derived.by(() => {
     if (!d) return '';
-    const res = d.height >= 2160 ? '4K' : d.height >= 1080 ? '1080p' : d.height ? `${d.height}p` : '';
-    const codec = codecLabel(d.videoCodec || videoStream?.codec);
-    if (res && codec) return `${res} (${codec})`;
-    return res || codec || '';
+    return formatVideoSpec({
+      width: d.width || videoStream?.width,
+      height: d.height || videoStream?.height,
+      hdr: d.hdr,
+      videoCodec: d.videoCodec || videoStream?.codec,
+    });
   });
 
-  const audioInfo = $derived.by(() => {
-    if (!audioStream) return '';
-    const lang = languageLabel(audioStream.language) || 'Unknown';
-    const codec = codecLabel(audioStream.codec);
-    const ch = audioStream.channels ? channelLabel(audioStream.channels) : '';
-    const details = [codec, ch].filter(Boolean).join(' ');
-    return details ? `${lang} (${details})` : lang;
+  const audioInfo = $derived(defaultAudioStream ? formatAudioTrack(defaultAudioStream) : '');
+
+  let selectedAudioIndex = $state<number>(0);
+
+  $effect(() => {
+    if (!item?.id || !audioStreams.length) return;
+    const stored = sessionStorage.getItem(`ply_audio_${item.id}`);
+    if (stored !== null) {
+      const parsed = Number(stored);
+      if (audioStreams.some((s) => s.index === parsed)) {
+        selectedAudioIndex = parsed;
+        return;
+      }
+    }
+    selectedAudioIndex = defaultAudioStream?.index ?? audioStreams[0].index;
   });
+
+  function handleAudioChange(e: Event) {
+    const val = Number((e.currentTarget as HTMLSelectElement).value);
+    if (!Number.isFinite(val)) return;
+    selectedAudioIndex = val;
+    if (item?.id) {
+      sessionStorage.setItem(`ply_audio_${item.id}`, String(val));
+    }
+  }
+
+  function handleVersionChange(e: Event) {
+    const nextId = Number((e.currentTarget as HTMLSelectElement).value);
+    if (!Number.isFinite(nextId) || nextId === item?.id) return;
+    redirect(href.item(nextId));
+  }
 
   let selectedSubKey = $state('');
 
@@ -373,15 +400,51 @@
       <section class="about">
         <div class="about-main">
           {#if overview}<p class="title-overview">{overview}</p>{/if}
-          {#if videoInfo || audioInfo || d?.subtitles?.length}
+          {#if videoInfo || versions.length > 1 || audioInfo || d?.subtitles?.length}
             <dl class="media-specs">
-              {#if videoInfo}
+              {#if versions.length > 1}
+                <div class="spec-row">
+                  <dt class="spec-label">Video</dt>
+                  <dd class="spec-value">
+                    <div class="spec-select-wrap">
+                      <select
+                        class="spec-select"
+                        aria-label="Video"
+                        value={String(item.id)}
+                        onchange={handleVersionChange}
+                      >
+                        {#each versions as v (v.id)}
+                          <option value={String(v.id)}>{formatVideoSpec(v) || versionLabel(v)}</option>
+                        {/each}
+                      </select>
+                    </div>
+                  </dd>
+                </div>
+              {:else if videoInfo}
                 <div class="spec-row">
                   <dt class="spec-label">Video</dt>
                   <dd class="spec-value">{videoInfo}</dd>
                 </div>
               {/if}
-              {#if audioInfo}
+              {#if audioStreams.length > 1}
+                <div class="spec-row">
+                  <dt class="spec-label">Audio</dt>
+                  <dd class="spec-value">
+                    <div class="spec-select-wrap">
+                      <select
+                        class="spec-select"
+                        aria-label="Audio"
+                        value={String(selectedAudioIndex)}
+                        onchange={handleAudioChange}
+                      >
+                        {#each audioStreams as s (s.index)}
+                          <option value={String(s.index)}>{formatAudioTrack(s)}</option>
+                        {/each}
+                      </select>
+                    </div>
+                  </dd>
+                </div>
+              {:else if audioInfo}
                 <div class="spec-row">
                   <dt class="spec-label">Audio</dt>
                   <dd class="spec-value">{audioInfo}</dd>
