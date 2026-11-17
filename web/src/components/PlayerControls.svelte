@@ -558,8 +558,8 @@
 >
   <div class="top">
     <h1 class="titles">
-      {#if subtitle}<span class="subtitle">{subtitle}</span>{/if}
-      <span class="title">{title}{#if year}<span class="year">{` (${year})`}</span>{/if}</span>
+      {#if subtitle}<span class="subtitle truncate">{subtitle}</span>{/if}
+      <span class="title truncate">{title}{#if year}<span class="year">{` (${year})`}</span>{/if}</span>
     </h1>
     {@render info?.()}
     {#if onClose}
@@ -772,9 +772,6 @@
   .title,
   .subtitle {
     display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .title {
     font-weight: var(--fw-bold);

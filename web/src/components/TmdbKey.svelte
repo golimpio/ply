@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { api, ApiError, type Settings } from '../lib/api';
+  import { messageOf } from '../lib/errors';
   import { app } from '../lib/state.svelte';
   import ConfirmRemove from './ConfirmRemove.svelte';
   import KeyField from './KeyField.svelte';
@@ -50,7 +51,7 @@
       key = '';
       app.libraryVersion++; // lookups may start (or stop): refresh this page and what every page shows
     } catch (e) {
-      const why = e instanceof ApiError && e.status === 502 ? 'TMDB could not be reached to check the key.' : e instanceof Error ? e.message : String(e);
+      const why = e instanceof ApiError && e.status === 502 ? 'TMDB could not be reached to check the key.' : messageOf(e);
       message = { ok: false, text: why };
     } finally {
       saving = false;

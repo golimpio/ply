@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import type HlsType from 'hls.js';
   import { api, ApiError, mediaUrl, type ItemDetail, type Playback, type Receiver, type Stream, type Subtitle } from '../lib/api';
+  import { messageOf } from '../lib/errors';
   import { episodeLabel, formatAudioTrack, languageLabel, methodLabel } from '../lib/format';
   import { needsReceiverChoice, observeAirPlay, reachesTarget, showAirPlay, supportsAirPlay } from '../lib/airplay';
   import { Heartbeat } from '../lib/heartbeat';
@@ -441,7 +442,7 @@
       if (l) refused(l);
       // A newer ask of this device (another window) has the play: this one was given up.
       else if (e instanceof ApiError && e.status === 410) stoppedElsewhere();
-      else fail(e instanceof Error ? e.message : String(e));
+      else fail(messageOf(e));
       return;
     }
     if (destroyed || run !== attempt) {
@@ -783,7 +784,7 @@
 
 {#if !active && wireless}
   <div class="remote" aria-label="AirPlay playback">
-    <span>AirPlay · {title}</span>
+    <span class="truncate">AirPlay · {title}</span>
     <!-- Like other back links, this fixed controller is not a library scroll anchor. -->
     <a class="btn back" href={href.play(item.id)}>Controls</a>
     <button class="btn" onclick={onStop}>Stop AirPlay</button>
@@ -829,9 +830,6 @@
   .remote span {
     flex: 1;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .airplay-status {
     font-size: var(--fs-sm);

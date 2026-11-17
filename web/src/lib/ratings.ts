@@ -23,17 +23,6 @@ export const SOURCE_NAMES: Record<RatingSource, string> = {
   tmdb: 'TMDB',
 };
 
-/** The name a chip shows beside its number: short, so seven chips fit. */
-export const SOURCE_SHORT: Record<RatingSource, string> = {
-  imdb: 'IMDb',
-  rt_critics: 'Critics',
-  rt_audience: 'Audience',
-  metacritic: 'Metacritic',
-  letterboxd: 'Letterboxd',
-  trakt: 'Trakt',
-  tmdb: 'TMDB',
-};
-
 /** The minimum-rating filter of the Movies and Shows pages, on score100. */
 export const MIN_RATINGS = [60, 70, 80] as const;
 

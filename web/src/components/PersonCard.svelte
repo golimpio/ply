@@ -13,7 +13,7 @@
   <div class="frame">
     <Picture img={profileImg({ profile })} ratio="1 / 1" label={name} sizes="(max-width: 600px) 30vw, 150px" />
   </div>
-  <div class="name">{name}</div>
+  <div class="name truncate">{name}</div>
   {#if role}<div class="role">{role}</div>{/if}
 </svelte:element>
 
@@ -46,9 +46,6 @@
     font-weight: var(--fw-semibold-2);
     font-size: var(--fs-sm-4);
     line-height: var(--lh-snug);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .role {
     color: var(--text-muted);

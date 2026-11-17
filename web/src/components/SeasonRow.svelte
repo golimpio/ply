@@ -156,7 +156,7 @@
     <!-- Its words are said after the name (below): "Season 1, 3 episodes, Watched". -->
     {#if s.badge}<span class="corner" aria-hidden="true"><WatchBadge badge={s.badge} /></span>{/if}
   </div>
-  <span class="name">{s.name}</span>
+  <span class="name truncate">{s.name}</span>
   <span class="eps">{plural(s.episodes)}</span>
   {#if s.badge}<span class="sr-only">{s.badge.label}</span>{/if}
 {/snippet}
@@ -324,9 +324,6 @@
   .name {
     font-weight: var(--fw-semibold-2);
     line-height: var(--lh-snug);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .season[aria-selected='true'] .name {
     color: var(--text);

@@ -173,6 +173,12 @@ code {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+/* One line, cut with an ellipsis (a card's title, a row's name, a bar's label). */
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* Metadata runs: items separated by space, not punctuation. */
 .meta {

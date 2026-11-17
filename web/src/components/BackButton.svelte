@@ -23,10 +23,10 @@
 </script>
 
 {#if unknown}
-  <span class="btn back pending" class:over aria-hidden="true"><Icon name="left" /><span>Back</span></span>
+  <span class="btn back pending" class:over aria-hidden="true"><Icon name="left" /><span class="truncate">Back</span></span>
 {:else}
   <a class="btn back" class:over href={to.hash} aria-label={to.previous ? 'Back' : `Back to ${to.label}`} onclick={back}>
-    <Icon name="left" /><span>{to.label}</span>
+    <Icon name="left" /><span class="truncate">{to.label}</span>
   </a>
 {/if}
 
@@ -56,11 +56,6 @@
     background: var(--fill-hover);
     border-color: var(--glass-line-hover);
     color: var(--text);
-  }
-  .back span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .pending {
     visibility: hidden;

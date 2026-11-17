@@ -8,7 +8,7 @@ import { search } from './fuzzy';
 export const PEOPLE_DEBOUNCE_MS = 150;
 
 /** People are only looked up from this many characters on. */
-export const MIN_PEOPLE_QUERY = 2;
+const MIN_PEOPLE_QUERY = 2;
 
 /** The query to look people up with (trimmed), or null when it is too short to ask the server. */
 export function peopleQuery(q: string): string | null {

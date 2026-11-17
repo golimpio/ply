@@ -2,6 +2,7 @@
   import { onMount, untrack } from 'svelte';
   import { openActivity } from './lib/activity.svelte';
   import { api, ApiError, getToken, onUnauthorized, setToken } from './lib/api';
+  import { messageOf } from './lib/errors';
   import { ambient } from './lib/ambient.svelte';
   import { goBack, router } from './lib/router.svelte';
   import { app, attachToRunningScan } from './lib/state.svelte';
@@ -90,7 +91,7 @@
       started();
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) return;
-      message = e instanceof Error ? e.message : String(e);
+      message = messageOf(e);
       phase = 'error';
     }
   }
@@ -103,7 +104,7 @@
       epoch++;
       started();
     } catch (e) {
-      if (!(e instanceof ApiError && e.status === 401)) message = e instanceof Error ? e.message : String(e);
+      if (!(e instanceof ApiError && e.status === 401)) message = messageOf(e);
     } finally {
       checking = false;
     }

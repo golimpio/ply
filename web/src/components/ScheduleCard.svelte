@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api, type ScheduleUpdate, type ScheduledTask } from '../lib/api';
+  import { messageOf } from '../lib/errors';
   import { href } from '../lib/router.svelte';
   import { daysWords, lastRunWords, nextRunWords, WEEKDAYS } from '../lib/schedules';
 
@@ -18,8 +19,6 @@
   const id = $derived(`schedule-${task.task.replace(/\./g, '-')}`);
   const last = $derived(lastRunWords(task.lastRun));
 
-  const said = (e: unknown) => (e instanceof Error ? e.message : String(e));
-
   async function save(update: ScheduleUpdate, text: string): Promise<boolean> {
     if (saving) return false;
     saving = true;
@@ -29,7 +28,7 @@
       note = { ok: true, text };
       return true;
     } catch (e) {
-      note = { ok: false, text: said(e) };
+      note = { ok: false, text: messageOf(e) };
       return false;
     } finally {
       saving = false;
@@ -63,7 +62,7 @@
       await api.runSchedule(task.task);
       note = { ok: true, text: 'Queued now: follow it on Activity.' };
     } catch (e) {
-      note = { ok: false, text: said(e) };
+      note = { ok: false, text: messageOf(e) };
     } finally {
       running = false;
     }

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import { api, type RatingSource, type Settings, type SettingsUpdate } from '../lib/api';
+  import { messageOf } from '../lib/errors';
   import { formatDate } from '../lib/credits';
   import { applyRatingPrefs } from '../lib/ratingprefs.svelte';
   import { linkParts, PRIMARY_SOURCES, RATING_SOURCES, SOURCE_NAMES } from '../lib/ratings';
@@ -93,7 +94,7 @@
           if (!latest()) continue;
           primary = confirmed.primary;
           shown = [...confirmed.shown];
-          choiceMessage = { ok: false, text: e instanceof Error ? e.message : String(e) };
+          choiceMessage = { ok: false, text: messageOf(e) };
         }
         return;
       }

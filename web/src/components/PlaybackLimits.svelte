@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api, ApiError, type Settings } from '../lib/api';
+  import { messageOf } from '../lib/errors';
 
   // The Playback card of Settings: how many videos may play at once, and how many of them ply may
   // convert. Each saves on change; one set on the command line is shown locked.
@@ -85,7 +86,7 @@
           } else if (e instanceof ApiError && e.status === 400) {
             notes[r.field] = { kind: 'error', text: `Choose a number from 1 to ${r.max}.` };
           } else {
-            notes[r.field] = { kind: 'error', text: e instanceof Error ? e.message : String(e) };
+            notes[r.field] = { kind: 'error', text: messageOf(e) };
           }
         }
         return;

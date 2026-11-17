@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from '../../lib/api';
+  import { messageOf } from '../../lib/errors';
   import { matchingStatus } from '../../lib/matching.svelte';
   import { href } from '../../lib/router.svelte';
   import { resource } from '../../lib/resource.svelte';
@@ -47,7 +48,7 @@
       message = { ok: true, text: done };
       app.libraryVersion++; // lookups may start (or stop): refresh this page and what every page shows
     } catch (e) {
-      message = { ok: false, text: e instanceof Error ? e.message : String(e) };
+      message = { ok: false, text: messageOf(e) };
     } finally {
       saving = false;
     }
@@ -60,7 +61,7 @@
       await api.refreshAll();
       refreshNote = 'Refreshing every title in the background.';
     } catch (e) {
-      refreshNote = e instanceof Error ? e.message : String(e);
+      refreshNote = messageOf(e);
     }
   }
 

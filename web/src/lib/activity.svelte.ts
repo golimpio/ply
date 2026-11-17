@@ -4,6 +4,7 @@
 // when the library changed ("library": files came, went or moved, titles were matched): every open
 // page then fetches what it shows again.
 import { api, ApiError, mediaUrl, normaliseSnapshot, normaliseTier, type Job, type JobEvent, type JobsSnapshot, type JobState, type PlayingSession, type TierState } from './api';
+import { messageOf } from './errors';
 import { deviceId } from './device';
 import { app } from './state.svelte';
 
@@ -12,11 +13,11 @@ export const HISTORY_MAX = 200;
 export const FAILURE_WINDOW_MS = 10 * 60_000;
 export const POLL_MS = 3000;
 /** EventSource errors in a row (without a successful open) before polling instead. */
-export const SSE_MAX_FAILURES = 3;
+const SSE_MAX_FAILURES = 3;
 /** Library events less than this apart make one refetch, after the last. */
 export const LIBRARY_SETTLE_MS = 1000;
 
-export const EVENT_TYPES = [
+const EVENT_TYPES = [
   'snapshot',
   'job.queued',
   'job.updated',
@@ -33,7 +34,7 @@ export const EVENT_TYPES = [
 ] as const;
 
 /** What plays, on the same stream (docs/M11-CLIENTS.md, "Session events"). */
-export const SESSION_EVENT_TYPES = ['session.started', 'session.updated', 'session.ended'] as const;
+const SESSION_EVENT_TYPES = ['session.started', 'session.updated', 'session.ended'] as const;
 
 /**
  * What plays after one session event: started and updated put the play in (in its place, or last:
@@ -52,7 +53,7 @@ export function applySessionEvent(list: PlayingSession[], type: string, data: un
   return out;
 }
 
-export const isFinished = (s: JobState) => s === 'done' || s === 'failed' || s === 'cancelled';
+const isFinished = (s: JobState) => s === 'done' || s === 'failed' || s === 'cancelled';
 
 /** Work outside the queue (reading the library folders): shown, never acted on. */
 export const isSynthetic = (j: Job) => j.id < 0;
@@ -260,7 +261,7 @@ export function actionError(e: unknown, action: 'cancel' | 'bump' | 'retry'): st
     return 'It can’t be retried now.';
   }
   if (e instanceof ApiError && e.status === 404) return 'This job is gone: finished jobs are kept for a week.';
-  return e instanceof Error ? e.message : String(e);
+  return messageOf(e);
 }
 
 // ---- the live store ---------------------------------------------------------------------------
@@ -309,7 +310,7 @@ class Activity {
       this.loaded = true;
       this.error = '';
     } catch (e) {
-      this.error = e instanceof Error ? e.message : String(e);
+      this.error = messageOf(e);
     }
   }
 

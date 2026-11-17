@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api, type KeyProvider } from '../lib/api';
+  import { messageOf } from '../lib/errors';
   import { testedLine } from '../lib/settings-tabs';
   import Icon from './Icon.svelte';
 
@@ -72,7 +73,7 @@
       if (r.ok) onworks?.();
     } catch (e) {
       if (mine !== asked) return;
-      result = { ok: false, text: e instanceof Error ? e.message : String(e) };
+      result = { ok: false, text: messageOf(e) };
       tested = { at: Date.now() / 1000, ok: false };
     } finally {
       testing = false;

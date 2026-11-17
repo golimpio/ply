@@ -218,7 +218,7 @@
               <div class="thumb"><Art item={hit.item} label={hit.label} /></div>
             {/if}
             <div class="text">
-              <div class="title">{hit.title}</div>
+              <div class="title truncate">{hit.title}</div>
               <div class="sub">
                 {#each hit.sub.filter((p) => p !== '' && p != null) as p, j (j)}<span>{p}</span>{/each}
               </div>
@@ -308,9 +308,6 @@
   }
   .title {
     font-weight: var(--fw-semibold-2);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .sub {
     display: flex;

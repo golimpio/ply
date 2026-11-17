@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { api, ApiError, type Settings, type SettingsUpdate } from '../lib/api';
+  import { messageOf } from '../lib/errors';
   import { applyRatingPrefs } from '../lib/ratingprefs.svelte';
   import { linkParts } from '../lib/ratings';
   import { app } from '../lib/state.svelte';
@@ -46,7 +47,7 @@
       app.libraryVersion++; // the sources this install can have change: the page and the lists
     } catch (e) {
       const why =
-        e instanceof ApiError && e.status === 502 ? 'MDBList could not be reached to check the key.' : e instanceof Error ? e.message : String(e);
+        e instanceof ApiError && e.status === 502 ? 'MDBList could not be reached to check the key.' : messageOf(e);
       keyMessage = { ok: false, text: why };
     } finally {
       saving = false;

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { api, ApiError, candidateRef, imageUrl, parseMatchInput, type MatchCandidate, type MatchInput, type MatchRef, type TitleKind } from '../lib/api';
+  import { messageOf } from '../lib/errors';
   import { href } from '../lib/router.svelte';
   import { app } from '../lib/state.svelte';
   import Dialog from './Dialog.svelte';
@@ -99,7 +100,7 @@
       }
       return `${/could not reach TVDB/.test(e.message) ? 'TVDB' : 'TMDB'} could not be reached. Try again in a moment.`;
     }
-    return e instanceof Error ? e.message : String(e);
+    return messageOf(e);
   }
 
   async function search(e?: Event) {

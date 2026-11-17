@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api, type Device } from '../../lib/api';
+  import { messageOf } from '../../lib/errors';
   import { codeDeadline, codeLeft, deviceLine } from '../../lib/devices';
   import { resource } from '../../lib/resource.svelte';
 
@@ -46,8 +47,6 @@
     }
   });
 
-  const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
-
   async function showCode() {
     busy = true;
     note = null;
@@ -56,7 +55,7 @@
       now = Date.now();
       shown = { code: c.code, deadline: codeDeadline(c.expiresIn, now), pairedBefore: pairedAt(devices.data) };
     } catch (e) {
-      note = { ok: false, text: message(e) };
+      note = { ok: false, text: messageOf(e) };
     } finally {
       busy = false;
     }
@@ -70,7 +69,7 @@
       note = { ok: true, text: `${d.name} can no longer use ply, nor the links it was given, until it is paired again.` };
       version++;
     } catch (e) {
-      note = { ok: false, text: message(e) };
+      note = { ok: false, text: messageOf(e) };
     } finally {
       busy = false;
     }

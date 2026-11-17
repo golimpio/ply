@@ -98,10 +98,10 @@
       </div>
     {/if}
   </div>
-  <div class="title">{title}</div>
+  <div class="title truncate">{title}</div>
   <!-- Always there, one line tall, a rating glyph or not: every card is as tall as the next (a
        virtual grid places its rows by one measured height). -->
-  <div class="sub">
+  <div class="sub truncate">
     {#if rating}<span class="rating"><Rating entry={rating} compact /></span>{/if}
     {#each parts as p, i (i)}<span>{p}</span>{/each}
   </div>
@@ -182,9 +182,6 @@
     font-size: var(--fs-xl);
     font-weight: var(--fw-regular);
     line-height: var(--lh-tight);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     color: var(--text);
   }
   /* One line tall: a rating glyph (1.3em) no longer makes it taller, its text where it was. */
@@ -198,9 +195,6 @@
     font-family: var(--font-mono);
     font-size: var(--fs-xs);
     font-variant-numeric: tabular-nums;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   /* The last part (a character, an episode title) gives way, with an ellipsis. */
   .sub span {

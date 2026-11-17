@@ -1,5 +1,6 @@
 <script lang="ts">
   import { ApiError, api, type FolderKind, type LibraryFolder } from '../lib/api';
+  import { messageOf } from '../lib/errors';
   import { plural } from '../lib/format';
   import { resource } from '../lib/resource.svelte';
   import { app, attachToRunningScan, rescan, rescanFolder, scan } from '../lib/state.svelte';
@@ -27,7 +28,6 @@
   const when = (unix: number) =>
     new Date(unix * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   const whenIso = (iso?: string | null) => (iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '');
-  const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
   // The library changed under every page: refresh them all, and follow the scan the server started.
   function changed() {

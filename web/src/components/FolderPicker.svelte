@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { api, type DirEntry, type DirListing, type FolderKind, type LibraryFolder } from '../lib/api';
+  import { messageOf } from '../lib/errors';
   import Dialog from './Dialog.svelte';
   import Icon from './Icon.svelte';
 
@@ -38,7 +39,7 @@
       (listEl?.querySelector<HTMLElement>('.dir') ?? listEl)?.focus();
     } catch (e) {
       if (ticket !== latest) return;
-      browseError = e instanceof Error ? e.message : String(e);
+      browseError = messageOf(e);
     } finally {
       if (ticket === latest) loading = false;
     }
@@ -84,7 +85,7 @@
       open = false;
       onadded(f);
     } catch (e) {
-      addError = e instanceof Error ? e.message : String(e);
+      addError = messageOf(e);
     } finally {
       adding = false;
     }
@@ -137,8 +138,8 @@
             <li>
               <button type="button" class="dir" onclick={() => go(d.path)} title={d.path}>
                 <Icon name="folder" />
-                <span>{d.name}</span>
-                {#if atPlaces && d.name !== baseName(d.path)}<span class="muted where-is">{d.path}</span>{/if}
+                <span class="truncate">{d.name}</span>
+                {#if atPlaces && d.name !== baseName(d.path)}<span class="muted where-is truncate">{d.path}</span>{/if}
               </button>
             </li>
           {/each}
@@ -249,11 +250,6 @@
     width: 1.15rem;
     height: 1.15rem;
     color: var(--accent);
-  }
-  .dir span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .dir .where-is {
     margin-left: auto;

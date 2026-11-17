@@ -681,7 +681,7 @@ export interface SettingsUpdate {
 }
 
 /** The settings with Go's nulls in the ratings lists as []. */
-export function normaliseSettings(s: Settings): Settings {
+function normaliseSettings(s: Settings): Settings {
   if (s.ratingsPrimary === undefined) return s; // a server older than M10
   return { ...s, ratingsShown: s.ratingsShown ?? [], ratingsAvailable: s.ratingsAvailable ?? [] };
 }
@@ -938,7 +938,7 @@ export interface ScheduleUpdate {
 }
 
 /** A schedule with Go's nulls as lists. */
-export function normaliseSchedule(s: ScheduledTask): ScheduledTask {
+function normaliseSchedule(s: ScheduledTask): ScheduledTask {
   return { ...s, days: s.days ?? [], missing: s.missing ?? [], warnings: s.warnings ?? [] };
 }
 
@@ -1031,6 +1031,7 @@ function retryAfterOf(res: Response): number | undefined {
   return v && /^\d+$/.test(v) ? Number(v) : undefined;
 }
 
+
 // ---- token -----------------------------------------------------------------
 
 const TOKEN_KEY = 'ply.token';
@@ -1080,7 +1081,7 @@ export function mediaUrl(rel: string): string {
 }
 
 /** The TMDB image sizes the server serves (its allowlist, TVDB's images too), by width. */
-export const IMAGE_SIZES = { w92: 92, w185: 185, w342: 342, w500: 500, w780: 780, w1280: 1280 } as const;
+const IMAGE_SIZES = { w92: 92, w185: 185, w342: 342, w500: 500, w780: 780, w1280: 1280 } as const;
 export type ImageSize = keyof typeof IMAGE_SIZES | 'original';
 
 const TMDB_IMAGE = /^(\/api\/images\/tmdb\/)(w92|w185|w342|w500|w780|w1280|original)(\/[A-Za-z0-9_-]+\.(?:jpg|png|svg))(\?.*)?$/;

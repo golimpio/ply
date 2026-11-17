@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api, ApiError, type EpisodeCard, type EpisodeOrder, type Subtitle } from '../lib/api';
+  import { messageOf } from '../lib/errors';
   import { useAmbient } from '../lib/ambient.svelte';
   import { episodeLabel, formatDuration, plural, seasonLabel } from '../lib/format';
   import { ensureEpisodes, episodes as episodeList, episodesOf, markWatched, showMeta, showsOf, type WatchTarget } from '../lib/library.svelte';
@@ -123,7 +124,7 @@
     try {
       await markWatched(t, watched);
     } catch (e) {
-      const why = e instanceof Error ? e.message : String(e);
+      const why = messageOf(e);
       markError = { at, text: `Couldn’t mark ${watched ? 'it as watched' : 'it as unwatched'}: ${why}` };
     } finally {
       marking = false;
@@ -138,7 +139,7 @@
       notice = 'Fetching the latest details. They appear here in a moment.';
       setTimeout(() => app.libraryVersion++, 4000);
     } catch (e) {
-      notice = e instanceof Error ? e.message : String(e);
+      notice = messageOf(e);
     }
   }
 
@@ -180,7 +181,7 @@
     } catch (err) {
       select.value = was;
       if (err instanceof ApiError && err.status === 502) orderError = 'TVDB can’t be reached right now.';
-      else orderError = err instanceof Error ? err.message : String(err);
+      else orderError = messageOf(err);
     } finally {
       ordering = false;
     }
@@ -363,7 +364,7 @@
               <div class="text">
                 <div class="line">
                   <span class="num tabular">{ep.episode ?? ''}</span>
-                  <span class="title">{ep.episodeTitle || `Episode ${ep.episode ?? ''}`.trim()}</span>
+                  <span class="title truncate">{ep.episodeTitle || `Episode ${ep.episode ?? ''}`.trim()}</span>
                 </div>
                 <div class="meta small">
                   {#if ep.durationSec}<span>{formatDuration(ep.durationSec)}</span>{/if}
@@ -580,9 +581,6 @@
     font-size: var(--fs-2xl-2);
     font-weight: var(--fw-regular);
     line-height: var(--lh-tight);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .small {
     margin-top: 0.2rem;

@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import { activity, actionError, describeTiers, countText, groupQueued, isSynthetic } from '../lib/activity.svelte';
   import { api, ApiError, type Job, type PlayingSession } from '../lib/api';
+  import { messageOf } from '../lib/errors';
   import { formatClock } from '../lib/format';
   import BackButton from '../components/BackButton.svelte';
   import Icon from '../components/Icon.svelte';
@@ -31,7 +32,7 @@
       polled = await api.sessions();
       sessionsError = '';
     } catch (e) {
-      sessionsError = e instanceof Error ? e.message : String(e);
+      sessionsError = messageOf(e);
     }
   }
   $effect(() => {
@@ -86,7 +87,7 @@
       await (paused ? api.pauseQueue() : api.resumeQueue());
       activity.apply(paused ? 'queue.paused' : 'queue.resumed', null);
     } catch (e) {
-      queueError = e instanceof Error ? e.message : String(e);
+      queueError = messageOf(e);
     } finally {
       queueBusy = false;
     }
@@ -106,7 +107,7 @@
         void loadSessions();
       } // live: the feed says it ended
     } catch (e) {
-      stopErrors[p.id] = e instanceof ApiError && e.status === 404 ? 'It had already stopped.' : e instanceof Error ? e.message : String(e);
+      stopErrors[p.id] = e instanceof ApiError && e.status === 404 ? 'It had already stopped.' : messageOf(e);
     } finally {
       stopping = null;
     }

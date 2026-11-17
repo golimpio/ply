@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api, ApiError } from '../lib/api';
+  import { messageOf } from '../lib/errors';
   import { formatClock } from '../lib/format';
   import { limitMessage, type PlayLimit } from '../lib/playlimit';
   import { href } from '../lib/router.svelte';
@@ -61,7 +62,7 @@
     } catch (e) {
       // Already gone (it ended, or was stopped elsewhere): its room is free all the same.
       if (!(e instanceof ApiError && (e.status === 404 || e.status === 410))) {
-        stopError = `Could not stop it: ${e instanceof Error ? e.message : String(e)}`;
+        stopError = `Could not stop it: ${messageOf(e)}`;
         stopping = null;
         return;
       }
@@ -80,7 +81,7 @@
       {#each limit.playing as p (p.id)}
         <li data-session={p.id}>
           <div class="what">
-            <span class="title">{p.title}</span>
+            <span class="title truncate">{p.title}</span>
             <span class="muted">
               {p.client || 'Unknown device'} · <span class="tabular">{p.paused ? 'Paused at' : 'At'} {formatClock(p.positionSec)}</span>
             </span>
@@ -153,9 +154,6 @@
   }
   .title {
     font-weight: var(--fw-semibold-2);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .what .muted {
     font-size: var(--fs-xs-3);

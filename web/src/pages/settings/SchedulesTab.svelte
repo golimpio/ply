@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api, type ScheduledTask } from '../../lib/api';
+  import { messageOf } from '../../lib/errors';
   import ScheduleCard from '../../components/ScheduleCard.svelte';
 
   // Settings → Schedules (M12, docs/M12-SCHEDULES.md): when each background task runs, and whether it
@@ -18,7 +19,7 @@
         if (live) tasks = list;
       })
       .catch((e: unknown) => {
-        if (live) error = e instanceof Error ? e.message : String(e);
+        if (live) error = messageOf(e);
       });
     return () => {
       live = false;

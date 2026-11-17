@@ -524,8 +524,8 @@ export function resetNavigation(): void {
   if (views[at].scroll > 0) restoreScroll(views[at].scroll, views[at].anchor, false);
 }
 
-/** Writes the views of the tab down, for a reload (pagehide). Exported for tests. */
-export function storeViews(): void {
+/** Writes the views of the tab down, for a reload (pagehide). */
+function storeViews(): void {
   save(views[at]);
   history.replaceState({ ply: tagFor(views[at]) }, '');
   try {

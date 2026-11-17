@@ -1,6 +1,7 @@
 // A list fetched whole from the server (movie cards, episodes), held per library version and patched
 // by the client's own watch and progress writes instead of refetched. Rows are never mutated: a patch
 // replaces the row and the array, so a reader keyed on a row or on the list sees every change.
+import { messageOf } from './errors';
 import { untrack } from 'svelte';
 
 export interface Row {
@@ -87,7 +88,7 @@ export class RowStore<T extends Row, E = undefined> {
         this.#fetched = version;
       })
       .catch((e: unknown) => {
-        if (version >= this.#fetched) this.#error = e instanceof Error ? e.message : String(e);
+        if (version >= this.#fetched) this.#error = messageOf(e);
       })
       .finally(() => {
         if (this.#inflight?.promise === promise) this.#inflight = null;

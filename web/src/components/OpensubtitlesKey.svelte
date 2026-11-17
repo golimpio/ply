@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { api, type Settings, type SettingsUpdate } from '../lib/api';
+  import { messageOf } from '../lib/errors';
   import { app } from '../lib/state.svelte';
   import ConfirmRemove from './ConfirmRemove.svelte';
   import KeyField from './KeyField.svelte';
@@ -22,7 +23,7 @@
       s.opensubtitlesKeySet = r.opensubtitlesKeySet;
       app.libraryVersion++;
     } catch (e) {
-      const why = e instanceof Error ? e.message : String(e);
+      const why = messageOf(e);
       keyMessage = { ok: false, text: why };
     } finally {
       saving = false;

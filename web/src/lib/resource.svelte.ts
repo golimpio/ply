@@ -1,3 +1,5 @@
+import { messageOf } from './errors';
+
 /**
  * Run an async fetcher when the component mounts and again whenever reactive state
  * read synchronously inside it changes. The previous value stays visible while reloading.
@@ -20,7 +22,7 @@ export function resource<T>(fetcher: () => Promise<T>) {
       },
       (e: unknown) => {
         if (stale) return;
-        error = e instanceof Error ? e.message : String(e);
+        error = messageOf(e);
         loading = false;
       },
     );

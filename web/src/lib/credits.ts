@@ -10,7 +10,7 @@ import { href } from './router.svelte';
 export type CreditGroup = 'Acting' | 'Directing' | 'Writing' | 'Other';
 
 /** The order the groups appear in on the page. */
-export const CREDIT_GROUPS: CreditGroup[] = ['Acting', 'Directing', 'Writing', 'Other'];
+const CREDIT_GROUPS: CreditGroup[] = ['Acting', 'Directing', 'Writing', 'Other'];
 
 const DIRECTING = new Set(['director']);
 const WRITING = new Set(['writer', 'screenplay', 'story', 'novel', 'creator']);

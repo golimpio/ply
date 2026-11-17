@@ -347,12 +347,12 @@
                 <span class="lang-tile" aria-hidden="true">{formatCode(sub.format)}</span>
                 <div class="row-body">
                   <span class="row-name">
-                    <span class="row-title">{langName(sub.language)}</span>
+                    <span class="row-title truncate">{langName(sub.language)}</span>
                     {#if sub.image}<span class="badge">Burned in</span>{/if}
                     {#if sub.forced}<span class="badge">Forced</span>{/if}
                     {#if sub.default}<span class="badge">Default</span>{/if}
                   </span>
-                  <span class="row-meta">{trackMeta(sub)}</span>
+                  <span class="row-meta truncate">{trackMeta(sub)}</span>
                 </div>
                 {#if sub.external}
                   <button
@@ -434,10 +434,10 @@
                 <span class="lang-tile" aria-hidden="true">{formatCode(item.format || 'srt')}</span>
                 <div class="row-body">
                   <span class="row-name">
-                    <span class="row-title">{item.release || item.fileName}</span>
+                    <span class="row-title truncate">{item.release || item.fileName}</span>
                     {#if item.hearingImpaired}<span class="badge">SDH</span>{/if}
                   </span>
-                  <span class="row-meta">{resultMeta(item)}</span>
+                  <span class="row-meta truncate">{resultMeta(item)}</span>
                 </div>
                 <button
                   class="btn pill subtle"
@@ -626,14 +626,8 @@
   }
   .row-title {
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .row-meta {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     font-size: var(--fs-xs-2);
     color: var(--text-muted);
   }

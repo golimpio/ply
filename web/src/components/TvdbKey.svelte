@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { api, ApiError, type Settings, type SettingsUpdate } from '../lib/api';
+  import { messageOf } from '../lib/errors';
   import { app } from '../lib/state.svelte';
   import ConfirmRemove from './ConfirmRemove.svelte';
   import KeyField from './KeyField.svelte';
@@ -79,9 +80,7 @@
           ? PIN_ELSEWHERE
           : e instanceof ApiError && e.status === 502
             ? 'TVDB could not be reached to check the key.'
-            : e instanceof Error
-              ? e.message
-              : String(e);
+            : messageOf(e);
       message = { ok: false, text: why };
     } finally {
       saving = false;

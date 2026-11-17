@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api, type CardRating, type EpisodeCard, type ItemDetail, type ItemSummary, type ItemWatch, type Stream, type Subtitle } from '../lib/api';
+  import { messageOf } from '../lib/errors';
   import { useAmbient } from '../lib/ambient.svelte';
   import {
     channelLabel,
@@ -67,7 +68,7 @@
       },
       (e: unknown) => {
         if (ac.signal.aborted) return;
-        error = e instanceof Error ? e.message : String(e);
+        error = messageOf(e);
       },
     );
     return () => ac.abort();
@@ -184,7 +185,7 @@
       if (answer) own = answer;
     } catch (e) {
       own = was;
-      markError = `Couldn’t mark it as ${watched ? 'watched' : 'unwatched'}: ${e instanceof Error ? e.message : String(e)}`;
+      markError = `Couldn’t mark it as ${watched ? 'watched' : 'unwatched'}: ${messageOf(e)}`;
     } finally {
       marking = false;
     }
@@ -199,7 +200,7 @@
       notice = 'Fetching the latest details. They appear here in a moment.';
       setTimeout(() => app.libraryVersion++, 4000);
     } catch (e) {
-      notice = e instanceof Error ? e.message : String(e);
+      notice = messageOf(e);
     }
   }
 
@@ -526,13 +527,13 @@
         {#if siblings.prev}
           <a href={href.item(siblings.prev.id)}>
             <span class="muted">Previous</span>
-            <span>{episodeLabel(siblings.prev.season, siblings.prev.episode)} {epTitle(siblings.prev)}</span>
+            <span class="truncate">{episodeLabel(siblings.prev.season, siblings.prev.episode)} {epTitle(siblings.prev)}</span>
           </a>
         {/if}
         {#if siblings.next}
           <a class="next" href={href.item(siblings.next.id)}>
             <span class="muted">Next</span>
-            <span>{episodeLabel(siblings.next.season, siblings.next.episode)} {epTitle(siblings.next)}</span>
+            <span class="truncate">{episodeLabel(siblings.next.season, siblings.next.episode)} {epTitle(siblings.next)}</span>
           </a>
         {/if}
       </nav>
@@ -753,9 +754,6 @@
   }
   .siblings span:last-child {
     font-weight: var(--fw-semibold);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   /* File and playback: a section at the end of the page, not a panel. A hairline and a heading
      row; the facts below read as part of the page. */

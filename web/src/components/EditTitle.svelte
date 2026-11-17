@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { api, type TitleDetail, type TitlePatch } from '../lib/api';
+  import { messageOf } from '../lib/errors';
   import { app } from '../lib/state.svelte';
   import Dialog from './Dialog.svelte';
 
@@ -56,7 +57,7 @@
       app.libraryVersion++;
       open = false;
     } catch (err) {
-      error = err instanceof Error ? err.message : String(err);
+      error = messageOf(err);
     } finally {
       busy = false;
     }
