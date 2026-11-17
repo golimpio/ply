@@ -280,3 +280,18 @@ func TestNewItemsArePendingAndFingerprintRoundTrips(t *testing.T) {
 		t.Errorf("ListItems after re-upsert: %+v, %v", entries, err)
 	}
 }
+
+// oldItem inserts an item with only the columns of version 1, into a database an older ply
+// left (openAtVersion), where UpsertItem's columns may not exist yet. It returns the id.
+func oldItem(t *testing.T, s *Store, it *Item) int64 {
+	t.Helper()
+	var id int64
+	err := s.rw.QueryRow(`INSERT INTO items (kind, title, year, show, season, episode, path, root, size, mtime,
+		container, duration_sec, bitrate, added_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1) RETURNING id`,
+		it.Kind, it.Title, it.Year, it.Show, it.Season, it.Episode, it.Path, it.Root, it.Size, it.MTime,
+		it.Container, it.DurationSec, it.Bitrate).Scan(&id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}

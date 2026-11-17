@@ -26,6 +26,9 @@ type Parsed struct {
 	// NeedsReview is set by ParseNameIn for an episode of a shows folder whose
 	// name has no episode number: it is episode 0, and a person should look.
 	NeedsReview bool
+
+	// OwnerDir is a trailer's: the folder of its film or show (see trailerOf).
+	OwnerDir string
 }
 
 var (
@@ -177,6 +180,9 @@ var episodeMarkers = []struct {
 // folder always an episode. A root with no type (a -media folder that has not
 // been guessed yet) parses as ParseName does.
 func ParseNameIn(r Root, path string) Parsed {
+	if p, ok := trailerOf(r, path); ok {
+		return p
+	}
 	switch r.Kind {
 	case KindMovies:
 		return parseMovieIn(r.Path, path)
@@ -318,7 +324,7 @@ func isSeasonDir(name string) bool { return reSeasonDir.MatchString(clean(dirSte
 
 // reExtrasDir names the folders that hold what is not an episode of the show:
 // extras, featurettes, behind the scenes.
-var reExtrasDir = regexp.MustCompile(`(?i)^(?:extras?|featurettes?|behind the scenes)$`)
+var reExtrasDir = regexp.MustCompile(`(?i)^(?:extras?|featurettes?|behind the scenes|deleted scenes|interviews?|scenes|shorts|other)$`)
 
 func isExtrasDir(name string) bool { return reExtrasDir.MatchString(clean(dirStem(name))) }
 

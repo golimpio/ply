@@ -142,7 +142,7 @@ func (s *Store) DueItems(ctx context.Context, now int64, limit int) ([]DueItem, 
 		if err := rows.Scan(&d.ID, &d.Kind, &d.Title, &d.Year, &d.Show, &d.Season, &d.Episode,
 			&d.Path, &d.Root, &d.Size, &d.MTime, &d.Container, &d.DurationSec, &d.Bitrate,
 			&d.AddedAt, &d.UpdatedAt, &titleID, &d.MatchState, &d.NeedsReview,
-			&d.LocalPoster, &d.LocalBackdrop, &d.LocalThumb, &d.Fingerprint, &d.Attempts); err != nil {
+			&d.LocalPoster, &d.LocalBackdrop, &d.LocalThumb, &d.Fingerprint, &d.OwnerDir, &d.Attempts); err != nil {
 			return nil, err
 		}
 		d.TitleID = titleID.Int64

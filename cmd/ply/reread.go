@@ -85,3 +85,26 @@ func forgetReread(ctx context.Context, st *store.Store, log *slog.Logger) func(r
 		}
 	}
 }
+
+// trailersRereadKey says the folders were read again for M13 (docs/M13-TRAILERS.md, "Data"):
+// an earlier version took a trailer for a film (or an episode), and only a new reading of the
+// names makes it a trailer.
+const trailersRereadKey = "m13.trailers"
+
+// markTrailerRereads notes, once, every typed folder as to be read again (rereadPending does
+// it). Call it before rereadPending.
+func markTrailerRereads(ctx context.Context, st *store.Store, roots []library.Root) error {
+	if _, done, err := st.GetSetting(ctx, trailersRereadKey); err != nil || done {
+		return err
+	}
+	var typed []string
+	for _, r := range roots {
+		if library.ValidKind(r.Kind) {
+			typed = append(typed, r.Path)
+		}
+	}
+	if err := markRereads(ctx, st, typed); err != nil {
+		return err
+	}
+	return st.SetSetting(ctx, trailersRereadKey, "1")
+}

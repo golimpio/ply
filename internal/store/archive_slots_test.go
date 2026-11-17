@@ -530,8 +530,9 @@ func TestArchiveAndDeleteRootForgetClearsTheArchiveOfItsFiles(t *testing.T) {
 func TestMigration006MovesAShowsMatchToItsOwnSlot(t *testing.T) {
 	s, path := openAtVersion(t, 5)
 	ctx := context.Background()
-	id := addAt(t, s, episode("/lib/Lost/S01E01.mkv", "Lost", 1, 1))
-	mid := addAt(t, s, movie("/lib/m.mp4", "M"))
+	lost, m := episode("/lib/Lost/S01E01.mkv", "Lost", 1, 1), movie("/lib/m.mp4", "M")
+	lost.Root, m.Root = "/lib", "/lib"
+	id, mid := oldItem(t, s, lost), oldItem(t, s, m)
 	for _, q := range []string{
 		`INSERT INTO item_archive (path, size, tmdb_id, tmdb_kind, archived_at) VALUES ('/lib/Lost/S01E01.mkv', 100, 4607, 'series', 1)`,
 		`INSERT INTO item_archive (path, size, tmdb_id, tmdb_kind, archived_at) VALUES ('/lib/m.mp4', 100, 603, 'movie', 1)`,

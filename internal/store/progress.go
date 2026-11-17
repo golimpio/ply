@@ -66,6 +66,11 @@ func (s *Store) SetProgress(ctx context.Context, itemID int64, positionSec, dura
 	var out *Progress
 	err := s.write(ctx, prioHigh, func(tx *sql.Tx) error {
 		now := time.Now()
+		// A trailer is played, never resumed or marked: nothing is stored for it.
+		var kind string
+		if err := tx.QueryRowContext(ctx, `SELECT kind FROM items WHERE id = ?`, itemID).Scan(&kind); err == nil && kind == KindTrailer {
+			return nil
+		}
 		prev, err := getProgress(ctx, tx, itemID)
 		if err != nil {
 			return err

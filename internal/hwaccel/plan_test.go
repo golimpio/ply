@@ -250,7 +250,7 @@ func TestBurnGraphScalesTheSubtitleToTheVideo(t *testing.T) {
 
 func TestEncodeArgs(t *testing.T) {
 	for _, enc := range []Encoder{vt, va, qsv, nv, x264} {
-		a := encodeArgs(enc, 8_000_000)
+		a := EncodeArgs(enc, 8_000_000)
 		j := strings.Join(a, " ")
 		if a[0] != "-c:v" || a[1] != enc.Name {
 			t.Errorf("%s: %s", enc.Name, j)
@@ -265,7 +265,7 @@ func TestEncodeArgs(t *testing.T) {
 		}
 	}
 	// libx264 must never add keyframes of its own, and forced ones are IDR.
-	j := strings.Join(encodeArgs(x264, 4_000_000), " ")
+	j := strings.Join(EncodeArgs(x264, 4_000_000), " ")
 	for _, must := range []string{"-sc_threshold 0", "-forced-idr 1", "-crf 21", "-bufsize 8000000", "-preset veryfast"} {
 		if !strings.Contains(j, must) {
 			t.Errorf("libx264 lacks %q: %s", must, j)

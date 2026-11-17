@@ -156,7 +156,7 @@ func (i Info) Plan(r Request) Spec {
 	case tenBit:
 		say("%d-bit video converted to 8-bit", r.BitDepth)
 	}
-	s.Encode = encodeArgs(enc, rate)
+	s.Encode = EncodeArgs(enc, rate)
 	return s
 }
 
@@ -285,10 +285,10 @@ func burnGraph(enc Encoder, r Request, outH int, resize, tonemap, refScale bool)
 	return strings.Join(g, ";")
 }
 
-// encodeArgs are the encoder options: H.264 High, bitrate capped at rate, and
+// EncodeArgs are the encoder options: H.264 High, bitrate capped at rate, and
 // no keyframes of the encoder's own — the only keyframes are the ones
 // -force_key_frames asks for, which is what keeps segments equal.
-func encodeArgs(e Encoder, rate int) []string {
+func EncodeArgs(e Encoder, rate int) []string {
 	r := strconv.Itoa(rate)
 	buf := strconv.Itoa(rate * 2)
 	const noGOP = "100000" // max keyframe interval: never reached

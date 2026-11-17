@@ -256,11 +256,11 @@ struct APIClientTests {
     @Test func trailersFetchesTitleTrailers() async throws {
         StubURL.reset { req in
             #expect(req.url?.path == "/api/titles/42/trailers")
-            return .json(#"[{"site":"youtube","key":"abc12345678","name":"Trailer","type":"trailer"}]"#)
+            return .json(#"{"local":[{"itemId":7,"name":"x-trailer","durationSec":90}]}"#)
         }
         let trailers = try await makeClient().trailers(titleId: 42)
-        #expect(trailers.count == 1)
-        #expect(trailers[0].key == "abc12345678")
+        #expect(trailers.local.map(\.itemId) == [7])
+        #expect(trailers.download == nil)
     }
 
     @Test func upcomingFetchesUpcomingShows() async throws {

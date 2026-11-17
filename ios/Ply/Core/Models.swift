@@ -134,6 +134,8 @@ nonisolated struct Item: Decodable, Sendable, Hashable, Identifiable {
     let hdr: String?
 
     var isEpisode: Bool { kind == "episode" }
+    /// A film's or a show's trailer (docs/M13-TRAILERS.md): played, never resumed.
+    var isTrailer: Bool { kind == "trailer" }
     var isWatched: Bool { watched ?? progress?.watched ?? false }
 
     var is4K: Bool { (height ?? 0) >= 2000 || (width ?? 0) >= 3800 }
@@ -351,45 +353,45 @@ nonisolated struct Snapshot: Decodable, Sendable {
     let commands: [Command]?
 }
 
-/// A trailer or teaser for a title (GET /api/titles/{id}/trailers).
-nonisolated struct Trailer: Decodable, Sendable, Hashable, Identifiable {
-    let site: String
-    let key: String
-    let name: String?
-    let type: String?
-    let official: Bool?
+/// A trailer file of a title: an item, played as a film is (GET /api/titles/{id}/trailers).
+nonisolated struct LocalTrailer: Decodable, Sendable, Hashable, Identifiable {
+    let itemId: Int64
+    /// The file's name without its extension.
+    let name: String
+    let durationSec: Double?
 
-    var id: String { "\(site):\(key)" }
+    var id: Int64 { itemId }
+}
 
-    var embedURL: URL? {
-        if site == "youtube" {
-            return URL(string: "https://www.youtube-nocookie.com/embed/\(key)?autoplay=1&rel=0&playsinline=1")
-        }
-        if site == "vimeo" {
-            return URL(string: "https://player.vimeo.com/video/\(key)?autoplay=1&dnt=1")
-        }
-        return nil
-    }
+/// The server downloading a title's trailer (docs/M13-TRAILERS.md).
+nonisolated struct TrailerDownload: Decodable, Sendable, Hashable {
+    /// queued | running | failed
+    let state: String
+    let jobId: Int64?
+    let error: String?
+}
 
-    var webURL: URL? {
-        if site == "youtube" {
-            return URL(string: "https://www.youtube.com/watch?v=\(key)")
-        }
-        if site == "vimeo" {
-            return URL(string: "https://vimeo.com/\(key)")
-        }
-        return nil
-    }
+/// GET /api/titles/{id}/trailers: the trailers on disk, and the download of one when there are none.
+nonisolated struct TitleTrailers: Decodable, Sendable, Hashable {
+    let local: [LocalTrailer]
+    let download: TrailerDownload?
+}
 
-    func label(in all: [Trailer]) -> String {
-        let cleanName = (name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !cleanName.isEmpty { return cleanName }
-        let kind = type == "teaser" ? "Teaser" : "Trailer"
-        let same = all.filter { ($0.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && ($0.type == "teaser") == (type == "teaser") }
-        if same.count > 1, let idx = same.firstIndex(where: { $0.id == id }) {
-            return "\(kind) \(idx + 1)"
-        }
-        return kind
+/// What the Trailer button of a title's page is.
+nonisolated enum TrailerButtonState: Equatable, Sendable {
+    /// The trailers on disk: the first plays, the others are offered too.
+    case play([LocalTrailer])
+    /// The server is downloading one.
+    case downloading
+    /// None, or the download failed: no button.
+    case none
+}
+
+extension TitleTrailers {
+    nonisolated var buttonState: TrailerButtonState {
+        if !local.isEmpty { return .play(local) }
+        if let d = download, d.state != "failed" { return .downloading }
+        return .none
     }
 }
 

@@ -306,6 +306,8 @@ func reads() []routed {
 		{name: "GetPerson", call: func(ctx context.Context, s *Store) error { _, err := s.GetPerson(ctx, 1); return nf(err) }},
 			{name: "GetTitleVideos", call: func(ctx context.Context, s *Store) error { _, err := s.GetTitleVideos(ctx, 1); return nf(err) }},
 			{name: "GetPersonFilmography", call: func(ctx context.Context, s *Store) error { _, err := s.GetPersonFilmography(ctx, 1); return nf(err) }},
+		{name: "TitleTrailers", call: func(ctx context.Context, s *Store) error { _, err := s.TitleTrailers(ctx, 1); return err }},
+		{name: "TitleFiles", call: func(ctx context.Context, s *Store) error { _, err := s.TitleFiles(ctx, 1); return err }},
 		{name: "Devices", call: func(ctx context.Context, s *Store) error { _, err := s.Devices(ctx); return err }},
 		{name: "DeviceTokens", call: func(ctx context.Context, s *Store) error { _, err := s.DeviceTokens(ctx); return err }},
 		{name: "Schedules", call: func(ctx context.Context, s *Store) error { _, err := s.Schedules(ctx); return err }},

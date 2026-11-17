@@ -321,6 +321,9 @@ func (f *subsFeeder) needs(e store.Entry) bool {
 
 // wants reports whether e should get a job.
 func (f *subsFeeder) wants(e store.Entry) bool {
+	if e.Kind == store.KindTrailer { // played, not watched: no subtitles ahead of time
+		return false
+	}
 	f.mu.Lock()
 	cancelled := f.cancelled[e.ID]
 	f.mu.Unlock()

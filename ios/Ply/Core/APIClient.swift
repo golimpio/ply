@@ -287,9 +287,9 @@ final class APIClient {
         return try await get("/api/metadata/preview/\(media)/\(tmdbId)")
     }
 
-    /// A title's trailers, best first; [] when it has none or online lookups are off.
-    func trailers(titleId: Int64) async throws -> [Trailer] {
-        try await list("/api/titles/\(titleId)/trailers")
+    /// A title's trailers on disk; asking queues the download of one when it has none.
+    func trailers(titleId: Int64) async throws -> TitleTrailers {
+        try await get("/api/titles/\(titleId)/trailers")
     }
 
     /// Shows with upcoming episodes airing today or later (GET /api/upcoming).

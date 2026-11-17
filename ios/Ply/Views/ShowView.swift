@@ -10,8 +10,6 @@ struct ShowView: View {
     @State private var episodes: [Item] = []
     @State private var season: Int?
     @State private var error: String?
-    @State private var trailers: [Trailer] = []
-    @State private var selectedTrailer: Trailer?
 
     private var nextEpisodeToPlay: Item? {
         episodes.first(where: { !$0.isWatched }) ?? episodes.first
@@ -41,10 +39,8 @@ struct ShowView: View {
             heroStage(detail)
 
             HStack(spacing: 12) {
-                if !trailers.isEmpty {
-                    DetailActionButton(title: "Trailer", systemImage: "film") {
-                        selectedTrailer = trailers.first
-                    }
+                if let titleId = detail?.meta?.id {
+                    TrailerButton(titleId: titleId)
                 }
 
                 DetailActionButton(
@@ -114,9 +110,6 @@ struct ShowView: View {
         .navigationTitle(name)
         #endif
         .task(id: connection.library.generation) { await load() }
-        .sheet(item: $selectedTrailer) { trailer in
-            TrailerSheet(trailer: $selectedTrailer, all: trailers)
-        }
     }
 
     @ViewBuilder
@@ -178,9 +171,6 @@ struct ShowView: View {
             self.detail = d
             self.episodes = list
             error = nil
-            if let metaId = d.meta?.id {
-                trailers = (try? await connection.api.trailers(titleId: metaId)) ?? []
-            }
             if season == nil || !seasons.contains(season!) {
                 // The first season with something left to watch.
                 season = seasons.first { n in list.contains { $0.season == n && !$0.isWatched } } ?? seasons.first

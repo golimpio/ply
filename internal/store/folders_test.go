@@ -14,10 +14,7 @@ func TestMigration005CreatesFoldersAndKeepsData(t *testing.T) {
 	if _, err := s.rw.Exec(`SELECT 1 FROM folders`); err == nil {
 		t.Fatal("control: a version 4 database already has folders")
 	}
-	id, err := s.UpsertItem(ctx, movie("/media/old.mp4", "Old"), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	id := oldItem(t, s, movie("/media/old.mp4", "Old"))
 	// The database is the one of a version before watch state: its progress has a flag, not a time.
 	if _, err := s.rw.Exec(`INSERT INTO progress (item_id, position_sec, duration_sec, watched, updated_at) VALUES (?, 100, 1000, 0, 5)`, id); err != nil {
 		t.Fatal(err)
@@ -26,7 +23,7 @@ func TestMigration005CreatesFoldersAndKeepsData(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s, err = Open(path)
+	s, err := Open(path)
 	if err != nil {
 		t.Fatalf("Open on a version 4 database: %v", err)
 	}

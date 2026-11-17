@@ -296,7 +296,7 @@ Design:
   7 days of history.
 - Kinds: `scan.full`, `scan.dirs` (coalesced), `scan.root.add`/`drop`, `fingerprint.backfill`, `meta.match.item`,
   `meta.match.series`, `meta.refresh.due`, `meta.refresh.title`, `meta.seasons`, `image.prefetch`,
-  `keyframes.index`, `subs.preextract`, `art.grab`, `prune.caches`, `nfo.write`, later `thumbs.trickplay`, `tvdb.*`.
+  `keyframes.index`, `subs.preextract`, `art.grab`, `trailer.download` (M13), `prune.caches`, `nfo.write`, later `thumbs.trickplay`, `tvdb.*`.
 - Priorities: user-requested 0 > `scan.dirs` 10 > match new 20 > `scan.full` 30 > refresh due 40 > prefetch, index,
   thumbs 50. Each kind declares its resource class and weight.
 - Dedupe by key: enqueueing onto a queued job merges; onto a running one sets `rerun`.

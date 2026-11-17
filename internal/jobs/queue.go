@@ -997,11 +997,15 @@ func (r *Run) Progress(done, total int, note string) {
 
 // Yield waits while playback or browsing needs the machine (for what the job's
 // YieldNeed says). Call it between steps.
-func (r *Run) Yield(ctx context.Context) error {
+func (r *Run) Yield(ctx context.Context) error { return r.YieldFor(ctx, r.need) }
+
+// YieldFor is Yield for a step that needs something of its own (a light job's step that
+// reads a disk or uses the CPU): it waits while playback or browsing needs that.
+func (r *Run) YieldFor(ctx context.Context, n tier.Need) error {
 	if r.q.o.Gate == nil {
 		return ctx.Err()
 	}
-	return r.q.o.Gate.Wait(ctx, r.need, r.held)
+	return r.q.o.Gate.Wait(ctx, n, r.held)
 }
 
 // SetResult is what Do returns to the caller that waits for this job.

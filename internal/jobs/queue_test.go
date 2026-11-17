@@ -955,3 +955,38 @@ func TestQueueLogging(t *testing.T) {
 	g.hold("")
 	waitFor(t, "gated job done", func() bool { return state(q, gatedJob.ID) == Done })
 }
+
+// needGate records the need of every Wait.
+type needGate struct {
+	*fakeGate
+	mu    sync.Mutex
+	needs []tier.Need
+}
+
+func (g *needGate) Wait(ctx context.Context, n tier.Need, held func(string)) error {
+	g.mu.Lock()
+	g.needs = append(g.needs, n)
+	g.mu.Unlock()
+	return g.fakeGate.Wait(ctx, n, held)
+}
+
+// A step of a light job can wait for what that step needs (a disk, the CPU).
+func TestYieldForWaitsOnTheGivenNeed(t *testing.T) {
+	g := &needGate{fakeGate: newGate()}
+	disk := tier.Need{CPU: true, Disks: []string{"/nas"}}
+	q, _ := start(t, Options{Gate: g}, Spec{Kind: "steps", Run: func(ctx context.Context, r *Run) error {
+		if err := r.Yield(ctx); err != nil {
+			return err
+		}
+		return r.YieldFor(ctx, disk)
+	}})
+	if _, err := q.Do(context.Background(), "steps", Opt{}); err != nil {
+		t.Fatal(err)
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	// The queue's own check before the start is Check, not Wait: only the two steps are here.
+	if len(g.needs) != 2 || len(g.needs[0].Disks) != 0 || g.needs[0].CPU || !g.needs[1].CPU || len(g.needs[1].Disks) != 1 || g.needs[1].Disks[0] != "/nas" {
+		t.Errorf("needs waited on: %+v, want [{} %+v]", g.needs, disk)
+	}
+}
