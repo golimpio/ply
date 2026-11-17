@@ -151,27 +151,52 @@ struct PeekingCanvasDeckView: View {
 
     @ViewBuilder
     private func canvasCard(_ item: Item, isCenter: Bool) -> some View {
-        let cardBody = ZStack {
-            RemoteImage(path: item.poster, placeholder: "film")
-                .aspectRatio(2 / 3, contentMode: .fill)
-                .frame(width: cardWidth, height: cardHeight)
-                .clipShape(.rect(cornerRadius: cornerRadius, style: .continuous))
-                .spatialMatchedGeometry(
-                    id: "spatial-art-\(item.id)",
-                    in: portalNamespace,
-                    isSource: expandedItemId != item.id
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [.white.opacity(isCenter ? 0.30 : 0.10), .clear],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            ),
-                            lineWidth: 1
-                        )
-                )
+        let cardArtwork = RemoteImage(path: item.poster, placeholder: "film")
+            .aspectRatio(2 / 3, contentMode: .fill)
+            .frame(width: cardWidth, height: cardHeight)
+            .clipShape(.rect(cornerRadius: cornerRadius, style: .continuous))
+            .spatialMatchedGeometry(
+                id: "spatial-art-\(item.id)",
+                in: portalNamespace,
+                isSource: expandedItemId != item.id
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [.white.opacity(isCenter ? 0.30 : 0.10), .clear],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 1
+                    )
+            )
+            .contentShape(.rect(cornerRadius: cornerRadius, style: .continuous))
+
+        ZStack {
+            #if os(iOS)
+            if let onOpenPortal {
+                Button {
+                    if isCenter {
+                        onOpenPortal(item)
+                    } else {
+                        withAnimation(.spring(response: 0.38, dampingFraction: 0.84)) {
+                            activeItemId = item.id
+                        }
+                    }
+                } label: {
+                    cardArtwork
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(item.isEpisode ? (item.show ?? item.title) : item.title)
+            } else {
+                NavigationLink(value: Route.item(item.id)) { cardArtwork }
+                    .buttonStyle(.plain)
+            }
+            #else
+            NavigationLink(value: Route.item(item.id)) { cardArtwork }
+                .buttonStyle(.plain)
+            #endif
 
             HeroPlayButton(
                 accessibilityLabel: item.resumeSec > 0 ? "Resume" : "Play",
@@ -187,36 +212,15 @@ struct PeekingCanvasDeckView: View {
                 isSource: expandedItemId != item.id
             )
             .opacity(isCenter ? 1.0 : 0.0)
+            .allowsHitTesting(isCenter)
+            .accessibilityHidden(!isCenter)
             .animation(.easeInOut(duration: 0.2), value: isCenter)
         }
-        .contentShape(.rect(cornerRadius: cornerRadius, style: .continuous))
         .shadow(
             color: Color.black.opacity(isCenter ? 0.44 : 0.22),
             radius: isCenter ? 20 : 10,
             y: isCenter ? 10 : 5
         )
-
-        #if os(iOS)
-        if let onOpenPortal {
-            cardBody
-                .onTapGesture {
-                    if isCenter {
-                        onOpenPortal(item)
-                    } else {
-                        withAnimation(.spring(response: 0.38, dampingFraction: 0.84)) {
-                            activeItemId = item.id
-                        }
-                    }
-                }
-                .accessibilityAddTraits(.isButton)
-        } else {
-            NavigationLink(value: Route.item(item.id)) { cardBody }
-                .buttonStyle(.plain)
-        }
-        #else
-        NavigationLink(value: Route.item(item.id)) { cardBody }
-            .buttonStyle(.plain)
-        #endif
     }
 }
 
@@ -411,6 +415,7 @@ struct HomeView: View {
             #if os(iOS)
             .sensoryFeedback(.impact(flexibility: .soft, intensity: 0.8), trigger: portalFeedbackTrigger)
             .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbarVisibility(isPortalOpen ? .hidden : .visible, for: .tabBar)
             #endif
             .plyMainPageLogo(color: .white, hidden: isPortalOpen)
             .plyDestinations()
@@ -461,12 +466,6 @@ struct MoviesView: View {
     @State private var only4K = false
     @State private var onlyHDR = false
     @State private var onlyUnwatched = false
-    #if os(iOS)
-    @State private var isScrubberVisible = false
-    @State private var scrubProgress: CGFloat = 0
-    @State private var currentScrubLabel = ""
-    @State private var hideTask: Task<Void, Never>? = nil
-    #endif
     private var availableGenres: [String] {
         let all = connection.library.movies.flatMap { $0.genres ?? [] }
         return Array(Set(all)).sorted()
@@ -532,131 +531,76 @@ struct MoviesView: View {
         }
     }
 
-    #if os(iOS)
-    private func handleScroll(offset: CGFloat) {
-        guard filteredMovies.count >= 8 else { return }
-        if !isScrubberVisible {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                isScrubberVisible = true
-            }
-        }
-        let rows = CGFloat((filteredMovies.count + 2) / 3)
-        let estHeight = max(1, rows * 210)
-        let p = max(0, min(1, -offset / estHeight))
-        scrubProgress = p
-        let idx = max(0, min(filteredMovies.count - 1, Int(p * CGFloat(filteredMovies.count - 1))))
-        currentScrubLabel = label(for: filteredMovies[idx])
-
-        hideTask?.cancel()
-        hideTask = Task {
-            try? await Task.sleep(nanoseconds: 1_800_000_000)
-            if !Task.isCancelled {
-                withAnimation(.easeOut(duration: 0.35)) {
-                    isScrubberVisible = false
-                }
-            }
-        }
-    }
-    #endif
-
     var body: some View {
         let library = connection.library
         NavigationStack {
             ScrollViewReader { proxy in
-                ZStack(alignment: .trailing) {
-                    ScrollView {
-                        #if os(iOS)
-                        GeometryReader { geo in
-                            Color.clear.preference(
-                                key: ScrollOffsetPreferenceKey.self,
-                                value: geo.frame(in: .named("MoviesScroll")).minY
-                            )
-                        }
-                        .frame(height: 0)
-                        #endif
+                ScrollView {
+                    #if os(tvOS)
+                    PlySearchField(text: $query, prompt: "Search films")
+                        .padding(.horizontal)
+                        .padding(.top, 10)
+                    #endif
 
-                        #if os(tvOS)
-                        PlySearchField(text: $query, prompt: "Search films")
-                            .padding(.horizontal)
-                            .padding(.top, 10)
-                        #endif
-
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                Menu {
-                                    Picker("Sort", selection: $sort) {
-                                        ForEach(MovieSort.allCases) { Text($0.rawValue).tag($0) }
-                                    }
-                                } label: {
-                                    Label(sort.rawValue, systemImage: "arrow.up.arrow.down")
-                                        .font(.footnote)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        filterChipRow {
+                            Menu {
+                                Picker("Sort", selection: $sort) {
+                                    ForEach(MovieSort.allCases) { Text($0.rawValue).tag($0) }
                                 }
-                                .buttonStyle(.bordered)
-
-                                if let genre = selectedGenre {
-                                    ActiveFilterChip(title: genre) {
-                                        selectedGenre = nil
-                                    }
-                                }
-
-                                if selectedDecade != .all {
-                                    ActiveFilterChip(title: selectedDecade.rawValue) {
-                                        selectedDecade = .all
-                                    }
-                                }
-
-                                FilterChip(title: "4K", isOn: $only4K)
-                                FilterChip(title: "HDR", isOn: $onlyHDR)
-                                FilterChip(title: "Unwatched", isOn: $onlyUnwatched)
-
-                                if hasActiveFilters {
-                                    Button("Clear all") {
-                                        resetFilters()
-                                    }
+                            } label: {
+                                Label(sort.rawValue, systemImage: "arrow.up.arrow.down")
                                     .font(.footnote)
-                                    .foregroundStyle(.secondary)
+                            }
+                            .plyGlassButtonStyle()
+                            .buttonBorderShape(.capsule)
+
+                            if let genre = selectedGenre {
+                                ActiveFilterChip(title: genre) {
+                                    selectedGenre = nil
                                 }
                             }
-                            .padding(.horizontal)
-                            .padding(.top, 4)
-                        }
 
-                        LazyVGrid(columns: posterColumns, spacing: 16) {
-                            ForEach(filteredMovies) { movie in
-                                NavigationLink(value: Route.item(movie.id)) {
-                                    PosterCard(title: movie.title, caption: movie.year.map(String.init), image: movie.poster,
-                                               watched: movie.isWatched, fraction: movie.fraction)
+                            if selectedDecade != .all {
+                                ActiveFilterChip(title: selectedDecade.rawValue) {
+                                    selectedDecade = .all
                                 }
-                                .buttonStyle(.plain)
-                                .id(movie.id)
+                            }
+
+                            FilterChip(title: "4K", isOn: $only4K)
+                            FilterChip(title: "HDR", isOn: $onlyHDR)
+                            FilterChip(title: "Unwatched", isOn: $onlyUnwatched)
+
+                            if hasActiveFilters {
+                                Button("Clear all") {
+                                    resetFilters()
+                                }
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
                             }
                         }
-                        .padding([.horizontal, .top])
+                        .padding(.horizontal)
+                        .padding(.top, 4)
                     }
-                    .plyTabBarBottomClearance()
-                    .coordinateSpace(name: "MoviesScroll")
-                    #if os(iOS)
-                    .onPreferenceChange(ScrollOffsetPreferenceKey.self) { offset in
-                        handleScroll(offset: offset)
-                    }
-                    #endif
 
-                    #if os(iOS)
-                    if filteredMovies.count >= 8 {
-                        FastScrollScrubber(
-                            itemCount: filteredMovies.count,
-                            currentLabel: currentScrubLabel,
-                            onScrub: { index in
-                                let movie = filteredMovies[index]
-                                currentScrubLabel = label(for: movie)
-                                proxy.scrollTo(movie.id, anchor: .top)
-                            },
-                            isVisible: $isScrubberVisible,
-                            progress: $scrubProgress
-                        )
+                    LazyVGrid(columns: posterColumns, spacing: 16) {
+                        ForEach(filteredMovies) { movie in
+                            NavigationLink(value: Route.item(movie.id)) {
+                                PosterCard(title: movie.title, caption: movie.year.map(String.init), image: movie.poster,
+                                           watched: movie.isWatched, fraction: movie.fraction)
+                            }
+                            .buttonStyle(.plain)
+                            .id(movie.id)
+                        }
                     }
-                    #endif
+                    .padding([.horizontal, .top])
                 }
+                .plyTabBarBottomClearance()
+                .plyFastScrollScrubber(
+                    itemCount: filteredMovies.count,
+                    labelAt: { label(for: filteredMovies[$0]) },
+                    onScrollTo: { proxy.scrollTo(filteredMovies[$0].id, anchor: .top) }
+                )
             }
             .overlay {
                 if (!query.isEmpty || hasActiveFilters) && filteredMovies.isEmpty {
@@ -665,6 +609,7 @@ struct MoviesView: View {
                     LibraryStatus(library: library, isEmpty: library.movies.isEmpty)
                 }
             }
+            .plySearchable($query, prompt: "Search films", drawer: true)
             .plyRefreshable { await library.reload() }
             .toolbar {
                 #if os(iOS)
@@ -739,12 +684,6 @@ struct ShowsView: View {
     @State private var sort: ShowSort = .title
     @State private var selectedDecade: DecadeFilter = .all
     @State private var onlyUnwatched = false
-    #if os(iOS)
-    @State private var isScrubberVisible = false
-    @State private var scrubProgress: CGFloat = 0
-    @State private var currentScrubLabel = ""
-    @State private var hideTask: Task<Void, Never>? = nil
-    #endif
 
     private var hasActiveFilters: Bool {
         selectedDecade != .all || onlyUnwatched
@@ -794,129 +733,74 @@ struct ShowsView: View {
     }
 
     private func label(for show: ShowSummary) -> String {
-        return alphabetLetter(of: show.sortTitle ?? show.show)
+        alphabetLetter(of: show.sortTitle ?? show.show)
     }
-
-    #if os(iOS)
-    private func handleScroll(offset: CGFloat) {
-        guard filteredShows.count >= 8 else { return }
-        if !isScrubberVisible {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                isScrubberVisible = true
-            }
-        }
-        let rows = CGFloat((filteredShows.count + 2) / 3)
-        let estHeight = max(1, rows * 210)
-        let p = max(0, min(1, -offset / estHeight))
-        scrubProgress = p
-        let idx = max(0, min(filteredShows.count - 1, Int(p * CGFloat(filteredShows.count - 1))))
-        currentScrubLabel = label(for: filteredShows[idx])
-
-        hideTask?.cancel()
-        hideTask = Task {
-            try? await Task.sleep(nanoseconds: 1_800_000_000)
-            if !Task.isCancelled {
-                withAnimation(.easeOut(duration: 0.35)) {
-                    isScrubberVisible = false
-                }
-            }
-        }
-    }
-    #endif
 
     var body: some View {
         let library = connection.library
         NavigationStack {
             ScrollViewReader { proxy in
-                ZStack(alignment: .trailing) {
-                    ScrollView {
-                        #if os(iOS)
-                        GeometryReader { geo in
-                            Color.clear.preference(
-                                key: ScrollOffsetPreferenceKey.self,
-                                value: geo.frame(in: .named("ShowsScroll")).minY
-                            )
-                        }
-                        .frame(height: 0)
-                        #endif
+                ScrollView {
+                    #if os(tvOS)
+                    PlySearchField(text: $query, prompt: "Search series")
+                        .padding(.horizontal)
+                        .padding(.top, 10)
+                    #endif
 
-                        #if os(tvOS)
-                        PlySearchField(text: $query, prompt: "Search series")
-                            .padding(.horizontal)
-                            .padding(.top, 10)
-                        #endif
-
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                Menu {
-                                    Picker("Sort", selection: $sort) {
-                                        ForEach(ShowSort.allCases) { Text($0.rawValue).tag($0) }
-                                    }
-                                } label: {
-                                    Label(sort.rawValue, systemImage: "arrow.up.arrow.down")
-                                        .font(.footnote)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        filterChipRow {
+                            Menu {
+                                Picker("Sort", selection: $sort) {
+                                    ForEach(ShowSort.allCases) { Text($0.rawValue).tag($0) }
                                 }
-                                .buttonStyle(.bordered)
-
-                                if selectedDecade != .all {
-                                    ActiveFilterChip(title: selectedDecade.rawValue) {
-                                        selectedDecade = .all
-                                    }
-                                }
-
-                                FilterChip(title: "Unwatched", isOn: $onlyUnwatched)
-
-                                if hasActiveFilters {
-                                    Button("Clear all") {
-                                        resetFilters()
-                                    }
+                            } label: {
+                                Label(sort.rawValue, systemImage: "arrow.up.arrow.down")
                                     .font(.footnote)
-                                    .foregroundStyle(.secondary)
+                            }
+                            .plyGlassButtonStyle()
+                            .buttonBorderShape(.capsule)
+
+                            if selectedDecade != .all {
+                                ActiveFilterChip(title: selectedDecade.rawValue) {
+                                    selectedDecade = .all
                                 }
                             }
-                            .padding(.horizontal)
-                            .padding(.top, 4)
-                        }
 
-                        if sort == .added {
-                            EpisodesFailure()
-                        }
+                            FilterChip(title: "Unwatched", isOn: $onlyUnwatched)
 
-                        LazyVGrid(columns: posterColumns, spacing: 16) {
-                            ForEach(filteredShows) { show in
-                                NavigationLink(value: Route.show(show.show)) {
-                                    PosterCard(title: show.show, caption: caption(show), image: show.poster, watched: show.allWatched)
+                            if hasActiveFilters {
+                                Button("Clear all") {
+                                    resetFilters()
                                 }
-                                .buttonStyle(.plain)
-                                .id(show.show)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
                             }
                         }
-                        .padding([.horizontal, .top])
+                        .padding(.horizontal)
+                        .padding(.top, 4)
                     }
-                    .plyTabBarBottomClearance()
-                    .coordinateSpace(name: "ShowsScroll")
-                    #if os(iOS)
-                    .onPreferenceChange(ScrollOffsetPreferenceKey.self) { offset in
-                        handleScroll(offset: offset)
-                    }
-                    #endif
 
-                    #if os(iOS)
-                    if filteredShows.count >= 8 {
-                        FastScrollScrubber(
-                            itemCount: filteredShows.count,
-                            currentLabel: currentScrubLabel,
-                            onScrub: { index in
-                                let show = filteredShows[index]
-                                currentScrubLabel = label(for: show)
-                                proxy.scrollTo(show.show, anchor: .top)
-                            },
-                            isVisible: $isScrubberVisible,
-                            progress: $scrubProgress
-                        )
+                    if sort == .added {
+                        EpisodesFailure()
                     }
-                    #endif
+
+                    LazyVGrid(columns: posterColumns, spacing: 16) {
+                        ForEach(filteredShows) { show in
+                            NavigationLink(value: Route.show(show.show)) {
+                                PosterCard(title: show.show, caption: caption(show), image: show.poster, watched: show.allWatched)
+                            }
+                            .buttonStyle(.plain)
+                            .id(show.show)
+                        }
+                    }
+                    .padding([.horizontal, .top])
                 }
+                .plyTabBarBottomClearance()
+                .plyFastScrollScrubber(
+                    itemCount: filteredShows.count,
+                    labelAt: { label(for: filteredShows[$0]) },
+                    onScrollTo: { proxy.scrollTo(filteredShows[$0].show, anchor: .top) }
+                )
             }
             .overlay {
                 if (!query.isEmpty || hasActiveFilters) && filteredShows.isEmpty {
@@ -925,6 +809,7 @@ struct ShowsView: View {
                     LibraryStatus(library: library, isEmpty: library.shows.isEmpty)
                 }
             }
+            .plySearchable($query, prompt: "Search series", drawer: true)
             .plyRefreshable { await library.reload() }
             // Newest first is a show's newest file, which the episodes list says; fetch it only when
             // that sort is chosen, and again after a reload has forgotten it.
@@ -980,23 +865,26 @@ struct ShowsView: View {
     }
 }
 
+@ViewBuilder
+private func filterChipRow<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+    #if os(iOS)
+    GlassEffectContainer(spacing: 8) {
+        HStack(spacing: 8) { content() }
+    }
+    #else
+    HStack(spacing: 8) { content() }
+    #endif
+}
+
 struct SettingsView: View {
     @Environment(Connection.self) private var connection
     @Environment(AppModel.self) private var model
+    @State private var confirmingDisconnect = false
 
     var body: some View {
         let info = connection.info
         NavigationStack {
             Form {
-                #if os(iOS)
-                Section {} header: {
-                    Text("Settings")
-                        .font(.title2.bold())
-                        .foregroundStyle(.primary)
-                        .textCase(nil)
-                }
-                #endif
-
                 Section("Server") {
                     LabeledContent("Name", value: info.name)
                     LabeledContent("Address") {
@@ -1025,19 +913,33 @@ struct SettingsView: View {
                 }
                 Section {
                     Button("Connect to another server") { model.chooseServer() }
-                    Button("Forget this server", role: .destructive) { model.disconnect() }
+                    Button("Forget this server", role: .destructive) { confirmingDisconnect = true }
                 } header: {
                     Text("Connection")
                 } footer: {
                     Text("Forgetting the server removes this device's token; the owner can also revoke it in Settings › Devices.")
                 }
             }
-            .plyTabBarBottomClearance()
-            #if os(iOS)
-            .plyMainPageLogo()
-            #else
             .navigationTitle("Settings")
+            .plyInlineTitle()
+            #if os(iOS)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    PlyLogo(size: PlyDesign.headerLogoSize, color: .primary)
+                }
+                .sharedBackgroundVisibility(.hidden)
+            }
             #endif
+            .confirmationDialog(
+                "Forget \(info.name)?",
+                isPresented: $confirmingDisconnect,
+                titleVisibility: .visible
+            ) {
+                Button("Forget server", role: .destructive) { model.disconnect() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This removes the pairing token stored on this device. You will need a new pairing code to reconnect if authentication is required.")
+            }
         }
     }
 }
@@ -1082,11 +984,8 @@ struct ActiveFilterChip: View {
             #if os(iOS)
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .background(Color.orange.opacity(0.18), in: .capsule)
-            .overlay(
-                Capsule().strokeBorder(Color.orange.opacity(0.4), lineWidth: 0.8)
-            )
-            .foregroundStyle(Color.orange)
+            .foregroundStyle(.white)
+            .plyInteractiveGlassCapsule(tint: .orange)
             #else
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
@@ -1095,6 +994,7 @@ struct ActiveFilterChip: View {
             #endif
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Remove \(title) filter")
     }
 }
 
@@ -1119,12 +1019,12 @@ struct FilterChip: View {
             isOn.toggle()
         } label: {
             Text(title)
-                .font(.footnote)
+                .font(.footnote.weight(isOn ? .semibold : .regular))
                 #if os(iOS)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(isOn ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary), in: .capsule)
                 .foregroundStyle(isOn ? .white : .primary)
+                .plyInteractiveGlassCapsule(tint: isOn ? .orange : nil)
                 #else
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
@@ -1160,6 +1060,10 @@ struct UpcomingCard: View {
                 .font(.caption).foregroundStyle(.secondary).lineLimit(1)
         }
         .contentShape(.rect)
+        .hoverEffect()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(upcoming.show)
+        .accessibilityValue("\(episodeText), \(Format.airDate(upcoming.nextAirDate))")
     }
 
     private var episodeText: String {

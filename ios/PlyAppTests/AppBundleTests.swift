@@ -25,4 +25,10 @@ nonisolated final class AppBundleTests: XCTestCase {
         let ats = info("NSAppTransportSecurity") as? [String: Any]
         XCTAssertEqual(ats?["NSAllowsLocalNetworking"] as? Bool, true, "a server on http://<LAN address> would be refused")
     }
+
+    #if os(iOS)
+    func testDarkAppearanceIsDeclaredInInfoPlist() {
+        XCTAssertEqual(info("UIUserInterfaceStyle") as? String, "Dark")
+    }
+    #endif
 }

@@ -51,17 +51,10 @@ struct ItemDetailView: View {
 
     private func content(item: Item, detail d: ItemDetail?) -> some View {
         let backdropPath = item.isEpisode ? item.landscapeImage : item.backdrop ?? d?.meta?.backdrop ?? item.art?.backdrop ?? item.poster
-        let bottomClearance: CGFloat = {
-            #if os(iOS)
-            return onDismissPortal == nil ? PlyDesign.tabBarBottomClearance : PlyDesign.standardBottomClearance
-            #else
-            return PlyDesign.standardBottomClearance
-            #endif
-        }()
 
         return DetailBackdropScaffold(
             backdropPath: backdropPath,
-            bottomClearance: bottomClearance
+            bottomClearance: PlyDesign.defaultDetailBottomClearance
         ) {
             heroStage(item: item, detail: d, backdropPath: backdropPath)
 
@@ -126,11 +119,13 @@ struct ItemDetailView: View {
         #if os(iOS)
         .overlay(alignment: .topTrailing) {
             if let onDismissPortal {
-                HStack(spacing: PlyDesign.overlayButtonSpacing) {
-                    if d != nil {
-                        airplayMenu(item)
+                GlassEffectContainer(spacing: PlyDesign.overlayButtonSpacing) {
+                    HStack(spacing: PlyDesign.overlayButtonSpacing) {
+                        if d != nil {
+                            airplayMenu(item)
+                        }
+                        GlassCloseButton(accessibilityLabel: "Close details", action: onDismissPortal)
                     }
-                    GlassCloseButton(accessibilityLabel: "Close details", action: onDismissPortal)
                 }
                 .padding(.top, portalTopInset + PlyDesign.overlayTopOffset)
                 .padding(.trailing, PlyDesign.overlayTrailingPadding)
@@ -211,7 +206,7 @@ struct ItemDetailView: View {
 
     @ViewBuilder
     private func actionButtons(_ item: Item) -> some View {
-        HStack(spacing: 12) {
+        let buttons = HStack(spacing: 12) {
             // A film's own; an episode's title is its show's, whose trailer is on the show's page.
             if item.kind == "movie", let titleId = item.titleId {
                 TrailerButton(titleId: titleId)
@@ -220,7 +215,8 @@ struct ItemDetailView: View {
             DetailActionButton(
                 title: item.isWatched ? "Watched" : "Mark as watched",
                 systemImage: item.isWatched ? "checkmark.circle.fill" : "checkmark.circle",
-                tint: item.isWatched ? .orange : .white
+                prominent: item.isWatched,
+                tint: item.isWatched ? .orange : nil
             ) {
                 setWatched(!item.isWatched)
             }
@@ -233,7 +229,13 @@ struct ItemDetailView: View {
 
             Spacer()
         }
-        .padding(.horizontal)
+
+        #if os(iOS)
+        GlassEffectContainer(spacing: 12) { buttons }
+            .padding(.horizontal, PlyDesign.contentHorizontalPadding)
+        #else
+        buttons.padding(.horizontal, PlyDesign.contentHorizontalPadding)
+        #endif
     }
 
     /// Icon-only AirPlay routing menu shown on the top right of item details.
@@ -356,7 +358,7 @@ struct ItemDetailView: View {
             }
         }
         .plyDetailCard()
-        .padding(.horizontal, 20)
+        .padding(.horizontal, PlyDesign.contentHorizontalPadding)
         .padding(.top, 8)
         .padding(.bottom, 2)
     }
@@ -366,31 +368,43 @@ struct ItemDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Versions").font(.headline)
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(versions) { v in
-                        let label = v.versionLabel.isEmpty ? (v.id == currentId ? "Current" : "Version \(v.id)") : v.versionLabel
-                        if v.id == currentId {
-                            Text(label)
-                                .font(.subheadline.weight(.semibold))
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(.tint, in: .capsule)
-                                .foregroundStyle(.white)
-                        } else {
-                            NavigationLink(value: Route.item(v.id)) {
-                                Text(label)
-                                    .font(.subheadline)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .background(.quaternary, in: .capsule)
-                            }
-                            .buttonStyle(.plain)
-                        }
+                versionChipsRow(versions, currentId: currentId)
+            }
+        }
+        .padding(.horizontal, PlyDesign.contentHorizontalPadding)
+    }
+
+    @ViewBuilder
+    private func versionChipsRow(_ versions: [Item], currentId: Int64) -> some View {
+        let row = HStack(spacing: 8) {
+            ForEach(versions) { v in
+                let label = v.versionLabel.isEmpty ? (v.id == currentId ? "Current" : "Version \(v.id)") : v.versionLabel
+                if v.id == currentId {
+                    Text(label)
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .foregroundStyle(.white)
+                        .plyInteractiveGlassCapsule(tint: .orange)
+                        .accessibilityAddTraits(.isSelected)
+                } else {
+                    NavigationLink(value: Route.item(v.id)) {
+                        Text(label)
+                            .font(.subheadline)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .foregroundStyle(.primary)
+                            .plyInteractiveGlassCapsule()
                     }
+                    .buttonStyle(.plain)
                 }
             }
         }
-        .padding(.horizontal)
+        #if os(iOS)
+        GlassEffectContainer(spacing: 8) { row }
+        #else
+        row
+        #endif
     }
 
     private func play(from start: Double, receiver: Receiver? = nil) {

@@ -246,7 +246,11 @@ private final class WindowWatcher: UIView {
             shown = true
         } else if shown {
             // After UIKit has finished with the dismissal, so that it can be told from a move.
-            DispatchQueue.main.async { [onLeave] in onLeave() }
+            Task { @MainActor [weak self, onLeave] in
+                await Task.yield()
+                guard self?.window == nil else { return }
+                onLeave()
+            }
         }
     }
 }
@@ -472,7 +476,7 @@ private struct PlayerTrackPill: View {
             }
             .accessibilityLabel("Subtitles")
         }
-        .plyGlassCapsule(strokeOpacity: 0.18)
+        .plyGlassCapsule(strokeOpacity: 0.18, interactive: true)
         .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
         .opacity(chrome.visible ? 1 : 0)
         .allowsHitTesting(chrome.visible)

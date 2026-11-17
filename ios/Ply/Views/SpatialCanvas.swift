@@ -63,18 +63,12 @@ actor PosterPaletteExtractor {
         guard let url else { return .fallback }
         if let cached = cache[url] { return cached }
 
-        do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-                  let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
-                return .fallback
-            }
-            let extracted = Self.extract(from: cgImage)
-            cache[url] = extracted
-            return extracted
-        } catch {
+        guard let cgImage = await ImagePipeline.shared.cgImage(for: url, maxPixelSize: 160) else {
             return .fallback
         }
+        let extracted = Self.extract(from: cgImage)
+        cache[url] = extracted
+        return extracted
     }
 
     /// Synchronously samples four quadrants and the center region of `cgImage`.

@@ -38,22 +38,8 @@ struct ShowView: View {
         DetailBackdropScaffold(backdropPath: backdropPath) {
             heroStage(detail)
 
-            HStack(spacing: 12) {
-                if let titleId = detail?.meta?.id {
-                    TrailerButton(titleId: titleId)
-                }
-
-                DetailActionButton(
-                    title: allShowWatched ? "Show watched" : "Mark show watched",
-                    systemImage: allShowWatched ? "checkmark.circle.fill" : "checkmark.circle",
-                    tint: allShowWatched ? .orange : .white
-                ) {
-                    setShowWatched(!allShowWatched)
-                }
-
-                Spacer()
-            }
-            .padding(.horizontal)
+            actionButtons
+                .padding(.horizontal, PlyDesign.contentHorizontalPadding)
 
             if let overview = detail?.overview ?? detail?.meta?.overview {
                 Text(overview).font(.callout).padding(.horizontal)
@@ -135,6 +121,32 @@ struct ShowView: View {
         )
     }
 
+    @ViewBuilder
+    private var actionButtons: some View {
+        let buttons = HStack(spacing: 12) {
+            if let titleId = detail?.meta?.id {
+                TrailerButton(titleId: titleId)
+            }
+
+            DetailActionButton(
+                title: allShowWatched ? "Show watched" : "Mark show watched",
+                systemImage: allShowWatched ? "checkmark.circle.fill" : "checkmark.circle",
+                prominent: allShowWatched,
+                tint: allShowWatched ? .orange : nil
+            ) {
+                setShowWatched(!allShowWatched)
+            }
+
+            Spacer()
+        }
+
+        #if os(iOS)
+        GlassEffectContainer(spacing: 12) { buttons }
+        #else
+        buttons
+        #endif
+    }
+
     private func setShowWatched(_ watched: Bool) {
         Task {
             do {
@@ -171,7 +183,8 @@ struct ShowView: View {
             self.detail = d
             self.episodes = list
             error = nil
-            if season == nil || !seasons.contains(season!) {
+            if let current = season, seasons.contains(current) {
+            } else {
                 // The first season with something left to watch.
                 season = seasons.first { n in list.contains { $0.season == n && !$0.isWatched } } ?? seasons.first
             }

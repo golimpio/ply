@@ -108,215 +108,7 @@ nonisolated struct PlyLogoPlayShape: Shape {
 /// The ply brand mark (alias to PlyLogo for consistent authentic branding across all views).
 typealias PlyBrand = PlyLogo
 
-/// Unified custom vector icons for the iOS floating pill tab bar, aligned to a shared 24×24 optical grid.
-struct PlyTabIcon: View {
-    nonisolated enum Kind: String, CaseIterable, Sendable {
-        case home
-        case films
-        case series
-        case search
-        case settings
-    }
-
-    var kind: Kind
-    var isFilled: Bool = false
-    var size: CGFloat = 20
-
-    var body: some View {
-        Canvas { context, canvasSize in
-            let rect = CGRect(origin: .zero, size: canvasSize)
-            let primaryStroke = StrokeStyle(
-                lineWidth: max(1.5, size * 0.088),
-                lineCap: .round,
-                lineJoin: .round
-            )
-            let secondaryStroke = StrokeStyle(
-                lineWidth: max(1.2, size * 0.062),
-                lineCap: .round,
-                lineJoin: .round
-            )
-            let layers = Self.layers(for: kind, in: rect, isFilled: isFilled)
-
-            if !layers.evenOddFill.isEmpty {
-                context.fill(layers.evenOddFill, with: .foreground, style: FillStyle(eoFill: true))
-            }
-            if !layers.primaryStroke.isEmpty {
-                context.stroke(layers.primaryStroke, with: .foreground, style: primaryStroke)
-            }
-            if !layers.secondaryStroke.isEmpty {
-                context.stroke(layers.secondaryStroke, with: .foreground, style: secondaryStroke)
-            }
-            if !layers.heavyStroke.isEmpty {
-                let heavy = StrokeStyle(
-                    lineWidth: primaryStroke.lineWidth * (isFilled ? 1.32 : 1.14),
-                    lineCap: .round,
-                    lineJoin: .round
-                )
-                context.stroke(layers.heavyStroke, with: .foreground, style: heavy)
-            }
-        }
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
-    }
-
-    nonisolated struct Layers {
-        var evenOddFill = SwiftUI.Path()
-        var primaryStroke = SwiftUI.Path()
-        var secondaryStroke = SwiftUI.Path()
-        var heavyStroke = SwiftUI.Path()
-
-        var combinedBounds: CGRect {
-            let paths = [evenOddFill, primaryStroke, secondaryStroke, heavyStroke].filter { !$0.isEmpty }
-            guard let first = paths.first else { return .zero }
-            return paths.dropFirst().reduce(first.boundingRect) { $0.union($1.boundingRect) }
-        }
-    }
-
-    nonisolated static func layers(for kind: Kind, in rect: CGRect, isFilled: Bool) -> Layers {
-        var layers = Layers()
-
-        switch kind {
-        case .home:
-            let house = homeSilhouettePath()
-            let window = SwiftUI.Path(
-                roundedRect: CGRect(x: 9.5, y: 12.1, width: 5.0, height: 5.0),
-                cornerRadius: 1.6,
-                style: .continuous
-            )
-            if isFilled {
-                layers.evenOddFill.addPath(house)
-                layers.evenOddFill.addPath(window)
-            } else {
-                layers.primaryStroke.addPath(house)
-                layers.secondaryStroke.addPath(window)
-            }
-
-        case .films:
-            let leftReel = SwiftUI.Path(ellipseIn: CGRect(x: 4.1, y: 3.4, width: 6.6, height: 6.6))
-            let rightReel = SwiftUI.Path(ellipseIn: CGRect(x: 10.9, y: 3.4, width: 6.6, height: 6.6))
-            let body = SwiftUI.Path(
-                roundedRect: CGRect(x: 3.8, y: 11.4, width: 12.4, height: 9.2),
-                cornerRadius: 2.1,
-                style: .continuous
-            )
-            if isFilled {
-                layers.evenOddFill.addPath(leftReel)
-                layers.evenOddFill.addEllipse(in: CGRect(x: 6.3, y: 5.6, width: 2.2, height: 2.2))
-                layers.evenOddFill.addPath(rightReel)
-                layers.evenOddFill.addEllipse(in: CGRect(x: 13.1, y: 5.6, width: 2.2, height: 2.2))
-                layers.evenOddFill.addPath(body)
-                layers.evenOddFill.addPath(projectorLensPath(closed: true))
-            } else {
-                layers.primaryStroke.addPath(leftReel)
-                layers.primaryStroke.addPath(rightReel)
-                layers.primaryStroke.addPath(body)
-                layers.primaryStroke.addPath(projectorLensPath(closed: false))
-            }
-
-        case .series:
-            let cabinet = SwiftUI.Path(
-                roundedRect: CGRect(x: 3.0, y: 3.5, width: 18.0, height: 17.0),
-                cornerRadius: 4.8,
-                style: .continuous
-            )
-            if isFilled {
-                let screen = SwiftUI.Path(
-                    roundedRect: CGRect(x: 6.5, y: 6.3, width: 11.0, height: 7.8),
-                    cornerRadius: 2.0,
-                    style: .continuous
-                )
-                let chinPill = SwiftUI.Path(
-                    roundedRect: CGRect(x: 9.6, y: 17.15, width: 4.8, height: 1.2),
-                    cornerRadius: 0.6,
-                    style: .continuous
-                )
-                layers.evenOddFill.addPath(cabinet)
-                layers.evenOddFill.addPath(screen)
-                layers.evenOddFill.addPath(chinPill)
-            } else {
-                let screen = SwiftUI.Path(
-                    roundedRect: CGRect(x: 5.8, y: 6.1, width: 12.4, height: 9.2),
-                    cornerRadius: 2.5,
-                    style: .continuous
-                )
-                layers.primaryStroke.addPath(cabinet)
-                layers.secondaryStroke.addPath(screen)
-                layers.secondaryStroke.move(to: CGPoint(x: 9.6, y: 18.0))
-                layers.secondaryStroke.addLine(to: CGPoint(x: 14.4, y: 18.0))
-            }
-
-        case .search:
-            if isFilled {
-                layers.evenOddFill.addEllipse(in: CGRect(x: 3.5, y: 3.5, width: 13.8, height: 13.8))
-                layers.evenOddFill.addEllipse(in: CGRect(x: 7.0, y: 7.0, width: 6.8, height: 6.8))
-                layers.heavyStroke.move(to: CGPoint(x: 15.5, y: 15.5))
-                layers.heavyStroke.addLine(to: CGPoint(x: 20.4, y: 20.4))
-            } else {
-                layers.primaryStroke.addEllipse(in: CGRect(x: 3.7, y: 3.7, width: 13.4, height: 13.4))
-                layers.heavyStroke.move(to: CGPoint(x: 15.4, y: 15.4))
-                layers.heavyStroke.addLine(to: CGPoint(x: 20.4, y: 20.4))
-            }
-
-        case .settings:
-            let sliders: [(x: CGFloat, y: CGFloat)] = [(15.1, 5.8), (8.9, 12.0), (15.1, 18.2)]
-            let radius: CGFloat = isFilled ? 2.45 : 2.15
-            for knob in sliders {
-                let knobRect = CGRect(
-                    x: knob.x - radius,
-                    y: knob.y - radius,
-                    width: radius * 2,
-                    height: radius * 2
-                )
-                if isFilled {
-                    layers.heavyStroke.move(to: CGPoint(x: 3.5, y: knob.y))
-                    layers.heavyStroke.addLine(to: CGPoint(x: 20.5, y: knob.y))
-                    layers.evenOddFill.addEllipse(in: knobRect)
-                } else {
-                    layers.primaryStroke.move(to: CGPoint(x: 3.5, y: knob.y))
-                    layers.primaryStroke.addLine(to: CGPoint(x: knob.x - radius, y: knob.y))
-                    layers.primaryStroke.move(to: CGPoint(x: knob.x + radius, y: knob.y))
-                    layers.primaryStroke.addLine(to: CGPoint(x: 20.5, y: knob.y))
-                    layers.primaryStroke.addEllipse(in: knobRect)
-                }
-            }
-        }
-
-        let scale = CGAffineTransform(translationX: rect.minX, y: rect.minY)
-            .scaledBy(x: rect.width / 24.0, y: rect.height / 24.0)
-        layers.evenOddFill = layers.evenOddFill.applying(scale)
-        layers.primaryStroke = layers.primaryStroke.applying(scale)
-        layers.secondaryStroke = layers.secondaryStroke.applying(scale)
-        layers.heavyStroke = layers.heavyStroke.applying(scale)
-        return layers
-    }
-
-    private nonisolated static func homeSilhouettePath() -> SwiftUI.Path {
-        var path = SwiftUI.Path()
-        path.move(to: CGPoint(x: 3.6, y: 10.6))
-        path.addLine(to: CGPoint(x: 12.0, y: 3.3))
-        path.addLine(to: CGPoint(x: 20.4, y: 10.6))
-        path.addLine(to: CGPoint(x: 20.4, y: 19.2))
-        path.addArc(tangent1End: CGPoint(x: 20.4, y: 20.7), tangent2End: CGPoint(x: 5.1, y: 20.7), radius: 1.5)
-        path.addLine(to: CGPoint(x: 5.1, y: 20.7))
-        path.addArc(tangent1End: CGPoint(x: 3.6, y: 20.7), tangent2End: CGPoint(x: 3.6, y: 10.6), radius: 1.5)
-        path.closeSubpath()
-        return path
-    }
-
-    private nonisolated static func projectorLensPath(closed: Bool) -> SwiftUI.Path {
-        var path = SwiftUI.Path()
-        path.move(to: CGPoint(x: 16.2, y: 13.8))
-        path.addLine(to: CGPoint(x: 20.5, y: 12.0))
-        path.addLine(to: CGPoint(x: 20.5, y: 20.0))
-        path.addLine(to: CGPoint(x: 16.2, y: 18.2))
-        if closed {
-            path.closeSubpath()
-        }
-        return path
-    }
-}
-
-/// An inline top search bar that avoids the system bottom search bar collision with `FloatingTabBar`.
+/// An inline top search bar used on tvOS where navigation-drawer search is unavailable.
 struct PlySearchField: View {
     @Binding var text: String
     var prompt: String
@@ -494,24 +286,36 @@ func alphabetLetter(of title: String) -> String {
     return (upper >= "A" && upper <= "Z") ? upper : "#"
 }
 
-#if os(iOS)
-struct ScrollOffsetPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
+/// Normalized scroll geometry used to drive `FastScrollScrubber` across any adaptive grid column count.
+nonisolated struct FastScrollMetrics: Equatable, Sendable {
+    let offsetY: CGFloat
+    let contentHeight: CGFloat
+    let containerHeight: CGFloat
+
+    var scrollableHeight: CGFloat { max(0, contentHeight - containerHeight) }
+    var isScrollable: Bool { scrollableHeight > 40 }
+
+    var progress: CGFloat {
+        guard scrollableHeight > 0 else { return 0 }
+        return max(0, min(1, offsetY / scrollableHeight))
+    }
+
+    func itemIndex(count: Int) -> Int {
+        guard count > 1 else { return 0 }
+        return max(0, min(count - 1, Int(progress * CGFloat(count - 1))))
     }
 }
 
-/// A Plex-style fast-scrolling vertical slider docked along the right edge of the screen.
-/// Appears when scrolling, featuring an edge-docked handle with vertical arrows and a floating white indicator bubble.
+#if os(iOS)
+/// A fast-scrolling vertical slider docked along the trailing edge using Liquid Glass chrome.
 struct FastScrollScrubber: View {
     let itemCount: Int
     let currentLabel: String
     let onScrub: (Int) -> Void
 
     @Binding var isVisible: Bool
+    @Binding var isDragging: Bool
     @Binding var progress: CGFloat
-    @State private var isDragging: Bool = false
     @State private var lastReportedIndex: Int = -1
 
     var body: some View {
@@ -522,49 +326,39 @@ struct FastScrollScrubber: View {
             let clampedProgress = max(0, min(1, progress))
             let currentY = topInset + (clampedProgress * trackHeight)
 
-            HStack(spacing: 8) {
-                Spacer()
+            GlassEffectContainer(spacing: 8) {
+                HStack(spacing: 8) {
+                    Spacer()
 
-                if isVisible {
-                    // Floating White Indicator Bubble
-                    ZStack {
-                        Circle()
-                            .fill(Color.white)
-                            .frame(width: 44, height: 44)
-                            .shadow(color: Color.black.opacity(0.35), radius: 8, y: 3)
-
-                        if isDragging && !currentLabel.isEmpty {
-                            Text(currentLabel)
-                                .font(.system(size: 20, weight: .bold))
-                                .foregroundStyle(Color.black)
-                        } else {
+                    if isVisible {
+                        ZStack {
                             Circle()
-                                .fill(Color.black)
-                                .frame(width: 7, height: 7)
-                        }
-                    }
-                    .scaleEffect(isDragging ? 1.08 : 0.95)
-                    .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isDragging)
-                    .transition(.scale.combined(with: .opacity))
+                                .fill(Color.white)
+                                .frame(width: 44, height: 44)
+                                .shadow(color: Color.black.opacity(0.35), radius: 8, y: 3)
 
-                    // Docked Slider Handle on right edge with vertical arrows
-                    ZStack {
-                        Capsule()
-                            .fill(Color.black.opacity(0.72))
-                            .background(.ultraThinMaterial, in: Capsule())
-                            .overlay(
-                                Capsule()
-                                    .strokeBorder(Color.white.opacity(0.2), lineWidth: 0.8)
-                            )
-                            .frame(width: 22, height: 38)
-                            .shadow(color: Color.black.opacity(0.4), radius: 6, y: 2)
+                            if isDragging && !currentLabel.isEmpty {
+                                Text(currentLabel)
+                                    .font(.system(size: 20, weight: .bold))
+                                    .foregroundStyle(Color.black)
+                            } else {
+                                Circle()
+                                    .fill(Color.black)
+                                    .frame(width: 7, height: 7)
+                            }
+                        }
+                        .scaleEffect(isDragging ? 1.08 : 0.95)
+                        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isDragging)
+                        .transition(.scale.combined(with: .opacity))
 
                         Image(systemName: "chevron.up.chevron.down")
                             .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(Color.white.opacity(0.85))
+                            .foregroundStyle(.white.opacity(0.9))
+                            .frame(width: 24, height: 38)
+                            .glassEffect(.regular.interactive(), in: .capsule)
+                            .frame(width: 32, height: 44, alignment: .trailing)
+                            .contentShape(Rectangle())
                     }
-                    .frame(width: 32, height: 44, alignment: .trailing)
-                    .contentShape(Rectangle())
                 }
             }
             .position(x: geo.size.width - 24, y: currentY)
@@ -585,7 +379,6 @@ struct FastScrollScrubber: View {
 
                         if clamped != lastReportedIndex {
                             lastReportedIndex = clamped
-                            UISelectionFeedbackGenerator().selectionChanged()
                             onScrub(clamped)
                         }
                     }
@@ -593,13 +386,92 @@ struct FastScrollScrubber: View {
                         isDragging = false
                     }
             )
+            .sensoryFeedback(.selection, trigger: lastReportedIndex)
         }
         .allowsHitTesting(isVisible)
+    }
+}
+
+private struct FastScrollScrubberModifier: ViewModifier {
+    let itemCount: Int
+    let labelAt: (Int) -> String
+    let onScrollTo: (Int) -> Void
+
+    @State private var isVisible = false
+    @State private var isDragging = false
+    @State private var progress: CGFloat = 0
+    @State private var currentLabel = ""
+    @State private var hideToken = 0
+
+    func body(content: Content) -> some View {
+        ZStack(alignment: .trailing) {
+            content
+                .onScrollGeometryChange(for: FastScrollMetrics.self) { geo in
+                    FastScrollMetrics(
+                        offsetY: geo.contentOffset.y + geo.contentInsets.top,
+                        contentHeight: geo.contentSize.height,
+                        containerHeight: geo.containerSize.height
+                    )
+                } action: { oldValue, newValue in
+                    guard itemCount >= 8, newValue.isScrollable, !isDragging else { return }
+                    guard abs(oldValue.offsetY - newValue.offsetY) > 0.5 else { return }
+
+                    progress = newValue.progress
+                    currentLabel = labelAt(newValue.itemIndex(count: itemCount))
+                    if !isVisible {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            isVisible = true
+                        }
+                    }
+                    hideToken += 1
+                }
+
+            if itemCount >= 8 {
+                FastScrollScrubber(
+                    itemCount: itemCount,
+                    currentLabel: currentLabel,
+                    onScrub: { index in
+                        currentLabel = labelAt(index)
+                        onScrollTo(index)
+                        hideToken += 1
+                    },
+                    isVisible: $isVisible,
+                    isDragging: $isDragging,
+                    progress: $progress
+                )
+            }
+        }
+        .task(id: hideToken) {
+            guard hideToken > 0, isVisible, !isDragging else { return }
+            try? await Task.sleep(for: .seconds(1.8))
+            guard !Task.isCancelled, !isDragging else { return }
+            withAnimation(.easeOut(duration: 0.35)) {
+                isVisible = false
+            }
+        }
+        .onChange(of: isDragging) { _, dragging in
+            if !dragging, isVisible {
+                hideToken += 1
+            }
+        }
     }
 }
 #endif
 
 extension View {
+    /// Attaches the iOS edge scrubber synced via `onScrollGeometryChange` with automatic hide timer cancellation.
+    @ViewBuilder func plyFastScrollScrubber(
+        itemCount: Int,
+        labelAt: @escaping (Int) -> String,
+        onScrollTo: @escaping (Int) -> Void
+    ) -> some View {
+        #if os(iOS)
+        modifier(FastScrollScrubberModifier(itemCount: itemCount, labelAt: labelAt, onScrollTo: onScrollTo))
+        #else
+        self
+        #endif
+    }
+
     /// The pages a Route opens.
     func plyDestinations() -> some View {
         navigationDestination(for: Route.self) { route in
@@ -624,10 +496,14 @@ extension View {
         #endif
     }
 
-    /// Search and pull-to-refresh are iOS; the TV has a search field of its own (BrowseView).
-    @ViewBuilder func plySearchable(_ text: Binding<String>, prompt: String) -> some View {
+    /// Search and pull-to-refresh are iOS; the TV has an inline `PlySearchField`.
+    @ViewBuilder func plySearchable(_ text: Binding<String>, prompt: String, drawer: Bool = false) -> some View {
         #if os(iOS)
-        searchable(text: text, prompt: prompt)
+        if drawer {
+            searchable(text: text, placement: .navigationBarDrawer(displayMode: .automatic), prompt: prompt)
+        } else {
+            searchable(text: text, prompt: prompt)
+        }
         #else
         self
         #endif
@@ -652,6 +528,19 @@ extension View {
 }
 
 enum Format {
+    private static let isoDateParser: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    private static let shortMonthDay: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d"
+        return f
+    }()
+
     /// "1h 41m", "52m".
     static func runtime(_ seconds: Double) -> String {
         let minutes = Int((seconds / 60).rounded())
@@ -672,37 +561,54 @@ enum Format {
 
     /// "Today", "Tomorrow", "Nov 20", or the date string.
     static func airDate(_ s: String) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        guard let date = f.date(from: s) else { return s }
+        guard let date = isoDateParser.date(from: s) else { return s }
         if Calendar.current.isDateInToday(date) { return "Today" }
         if Calendar.current.isDateInTomorrow(date) { return "Tomorrow" }
-        let out = DateFormatter()
-        out.dateFormat = "MMM d"
-        return out.string(from: date)
+        return shortMonthDay.string(from: date)
     }
 }
 
-/// An image the server links to (with its URL token when it needs one), filling its frame.
+/// An image the server links to (with its URL token when it needs one), filling its frame via `ImagePipeline`.
 struct RemoteImage: View {
     @Environment(Connection.self) private var connection
     let path: String?
     var placeholder = "photo"
 
+    @State private var loadedImage: UIImage?
+    @State private var loadedURL: URL?
+
     var body: some View {
+        let url = connection.api.url(path)
+        let displayImage = (loadedURL == url ? loadedImage : nil) ?? ImagePipeline.shared.cachedImage(for: url)
+
         Rectangle()
             .fill(.quaternary)
             .overlay {
-                AsyncImage(url: connection.api.url(path)) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
-                    } else {
-                        Image(systemName: placeholder).font(.title2).foregroundStyle(.tertiary)
-                    }
+                if let displayImage {
+                    Image(uiImage: displayImage)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    Image(systemName: placeholder).font(.title2).foregroundStyle(.tertiary)
                 }
             }
             .clipped()
+            .task(id: url) {
+                guard let url else {
+                    loadedImage = nil
+                    loadedURL = nil
+                    return
+                }
+                if let cached = ImagePipeline.shared.cachedImage(for: url) {
+                    loadedImage = cached
+                    loadedURL = url
+                    return
+                }
+                let fetched = await ImagePipeline.shared.image(for: url)
+                guard !Task.isCancelled else { return }
+                loadedImage = fetched
+                loadedURL = url
+            }
             // The card around it says what it is; the picture itself says nothing.
             .accessibilityHidden(true)
     }
@@ -901,12 +807,9 @@ struct ExternalLinkPill: View {
                     .font(.caption2.weight(.semibold))
             }
             .font(.caption.weight(.medium))
-            .foregroundStyle(.primary.opacity(0.88))
-            .padding(.horizontal, PlyDesign.capsuleHorizontalPadding)
-            .padding(.vertical, PlyDesign.capsuleVerticalPadding)
-            .plySubtleCapsule()
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.glass)
+        .buttonBorderShape(.capsule)
         #endif
     }
 }
@@ -997,17 +900,12 @@ struct EpisodesFailure: View {
 extension View {
     @ViewBuilder func plyGlassCircle(tintOpacity: Double = 0.18) -> some View {
         #if os(iOS)
-        if #available(iOS 26.0, *) {
-            self
-                .background(Color.black.opacity(tintOpacity), in: Circle())
-                .glassEffect(.regular.interactive(), in: .circle)
-        } else {
-            self
-                .background(.ultraThinMaterial, in: Circle())
-                .background(Color.black.opacity(tintOpacity), in: Circle())
-                .overlay(Circle().strokeBorder(.white.opacity(0.24), lineWidth: 0.85))
-                .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
-        }
+        glassEffect(
+            tintOpacity > 0
+                ? .regular.tint(Color.black.opacity(tintOpacity)).interactive()
+                : .regular.interactive(),
+            in: .circle
+        )
         #else
         self
             .background(.ultraThinMaterial, in: Circle())
@@ -1019,12 +917,45 @@ extension View {
 
     @ViewBuilder func plyGlassCapsule(
         tintOpacity: Double = 0,
-        strokeOpacity: Double = 0.14
+        strokeOpacity: Double = 0.14,
+        interactive: Bool = false
     ) -> some View {
+        #if os(iOS)
+        let base: Glass = tintOpacity > 0 ? .regular.tint(Color.black.opacity(tintOpacity)) : .regular
+        glassEffect(interactive ? base.interactive() : base, in: .capsule)
+        #else
         self
             .background(.ultraThinMaterial, in: Capsule())
             .background(Color.black.opacity(tintOpacity), in: Capsule())
             .overlay(Capsule().strokeBorder(Color.white.opacity(strokeOpacity), lineWidth: 0.75))
+        #endif
+    }
+
+    @ViewBuilder func plyInteractiveGlassCapsule(tint: Color? = nil) -> some View {
+        #if os(iOS)
+        glassEffect(
+            tint.map { .regular.tint($0).interactive() } ?? .regular.interactive(),
+            in: .capsule
+        )
+        #else
+        plySubtleCapsule()
+        #endif
+    }
+
+    @ViewBuilder func plyGlassButtonStyle(prominent: Bool = false) -> some View {
+        #if os(iOS)
+        if prominent {
+            buttonStyle(.glassProminent)
+        } else {
+            buttonStyle(.glass)
+        }
+        #else
+        if prominent {
+            buttonStyle(.borderedProminent)
+        } else {
+            buttonStyle(.bordered)
+        }
+        #endif
     }
 
     @ViewBuilder func plySubtleCapsule(
@@ -1037,12 +968,16 @@ extension View {
     }
 
     @ViewBuilder func plyDetailCard() -> some View {
+        #if os(iOS)
+        glassEffect(.regular, in: .rect(cornerRadius: PlyDesign.panelCornerRadius))
+        #else
         self
             .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: PlyDesign.panelCornerRadius))
             .overlay(
                 RoundedRectangle(cornerRadius: PlyDesign.panelCornerRadius)
                     .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.8)
             )
+        #endif
     }
 
     @ViewBuilder func plyMicroSpecsStyle(opacity: Double = 0.68) -> some View {
@@ -1233,10 +1168,11 @@ struct PlyGlassPillBadge: View {
     }
 }
 
-/// Reusable bordered detail action button (`Trailer`, `Mark as watched`, `From start`, etc.).
+/// Reusable Liquid Glass detail action button (`Trailer`, `Mark as watched`, `From start`, etc.).
 struct DetailActionButton: View {
     let title: String
     let systemImage: String
+    var prominent: Bool = false
     var tint: Color? = nil
     let action: () -> Void
 
@@ -1245,7 +1181,8 @@ struct DetailActionButton: View {
             Label(title, systemImage: systemImage)
                 .font(.subheadline.weight(.semibold))
         }
-        .buttonStyle(.bordered)
+        .plyGlassButtonStyle(prominent: prominent)
+        .buttonBorderShape(.capsule)
         .tint(tint)
     }
 }
@@ -1284,6 +1221,9 @@ struct DetailRowContent: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 13)
         .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(value)
     }
 }
 
@@ -1304,6 +1244,9 @@ struct PersonCreditCard: View {
             }
         }
         .frame(width: 90)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(name)
+        .accessibilityValue(subtitle ?? "")
     }
 }
 
@@ -1411,7 +1354,7 @@ struct DetailHeroStage<Eyebrow: View>: View {
                         .lineLimit(1)
                 }
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, PlyDesign.contentHorizontalPadding)
             .padding(.bottom, 16)
 
             if let onPlay, let playAccessibilityLabel {
@@ -1482,27 +1425,12 @@ nonisolated enum PlyDesign {
     static let overlayButtonSpacing: CGFloat = 10
     static let capsuleHorizontalPadding: CGFloat = 12
     static let capsuleVerticalPadding: CGFloat = 6
+    static let contentHorizontalPadding: CGFloat = 16
     static let panelCornerRadius: CGFloat = 14
     static let heroCardCornerRadius: CGFloat = 32
-    static let floatingTabBarItemHeight: CGFloat = 52
-    static let floatingTabBarVerticalPadding: CGFloat = 3
-    /// Total height of `FloatingTabBar` (`58pt`) plus its bottom offset (`8pt`).
-    static let floatingTabBarBottomInset: CGFloat = 8
-    static let floatingTabBarHeight: CGFloat = floatingTabBarItemHeight + floatingTabBarVerticalPadding * 2
-    /// Generous breathing gap above the floating dock when scrolled all the way to the bottom.
-    static let floatingTabBarBreathingGap: CGFloat = 36
-    /// Standard scroll-content bottom clearance on iOS (`102pt`), shared across all tabs and pushed pages.
-    static let tabBarBottomClearance: CGFloat = floatingTabBarHeight + floatingTabBarBottomInset + floatingTabBarBreathingGap
-    /// Standard scroll-content bottom clearance on tvOS and modal surfaces without the floating dock.
-    static let standardBottomClearance: CGFloat = 36
-    /// Default bottom clearance for pushed detail screens (clears the floating dock on iOS).
-    static let defaultDetailBottomClearance: CGFloat = {
-        #if os(iOS)
-        tabBarBottomClearance
-        #else
-        standardBottomClearance
-        #endif
-    }()
+    /// Standard scroll-content bottom breathing room (native `TabView` manages tab bar safe-area insets on iOS 26).
+    static let standardBottomClearance: CGFloat = 28
+    static let defaultDetailBottomClearance: CGFloat = standardBottomClearance
 }
 
 extension View {
@@ -1513,16 +1441,10 @@ extension View {
             .navigationTitle("")
             .plyInlineTitle()
             .toolbar {
-                if #available(iOS 26.0, *) {
-                    ToolbarItem(placement: .topBarLeading) {
-                        PlyLogo(size: PlyDesign.headerLogoSize, color: color)
-                    }
-                    .sharedBackgroundVisibility(.hidden)
-                } else {
-                    ToolbarItem(placement: .topBarLeading) {
-                        PlyLogo(size: PlyDesign.headerLogoSize, color: color)
-                    }
+                ToolbarItem(placement: .topBarLeading) {
+                    PlyLogo(size: PlyDesign.headerLogoSize, color: color)
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             .toolbar(hidden ? .hidden : .visible, for: .navigationBar)
         #else
@@ -1539,28 +1461,18 @@ extension View {
     ) -> some View {
         #if os(iOS)
         toolbar {
-            if #available(iOS 26.0, *) {
-                ToolbarItem(placement: .topBarTrailing) {
-                    GlassCloseButton(accessibilityLabel: accessibilityLabel, action: action)
-                }
-                .sharedBackgroundVisibility(.hidden)
-            } else {
-                ToolbarItem(placement: .topBarTrailing) {
-                    GlassCloseButton(accessibilityLabel: accessibilityLabel, action: action)
-                }
+            ToolbarItem(placement: .topBarTrailing) {
+                GlassCloseButton(accessibilityLabel: accessibilityLabel, action: action)
             }
+            .sharedBackgroundVisibility(.hidden)
         }
         #else
         self
         #endif
     }
 
-    /// Applies the standard bottom scroll-content clearance so scrolled pages never collide with `FloatingTabBar`.
+    /// Applies the standard bottom breathing clearance for scrolled pages.
     @ViewBuilder func plyTabBarBottomClearance() -> some View {
-        #if os(iOS)
-        contentMargins(.bottom, PlyDesign.tabBarBottomClearance, for: .scrollContent)
-        #else
         contentMargins(.bottom, PlyDesign.standardBottomClearance, for: .scrollContent)
-        #endif
     }
 }

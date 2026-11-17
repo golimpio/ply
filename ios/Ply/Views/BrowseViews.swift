@@ -62,10 +62,12 @@ struct BrowseView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    #if os(tvOS)
                     PlySearchField(text: $query, prompt: "Titles, shows, episodes, people, genres")
                         .frame(maxWidth: 360)
                         .padding(.horizontal, 24)
                         .frame(maxWidth: .infinity)
+                    #endif
 
                     if trimmed.isEmpty {
                         browseHome(browse)
@@ -76,6 +78,7 @@ struct BrowseView: View {
                 .padding(.top, 4)
             }
             .plyTabBarBottomClearance()
+            .plySearchable($query, prompt: "Titles, shows, episodes, people, genres")
             .plyRefreshable {
                 await library.reload()
                 await browse.load()
@@ -145,7 +148,7 @@ struct BrowseView: View {
                                 }
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 8)
-                                .plySubtleCapsule()
+                                .plyInteractiveGlassCapsule()
                             }
                             .buttonStyle(.plain)
                         }
@@ -294,12 +297,15 @@ struct PeopleView: View {
 
     var body: some View {
         ScrollView {
+            #if os(tvOS)
             PlySearchField(text: $query, prompt: "Search people")
                 .padding(.horizontal)
                 .padding(.top, 8)
+            #endif
             content
         }
         .plyTabBarBottomClearance()
+        .plySearchable($query, prompt: "Search people")
         .navigationTitle("People")
         .plyInlineTitle()
         .task(id: query) { await search() }
@@ -542,7 +548,7 @@ struct PersonView: View {
                 VStack(spacing: 6) {
                     Text(biography)
                         .font(.callout)
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(.primary.opacity(0.85))
                         .multilineTextAlignment(.center)
                         .lineLimit(isBioExpanded ? nil : 6)
                         .lineSpacing(3)
@@ -607,6 +613,7 @@ struct CreditCard: View {
             }
         }
         .frame(width: shelfCardWidth, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -631,6 +638,7 @@ struct FilmographyCard: View {
         }
         .frame(width: shelfCardWidth, alignment: .leading)
         .contentShape(.rect)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -786,7 +794,7 @@ struct CreditPreviewSheet: View {
                         .font(.caption.weight(.medium))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .plySubtleCapsule()
+                        .background(.fill.tertiary, in: .capsule)
                 }
             }
             .padding(.horizontal)
@@ -914,110 +922,48 @@ struct CollectionView: View {
 struct AllCollectionsView: View {
     @Environment(Connection.self) private var connection
     @State private var kind: CollectionKindFilter = .films
-    #if os(iOS)
-    @State private var isScrubberVisible = false
-    @State private var scrubProgress: CGFloat = 0
-    @State private var currentScrubLabel = ""
-    @State private var hideTask: Task<Void, Never>? = nil
-    #endif
 
     private var filteredCollections: [CollectionCard] {
         connection.browse.collections(for: kind)
     }
 
-    #if os(iOS)
-    private func handleScroll(offset: CGFloat) {
-        guard filteredCollections.count >= 8 else { return }
-        if !isScrubberVisible {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                isScrubberVisible = true
-            }
-        }
-        let rows = CGFloat((filteredCollections.count + 2) / 3)
-        let estHeight = max(1, rows * 210)
-        let p = max(0, min(1, -offset / estHeight))
-        scrubProgress = p
-        let idx = max(0, min(filteredCollections.count - 1, Int(p * CGFloat(filteredCollections.count - 1))))
-        currentScrubLabel = alphabetLetter(of: filteredCollections[idx].name)
-
-        hideTask?.cancel()
-        hideTask = Task {
-            try? await Task.sleep(nanoseconds: 1_800_000_000)
-            if !Task.isCancelled {
-                withAnimation(.easeOut(duration: 0.35)) {
-                    isScrubberVisible = false
-                }
-            }
-        }
-    }
-    #endif
-
     var body: some View {
         let browse = connection.browse
         ScrollViewReader { proxy in
-            ZStack(alignment: .trailing) {
-                ScrollView {
-                    #if os(iOS)
-                    GeometryReader { geo in
-                        Color.clear.preference(
-                            key: ScrollOffsetPreferenceKey.self,
-                            value: geo.frame(in: .named("CollectionsScroll")).minY
-                        )
-                    }
-                    .frame(height: 0)
-                    #endif
-
-                    VStack(spacing: 16) {
-                        Picker("Collection Type", selection: $kind) {
-                            ForEach(CollectionKindFilter.allCases) { option in
-                                Text(option.rawValue).tag(option)
-                            }
+            ScrollView {
+                VStack(spacing: 16) {
+                    Picker("Collection Type", selection: $kind) {
+                        ForEach(CollectionKindFilter.allCases) { option in
+                            Text(option.rawValue).tag(option)
                         }
-                        .pickerStyle(.segmented)
-                        .frame(maxWidth: 360)
-                        .padding(.horizontal, 24)
-                        .padding(.top, 8)
-
-                        LazyVGrid(columns: posterColumns, spacing: 16) {
-                            ForEach(filteredCollections) { collection in
-                                NavigationLink(value: Route.collection(collection.id, collection.name)) {
-                                    PosterCard(
-                                        title: collection.name,
-                                        caption: collection.count == 1 ? "1 title" : "\(collection.count) titles",
-                                        image: collection.poster
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                                .id(collection.id)
-                            }
-                        }
-                        .padding(.horizontal)
                     }
-                }
-                .plyTabBarBottomClearance()
-                .coordinateSpace(name: "CollectionsScroll")
-                #if os(iOS)
-                .onPreferenceChange(ScrollOffsetPreferenceKey.self) { offset in
-                    handleScroll(offset: offset)
-                }
-                #endif
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 360)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 8)
 
-                #if os(iOS)
-                if filteredCollections.count >= 8 {
-                    FastScrollScrubber(
-                        itemCount: filteredCollections.count,
-                        currentLabel: currentScrubLabel,
-                        onScrub: { index in
-                            let collection = filteredCollections[index]
-                            currentScrubLabel = alphabetLetter(of: collection.name)
-                            proxy.scrollTo(collection.id, anchor: .top)
-                        },
-                        isVisible: $isScrubberVisible,
-                        progress: $scrubProgress
-                    )
+                    LazyVGrid(columns: posterColumns, spacing: 16) {
+                        ForEach(filteredCollections) { collection in
+                            NavigationLink(value: Route.collection(collection.id, collection.name)) {
+                                PosterCard(
+                                    title: collection.name,
+                                    caption: collection.count == 1 ? "1 title" : "\(collection.count) titles",
+                                    image: collection.poster
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .id(collection.id)
+                        }
+                    }
+                    .padding(.horizontal)
                 }
-                #endif
             }
+            .plyTabBarBottomClearance()
+            .plyFastScrollScrubber(
+                itemCount: filteredCollections.count,
+                labelAt: { alphabetLetter(of: filteredCollections[$0].name) },
+                onScrollTo: { proxy.scrollTo(filteredCollections[$0].id, anchor: .top) }
+            )
         }
         .overlay {
             if browse.loaded && filteredCollections.isEmpty {

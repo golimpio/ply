@@ -26,7 +26,8 @@ struct TrailerButton: View {
                 } label: {
                     Label("Trailer", systemImage: "film").font(.subheadline.weight(.semibold))
                 }
-                .buttonStyle(.bordered)
+                .plyGlassButtonStyle()
+                .buttonBorderShape(.capsule)
             case .play(let list):
                 DetailActionButton(title: "Trailer", systemImage: "film") { play(list[0]) }
             case .downloading:
@@ -34,7 +35,8 @@ struct TrailerButton: View {
                     Label { Text("Trailer") } icon: { ProgressView() }
                         .font(.subheadline.weight(.semibold))
                 }
-                .buttonStyle(.bordered)
+                .plyGlassButtonStyle()
+                .buttonBorderShape(.capsule)
                 .disabled(true)
                 .accessibilityLabel("Downloading trailer")
             case .none:

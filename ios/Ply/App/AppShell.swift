@@ -35,6 +35,8 @@ struct RootView: View {
             }
         }
         .environment(playbackScene)
+        .preferredColorScheme(.dark)
+        .tint(.plyAmberHighlight)
         .onAppear { model.register(playbackScene) }
         .background(WindowSceneReader(
             onScene: { playbackScene.windowScene = $0 },
@@ -102,80 +104,12 @@ final class WindowSceneProbe: UIView {
 }
 
 #if os(iOS)
-enum AppTab: Int, CaseIterable, Identifiable {
+enum AppTab: Hashable {
     case home
     case films
     case series
-    case search
     case settings
-
-    var id: Int { rawValue }
-
-    var tabIcon: PlyTabIcon.Kind {
-        switch self {
-        case .home: .home
-        case .films: .films
-        case .series: .series
-        case .search: .search
-        case .settings: .settings
-        }
-    }
-
-    var label: String {
-        switch self {
-        case .home: "Home"
-        case .films: "Films"
-        case .series: "Series"
-        case .search: "Search"
-        case .settings: "Settings"
-        }
-    }
-}
-
-/// A floating minimalist glass dock without text labels, featuring crisp minimalist icons and an orange highlight.
-struct FloatingTabBar: View {
-    @Binding var selectedTab: AppTab
-    @Namespace private var animation
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ForEach(AppTab.allCases) { tab in
-                let isSelected = selectedTab == tab
-                Button {
-                    if selectedTab != tab {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
-                            selectedTab = tab
-                        }
-                    }
-                } label: {
-                    ZStack {
-                        if isSelected {
-                            Capsule()
-                                .fill(LinearGradient.plyAmber)
-                                .matchedGeometryEffect(id: "ActiveTabIndicator", in: animation)
-                                .frame(width: 48, height: 38)
-                                .shadow(color: Color.orange.opacity(0.45), radius: 8, y: 3)
-                        }
-
-                        PlyTabIcon(kind: tab.tabIcon, isFilled: isSelected, size: 20)
-                            .foregroundStyle(isSelected ? Color.white : Color.white.opacity(0.46))
-                            .scaleEffect(isSelected ? 1.05 : 1.0)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: PlyDesign.floatingTabBarItemHeight)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(tab.label)
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, PlyDesign.floatingTabBarVerticalPadding)
-        .plyGlassCapsule(strokeOpacity: 0.16)
-        .shadow(color: Color.black.opacity(0.32), radius: 14, y: 6)
-        .frame(maxWidth: 360)
-        .sensoryFeedback(.selection, trigger: selectedTab)
-    }
+    case search
 }
 
 struct MainTabs: View {
@@ -186,38 +120,29 @@ struct MainTabs: View {
     private var playerShown: Bool { playbackScene?.presentation.shown ?? false }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            // Tab containers - kept alive to preserve scroll and navigation state without UIKit UITabBar
-            ZStack {
-                tabContainer(HomeView(), tab: .home)
-                tabContainer(MoviesView(), tab: .films)
-                tabContainer(ShowsView(), tab: .series)
-                tabContainer(BrowseView(), tab: .search)
-                tabContainer(SettingsView(), tab: .settings)
+        TabView(selection: $selectedTab) {
+            Tab("Home", systemImage: "house", value: AppTab.home) {
+                HomeView()
             }
-            .environment(portalState)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .ignoresSafeArea(.keyboard, edges: .bottom)
-
-            FloatingTabBar(selectedTab: $selectedTab)
-                .padding(.horizontal, 24)
-                .padding(.bottom, PlyDesign.floatingTabBarBottomInset)
-                .offset(y: portalState.isPresented ? 120 : 0)
-                .opacity(portalState.isPresented ? 0 : 1)
-                .allowsHitTesting(!portalState.isPresented)
-                .animation(.spring(response: 0.45, dampingFraction: 0.86), value: portalState.isPresented)
+            Tab("Films", systemImage: "film", value: AppTab.films) {
+                MoviesView()
+            }
+            Tab("Series", systemImage: "tv", value: AppTab.series) {
+                ShowsView()
+            }
+            Tab("Settings", systemImage: "gearshape", value: AppTab.settings) {
+                SettingsView()
+            }
+            Tab("Search", systemImage: "magnifyingglass", value: AppTab.search, role: .search) {
+                BrowseView()
+            }
         }
+        .tabViewStyle(.sidebarAdaptable)
+        .tabBarMinimizeBehavior(.onScrollDown)
+        .environment(portalState)
+        .allowsHitTesting(!playerShown)
         .onChange(of: selectedTab) { _, _ in resignKeyboard() }
         .onChange(of: playerShown) { _, shown in if shown { resignKeyboard() } }
-    }
-
-    private func tabContainer<Content: View>(_ view: Content, tab: AppTab) -> some View {
-        let isSelected = selectedTab == tab
-        return view
-            .opacity(isSelected ? 1 : 0)
-            .allowsHitTesting(isSelected && !playerShown)
-            .disabled(!isSelected || playerShown)
-            .accessibilityHidden(!isSelected)
     }
 
     private func resignKeyboard() {

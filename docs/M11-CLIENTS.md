@@ -391,7 +391,7 @@ Receiver, ply on `http://192.168.4.196:8420`:
     `commands` section of the snapshot.
 
 ## The apps (`ios/`, 2026-11-12; iPhone, iPad and Apple TV)
-The first native clients: SwiftUI, iOS 17 and tvOS 17 and later. Everything they need to build is in `ios/`
+The first native clients: SwiftUI, iOS 26 (Liquid Glass, native `TabView`) and tvOS 17 and later. Everything they need to build is in `ios/`
 (XcodeGen's `project.yml` and a Makefile: `make`, `make test`, `make app-test`, `make tv-test`, `make check`,
 `make ci-build`, `make run`, `make tv`, `make tv-run`, `make device TEAM=<team id>`), so they can move to a repository
 of their own. The generated `Ply.xcodeproj` is not committed. Xcode 26 or newer (Swift 6.2) and XcodeGen are

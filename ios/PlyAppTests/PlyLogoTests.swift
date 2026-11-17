@@ -130,7 +130,8 @@ nonisolated final class PlyLogoTests: XCTestCase {
     #if os(iOS)
     @MainActor
     func testPlyCloseToolbarPlacesCloseButtonOnTopRight() throws {
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
         defer { window.isHidden = true }
         let host = UIHostingController(rootView: NavigationStack {
             Color.black
@@ -167,14 +168,9 @@ nonisolated final class PlyLogoTests: XCTestCase {
     }
     #endif
 
-    func testTabBarBottomClearanceExceedsFloatingDockWithBreathingGap() {
-        let dockFootprint = PlyDesign.floatingTabBarHeight + PlyDesign.floatingTabBarBottomInset
-        XCTAssertEqual(dockFootprint, 66)
-        XCTAssertGreaterThanOrEqual(PlyDesign.floatingTabBarBreathingGap, 32)
-        XCTAssertEqual(
-            PlyDesign.tabBarBottomClearance,
-            dockFootprint + PlyDesign.floatingTabBarBreathingGap
-        )
+    func testDetailClearanceAndContentPaddingUseSharedDesignTokens() {
+        XCTAssertEqual(PlyDesign.defaultDetailBottomClearance, PlyDesign.standardBottomClearance)
+        XCTAssertEqual(PlyDesign.contentHorizontalPadding, 16)
     }
 
     @MainActor
@@ -182,58 +178,5 @@ nonisolated final class PlyLogoTests: XCTestCase {
         let logoSize = PlyLogo().size
         XCTAssertEqual(PlyDesign.headerLogoSize, 22 * 1.3, accuracy: 0.01)
         XCTAssertEqual(logoSize, PlyDesign.headerLogoSize, accuracy: 0.01)
-    }
-
-    func testTabIconsShareOpticalHeightAndBalancedWidths() {
-        let box = CGRect(x: 0, y: 0, width: 24, height: 24)
-        var heights: [CGFloat] = []
-
-        for isFilled in [false, true] {
-            for kind in PlyTabIcon.Kind.allCases {
-                let bounds = PlyTabIcon.layers(for: kind, in: box, isFilled: isFilled).combinedBounds
-                XCTAssertFalse(bounds.isEmpty, "\(kind) (filled=\(isFilled)) should not be empty")
-                XCTAssertGreaterThanOrEqual(bounds.minY, 3.0, "\(kind) should sit inside top optical margin")
-                XCTAssertLessThanOrEqual(bounds.maxY, 21.0, "\(kind) should sit inside bottom optical margin")
-                XCTAssertEqual(bounds.height, 17.1, accuracy: 0.5, "\(kind) height should match the shared optical band")
-                XCTAssertEqual(bounds.width, 17.3, accuracy: 0.9, "\(kind) width should stay balanced across tabs")
-                heights.append(bounds.height)
-            }
-        }
-
-        let spread = (heights.max() ?? 0) - (heights.min() ?? 0)
-        XCTAssertLessThanOrEqual(spread, 0.8, "all 5 tab icons should share perceived height within 0.8 units")
-    }
-
-    @MainActor
-    func testTabIconsRenderOpaquePixelsAndFilledStateIsHeavier() throws {
-        for kind in PlyTabIcon.Kind.allCases {
-            let outlineCount = try countWhitePixels(in: PlyTabIcon(kind: kind, isFilled: false, size: 20))
-            let filledCount = try countWhitePixels(in: PlyTabIcon(kind: kind, isFilled: true, size: 20))
-            XCTAssertGreaterThan(outlineCount, 40, "\(kind) outline should render visible strokes")
-            XCTAssertGreaterThan(filledCount, outlineCount, "\(kind) active state should carry more visual weight than outline")
-        }
-    }
-
-    @MainActor
-    private func countWhitePixels<V: View>(in icon: V) throws -> Int {
-        let renderer = ImageRenderer(content: icon.foregroundStyle(Color.white).background(Color.black))
-        renderer.scale = 2
-        let cgImage = try XCTUnwrap(renderer.cgImage)
-        var bytes = [UInt8](repeating: 0, count: cgImage.width * cgImage.height * 4)
-        let ctx = try XCTUnwrap(CGContext(
-            data: &bytes,
-            width: cgImage.width,
-            height: cgImage.height,
-            bitsPerComponent: 8,
-            bytesPerRow: cgImage.width * 4,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ))
-        ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height))
-        var count = 0
-        for i in stride(from: 0, to: bytes.count, by: 4) where bytes[i] > 180 && bytes[i + 1] > 180 && bytes[i + 2] > 180 {
-            count += 1
-        }
-        return count
     }
 }
