@@ -5,6 +5,11 @@ import SwiftUI
 nonisolated extension Color {
     static let plyAmberHighlight = Color(red: 0.98, green: 0.62, blue: 0.22)
     static let plyAmberDeep = Color(red: 0.92, green: 0.41, blue: 0.11)
+    static let plyAccent = plyAmberHighlight
+}
+
+nonisolated enum PlyPreferences {
+    static let showTabLabelsKey = "ply.showTabLabels"
 }
 
 nonisolated extension LinearGradient {
@@ -107,6 +112,273 @@ nonisolated struct PlyLogoPlayShape: Shape {
 
 /// The ply brand mark (alias to PlyLogo for consistent authentic branding across all views).
 typealias PlyBrand = PlyLogo
+
+/// Custom vector icons aligned to a shared 24×24 optical grid, rendered as template images for the iOS 26 `TabView` and SwiftUI shapes.
+struct PlyTabIcon: View {
+    nonisolated enum Kind: String, CaseIterable, Sendable {
+        case home
+        case films
+        case series
+        case search
+        case settings
+    }
+
+    var kind: Kind
+    var isFilled: Bool = false
+    var size: CGFloat = 20
+
+    var body: some View {
+        Canvas { context, canvasSize in
+            let rect = CGRect(origin: .zero, size: canvasSize)
+            let primaryStroke = StrokeStyle(
+                lineWidth: Self.primaryLineWidth(for: size),
+                lineCap: .round,
+                lineJoin: .round
+            )
+            let secondaryStroke = StrokeStyle(
+                lineWidth: Self.secondaryLineWidth(for: size),
+                lineCap: .round,
+                lineJoin: .round
+            )
+            let layers = Self.layers(for: kind, in: rect, isFilled: isFilled)
+
+            if !layers.evenOddFill.isEmpty {
+                context.fill(layers.evenOddFill, with: .foreground, style: FillStyle(eoFill: true))
+            }
+            if !layers.primaryStroke.isEmpty {
+                context.stroke(layers.primaryStroke, with: .foreground, style: primaryStroke)
+            }
+            if !layers.secondaryStroke.isEmpty {
+                context.stroke(layers.secondaryStroke, with: .foreground, style: secondaryStroke)
+            }
+            if !layers.heavyStroke.isEmpty {
+                let heavy = StrokeStyle(
+                    lineWidth: primaryStroke.lineWidth * (isFilled ? 1.32 : 1.14),
+                    lineCap: .round,
+                    lineJoin: .round
+                )
+                context.stroke(layers.heavyStroke, with: .foreground, style: heavy)
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+
+    private nonisolated static func primaryLineWidth(for size: CGFloat) -> CGFloat {
+        max(1.5, size * 0.088)
+    }
+
+    private nonisolated static func secondaryLineWidth(for size: CGFloat) -> CGFloat {
+        max(1.2, size * 0.062)
+    }
+
+    #if os(iOS)
+    private static var templateCache: [String: UIImage] = [:]
+
+    /// Cached template `UIImage` for native UIKit / SwiftUI `Tab` items so Liquid Glass tinting applies cleanly.
+    static func templateImage(for kind: Kind, filled: Bool = false, pointSize: CGFloat = 22) -> UIImage {
+        let key = "\(kind.rawValue)-\(filled)-\(Int(pointSize))"
+        if let cached = templateCache[key] { return cached }
+
+        let format = UIGraphicsImageRendererFormat()
+        format.opaque = false
+        format.scale = 3.0
+        let size = CGSize(width: pointSize, height: pointSize)
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+            let cg = ctx.cgContext
+            let rect = CGRect(origin: .zero, size: size)
+            let layers = layers(for: kind, in: rect, isFilled: filled)
+            let primaryWidth = primaryLineWidth(for: pointSize)
+            let secondaryWidth = secondaryLineWidth(for: pointSize)
+
+            cg.setFillColor(UIColor.black.cgColor)
+            cg.setStrokeColor(UIColor.black.cgColor)
+            cg.setLineCap(.round)
+            cg.setLineJoin(.round)
+
+            if !layers.evenOddFill.isEmpty {
+                cg.addPath(layers.evenOddFill.cgPath)
+                cg.fillPath(using: .evenOdd)
+            }
+            if !layers.primaryStroke.isEmpty {
+                cg.setLineWidth(primaryWidth)
+                cg.addPath(layers.primaryStroke.cgPath)
+                cg.strokePath()
+            }
+            if !layers.secondaryStroke.isEmpty {
+                cg.setLineWidth(secondaryWidth)
+                cg.addPath(layers.secondaryStroke.cgPath)
+                cg.strokePath()
+            }
+            if !layers.heavyStroke.isEmpty {
+                cg.setLineWidth(primaryWidth * (filled ? 1.32 : 1.14))
+                cg.addPath(layers.heavyStroke.cgPath)
+                cg.strokePath()
+            }
+        }
+        .withRenderingMode(.alwaysTemplate)
+
+        templateCache[key] = image
+        return image
+    }
+    #endif
+
+    nonisolated struct Layers {
+        var evenOddFill = SwiftUI.Path()
+        var primaryStroke = SwiftUI.Path()
+        var secondaryStroke = SwiftUI.Path()
+        var heavyStroke = SwiftUI.Path()
+
+        var combinedBounds: CGRect {
+            let paths = [evenOddFill, primaryStroke, secondaryStroke, heavyStroke].filter { !$0.isEmpty }
+            guard let first = paths.first else { return .zero }
+            return paths.dropFirst().reduce(first.boundingRect) { $0.union($1.boundingRect) }
+        }
+    }
+
+    nonisolated static func layers(for kind: Kind, in rect: CGRect, isFilled: Bool) -> Layers {
+        var layers = Layers()
+
+        switch kind {
+        case .home:
+            let house = homeSilhouettePath()
+            let window = SwiftUI.Path(
+                roundedRect: CGRect(x: 9.5, y: 12.1, width: 5.0, height: 5.0),
+                cornerRadius: 1.6,
+                style: .continuous
+            )
+            if isFilled {
+                layers.evenOddFill.addPath(house)
+                layers.evenOddFill.addPath(window)
+            } else {
+                layers.primaryStroke.addPath(house)
+                layers.secondaryStroke.addPath(window)
+            }
+
+        case .films:
+            let leftReel = SwiftUI.Path(ellipseIn: CGRect(x: 4.1, y: 3.4, width: 6.6, height: 6.6))
+            let rightReel = SwiftUI.Path(ellipseIn: CGRect(x: 10.9, y: 3.4, width: 6.6, height: 6.6))
+            let body = SwiftUI.Path(
+                roundedRect: CGRect(x: 3.8, y: 11.4, width: 12.4, height: 9.2),
+                cornerRadius: 2.1,
+                style: .continuous
+            )
+            if isFilled {
+                layers.evenOddFill.addPath(leftReel)
+                layers.evenOddFill.addEllipse(in: CGRect(x: 6.3, y: 5.6, width: 2.2, height: 2.2))
+                layers.evenOddFill.addPath(rightReel)
+                layers.evenOddFill.addEllipse(in: CGRect(x: 13.1, y: 5.6, width: 2.2, height: 2.2))
+                layers.evenOddFill.addPath(body)
+                layers.evenOddFill.addPath(projectorLensPath(closed: true))
+            } else {
+                layers.primaryStroke.addPath(leftReel)
+                layers.primaryStroke.addPath(rightReel)
+                layers.primaryStroke.addPath(body)
+                layers.primaryStroke.addPath(projectorLensPath(closed: false))
+            }
+
+        case .series:
+            let cabinet = SwiftUI.Path(
+                roundedRect: CGRect(x: 3.0, y: 3.5, width: 18.0, height: 17.0),
+                cornerRadius: 4.8,
+                style: .continuous
+            )
+            if isFilled {
+                let screen = SwiftUI.Path(
+                    roundedRect: CGRect(x: 6.5, y: 6.3, width: 11.0, height: 7.8),
+                    cornerRadius: 2.0,
+                    style: .continuous
+                )
+                let chinPill = SwiftUI.Path(
+                    roundedRect: CGRect(x: 9.6, y: 17.15, width: 4.8, height: 1.2),
+                    cornerRadius: 0.6,
+                    style: .continuous
+                )
+                layers.evenOddFill.addPath(cabinet)
+                layers.evenOddFill.addPath(screen)
+                layers.evenOddFill.addPath(chinPill)
+            } else {
+                let screen = SwiftUI.Path(
+                    roundedRect: CGRect(x: 5.8, y: 6.1, width: 12.4, height: 9.2),
+                    cornerRadius: 2.5,
+                    style: .continuous
+                )
+                layers.primaryStroke.addPath(cabinet)
+                layers.secondaryStroke.addPath(screen)
+                layers.secondaryStroke.move(to: CGPoint(x: 9.6, y: 18.0))
+                layers.secondaryStroke.addLine(to: CGPoint(x: 14.4, y: 18.0))
+            }
+
+        case .search:
+            if isFilled {
+                layers.evenOddFill.addEllipse(in: CGRect(x: 3.5, y: 3.5, width: 13.8, height: 13.8))
+                layers.evenOddFill.addEllipse(in: CGRect(x: 7.0, y: 7.0, width: 6.8, height: 6.8))
+                layers.heavyStroke.move(to: CGPoint(x: 15.5, y: 15.5))
+                layers.heavyStroke.addLine(to: CGPoint(x: 20.4, y: 20.4))
+            } else {
+                layers.primaryStroke.addEllipse(in: CGRect(x: 3.7, y: 3.7, width: 13.4, height: 13.4))
+                layers.heavyStroke.move(to: CGPoint(x: 15.4, y: 15.4))
+                layers.heavyStroke.addLine(to: CGPoint(x: 20.4, y: 20.4))
+            }
+
+        case .settings:
+            let sliders: [(x: CGFloat, y: CGFloat)] = [(15.1, 5.8), (8.9, 12.0), (15.1, 18.2)]
+            let radius: CGFloat = isFilled ? 2.45 : 2.15
+            for knob in sliders {
+                let knobRect = CGRect(
+                    x: knob.x - radius,
+                    y: knob.y - radius,
+                    width: radius * 2,
+                    height: radius * 2
+                )
+                if isFilled {
+                    layers.heavyStroke.move(to: CGPoint(x: 3.5, y: knob.y))
+                    layers.heavyStroke.addLine(to: CGPoint(x: 20.5, y: knob.y))
+                    layers.evenOddFill.addEllipse(in: knobRect)
+                } else {
+                    layers.primaryStroke.move(to: CGPoint(x: 3.5, y: knob.y))
+                    layers.primaryStroke.addLine(to: CGPoint(x: knob.x - radius, y: knob.y))
+                    layers.primaryStroke.move(to: CGPoint(x: knob.x + radius, y: knob.y))
+                    layers.primaryStroke.addLine(to: CGPoint(x: 20.5, y: knob.y))
+                    layers.primaryStroke.addEllipse(in: knobRect)
+                }
+            }
+        }
+
+        let scale = CGAffineTransform(translationX: rect.minX, y: rect.minY)
+            .scaledBy(x: rect.width / 24.0, y: rect.height / 24.0)
+        layers.evenOddFill = layers.evenOddFill.applying(scale)
+        layers.primaryStroke = layers.primaryStroke.applying(scale)
+        layers.secondaryStroke = layers.secondaryStroke.applying(scale)
+        layers.heavyStroke = layers.heavyStroke.applying(scale)
+        return layers
+    }
+
+    private nonisolated static func homeSilhouettePath() -> SwiftUI.Path {
+        var path = SwiftUI.Path()
+        path.move(to: CGPoint(x: 3.6, y: 10.6))
+        path.addLine(to: CGPoint(x: 12.0, y: 3.3))
+        path.addLine(to: CGPoint(x: 20.4, y: 10.6))
+        path.addLine(to: CGPoint(x: 20.4, y: 19.2))
+        path.addArc(tangent1End: CGPoint(x: 20.4, y: 20.7), tangent2End: CGPoint(x: 5.1, y: 20.7), radius: 1.5)
+        path.addLine(to: CGPoint(x: 5.1, y: 20.7))
+        path.addArc(tangent1End: CGPoint(x: 3.6, y: 20.7), tangent2End: CGPoint(x: 3.6, y: 10.6), radius: 1.5)
+        path.closeSubpath()
+        return path
+    }
+
+    private nonisolated static func projectorLensPath(closed: Bool) -> SwiftUI.Path {
+        var path = SwiftUI.Path()
+        path.move(to: CGPoint(x: 16.2, y: 13.8))
+        path.addLine(to: CGPoint(x: 20.5, y: 12.0))
+        path.addLine(to: CGPoint(x: 20.5, y: 20.0))
+        path.addLine(to: CGPoint(x: 16.2, y: 18.2))
+        if closed {
+            path.closeSubpath()
+        }
+        return path
+    }
+}
 
 /// An inline top search bar used on tvOS where navigation-drawer search is unavailable.
 struct PlySearchField: View {
@@ -288,6 +560,12 @@ func alphabetLetter(of title: String) -> String {
 
 /// Normalized scroll geometry used to drive `FastScrollScrubber` across any adaptive grid column count.
 nonisolated struct FastScrollMetrics: Equatable, Sendable {
+    static let minimumItemCount = 8
+    static let defaultTopInset: CGFloat = 80
+    static let defaultBottomInset: CGFloat = 110
+    static let minTrackHeight: CGFloat = 100
+    static let thumbHitSize = CGSize(width: 48, height: 58)
+
     let offsetY: CGFloat
     let contentHeight: CGFloat
     let containerHeight: CGFloat
@@ -301,106 +579,241 @@ nonisolated struct FastScrollMetrics: Equatable, Sendable {
     }
 
     func itemIndex(count: Int) -> Int {
+        Self.clampedIndex(progress: progress, count: count)
+    }
+
+    static func trackHeight(
+        containerHeight: CGFloat,
+        topInset: CGFloat = defaultTopInset,
+        bottomInset: CGFloat = defaultBottomInset
+    ) -> CGFloat {
+        max(minTrackHeight, containerHeight - topInset - bottomInset)
+    }
+
+    static func thumbCenterY(
+        progress: CGFloat,
+        containerHeight: CGFloat,
+        topInset: CGFloat = defaultTopInset,
+        bottomInset: CGFloat = defaultBottomInset
+    ) -> CGFloat {
+        let clamped = max(0, min(1, progress))
+        let track = trackHeight(containerHeight: containerHeight, topInset: topInset, bottomInset: bottomInset)
+        return topInset + (clamped * track)
+    }
+
+    static func progress(
+        forLocationY locationY: CGFloat,
+        containerHeight: CGFloat,
+        topInset: CGFloat = defaultTopInset,
+        bottomInset: CGFloat = defaultBottomInset
+    ) -> CGFloat {
+        let track = trackHeight(containerHeight: containerHeight, topInset: topInset, bottomInset: bottomInset)
+        return max(0, min(1, (locationY - topInset) / track))
+    }
+
+    static func clampedIndex(progress: CGFloat, count: Int) -> Int {
         guard count > 1 else { return 0 }
-        return max(0, min(count - 1, Int(progress * CGFloat(count - 1))))
+        let clamped = max(0, min(1, progress))
+        return max(0, min(count - 1, Int((clamped * CGFloat(count - 1)).rounded())))
+    }
+
+    static func shouldRevealOnScroll(
+        oldOffsetY: CGFloat,
+        newMetrics: FastScrollMetrics,
+        itemCount: Int,
+        isDragging: Bool
+    ) -> Bool {
+        itemCount >= minimumItemCount &&
+            newMetrics.isScrollable &&
+            !isDragging &&
+            abs(oldOffsetY - newMetrics.offsetY) > 0.5
+    }
+
+    static func positionText(index: Int, count: Int) -> String {
+        guard count > 0 else { return "0 / 0" }
+        let clamped = max(0, min(count - 1, index))
+        return "\( (clamped + 1).formatted() ) / \(count.formatted())"
     }
 }
 
 #if os(iOS)
-/// A fast-scrolling vertical slider docked along the trailing edge using Liquid Glass chrome.
+/// A fast-scrolling Liquid Glass thumb pill along the trailing edge with an offset floating loupe.
 struct FastScrollScrubber: View {
+    private static let trackCoordinateSpace = "PlyFastScrollTrack"
+
     let itemCount: Int
+    let currentIndex: Int
     let currentLabel: String
+    let currentTitle: String?
     let onScrub: (Int) -> Void
 
     @Binding var isVisible: Bool
     @Binding var isDragging: Bool
     @Binding var progress: CGFloat
     @State private var lastReportedIndex: Int = -1
+    @State private var hapticToken = 0
+
+    private var activeLabel: String {
+        currentLabel.isEmpty ? "•" : currentLabel
+    }
+
+    private var thumbPill: some View {
+        VStack(spacing: 3) {
+            Circle()
+                .fill(Color.plyAmberHighlight)
+                .frame(width: 5, height: 5)
+
+            Text(activeLabel)
+                .font(.system(size: activeLabel.count > 2 ? 10 : 11, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(.secondary)
+        }
+        .frame(minWidth: 28)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 8)
+        .glassEffect(.regular.interactive(), in: .capsule)
+        .overlay(
+            Capsule()
+                .strokeBorder(Color.plyAmberHighlight.opacity(isDragging ? 0.9 : 0.25), lineWidth: isDragging ? 1.5 : 1)
+        )
+        .shadow(color: Color.black.opacity(0.32), radius: isDragging ? 10 : 6, y: 3)
+        .scaleEffect(isDragging ? 1.10 : 1.0)
+        .animation(.spring(response: 0.24, dampingFraction: 0.72), value: isDragging)
+    }
+
+    private var loupeView: some View {
+        HStack(spacing: 12) {
+            Text(activeLabel)
+                .font(.system(size: activeLabel.count > 2 ? 20 : 28, weight: .bold, design: .serif))
+                .monospacedDigit()
+                .foregroundStyle(Color(red: 0.08, green: 0.075, blue: 0.07))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+
+            Rectangle()
+                .fill(Color.black.opacity(0.14))
+                .frame(width: 1, height: 28)
+
+            VStack(alignment: .leading, spacing: 2) {
+                if let currentTitle, !currentTitle.isEmpty {
+                    Text(currentTitle)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color(red: 0.08, green: 0.075, blue: 0.07))
+                        .lineLimit(1)
+                        .frame(maxWidth: 132, alignment: .leading)
+                }
+
+                Text(FastScrollMetrics.positionText(index: currentIndex, count: itemCount))
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Color.black.opacity(0.58))
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(red: 0.95, green: 0.94, blue: 0.91).opacity(0.95))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.black.opacity(0.08), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.45), radius: 18, y: 6)
+    }
 
     var body: some View {
         GeometryReader { geo in
-            let topInset: CGFloat = 80
-            let bottomInset: CGFloat = 110
-            let trackHeight = max(100, geo.size.height - topInset - bottomInset)
-            let clampedProgress = max(0, min(1, progress))
-            let currentY = topInset + (clampedProgress * trackHeight)
+            let currentY = FastScrollMetrics.thumbCenterY(progress: progress, containerHeight: geo.size.height)
+            let trackH = FastScrollMetrics.trackHeight(containerHeight: geo.size.height)
 
-            GlassEffectContainer(spacing: 8) {
-                HStack(spacing: 8) {
-                    Spacer()
+            ZStack(alignment: .topTrailing) {
+                Color.clear
+                    .allowsHitTesting(false)
 
-                    if isVisible {
-                        ZStack {
-                            Circle()
-                                .fill(Color.white)
-                                .frame(width: 44, height: 44)
-                                .shadow(color: Color.black.opacity(0.35), radius: 8, y: 3)
+                if isVisible {
+                    Capsule()
+                        .fill(Color.white.opacity(isDragging ? 0.22 : 0.10))
+                        .frame(width: 3, height: trackH)
+                        .padding(.top, FastScrollMetrics.defaultTopInset)
+                        .padding(.trailing, 18)
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
 
-                            if isDragging && !currentLabel.isEmpty {
-                                Text(currentLabel)
-                                    .font(.system(size: 20, weight: .bold))
-                                    .foregroundStyle(Color.black)
-                            } else {
-                                Circle()
-                                    .fill(Color.black)
-                                    .frame(width: 7, height: 7)
-                            }
-                        }
-                        .scaleEffect(isDragging ? 1.08 : 0.95)
-                        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isDragging)
-                        .transition(.scale.combined(with: .opacity))
-
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.9))
-                            .frame(width: 24, height: 38)
-                            .glassEffect(.regular.interactive(), in: .capsule)
-                            .frame(width: 32, height: 44, alignment: .trailing)
-                            .contentShape(Rectangle())
+                    if isDragging {
+                        loupeView
+                            .padding(.trailing, 72)
+                            .offset(y: currentY - 30)
+                            .allowsHitTesting(false)
+                            .transition(.scale(scale: 0.9, anchor: .trailing).combined(with: .opacity))
                     }
+
+                    thumbPill
+                        .frame(
+                            width: FastScrollMetrics.thumbHitSize.width,
+                            height: FastScrollMetrics.thumbHitSize.height,
+                            alignment: .trailing
+                        )
+                        .padding(.trailing, 4)
+                        .contentShape(Rectangle())
+                        .offset(y: currentY - (FastScrollMetrics.thumbHitSize.height / 2))
+                        .gesture(
+                            DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.trackCoordinateSpace))
+                                .onChanged { value in
+                                    isDragging = true
+                                    isVisible = true
+                                    let p = FastScrollMetrics.progress(
+                                        forLocationY: value.location.y,
+                                        containerHeight: geo.size.height
+                                    )
+                                    progress = p
+
+                                    guard itemCount > 0 else { return }
+                                    let clamped = FastScrollMetrics.clampedIndex(progress: p, count: itemCount)
+                                    if clamped != lastReportedIndex {
+                                        lastReportedIndex = clamped
+                                        onScrub(clamped)
+                                    }
+                                }
+                                .onEnded { _ in
+                                    isDragging = false
+                                    lastReportedIndex = -1
+                                }
+                        )
+                        .transition(.scale(scale: 0.85, anchor: .trailing).combined(with: .opacity))
                 }
             }
-            .position(x: geo.size.width - 24, y: currentY)
+            .coordinateSpace(name: Self.trackCoordinateSpace)
             .opacity(isVisible ? 1 : 0)
-            .animation(.easeInOut(duration: 0.25), value: isVisible)
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        isDragging = true
-                        isVisible = true
-                        let localY = value.location.y - topInset
-                        let p = max(0, min(1, localY / trackHeight))
-                        progress = p
-
-                        guard itemCount > 0 else { return }
-                        let index = Int(p * CGFloat(itemCount - 1))
-                        let clamped = max(0, min(itemCount - 1, index))
-
-                        if clamped != lastReportedIndex {
-                            lastReportedIndex = clamped
-                            onScrub(clamped)
-                        }
-                    }
-                    .onEnded { _ in
-                        isDragging = false
-                    }
-            )
-            .sensoryFeedback(.selection, trigger: lastReportedIndex)
+            .animation(.easeInOut(duration: 0.22), value: isVisible)
+            .animation(.spring(response: 0.24, dampingFraction: 0.78), value: isDragging)
+            .onChange(of: currentLabel) { oldValue, newValue in
+                if isDragging, oldValue != newValue {
+                    hapticToken += 1
+                }
+            }
+            .sensoryFeedback(.selection, trigger: hapticToken)
         }
-        .allowsHitTesting(isVisible)
     }
 }
 
 private struct FastScrollScrubberModifier: ViewModifier {
     let itemCount: Int
     let labelAt: (Int) -> String
+    let titleAt: ((Int) -> String)?
     let onScrollTo: (Int) -> Void
 
     @State private var isVisible = false
     @State private var isDragging = false
     @State private var progress: CGFloat = 0
+    @State private var currentIndex = 0
     @State private var currentLabel = ""
+    @State private var currentTitle: String?
     @State private var hideToken = 0
 
     func body(content: Content) -> some View {
@@ -413,11 +826,18 @@ private struct FastScrollScrubberModifier: ViewModifier {
                         containerHeight: geo.containerSize.height
                     )
                 } action: { oldValue, newValue in
-                    guard itemCount >= 8, newValue.isScrollable, !isDragging else { return }
-                    guard abs(oldValue.offsetY - newValue.offsetY) > 0.5 else { return }
+                    guard FastScrollMetrics.shouldRevealOnScroll(
+                        oldOffsetY: oldValue.offsetY,
+                        newMetrics: newValue,
+                        itemCount: itemCount,
+                        isDragging: isDragging
+                    ) else { return }
 
+                    let index = newValue.itemIndex(count: itemCount)
                     progress = newValue.progress
-                    currentLabel = labelAt(newValue.itemIndex(count: itemCount))
+                    currentIndex = index
+                    currentLabel = labelAt(index)
+                    currentTitle = titleAt?(index)
                     if !isVisible {
                         withAnimation(.easeInOut(duration: 0.2)) {
                             isVisible = true
@@ -426,12 +846,16 @@ private struct FastScrollScrubberModifier: ViewModifier {
                     hideToken += 1
                 }
 
-            if itemCount >= 8 {
+            if itemCount >= FastScrollMetrics.minimumItemCount {
                 FastScrollScrubber(
                     itemCount: itemCount,
+                    currentIndex: currentIndex,
                     currentLabel: currentLabel,
+                    currentTitle: currentTitle,
                     onScrub: { index in
+                        currentIndex = index
                         currentLabel = labelAt(index)
+                        currentTitle = titleAt?(index)
                         onScrollTo(index)
                         hideToken += 1
                     },
@@ -463,10 +887,11 @@ extension View {
     @ViewBuilder func plyFastScrollScrubber(
         itemCount: Int,
         labelAt: @escaping (Int) -> String,
+        titleAt: ((Int) -> String)? = nil,
         onScrollTo: @escaping (Int) -> Void
     ) -> some View {
         #if os(iOS)
-        modifier(FastScrollScrubberModifier(itemCount: itemCount, labelAt: labelAt, onScrollTo: onScrollTo))
+        modifier(FastScrollScrubberModifier(itemCount: itemCount, labelAt: labelAt, titleAt: titleAt, onScrollTo: onScrollTo))
         #else
         self
         #endif
@@ -967,19 +1392,6 @@ extension View {
             .overlay(Capsule().strokeBorder(Color.white.opacity(strokeOpacity), lineWidth: 0.75))
     }
 
-    @ViewBuilder func plyDetailCard() -> some View {
-        #if os(iOS)
-        glassEffect(.regular, in: .rect(cornerRadius: PlyDesign.panelCornerRadius))
-        #else
-        self
-            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: PlyDesign.panelCornerRadius))
-            .overlay(
-                RoundedRectangle(cornerRadius: PlyDesign.panelCornerRadius)
-                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.8)
-            )
-        #endif
-    }
-
     @ViewBuilder func plyMicroSpecsStyle(opacity: Double = 0.68) -> some View {
         self
             .font(.system(size: 11, weight: .semibold))
@@ -1198,7 +1610,7 @@ struct DetailRowContent: View {
         HStack(spacing: 12) {
             Image(systemName: systemImage)
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(Color.orange)
+                .foregroundStyle(Color.plyAccent)
                 .frame(width: 22)
 
             Text(title)
@@ -1218,8 +1630,7 @@ struct DetailRowContent: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 13)
+        .padding(.vertical, 10)
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
@@ -1298,13 +1709,15 @@ struct DetailBackdropScaffold<Content: View>: View {
             .contentMargins(.bottom, bottomClearance, for: .scrollContent)
             #if os(iOS)
             .ignoresSafeArea(edges: .top)
-            .toolbarBackground(.hidden, for: .navigationBar)
+            .scrollEdgeEffectHidden(true, for: .top)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             #endif
         }
         .coordinateSpace(name: coordinateSpaceName)
         #if os(iOS)
         .ignoresSafeArea(edges: .top)
         .navigationTitle("")
+        .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         #endif
         .plyInlineTitle()
     }
@@ -1434,8 +1847,9 @@ nonisolated enum PlyDesign {
 }
 
 extension View {
-    /// Places `PlyLogo` in the exact same top-left toolbar slot across all main tabs on iOS.
-    @ViewBuilder func plyMainPageLogo(color: Color = .primary, hidden: Bool = false) -> some View {
+    /// Places `PlyLogo` in the exact same top-left toolbar slot across all main tabs on iOS,
+    /// without a pill or full-width header background so content scrolls cleanly underneath.
+    @ViewBuilder func plyMainPageLogo(color: Color = .white, hidden: Bool = false) -> some View {
         #if os(iOS)
         self
             .navigationTitle("")
@@ -1443,9 +1857,11 @@ extension View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     PlyLogo(size: PlyDesign.headerLogoSize, color: color)
+                        .shadow(color: .black.opacity(0.35), radius: 4, y: 1)
                 }
                 .sharedBackgroundVisibility(.hidden)
             }
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar(hidden ? .hidden : .visible, for: .navigationBar)
         #else
         self
@@ -1471,8 +1887,18 @@ extension View {
         #endif
     }
 
-    /// Applies the standard bottom breathing clearance for scrolled pages.
-    @ViewBuilder func plyTabBarBottomClearance() -> some View {
+    /// Applies the standard bottom breathing clearance and disables the iOS 26 top scroll-edge
+    /// header fade when floating chrome sits over scrolling content.
+    @ViewBuilder func plyTabBarBottomClearance(transparentTopEdge: Bool = false) -> some View {
+        #if os(iOS)
+        if transparentTopEdge {
+            contentMargins(.bottom, PlyDesign.standardBottomClearance, for: .scrollContent)
+                .scrollEdgeEffectHidden(true, for: .top)
+        } else {
+            contentMargins(.bottom, PlyDesign.standardBottomClearance, for: .scrollContent)
+        }
+        #else
         contentMargins(.bottom, PlyDesign.standardBottomClearance, for: .scrollContent)
+        #endif
     }
 }

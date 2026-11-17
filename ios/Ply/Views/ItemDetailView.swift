@@ -37,12 +37,15 @@ struct ItemDetailView: View {
             } else if let seedItem {
                 content(item: seedItem, detail: nil)
             } else if let error {
-                ContentUnavailableView("Cannot load this item", systemImage: "exclamationmark.triangle", description: Text(error))
+                DetailBackdropScaffold(backdropPath: nil) { Color.clear }
+                    .overlay {
+                        ContentUnavailableView("Cannot load this item", systemImage: "exclamationmark.triangle", description: Text(error))
+                    }
             } else {
-                ProgressView()
+                DetailBackdropScaffold(backdropPath: nil) { Color.clear }
+                    .overlay { ProgressView() }
             }
         }
-        .plyInlineTitle()
         .task(id: connection.library.generation) { await load() }
         #if os(iOS)
         .task { await loadReceivers() }
@@ -131,9 +134,7 @@ struct ItemDetailView: View {
                 .padding(.trailing, PlyDesign.overlayTrailingPadding)
             }
         }
-        .clipShape(.rect(cornerRadius: portalDragOffset > 0 ? 36 : 0, style: .continuous))
-        .scaleEffect(portalDragScale)
-        .offset(y: max(0, portalDragOffset))
+        .modifier(PortalDragTransformModifier(active: onDismissPortal != nil && portalDragOffset > 0, offset: portalDragOffset, scale: portalDragScale))
         .toolbar {
             if onDismissPortal == nil, d != nil, !routableReceivers.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -172,7 +173,7 @@ struct ItemDetailView: View {
                 NavigationLink(value: Route.show(show)) {
                     Text(Format.facts(show, item.episodeCode))
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Color.orange)
+                        .foregroundStyle(Color.plyAccent)
                 }
             }
         }
@@ -216,7 +217,7 @@ struct ItemDetailView: View {
                 title: item.isWatched ? "Watched" : "Mark as watched",
                 systemImage: item.isWatched ? "checkmark.circle.fill" : "checkmark.circle",
                 prominent: item.isWatched,
-                tint: item.isWatched ? .orange : nil
+                tint: item.isWatched ? .plyAccent : nil
             ) {
                 setWatched(!item.isWatched)
             }
@@ -297,15 +298,39 @@ struct ItemDetailView: View {
         return "Off"
     }
 
+    private func videoSummary(_ d: ItemDetail) -> String? {
+        var parts: [String] = []
+        let base = d.item.versionLabel
+        if !base.isEmpty { parts.append(base) }
+        if let codec = d.videoStreams.first?.codec, !codec.isEmpty,
+           !base.localizedStandardContains(codec) {
+            parts.append(codec.uppercased())
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
     @ViewBuilder
     private func tracks(_ d: ItemDetail) -> some View {
+        let video = videoSummary(d)
         let audio = d.audioStreams
         let subtitles = d.subtitles.compactMap { s in s.choice.map { (s, $0) } }
 
         VStack(spacing: 0) {
+            if let video {
+                DetailRowContent(
+                    systemImage: "film",
+                    title: "Video",
+                    value: video
+                )
+
+                Divider()
+                    .padding(.leading, 34)
+                    .opacity(0.14)
+            }
+
             if audio.count > 1 {
                 Menu {
-                    Picker("Language", selection: $audioIndex) {
+                    Picker("Audio", selection: $audioIndex) {
                         Text("Default").tag(Int?.none)
                         ForEach(audio, id: \.index) { stream in
                             Text(stream.label).tag(Optional(stream.index))
@@ -314,7 +339,7 @@ struct ItemDetailView: View {
                 } label: {
                     DetailRowContent(
                         systemImage: "speaker.wave.2",
-                        title: "Language",
+                        title: "Audio",
                         value: currentAudioLabel(audio),
                         showsPickerIndicator: true
                     )
@@ -323,14 +348,14 @@ struct ItemDetailView: View {
             } else {
                 DetailRowContent(
                     systemImage: "speaker.wave.2",
-                    title: "Language",
+                    title: "Audio",
                     value: currentAudioLabel(audio)
                 )
             }
 
             Divider()
-                .padding(.leading, 50)
-                .opacity(0.15)
+                .padding(.leading, 34)
+                .opacity(0.14)
 
             if !subtitles.isEmpty {
                 Menu {
@@ -357,10 +382,7 @@ struct ItemDetailView: View {
                 )
             }
         }
-        .plyDetailCard()
         .padding(.horizontal, PlyDesign.contentHorizontalPadding)
-        .padding(.top, 8)
-        .padding(.bottom, 2)
     }
 
     @ViewBuilder
@@ -385,7 +407,7 @@ struct ItemDetailView: View {
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .foregroundStyle(.white)
-                        .plyInteractiveGlassCapsule(tint: .orange)
+                        .plyInteractiveGlassCapsule(tint: .plyAccent)
                         .accessibilityAddTraits(.isSelected)
                 } else {
                     NavigationLink(value: Route.item(v.id)) {
@@ -442,6 +464,25 @@ struct ItemDetailView: View {
         } catch is CancellationError {
         } catch {
             self.error = error.localizedDescription
+        }
+    }
+}
+
+/// Applies sheet corner rounding, scale, and vertical offset only during an interactive portal pull-to-dismiss gesture,
+/// so resting portal and pushed detail screens share identical top-edge safe-area bleed.
+private struct PortalDragTransformModifier: ViewModifier {
+    let active: Bool
+    let offset: CGFloat
+    let scale: CGFloat
+
+    func body(content: Content) -> some View {
+        if active {
+            content
+                .clipShape(.rect(cornerRadius: 36, style: .continuous))
+                .scaleEffect(scale)
+                .offset(y: offset)
+        } else {
+            content
         }
     }
 }

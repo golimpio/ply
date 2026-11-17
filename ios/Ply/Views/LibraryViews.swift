@@ -380,7 +380,7 @@ struct HomeView: View {
                     }
                     .padding(.top)
                 }
-                .plyTabBarBottomClearance()
+                .plyTabBarBottomClearance(transparentTopEdge: true)
                 .blur(radius: isPortalOpen ? 12 : 0)
                 .scaleEffect(isPortalOpen ? 0.94 : 1.0)
                 .opacity(isPortalOpen ? 0.35 : 1.0)
@@ -414,7 +414,6 @@ struct HomeView: View {
             }
             #if os(iOS)
             .sensoryFeedback(.impact(flexibility: .soft, intensity: 0.8), trigger: portalFeedbackTrigger)
-            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbarVisibility(isPortalOpen ? .hidden : .visible, for: .tabBar)
             #endif
             .plyMainPageLogo(color: .white, hidden: isPortalOpen)
@@ -459,7 +458,9 @@ enum MovieSort: String, CaseIterable, Identifiable {
 
 struct MoviesView: View {
     @Environment(Connection.self) private var connection
+    #if os(tvOS)
     @State private var query = ""
+    #endif
     @State private var sort: MovieSort = .title
     @State private var selectedGenre: String? = nil
     @State private var selectedDecade: DecadeFilter = .all
@@ -485,9 +486,11 @@ struct MoviesView: View {
 
     private var filteredMovies: [Item] {
         var list = connection.library.movies
+        #if os(tvOS)
         if !query.isEmpty {
             list = list.filter { $0.title.localizedStandardContains(query) }
         }
+        #endif
         if let selectedGenre {
             list = list.filter { $0.genres?.contains(selectedGenre) == true }
         }
@@ -520,14 +523,14 @@ struct MoviesView: View {
 
     private func label(for movie: Item) -> String {
         switch sort {
-        case .title:
+        case .title, .added:
             return alphabetLetter(of: movie.sortTitle ?? movie.title)
         case .year:
             return movie.year.map(String.init) ?? "#"
+        case .duration:
+            return movie.durationSec > 0 ? Format.runtime(movie.durationSec) : "•"
         case .rating:
             return movie.rating.map { "★\($0.label)" } ?? "•"
-        case .added, .duration:
-            return alphabetLetter(of: movie.sortTitle ?? movie.title)
         }
     }
 
@@ -595,21 +598,29 @@ struct MoviesView: View {
                     }
                     .padding([.horizontal, .top])
                 }
-                .plyTabBarBottomClearance()
+                .plyTabBarBottomClearance(transparentTopEdge: true)
                 .plyFastScrollScrubber(
                     itemCount: filteredMovies.count,
                     labelAt: { label(for: filteredMovies[$0]) },
+                    titleAt: { filteredMovies[$0].title },
                     onScrollTo: { proxy.scrollTo(filteredMovies[$0].id, anchor: .top) }
                 )
             }
             .overlay {
+                #if os(tvOS)
                 if (!query.isEmpty || hasActiveFilters) && filteredMovies.isEmpty {
                     ContentUnavailableView.search(text: query.isEmpty ? "filtered films" : query)
                 } else {
                     LibraryStatus(library: library, isEmpty: library.movies.isEmpty)
                 }
+                #else
+                if hasActiveFilters && filteredMovies.isEmpty {
+                    ContentUnavailableView.search(text: "filtered films")
+                } else {
+                    LibraryStatus(library: library, isEmpty: library.movies.isEmpty)
+                }
+                #endif
             }
-            .plySearchable($query, prompt: "Search films", drawer: true)
             .plyRefreshable { await library.reload() }
             .toolbar {
                 #if os(iOS)
@@ -656,6 +667,7 @@ struct MoviesView: View {
                     } label: {
                         FilterButtonLabel(hasActive: hasActiveFilters)
                     }
+                    .tint(hasActiveFilters ? Color.plyAccent : .primary)
                 }
                 #endif
             }
@@ -680,7 +692,9 @@ enum ShowSort: String, CaseIterable, Identifiable {
 
 struct ShowsView: View {
     @Environment(Connection.self) private var connection
+    #if os(tvOS)
     @State private var query = ""
+    #endif
     @State private var sort: ShowSort = .title
     @State private var selectedDecade: DecadeFilter = .all
     @State private var onlyUnwatched = false
@@ -696,9 +710,11 @@ struct ShowsView: View {
 
     private var filteredShows: [ShowSummary] {
         var list = connection.library.shows
+        #if os(tvOS)
         if !query.isEmpty {
             list = list.filter { $0.show.localizedStandardContains(query) }
         }
+        #endif
         if selectedDecade != .all {
             list = list.filter { selectedDecade.matches(year: $0.year) }
         }
@@ -733,7 +749,14 @@ struct ShowsView: View {
     }
 
     private func label(for show: ShowSummary) -> String {
-        alphabetLetter(of: show.sortTitle ?? show.show)
+        switch sort {
+        case .title, .added:
+            return alphabetLetter(of: show.sortTitle ?? show.show)
+        case .rating:
+            return show.rating.map { "★\($0.label)" } ?? "•"
+        case .episodes:
+            return "\(show.episodeCount)ep"
+        }
     }
 
     var body: some View {
@@ -795,21 +818,29 @@ struct ShowsView: View {
                     }
                     .padding([.horizontal, .top])
                 }
-                .plyTabBarBottomClearance()
+                .plyTabBarBottomClearance(transparentTopEdge: true)
                 .plyFastScrollScrubber(
                     itemCount: filteredShows.count,
                     labelAt: { label(for: filteredShows[$0]) },
+                    titleAt: { filteredShows[$0].show },
                     onScrollTo: { proxy.scrollTo(filteredShows[$0].show, anchor: .top) }
                 )
             }
             .overlay {
+                #if os(tvOS)
                 if (!query.isEmpty || hasActiveFilters) && filteredShows.isEmpty {
                     ContentUnavailableView.search(text: query.isEmpty ? "filtered series" : query)
                 } else {
                     LibraryStatus(library: library, isEmpty: library.shows.isEmpty)
                 }
+                #else
+                if hasActiveFilters && filteredShows.isEmpty {
+                    ContentUnavailableView.search(text: "filtered series")
+                } else {
+                    LibraryStatus(library: library, isEmpty: library.shows.isEmpty)
+                }
+                #endif
             }
-            .plySearchable($query, prompt: "Search series", drawer: true)
             .plyRefreshable { await library.reload() }
             // Newest first is a show's newest file, which the episodes list says; fetch it only when
             // that sort is chosen, and again after a reload has forgotten it.
@@ -847,6 +878,7 @@ struct ShowsView: View {
                     } label: {
                         FilterButtonLabel(hasActive: hasActiveFilters)
                     }
+                    .tint(hasActiveFilters ? Color.plyAccent : .primary)
                 }
                 #endif
             }
@@ -879,12 +911,20 @@ private func filterChipRow<Content: View>(@ViewBuilder content: () -> Content) -
 struct SettingsView: View {
     @Environment(Connection.self) private var connection
     @Environment(AppModel.self) private var model
+    #if os(iOS)
+    @AppStorage(PlyPreferences.showTabLabelsKey) private var showTabLabels = false
+    #endif
     @State private var confirmingDisconnect = false
 
     var body: some View {
         let info = connection.info
         NavigationStack {
             Form {
+                #if os(iOS)
+                Section("Appearance") {
+                    Toggle("Show tab labels", isOn: $showTabLabels)
+                }
+                #endif
                 Section("Server") {
                     LabeledContent("Name", value: info.name)
                     LabeledContent("Address") {
@@ -985,11 +1025,11 @@ struct ActiveFilterChip: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
             .foregroundStyle(.white)
-            .plyInteractiveGlassCapsule(tint: .orange)
+            .plyInteractiveGlassCapsule(tint: .plyAccent)
             #else
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
-            .background(Color.orange.opacity(0.3), in: .capsule)
+            .background(Color.plyAccent.opacity(0.3), in: .capsule)
             .foregroundStyle(Color.white)
             #endif
         }
@@ -1005,7 +1045,7 @@ struct FilterButtonLabel: View {
     var body: some View {
         Image(systemName: "line.3.horizontal.decrease")
             .font(.system(size: 15, weight: .semibold))
-            .foregroundStyle(hasActive ? Color.orange : Color.primary)
+            .foregroundStyle(hasActive ? Color.plyAccent : Color.primary)
             .accessibilityLabel("Filter")
     }
 }
@@ -1024,7 +1064,7 @@ struct FilterChip: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
                 .foregroundStyle(isOn ? .white : .primary)
-                .plyInteractiveGlassCapsule(tint: isOn ? .orange : nil)
+                .plyInteractiveGlassCapsule(tint: isOn ? .plyAccent : nil)
                 #else
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)

@@ -132,7 +132,7 @@ struct ShowView: View {
                 title: allShowWatched ? "Show watched" : "Mark show watched",
                 systemImage: allShowWatched ? "checkmark.circle.fill" : "checkmark.circle",
                 prominent: allShowWatched,
-                tint: allShowWatched ? .orange : nil
+                tint: allShowWatched ? .plyAccent : nil
             ) {
                 setShowWatched(!allShowWatched)
             }

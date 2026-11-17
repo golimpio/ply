@@ -95,6 +95,15 @@ private func decode<T: Decodable>(_ json: String) throws -> T {
         #expect(detail.overview == "The episode's overview.")
         #expect(detail.episodeInfo?.name == "Pilot")
     }
+
+    @Test func audioStreamLabelAlwaysIncludesCodecEvenWhenTitled() throws {
+        let titled: MediaStream = try decode(#"{"index":1,"type":"audio","codec":"eac3","language":"en","title":"Surround","channels":6,"default":true}"#)
+        let redundantTitle: MediaStream = try decode(#"{"index":2,"type":"audio","codec":"eac3","language":"en","title":"EAC3 5.1","channels":6}"#)
+        #expect(titled.label.contains("Surround"))
+        #expect(titled.label.contains("EAC3"))
+        #expect(titled.label.contains("5.1"))
+        #expect(redundantTitle.label.components(separatedBy: "EAC3").count == 2)
+    }
 }
 
 @Suite struct ShowAndMetaTests {

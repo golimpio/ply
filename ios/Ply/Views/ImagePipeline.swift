@@ -77,6 +77,11 @@ final class ImagePipeline {
         cache.removeAllObjects()
     }
 
+    /// Pre-populates the memory cache (used by tests verifying image rendering without network I/O).
+    func seed(_ image: UIImage, for url: URL) {
+        cache.setObject(image, forKey: Self.cacheKey(for: url, maxPixelSize: nil) as NSString)
+    }
+
     private nonisolated static func fetchAndDecode(
         url: URL,
         maxPixelSize: Int?,

@@ -186,7 +186,15 @@ nonisolated struct MediaStream: Decodable, Sendable, Hashable {
     var label: String {
         var parts: [String] = []
         if let l = language, !l.isEmpty { parts.append(Locale.current.localizedString(forLanguageCode: l) ?? l) }
-        if let t = title, !t.isEmpty { parts.append(t) } else { parts.append(codec.uppercased()) }
+        let codecName = codec.uppercased()
+        if let t = title, !t.isEmpty {
+            parts.append(t)
+            if !codecName.isEmpty, !t.localizedStandardContains(codecName) {
+                parts.append(codecName)
+            }
+        } else if !codecName.isEmpty {
+            parts.append(codecName)
+        }
         if let c = channels, c > 0 { parts.append(c == 2 ? "stereo" : c == 1 ? "mono" : "\(c - 1).1") }
         return parts.joined(separator: " · ")
     }
@@ -284,6 +292,7 @@ nonisolated struct ItemDetail: Decodable, Sendable {
     }
 
     var audioStreams: [MediaStream] { streams.filter { $0.type == "audio" } }
+    var videoStreams: [MediaStream] { streams.filter { $0.type == "video" } }
     var overview: String? { episodeInfo?.overview ?? item.overview ?? meta?.overview }
 }
 

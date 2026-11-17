@@ -77,7 +77,7 @@ struct BrowseView: View {
                 }
                 .padding(.top, 4)
             }
-            .plyTabBarBottomClearance()
+            .plyTabBarBottomClearance(transparentTopEdge: true)
             .plySearchable($query, prompt: "Titles, shows, episodes, people, genres")
             .plyRefreshable {
                 await library.reload()
@@ -114,7 +114,7 @@ struct BrowseView: View {
                     NavigationLink(value: Route.collections) {
                         Text("Show All")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Color.orange)
+                            .foregroundStyle(Color.plyAccent)
                     }
                     .buttonStyle(.plain)
                 } content: {
@@ -561,7 +561,7 @@ struct PersonView: View {
                         } label: {
                             Text(isBioExpanded ? "Read less" : "Read more")
                                 .font(.footnote.weight(.semibold))
-                                .foregroundStyle(Color.orange)
+                                .foregroundStyle(Color.plyAccent)
                         }
                         .buttonStyle(.plain)
                         .padding(.top, 2)
@@ -962,6 +962,7 @@ struct AllCollectionsView: View {
             .plyFastScrollScrubber(
                 itemCount: filteredCollections.count,
                 labelAt: { alphabetLetter(of: filteredCollections[$0].name) },
+                titleAt: { filteredCollections[$0].name },
                 onScrollTo: { proxy.scrollTo(filteredCollections[$0].id, anchor: .top) }
             )
         }

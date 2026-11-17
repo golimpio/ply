@@ -4,6 +4,26 @@
     "" : {
 
     },
+    "%@, %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@, %2$@"
+          }
+        }
+      }
+    },
+    "%@: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@: %2$@"
+          }
+        }
+      }
+    },
     "%lld" : {
 
     },
@@ -13,16 +33,13 @@
     "1 title in your library" : {
 
     },
-    "192.168.1.10 or nas.local:8420" : {
-
-    },
     "4K UHD" : {
 
     },
     "6-digit code" : {
 
     },
-    "API" : {
+    "192.168.1.10 or nas.local:8420" : {
 
     },
     "Add folders to the library on ply's web page." : {
@@ -37,10 +54,16 @@
     "All Genres" : {
 
     },
+    "API" : {
+
+    },
     "Attributes" : {
 
     },
     "Audio" : {
+
+    },
+    "Cancel" : {
 
     },
     "Cannot load %@" : {
@@ -106,6 +129,9 @@
     "Downloading subtitles…" : {
 
     },
+    "Downloading trailer" : {
+
+    },
     "Era" : {
 
     },
@@ -113,6 +139,12 @@
 
     },
     "Filter" : {
+
+    },
+    "Forget %@?" : {
+
+    },
+    "Forget server" : {
 
     },
     "Forget this server" : {
@@ -139,6 +171,12 @@
     "Language" : {
 
     },
+    "Loading details…" : {
+
+    },
+    "Loading filmography…" : {
+
+    },
     "Looking for ply servers…" : {
 
     },
@@ -151,6 +189,9 @@
     "Mark show watched" : {
 
     },
+    "More details couldn’t be loaded right now." : {
+
+    },
     "Movies" : {
 
     },
@@ -160,10 +201,10 @@
     "No %@ collections" : {
 
     },
-    "No Subtitles Available" : {
+    "No genres or collections yet" : {
 
     },
-    "No genres or collections yet" : {
+    "No Subtitles Available" : {
 
     },
     "No title in this genre is in the library." : {
@@ -175,16 +216,16 @@
     "None" : {
 
     },
-    "None of their work is in the library right now." : {
+    "None of their work is in your library right now." : {
 
     },
     "Nothing here yet" : {
 
     },
-    "OK" : {
+    "Off" : {
 
     },
-    "Off" : {
+    "OK" : {
 
     },
     "On ply's web page, open Settings › Devices › Pair a device, and type the code it shows." : {
@@ -220,13 +261,22 @@
     "Play on Apple TV" : {
 
     },
+    "ply" : {
+
+    },
     "Ply" : {
+
+    },
+    "Read less" : {
 
     },
     "Read more" : {
 
     },
     "Release Era" : {
+
+    },
+    "Remove %@ filter" : {
 
     },
     "Reset Filters" : {
@@ -271,9 +321,6 @@
     "Show All" : {
 
     },
-    "Show less" : {
-
-    },
     "Show watched" : {
 
     },
@@ -307,6 +354,9 @@
     "This device" : {
 
     },
+    "This removes the pairing token stored on this device. You will need a new pairing code to reconnect if authentication is required." : {
+
+    },
     "Titles, shows, episodes, people, genres" : {
 
     },
@@ -335,9 +385,6 @@
 
     },
     "Without a port, ply's own (%@) is used." : {
-
-    },
-    "ply" : {
 
     }
   },

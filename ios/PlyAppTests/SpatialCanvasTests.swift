@@ -154,12 +154,24 @@ nonisolated final class SpatialCanvasTests: XCTestCase {
 
         let movie = try JSONDecoder().decode(
             Item.self,
-            from: Data(#"{"id":10,"kind":"movie","title":"Air","year":2023,"durationSec":6840}"#.utf8)
+            from: Data(#"{"id":10,"kind":"movie","title":"Air","year":2023,"durationSec":6840,"backdrop":"/art/hero-film.png"}"#.utf8)
         )
         let episode = try JSONDecoder().decode(
             Item.self,
-            from: Data(#"{"id":20,"kind":"episode","title":"The Yankee Dodge","show":"The Artful Dodger","season":1,"episode":1,"durationSec":2940}"#.utf8)
+            from: Data(#"{"id":20,"kind":"episode","title":"The Yankee Dodge","show":"The Artful Dodger","season":1,"episode":1,"durationSec":2940,"still":"/art/hero-ep.png"}"#.utf8)
         )
+
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 40))
+        let brightArt = renderer.image { ctx in
+            UIColor(red: 0.95, green: 0.45, blue: 0.15, alpha: 1.0).setFill()
+            ctx.fill(CGRect(x: 0, y: 0, width: 40, height: 40))
+        }
+        for path in ["/art/hero-film.png", "/art/hero-ep.png"] {
+            if let url = connection.api.url(path) {
+                ImagePipeline.shared.seed(brightArt, for: url)
+            }
+        }
+        defer { ImagePipeline.shared.removeAll() }
 
         let cases: [(name: String, view: AnyView)] = [
             ("Film", AnyView(ItemDetailView(id: movie.id, seedItem: movie))),
@@ -197,6 +209,24 @@ nonisolated final class SpatialCanvasTests: XCTestCase {
             XCTAssertGreaterThan(nav.navigationBar.frame.maxY, 44, "\(entry.name): expected non-zero navigation bar height")
             let minY = try XCTUnwrap(observedMinY, "\(entry.name): HeroBackdropArtwork did not report its minY")
             XCTAssertLessThanOrEqual(minY, 1.0, "\(entry.name): HeroBackdropArtwork stopped below top edge at y=\(minY)")
+
+            // Rendered pixels inside the top safe area (well above navBar.maxY) must not be clipped to black (#000).
+            if entry.name != "Series" {
+                window.layoutIfNeeded()
+                let snap = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+                    window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+                }
+                if let cg = snap.cgImage,
+                   let data = cg.dataProvider?.data,
+                   let ptr = CFDataGetBytePtr(data) {
+                    let bytesPerPixel = cg.bitsPerPixel / 8
+                    let sampleX = Int(Double(cg.width) * 0.5)
+                    let sampleY = min(Int(10.0 * snap.scale), cg.height - 1)
+                    let offset = sampleY * cg.bytesPerRow + sampleX * bytesPerPixel
+                    let maxChannel = max(ptr[offset], max(ptr[offset + 1], ptr[offset + 2]))
+                    XCTAssertGreaterThan(maxChannel, 8, "\(entry.name): top safe-area pixels at y=10pt were clipped black")
+                }
+            }
         }
     }
     #endif

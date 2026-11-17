@@ -113,6 +113,7 @@ enum AppTab: Hashable {
 }
 
 struct MainTabs: View {
+    @AppStorage(PlyPreferences.showTabLabelsKey) private var showTabLabels = false
     @State private var selectedTab: AppTab = .home
     @State private var portalState = SpatialPortalState()
     @Environment(PlaybackScene.self) private var playbackScene: PlaybackScene?
@@ -121,19 +122,19 @@ struct MainTabs: View {
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            Tab("Home", systemImage: "house", value: AppTab.home) {
+            tabItem("Home", kind: .home, value: .home) {
                 HomeView()
             }
-            Tab("Films", systemImage: "film", value: AppTab.films) {
+            tabItem("Films", kind: .films, value: .films) {
                 MoviesView()
             }
-            Tab("Series", systemImage: "tv", value: AppTab.series) {
+            tabItem("Series", kind: .series, value: .series) {
                 ShowsView()
             }
-            Tab("Settings", systemImage: "gearshape", value: AppTab.settings) {
+            tabItem("Settings", kind: .settings, value: .settings) {
                 SettingsView()
             }
-            Tab("Search", systemImage: "magnifyingglass", value: AppTab.search, role: .search) {
+            tabItem("Search", kind: .search, value: .search, role: .search) {
                 BrowseView()
             }
         }
@@ -143,6 +144,26 @@ struct MainTabs: View {
         .allowsHitTesting(!playerShown)
         .onChange(of: selectedTab) { _, _ in resignKeyboard() }
         .onChange(of: playerShown) { _, shown in if shown { resignKeyboard() } }
+    }
+
+    private func tabItem<Content: View>(
+        _ title: String,
+        kind: PlyTabIcon.Kind,
+        value: AppTab,
+        role: TabRole? = nil,
+        @ViewBuilder content: () -> Content
+    ) -> some TabContent<AppTab> {
+        Tab(value: value, role: role) {
+            content()
+        } label: {
+            let icon = PlyTabIcon.templateImage(for: kind, filled: selectedTab == value)
+            if showTabLabels {
+                Label { Text(title) } icon: { Image(uiImage: icon) }
+            } else {
+                Image(uiImage: icon)
+                    .accessibilityLabel(title)
+            }
+        }
     }
 
     private func resignKeyboard() {
