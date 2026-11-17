@@ -158,8 +158,8 @@ func (v *metaView) apply(sum *ItemSummary, e store.Entry) {
 		sum.Genres = b.Genres
 	}
 
-	switch {
-	case e.Kind == store.KindEpisode:
+	switch e.Kind {
+	case store.KindEpisode:
 		sum.Poster = s.imageURL(pickArt(show.LocalPoster, store.LocalRef(store.ArtSeries, show.ID, "poster"), b.Poster), posterSize)
 		sum.Backdrop = s.imageURL(pickArt(show.LocalBackdrop, store.LocalRef(store.ArtSeries, show.ID, "backdrop"), b.Backdrop), backdropSize)
 		if ep, found := v.episodes[titleID][[2]int{e.Season, e.Episode}]; found {

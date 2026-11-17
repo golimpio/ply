@@ -193,7 +193,7 @@ func (w *compressWriter) startPlain() {
 	w.plain = true
 	w.ResponseWriter.WriteHeader(w.status)
 	if len(w.buf) > 0 {
-		w.ResponseWriter.Write(w.buf)
+		_, _ = w.ResponseWriter.Write(w.buf)
 		w.buf = nil
 	}
 }
@@ -210,7 +210,7 @@ func (w *compressWriter) startGzip() {
 	w.zw = gzipPool.Get().(*gzip.Writer)
 	w.zw.Reset(w.ResponseWriter)
 	if len(w.buf) > 0 {
-		w.zw.Write(w.buf)
+		_, _ = w.zw.Write(w.buf)
 		w.buf = nil
 	}
 }

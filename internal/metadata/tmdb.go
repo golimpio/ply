@@ -373,13 +373,13 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, out any) er
 		c.log.LogAttrs(ctx, slog.LevelDebug, "tmdb request", slog.String("path", path),
 			slog.Int("status", status), slog.Duration("took", c.now().Sub(start)))
 
-		switch {
-		case status == http.StatusOK:
+		switch status {
+		case http.StatusOK:
 			if err := json.Unmarshal(body, out); err != nil {
 				return &Error{Op: op, Status: status, Transient: true, Message: "malformed response", Err: err}
 			}
 			return nil
-		case status == http.StatusTooManyRequests:
+		case http.StatusTooManyRequests:
 			c.log.LogAttrs(ctx, slog.LevelWarn, "tmdb rate limited", slog.String("path", path),
 				slog.Duration("retry_after", wait), slog.Int("attempt", attempt+1))
 			if attempt < maxRateRetries && wait <= c.maxWait {

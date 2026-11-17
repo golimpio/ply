@@ -672,7 +672,7 @@ func noteFormerFlags(ctx context.Context, st *store.Store, flags []library.Root,
 	if v, ok, err := st.GetSetting(ctx, flagFoldersKey); err != nil {
 		log.Warn("reading the folders of the last start", "err", err)
 	} else if ok {
-		json.Unmarshal([]byte(v), &before) // an unreadable list is as if there was none
+		_ = json.Unmarshal([]byte(v), &before) // an unreadable list is as if there was none
 	}
 	for _, p := range before {
 		if !slices.Contains(now, p) && slices.ContainsFunc(saved, func(f store.Folder) bool { return f.Path == p }) {

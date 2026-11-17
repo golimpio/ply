@@ -98,8 +98,8 @@ func ParseNFO(data []byte) NFO {
 	if n.IDs.IsZero() {
 		// Ids in the text around the XML (Kodi appends the URL after it), never in
 		// the XML itself: a plot that mentions a movie is not that movie's id.
-		switch {
-		case n.Root == "":
+		switch n.Root {
+		case "":
 			n.IDs = scanURLs(data, true)
 		default:
 			n.IDs = scanURLs(outsideRoot(data, end), false)

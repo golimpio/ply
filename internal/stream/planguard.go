@@ -371,13 +371,13 @@ func (s *Session) rebuildPlan() error {
 		}
 		s.m.log.Error("keyframe scan after a bad index failed", "session", s.ID, "err", err)
 		if errors.Is(err, context.DeadlineExceeded) { // the scan took longer than ExtractTimeout
-			return fmt.Errorf("%w: scanning %s: %v", ErrTimeout, filepath.Base(s.req.Path), err)
+			return fmt.Errorf("%w: scanning %s: %w", ErrTimeout, filepath.Base(s.req.Path), err)
 		}
-		return fmt.Errorf("%w: %v", ErrIndex, err)
+		return fmt.Errorf("%w: %w", ErrIndex, err)
 	}
 	plan, err := NewPlan(kf, s.req.DurationSec, s.m.o.SegmentSec)
 	if err != nil {
-		return fmt.Errorf("%w: %s: %v", ErrIndex, filepath.Base(s.req.Path), err)
+		return fmt.Errorf("%w: %s: %w", ErrIndex, filepath.Base(s.req.Path), err)
 	}
 
 	s.mu.Lock()
@@ -481,7 +481,7 @@ func (p *mp4Parser) trackID(ctx context.Context, trak mp4Box) (uint32, error) {
 		id = binary.BigEndian.Uint32(h[at:])
 		return errFragFound
 	})
-	if err != nil && err != errFragFound {
+	if err != nil && !errors.Is(err, errFragFound) {
 		return 0, err
 	}
 	return id, nil
@@ -567,7 +567,7 @@ func fragmentVideoSpan(path string, v fragVideo) (fragSpan, error) {
 			return errFragFound
 		})
 	})
-	if err != nil && err != errFragFound {
+	if err != nil && !errors.Is(err, errFragFound) {
 		return fragSpan{}, err
 	}
 	if !found {

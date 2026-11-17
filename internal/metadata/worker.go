@@ -107,16 +107,16 @@ type Worker struct {
 	log  *slog.Logger
 	wake chan struct{}
 
-	mu             sync.Mutex
-	sidecars       map[int64]struct{}
-	jobs           []job
-	reload         bool
-	running        bool
-	lastError      string
-	retryRefreshAt map[string]time.Time // by provider (SourceTMDB, SourceTVDB): when its part of the refresh may be tried again
-	probes         map[int64]probeEntry
-	seasonTried    map[seasonKey]time.Time
-	nfoApplied     map[int64]string // title id -> stamp of the NFO last laid over it
+	mu                sync.Mutex
+	sidecars          map[int64]struct{}
+	jobs              []job
+	reload            bool
+	running           bool
+	lastError         string
+	retryRefreshAt    map[string]time.Time // by provider (SourceTMDB, SourceTVDB): when its part of the refresh may be tried again
+	probes            map[int64]probeEntry
+	seasonTried       map[seasonKey]time.Time
+	nfoApplied        map[int64]string // title id -> stamp of the NFO last laid over it
 	personFailed      map[int64]fetchFailure
 	trailerFailed     map[int64]fetchFailure // by title id
 	filmographyFailed map[int64]fetchFailure // by person id
@@ -183,7 +183,7 @@ func NewWorker(o WorkerOptions) *Worker {
 		sidecars: map[int64]struct{}{}, retryRefreshAt: map[string]time.Time{}, probes: map[int64]probeEntry{}, seasonTried: map[seasonKey]time.Time{},
 		nfoApplied: map[int64]string{}, personFailed: map[int64]fetchFailure{}, trailerFailed: map[int64]fetchFailure{},
 		filmographyFailed: map[int64]fetchFailure{},
-		switchTried: map[int64]bool{},
+		switchTried:       map[int64]bool{},
 	}
 	w.bgCtx, w.bgCancel = context.WithCancel(context.Background())
 	return w

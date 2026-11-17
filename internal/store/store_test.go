@@ -495,7 +495,7 @@ func TestShows(t *testing.T) {
 		episode("/m/2.mkv", "Beta", 1, 2),
 		episode("/m/3.mkv", "Beta", 3, 1),
 		episode("/m/4.mkv", "alpha", 0, 1), // specials
-		episode("/m/6.mkv", "Beta", 1, 1), // a second file of an episode
+		episode("/m/6.mkv", "Beta", 1, 1),  // a second file of an episode
 		movie("/m/5.mp4", "Not a show"),
 	} {
 		if _, err := s.UpsertItem(ctx, it, nil); err != nil {

@@ -201,7 +201,7 @@ func startHelperCmd(cmd *exec.Cmd) (backend, error) {
 		if hello.Broken != "" {
 			return nil, fmt.Errorf("watch helper: %s", hello.Broken)
 		}
-		return nil, fmt.Errorf("watch helper did not start (%v)", err)
+		return nil, fmt.Errorf("watch helper did not start (%w)", err)
 	}
 	b := &helperBackend{
 		cmd:      cmd,

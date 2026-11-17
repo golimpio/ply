@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -92,7 +93,7 @@ func cleanKeyframes(in []float64) []float64 {
 		}
 		kf = append(kf, math.Max(t, 0))
 	}
-	sort.Float64s(kf)
+	slices.Sort(kf)
 	out := kf[:0]
 	for _, t := range kf {
 		if len(out) == 0 || t-out[len(out)-1] >= 0.001 {

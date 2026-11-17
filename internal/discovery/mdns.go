@@ -226,7 +226,7 @@ func (z zone) answer(q dnsmessage.Message, addrs []net.IP) (answers, extra []dns
 // bits (§6.7). to is where to send it: nil for the multicast group. ok is false when there is
 // nothing to say.
 func (z zone) reply(q dnsmessage.Message, src *net.UDPAddr, addrs []net.IP) (m dnsmessage.Message, to *net.UDPAddr, ok bool) {
-	if q.Header.Response || q.Header.OpCode != 0 {
+	if q.Response || q.OpCode != 0 {
 		return m, nil, false
 	}
 	answers, extra := z.answer(q, addrs)
@@ -235,7 +235,7 @@ func (z zone) reply(q dnsmessage.Message, src *net.UDPAddr, addrs []net.IP) (m d
 	}
 	m = dnsmessage.Message{Response: true, Authoritative: true, Answers: answers, Additionals: extra}
 	if src != nil && src.Port != mdnsPort {
-		m.Header.ID = q.Header.ID
+		m.ID = q.ID
 		m.Questions = q.Questions
 		for _, rs := range [][]dnsmessage.Resource{m.Answers, m.Additionals} {
 			for i := range rs {
@@ -269,7 +269,7 @@ func (z zone) probe(first bool) dnsmessage.Message {
 // claims reports whether a response from another responder holds a record of the instance
 // name: while probing, the name is someone else's.
 func (z zone) claims(m dnsmessage.Message) bool {
-	if !m.Header.Response {
+	if !m.Response {
 		return false
 	}
 	for _, rs := range [][]dnsmessage.Resource{m.Answers, m.Additionals} {
@@ -459,7 +459,7 @@ func (r *responder) handle(m dnsmessage.Message, cm *ipv4.ControlMessage, from n
 	r.mu.Unlock()
 	// Not while the name is not ours yet, nor once the goodbye is said; and only a query that
 	// names something of ours is worth looking up the addresses for.
-	if probing || r.closed || m.Header.Response || !z.named(m) {
+	if probing || r.closed || m.Response || !z.named(m) {
 		return
 	}
 	// Answer on the network the query came from. One that came from elsewhere (looped back from

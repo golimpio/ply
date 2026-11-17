@@ -23,7 +23,9 @@ func TestDestination(t *testing.T) {
 	film := func(id int64, path, title string, year int) store.Item {
 		return store.Item{ID: id, Kind: store.KindMovie, Path: path, Title: title, Year: year}
 	}
-	ep := func(id int64, path, show string) store.Item { return store.Item{ID: id, Kind: store.KindEpisode, Path: path, Show: show} }
+	ep := func(id int64, path, show string) store.Item {
+		return store.Item{ID: id, Kind: store.KindEpisode, Path: path, Show: show}
+	}
 	for _, c := range []struct {
 		name  string
 		roots []library.Root

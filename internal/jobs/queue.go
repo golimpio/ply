@@ -803,7 +803,7 @@ func (q *Queue) Retry(ctx context.Context, id int64) (Job, error) {
 	}
 	kind, key, payload := old.Kind, old.Key, old.Payload
 	q.mu.Unlock()
-	return q.Enqueue(ctx, kind, Opt{Key: key, Payload: json.RawMessage(payload), User: true})
+	return q.Enqueue(ctx, kind, Opt{Key: key, Payload: payload, User: true})
 }
 
 func (q *Queue) inHistory(id int64) bool {

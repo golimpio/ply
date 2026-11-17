@@ -240,7 +240,7 @@ func (p *mp4Parser) findMoov(ctx context.Context) (mp4Box, error) {
 		}
 		return nil
 	})
-	if err != nil && err != errFound {
+	if err != nil && !errors.Is(err, errFound) {
 		return mp4Box{}, err
 	}
 	if moov.typ == "" {

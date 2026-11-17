@@ -1,6 +1,9 @@
 package stream
 
-import "sort"
+import (
+	"cmp"
+	"slices"
+)
 
 // A PlayChange is a play starting, changing or ending, for the live feed
 // (docs/M11-CLIENTS.md, "Session events").
@@ -68,7 +71,7 @@ func (m *Manager) reconcileLocked() {
 			gone = append(gone, p)
 		}
 	}
-	sort.Slice(gone, func(i, j int) bool { return gone[i].ID < gone[j].ID })
+	slices.SortFunc(gone, func(a, b PlayInfo) int { return cmp.Compare(a.ID, b.ID) })
 	for _, p := range gone {
 		reason := m.endReason[p.ID]
 		if reason == "" {

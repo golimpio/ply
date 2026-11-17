@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -59,7 +60,8 @@ type MDBListOptions struct {
 	Logger *slog.Logger // default slog.Default(). Never receives the key.
 }
 
-// String, GoString and LogValue leave the key out of anything that prints or logs the options.
+// String leaves the key out of anything that prints or logs the options;
+// GoString and LogValue do the same.
 func (o MDBListOptions) String() string {
 	return fmt.Sprintf("MDBListOptions{Key: %s, BaseURL: %q}", tvdbMask(o.Key), o.BaseURL)
 }
@@ -364,8 +366,10 @@ func (c *MDBListClient) get(ctx context.Context, path string, out any) error {
 				return c.failedAnswer(op, fail.Error)
 			}
 			if err := json.Unmarshal(body, out); err != nil {
-				return &MDBListError{Op: op, Status: status, Transient: true, Message: "malformed response",
-					Err: causeOf(err, c.redact(err.Error()))}
+				return &MDBListError{
+					Op: op, Status: status, Transient: true, Message: "malformed response",
+					Err: causeOf(err, c.redact(err.Error())),
+				}
 			}
 			return nil
 		case status == http.StatusTooManyRequests:
@@ -378,8 +382,10 @@ func (c *MDBListClient) get(ctx context.Context, path string, out any) error {
 		case status >= 300 && status < 400:
 			return &MDBListError{Op: op, Status: status, Message: "redirect not followed"}
 		default:
-			e := &MDBListError{Op: op, Status: status, Transient: status >= 500 || status == http.StatusRequestTimeout || status == http.StatusTooEarly,
-				Message: c.message(body)}
+			e := &MDBListError{
+				Op: op, Status: status, Transient: status >= 500 || status == http.StatusRequestTimeout || status == http.StatusTooEarly,
+				Message: c.message(body),
+			}
 			if status >= 500 {
 				c.log.LogAttrs(ctx, slog.LevelWarn, "mdblist server error", slog.String("path", path), slog.Int("status", status))
 			}
@@ -466,7 +472,7 @@ func (c *MDBListClient) message(body []byte) string {
 	if json.Unmarshal(body, &e) != nil {
 		return ""
 	}
-	return tidyMessage(c.redact(firstNonEmpty(e.Error, e.Message)), maxMDBListMessage)
+	return tidyMessage(c.redact(cmp.Or(e.Error, e.Message)), maxMDBListMessage)
 }
 
 // ---- answers ----
@@ -749,7 +755,7 @@ func (t *MDBListTitle) StoreRatings(fetchedAt int64) []store.Rating {
 			rating.Votes = int(min(r.Votes.V, 1<<31))
 		}
 		if k.source == store.RatingRTCritics || k.source == store.RatingRTAudience {
-			rating.State = rtState(k.source, v, firstNonEmpty(r.State, r.Status))
+			rating.State = rtState(k.source, v, cmp.Or(r.State, r.Status))
 		}
 		out = append(out, rating)
 	}

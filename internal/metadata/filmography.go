@@ -10,6 +10,7 @@ import (
 
 	"ply/internal/store"
 )
+
 // What is kept of a person's external filmography, and for how long.
 const (
 	maxFilmography   = 50

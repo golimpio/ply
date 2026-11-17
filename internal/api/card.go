@@ -69,7 +69,7 @@ type CardRating struct {
 func itemCard(it ItemSummary) ItemCard {
 	c := ItemCard{
 		ID: it.ID, Kind: it.Kind, Title: it.Title, SortTitle: it.SortTitle, Year: it.Year, TitleID: it.TitleID, AddedAt: it.AddedAt,
-		Poster: it.Poster, Backdrop: it.Backdrop, Watched: it.WatchState.Watched, Progress: it.Progress, DurationSec: it.DurationSec,
+		Poster: it.Poster, Backdrop: it.Backdrop, Watched: it.Watched, Progress: it.Progress, DurationSec: it.DurationSec,
 		Container: it.Container, Width: it.Width, Height: it.Height, HDR: it.HDR, Genres: it.Genres, MatchState: it.MatchState, NeedsReview: it.NeedsReview,
 	}
 	if a := it.Art; a != nil {
@@ -129,7 +129,7 @@ func episodeCard(it ItemSummary) EpisodeCard {
 	c := EpisodeCard{
 		ID: it.ID, Kind: it.Kind, Title: it.Title, Year: it.Year, Show: it.Show, Season: it.Season, Episode: it.Episode,
 		EpisodeTitle: it.EpisodeTitle, AddedAt: it.AddedAt, DurationSec: it.DurationSec, Still: it.Still, Overview: it.Overview,
-		Watched: it.WatchState.Watched, WatchedAt: it.WatchState.WatchedAt, PlayCount: it.WatchState.PlayCount,
+		Watched: it.Watched, WatchedAt: it.WatchedAt, PlayCount: it.PlayCount,
 		Progress: it.Progress, Width: it.Width, Height: it.Height, HDR: it.HDR,
 	}
 	if a := it.Art; a != nil {

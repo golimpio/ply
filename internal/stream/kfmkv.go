@@ -2,6 +2,7 @@ package stream
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -304,7 +305,7 @@ func matroskaKeyframes(ctx context.Context, x *indexReader, videoIndex int) ([]f
 	if len(cues) == 0 {
 		return nil, errors.New("matroska: no cue points for the video track")
 	}
-	sort.SliceStable(cues, func(i, j int) bool { return cues[i].time < cues[j].time })
+	slices.SortStableFunc(cues, func(a, b cueEntry) int { return cmp.Compare(a.time, b.time) })
 
 	// Do the cues list the keyframes that are there? Compare them with the
 	// blocks of the clusters read, which are the first keyframe or two of the
@@ -354,7 +355,7 @@ func checkDense(kf []float64, duration, start float64) error {
 	for i := range gaps {
 		gaps[i] = kf[i+1] - kf[i]
 	}
-	sort.Float64s(gaps)
+	slices.Sort(gaps)
 	if len(gaps) > 0 && gaps[len(gaps)/2] > maxMedianGap {
 		return fmt.Errorf("matroska: median cue gap %.1f s is too sparse for a keyframe index", gaps[len(gaps)/2])
 	}
@@ -698,7 +699,7 @@ func (p *mkvParser) readCues(ctx context.Context, track uint64) ([]cueEntry, err
 		}
 		head, err := br.Peek(12)
 		if len(head) == 0 {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				return cues, nil
 			}
 			return nil, err
@@ -739,7 +740,7 @@ func (p *mkvParser) readCues(ctx context.Context, track uint64) ([]cueEntry, err
 
 // noEOF turns the end of the stream inside an element into an error.
 func noEOF(err error) error {
-	if err == io.EOF {
+	if errors.Is(err, io.EOF) {
 		return io.ErrUnexpectedEOF
 	}
 	return err

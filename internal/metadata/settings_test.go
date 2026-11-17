@@ -305,7 +305,7 @@ func TestResolvedNeverPrintsTheKey(t *testing.T) {
 	jbuf := &bytes.Buffer{}
 	slog.New(slog.NewJSONHandler(jbuf, nil)).Info("settings", "resolved", r)
 	for _, out := range []string{
-		fmt.Sprint(r), fmt.Sprintf("%v", r), fmt.Sprintf("%+v", r), fmt.Sprintf("%#v", r), fmt.Sprintf("%s", r), fmt.Sprintf("%q", r),
+		fmt.Sprint(r), fmt.Sprintf("%v", r), fmt.Sprintf("%+v", r), fmt.Sprintf("%#v", r), r.String(), fmt.Sprintf("%q", r),
 		fmt.Sprintf("%v", &r), fmt.Sprintf("%+v", []Resolved{r}), fmt.Sprintf("%v", map[string]Resolved{"a": r}),
 		buf.String(), jbuf.String(),
 	} {

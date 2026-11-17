@@ -51,7 +51,7 @@ type Fake struct {
 	// is a 404.
 	TrailerLists map[int64][]store.Video
 	// What CombinedCredits returns by the person's TMDB id; an id that is not here is a 404.
-	Filmography map[int64]*metadata.PersonCombinedCredits
+	Filmography   map[int64]*metadata.PersonCombinedCredits
 	ChangedMovies []int64
 	ChangedShows  []int64
 	// ImageBase is where ImageURL points (an httptest server serving images).

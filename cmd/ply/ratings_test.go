@@ -169,8 +169,7 @@ func TestRatingsIMDbJobYieldsToAStalledViewer(t *testing.T) {
 	pb := &stalled{}
 	gov := tier.New(tier.Options{Playback: pb, Poll: 5 * time.Millisecond})
 	var once sync.Once
-	var r *ratingsRig
-	r = newRatingsRig(t, nil, func(*testing.T) func(context.Context) error {
+	r := newRatingsRig(t, nil, func(*testing.T) func(context.Context) error {
 		pace := paceFor(gov, tier.Need{CPU: true})
 		return func(ctx context.Context) error {
 			once.Do(func() { pb.set(1) }) // a viewer stalls as the first chunk is written

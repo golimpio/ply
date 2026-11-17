@@ -194,7 +194,7 @@ func TestPendingMatchesLastUntilForgotten(t *testing.T) {
 		return id
 	}
 	movieID := add(movie("/lib/m.mp4", "M"))
-	epID := add(episode("/lib/Lost/S01E01.mkv", "Lost", 1, 1))
+	_ = add(episode("/lib/Lost/S01E01.mkv", "Lost", 1, 1))
 	mt, _ := s.UpsertTitle(ctx, tmdbMovie(603, "The Matrix", 1999))
 	st, _ := s.UpsertTitle(ctx, tmdbSeries(4607, "Lost", 2004))
 	if err := s.SetItemMatch(ctx, movieID, Match{TitleID: mt, State: MatchManual, Score: 1}); err != nil {
@@ -221,7 +221,7 @@ func TestPendingMatchesLastUntilForgotten(t *testing.T) {
 
 	// The files come back and are restored; the matches wait.
 	movieID = add(movie("/lib/m.mp4", "M"))
-	epID = add(episode("/lib/Lost/S01E01.mkv", "Lost", 1, 1))
+	epID := add(episode("/lib/Lost/S01E01.mkv", "Lost", 1, 1))
 	for _, p := range []string{"/lib/m.mp4", "/lib/Lost/S01E01.mkv"} {
 		id := map[string]int64{"/lib/m.mp4": movieID, "/lib/Lost/S01E01.mkv": epID}[p]
 		if _, _, ok, err := s.RestoreArchived(ctx, id, p, 100); err != nil || !ok {

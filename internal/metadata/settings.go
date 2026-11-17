@@ -205,8 +205,8 @@ type Settings struct {
 	tests  map[string]keyTestRec
 }
 
-// String, GoString and LogValue keep the keys and the PIN, which the options hold,
-// out of anything that prints or logs the settings.
+// String keeps the keys and the PIN, which the options hold, out of anything
+// that prints or logs the settings; GoString and LogValue do the same.
 func (s *Settings) String() string { return "metadata.Settings{}" }
 
 func (s *Settings) GoString() string { return s.String() }
@@ -552,7 +552,7 @@ func (s *Settings) checkKey(ctx context.Context, key, language string) error {
 		return fmt.Errorf("%w: use a v3 API key or a v4 read access token from your TMDB account settings", ErrKeyRejected)
 	default:
 		// The error is TMDB's or the network's: it never holds the key.
-		return fmt.Errorf("%w to check the key: %v", ErrUnreachable, err)
+		return fmt.Errorf("%w to check the key: %w", ErrUnreachable, err)
 	}
 }
 
@@ -570,7 +570,7 @@ func (s *Settings) checkTVDB(ctx context.Context, key, pin, language string) err
 		return fmt.Errorf("%w: check the project key and, if your key needs one, the subscriber PIN", ErrTVDBRejected)
 	default:
 		// The error is TVDB's or the network's: it never holds the key or the PIN.
-		return fmt.Errorf("%w to check the key: %v", ErrTVDBUnreachable, err)
+		return fmt.Errorf("%w to check the key: %w", ErrTVDBUnreachable, err)
 	}
 }
 
@@ -586,7 +586,7 @@ func (s *Settings) checkMDBList(ctx context.Context, key string) error {
 		return fmt.Errorf("%w: use the API key from your MDBList preferences page", ErrMDBListRejected)
 	default:
 		// The error is MDBList's or the network's: it never holds the key.
-		return fmt.Errorf("%w to check the key: %v", ErrMDBListUnreachable, err)
+		return fmt.Errorf("%w to check the key: %w", ErrMDBListUnreachable, err)
 	}
 }
 

@@ -519,9 +519,9 @@ func (g *Generator) exec(ctx context.Context, args []string) ([]byte, error) {
 		}
 		msg := firstLine(stderr.String())
 		if contentFailure(stderr.String()) {
-			return nil, fmt.Errorf("%w: %v: %s", ErrNoFrame, err, msg)
+			return nil, fmt.Errorf("%w: %w: %s", ErrNoFrame, err, msg)
 		}
-		return nil, fmt.Errorf("%w: %v: %s", ErrUnavailable, err, msg)
+		return nil, fmt.Errorf("%w: %w: %s", ErrUnavailable, err, msg)
 	}
 	return stdout.Bytes(), nil
 }

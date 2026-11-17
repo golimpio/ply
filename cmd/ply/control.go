@@ -202,7 +202,7 @@ func stopRunning(ctx context.Context, cfg config.Config, out io.Writer) error {
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusAccepted {
 			var e struct{ Error string }
-			json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&e)
+			_ = json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&e)
 			return fmt.Errorf("ply (pid %d) at %s refused the stop: %s %s", c.PID, c.URL, resp.Status, e.Error)
 		}
 		fmt.Fprintf(out, "Stopping ply (pid %d, %s)...\n", c.PID, c.URL)

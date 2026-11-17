@@ -47,7 +47,7 @@ type TitleCard struct {
 	*EpisodeCounts
 }
 
-// Genre, CollectionRef, CastMember and CrewMember are parts of a TitleDetail.
+// Genre is part of a TitleDetail, with the collection, cast and crew.
 type Genre struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`

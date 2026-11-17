@@ -1,12 +1,13 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"time"
 )
@@ -53,13 +54,15 @@ func (s *Store) backupBeforeMigration(ctx context.Context, db string, from int, 
 	if err != nil {
 		return "", nil, err
 	}
-	f.Close()
 	done := false
 	defer func() {
 		if !done {
 			_ = os.Remove(tmp)
 		}
 	}()
+	if err := f.Close(); err != nil {
+		return "", nil, err
+	}
 	// SQLite writes into a file that is there and empty.
 	if _, err := s.rw.ExecContext(ctx, `VACUUM INTO ?`, tmp); err != nil {
 		return "", nil, err
@@ -99,11 +102,11 @@ func pruneBackups(db string) {
 			backups = append(backups, backup{filepath.Join(dir, e.Name()), info.ModTime()})
 		}
 	}
-	sort.Slice(backups, func(i, j int) bool {
-		if !backups[i].mod.Equal(backups[j].mod) {
-			return backups[i].mod.After(backups[j].mod)
+	slices.SortFunc(backups, func(a, b backup) int {
+		if !a.mod.Equal(b.mod) {
+			return b.mod.Compare(a.mod)
 		}
-		return backups[i].path > backups[j].path
+		return cmp.Compare(b.path, a.path)
 	})
 	for _, b := range backups[min(keepBackups, len(backups)):] {
 		_ = os.Remove(b.path)

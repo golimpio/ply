@@ -11,10 +11,10 @@ package discovery
 // responder and with ours: every socket joined to the group receives what is multicast.
 
 import (
+	"cmp"
 	"errors"
 	"net"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -122,11 +122,11 @@ func (b *Browser) Receivers() []Receiver {
 			out = append(out, r)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Name != out[j].Name {
-			return out[i].Name < out[j].Name
+	slices.SortFunc(out, func(a, b Receiver) int {
+		if c := cmp.Compare(a.Name, b.Name); c != 0 {
+			return c
 		}
-		return out[i].ID < out[j].ID
+		return cmp.Compare(a.ID, b.ID)
 	})
 	return out
 }
@@ -152,7 +152,7 @@ func (b *Browser) serve() {
 			return // closed
 		}
 		var m dnsmessage.Message
-		if m.Unpack(buf[:n]) != nil || !m.Header.Response {
+		if m.Unpack(buf[:n]) != nil || !m.Response {
 			continue // a query, ours or another client's, says nothing of a receiver
 		}
 		b.observe(m)

@@ -189,7 +189,7 @@ func (b *kqueueBackend) close() error {
 	close(b.done)
 	b.mu.Unlock()
 
-	syscall.Write(b.pipeW, []byte{0}) // wake the loop; a full pipe already has
+	_, _ = syscall.Write(b.pipeW, []byte{0}) // wake the loop; a full pipe already has
 	<-b.loopDone
 
 	b.mu.Lock()
@@ -201,7 +201,7 @@ func (b *kqueueBackend) close() error {
 	clear(b.byPath)
 	b.mu.Unlock()
 
-	parallel(len(fds), closeConcurrency, nil, func(k int) { b.closeFd(fds[k]) })
+	parallel(len(fds), closeConcurrency, nil, func(k int) { _ = b.closeFd(fds[k]) })
 	b.closeFds()
 	return nil
 }
@@ -226,7 +226,7 @@ func (b *kqueueBackend) loop() {
 		for _, k := range buf[:n] {
 			if int(k.Ident) == b.pipeR {
 				var drain [16]byte
-				syscall.Read(b.pipeR, drain[:])
+				_, _ = syscall.Read(b.pipeR, drain[:])
 				continue
 			}
 			b.dispatch(k)

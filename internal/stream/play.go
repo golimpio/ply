@@ -1,12 +1,13 @@
 package stream
 
 import (
+	"cmp"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 )
@@ -481,11 +482,11 @@ func (m *Manager) playingLocked(keep func(PlayInfo) bool) []PlayInfo {
 	for _, d := range m.direct {
 		add(d.info())
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if !out[i].StartedAt.Equal(out[j].StartedAt) {
-			return out[i].StartedAt.Before(out[j].StartedAt)
+	slices.SortFunc(out, func(a, b PlayInfo) int {
+		if c := a.StartedAt.Compare(b.StartedAt); c != 0 {
+			return c
 		}
-		return out[i].ID < out[j].ID
+		return cmp.Compare(a.ID, b.ID)
 	})
 	return out
 }

@@ -53,10 +53,10 @@ func fingerprint(provider string, secrets ...string) string {
 		return ""
 	}
 	h := sha256.New()
-	io.WriteString(h, provider)
+	_, _ = io.WriteString(h, provider)
 	for _, secret := range secrets {
 		h.Write([]byte{0}) // keys and PINs have no NUL, so the parts cannot run together
-		io.WriteString(h, secret)
+		_, _ = io.WriteString(h, secret)
 	}
 	return hex.EncodeToString(h.Sum(nil)[:keyFingerprintBytes])
 }

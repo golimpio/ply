@@ -572,7 +572,7 @@ func (s *Scheduler) Set(ctx context.Context, task string, e Edit) (Entry, error)
 	rec.UpdatedAt = s.o.Now().Unix()
 	if err := s.o.Store.PutSchedule(ctx, rec); err != nil {
 		if errors.Is(err, store.ErrInvalidSchedule) {
-			return Entry{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+			return Entry{}, fmt.Errorf("%w: %w", ErrInvalid, err)
 		}
 		return Entry{}, err
 	}

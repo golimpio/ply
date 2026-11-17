@@ -492,7 +492,9 @@ func (r *Ratings) recordFetch(ctx context.Context, d imdbSet, got imdbFetch) err
 func (r *Ratings) discard(ctx context.Context, d imdbSet) {
 	os.Remove(r.path(d))
 	for _, what := range []string{"etag", "modified", "checked"} {
-		r.o.Store.DeleteSetting(ctx, d.key(what))
+		if err := r.o.Store.DeleteSetting(ctx, d.key(what)); err != nil {
+			r.o.Logger.Warn("ratings: forgetting a stale check of the IMDb dataset", "what", what, "err", err)
+		}
 	}
 }
 
@@ -682,13 +684,12 @@ func (r *Ratings) reserve(ctx context.Context, c *MDBListClient) (bool, error) {
 	if r.syncedDay != b.day {
 		lim, err := c.Limits(ctx)
 		r.o.Settings.NoteMDBList(err)
-		switch {
-		case err == nil:
+		if err == nil {
 			if lim.Limit > 0 {
 				b.limit, b.used = lim.Limit, lim.Used
 			}
 			r.syncedDay = b.day
-		default:
+		} else {
 			if _, daily := IsMDBListDaily(err); !daily {
 				return false, err
 			}

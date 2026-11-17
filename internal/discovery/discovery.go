@@ -7,7 +7,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -145,7 +145,7 @@ func urlsFromAddrs(addrs []net.Addr, port int) []string {
 		}
 		urls = append(urls, httpURL(ip4, port))
 	}
-	sort.Strings(urls)
+	slices.Sort(urls)
 	return urls
 }
 

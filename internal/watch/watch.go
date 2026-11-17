@@ -258,7 +258,7 @@ func (w *Watcher) reroot(ctx context.Context, specs []RootSpec, down string) {
 		}
 		for d, owner := range w.dirs {
 			if gone[owner] {
-				w.be.remove(d)
+				_ = w.be.remove(d) // the watch may already be gone with the directory
 				delete(w.dirs, d)
 				delete(w.snaps, d)
 			}
@@ -889,7 +889,7 @@ func (w *Watcher) listDirs(ctx context.Context, top string, all bool, maxDepth i
 func (w *Watcher) dropTree(p string) {
 	for d, owner := range w.dirs {
 		if within(p, d) {
-			w.be.remove(d) // the watch may have died with the directory
+			_ = w.be.remove(d) // the watch may have died with the directory
 			delete(w.dirs, d)
 			delete(w.snaps, d)
 			w.adjust(owner, -1)

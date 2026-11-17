@@ -671,9 +671,9 @@ func (g *Generator) attemptOnce(ctx context.Context, c *call, run []Source, pipe
 	}
 	if err != nil {
 		if _, serr := os.Stat(first.Input); serr != nil { // the share went to sleep, or is not mounted yet
-			return nil, fd != nil, fmt.Errorf("%w: %v", ErrUnavailable, serr)
+			return nil, fd != nil, fmt.Errorf("%w: %w", ErrUnavailable, serr)
 		}
-		return nil, fd != nil, fmt.Errorf("%w: %v: %s", ErrConvert, err, firstLine(stderr))
+		return nil, fd != nil, fmt.Errorf("%w: %w: %s", ErrConvert, err, firstLine(stderr))
 	}
 	var miss map[string]error
 	for i, s := range run {

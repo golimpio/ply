@@ -90,7 +90,7 @@ func archivedMatches(t *testing.T, st *store.Store) (movie int64, lost []int64) 
 		e2 := addItem(t, st, &store.Item{Kind: store.KindEpisode, Show: "Lost", Season: 1, Episode: 2, Path: "/lib/Lost/2.mkv"})
 		return m, []int64{e1, e2}
 	}
-	movie, lost = items()
+	movie, _ = items()
 	mt, _ := st.UpsertTitle(ctx, &store.TitleInput{Title: store.Title{Kind: store.KindMovie, TMDBID: 603, Title: "The Matrix"}})
 	lt, _ := st.UpsertTitle(ctx, &store.TitleInput{Title: store.Title{Kind: store.KindSeries, TMDBID: 4607, Title: "Lost"}})
 	if err := st.SetItemMatch(ctx, movie, store.Match{TitleID: mt, State: store.MatchManual, Score: 1}); err != nil {

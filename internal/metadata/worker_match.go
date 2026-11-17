@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"path/filepath"
@@ -262,8 +263,10 @@ func (w *Worker) matchSeries(ctx context.Context, p *Providers, d store.DueSerie
 	}
 
 	if !p.ShowsOn() {
-		m := store.Match{State: store.MatchPending, Attempts: d.Attempts, TitleID: existing,
-			NextAttemptAt: w.now().Add(idleRecheck).Unix()}
+		m := store.Match{
+			State: store.MatchPending, Attempts: d.Attempts, TitleID: existing,
+			NextAttemptAt: w.now().Add(idleRecheck).Unix(),
+		}
 		if in, ok := localSeries(); ok {
 			w.adoptLocal(ctx, existing, in)
 			ok, _ := w.linkSeries(ctx, d.Show, in, m, "")
@@ -329,11 +332,12 @@ func (w *Worker) matchSeries(ctx context.Context, p *Providers, d store.DueSerie
 
 // showTags returns the tags of the first episode of a show whose file has any.
 func (w *Worker) showTags(ctx context.Context, items []store.Item) tagsView {
-	for _, it := range items {
-		if t := w.probeOf(ctx, it).tags; t.Show != "" {
-			return t
-		}
-		break // one file is enough; the rest of the show says the same
+	if len(items) == 0 {
+		return tagsView{}
+	}
+	// One file is enough: the rest of the show says the same.
+	if t := w.probeOf(ctx, items[0]).tags; t.Show != "" {
+		return t
 	}
 	return tagsView{}
 }
@@ -366,8 +370,10 @@ func (w *Worker) localSeasons(items []store.Item, names func(dir string) []strin
 			bySeason[it.Season] = se
 			order = append(order, it.Season)
 		}
-		se.Episodes = append(se.Episodes, store.Episode{Season: it.Season, Number: it.Episode, Name: n.Title,
-			Overview: firstNonEmpty(n.Plot, n.Outline), AirDate: n.Premiered, RuntimeMin: n.RuntimeMin, Rating: n.Rating})
+		se.Episodes = append(se.Episodes, store.Episode{
+			Season: it.Season, Number: it.Episode, Name: n.Title,
+			Overview: cmp.Or(n.Plot, n.Outline), AirDate: n.Premiered, RuntimeMin: n.RuntimeMin, Rating: n.Rating,
+		})
 	}
 	out := make([]store.Season, 0, len(order))
 	for _, n := range order {

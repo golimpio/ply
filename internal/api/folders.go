@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,7 +13,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -397,12 +397,11 @@ func subdirs(dir string) ([]fsEntry, error) {
 			out = append(out, fsEntry{Name: e.Name(), Path: p})
 		}
 	}
-	sort.Slice(out, func(i, j int) bool {
-		a, b := strings.ToLower(out[i].Name), strings.ToLower(out[j].Name)
-		if a != b {
-			return a < b
+	slices.SortFunc(out, func(a, b fsEntry) int {
+		if c := cmp.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)); c != 0 {
+			return c
 		}
-		return out[i].Name < out[j].Name
+		return cmp.Compare(a.Name, b.Name)
 	})
 	return out, nil
 }

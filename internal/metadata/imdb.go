@@ -94,7 +94,7 @@ func scanIMDb(ctx context.Context, r io.Reader, header string, yield func(contex
 	var stats IMDbParseStats
 	gz, err := gzip.NewReader(r)
 	if err != nil {
-		return stats, fmt.Errorf("%w: %v", ErrIMDbFormat, err)
+		return stats, fmt.Errorf("%w: %w", ErrIMDbFormat, err)
 	}
 	defer gz.Close()
 	br := bufio.NewReaderSize(&expandCap{r: gz, left: maxIMDbExpanded + 1}, 256<<10)

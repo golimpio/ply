@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"net/url"
@@ -243,8 +244,10 @@ func (p *Providers) Lookup(ctx context.Context, text string) (c Scored, ok bool,
 	} else {
 		var in *store.TitleInput
 		if in, err = p.TVDB.Series(ctx, id, store.OrderAired, nil); err == nil {
-			cand = Candidate{ID: id, Source: SourceTVDB, Title: in.Title.Title, OriginalTitle: in.OriginalTitle,
-				Year: in.Year, Overview: in.Overview, Poster: in.Poster}
+			cand = Candidate{
+				ID: id, Source: SourceTVDB, Title: in.Title.Title, OriginalTitle: in.OriginalTitle,
+				Year: in.Year, Overview: in.Overview, Poster: in.Poster,
+			}
 		}
 	}
 	if IsNotFound(err) {
@@ -269,9 +272,11 @@ func (p *TVDBProvider) Brief(ctx context.Context, id int64) (Candidate, error) {
 		return Candidate{}, err
 	}
 	lang := p.c.Language()
-	return Candidate{ID: s.ID, Source: SourceTVDB, Title: firstNonEmpty(s.Translations.Name(lang), s.Name), OriginalTitle: s.Name,
-		Year: firstInt(yearOf(s.FirstAired), atoi(s.Year)), Overview: firstNonEmpty(s.Translations.Overview(lang), s.Overview),
-		Poster: TVDBImageRef(s.Image)}, nil
+	return Candidate{
+		ID: s.ID, Source: SourceTVDB, Title: cmp.Or(s.Translations.Name(lang), s.Name), OriginalTitle: s.Name,
+		Year: firstInt(yearOf(s.FirstAired), atoi(s.Year)), Overview: cmp.Or(s.Translations.Overview(lang), s.Overview),
+		Poster: TVDBImageRef(s.Image),
+	}, nil
 }
 
 var (

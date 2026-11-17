@@ -1,0 +1,114 @@
+version: "2"
+
+# `make lint` runs this. The defaults golangci-lint ships (errcheck, govet,
+# ineffassign, staticcheck, unused) plus the checks below: the point is to keep
+# the gate honest rather than broad, so every linter here is one whose findings
+# are fixed, not waived.
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - copyloopvar
+    - errcheck
+    - errorlint
+    - govet
+    - ineffassign
+    - misspell
+    - staticcheck
+    - unconvert
+    - unused
+    - usestdlibvars
+
+  settings:
+    errcheck:
+      # The std-error-handling preset below already exempts Close. These name the
+      # two other shapes with nothing to report: a cursor read reports through
+      # rows.Err, and a rollback after a failed write is best-effort. A file's Close
+      # error is handled where it can fail (store/backup.go), by hand.
+      exclude-functions:
+        - (*database/sql.Rows).Close
+        - (*database/sql.Tx).Rollback
+    staticcheck:
+      checks:
+        - all
+        # De Morgan's law is a readability guess, not a defect, and it makes the
+        # containment checks it fires on harder to read.
+        - -QF1001
+    misspell:
+      # The prose is British English, the identifiers and technical terms are the
+      # usual American ones ("color", "serialize"): accept both, flag neither.
+      locale: US
+      ignore-rules:
+        - authorised
+        - behaviour
+        - cancelled
+        - cancelling
+        - colourful
+        - colour
+        - colours
+        - honoured
+        - honour
+        - honours
+        - labelled
+        - neighbours
+        - recognises
+        - serialised
+        - serialises
+        - signalled
+        - summarised
+        - summarises
+        - theatre
+        - unauthorised
+
+  exclusions:
+    # npm packages under web/ carry a little Go of their own; not ply's code.
+    paths:
+      - web/node_modules
+    # The errcheck/fmt/Close conventions the project already follows: a write to
+    # an http.ResponseWriter or fmt.Fprintf to stdout has no recoverable failure.
+    presets: [std-error-handling, common-false-positives, legacy]
+    rules:
+      # Tests report their failures with t.Errorf; a close() error in a test that
+      # just fails the test is noise, and style there is not worth a code change.
+      - path: _test\.go
+        linters: [errcheck]
+      - path: _test\.go
+        linters: [staticcheck]
+        text: "^(QF|S1|ST)\\d{4}"
+      # A test compares sentinels it built itself; errors.Is in a fixture reads worse
+      # and hides the point of the assertion.
+      - path: _test\.go
+        linters: [errorlint]
+      # Test helpers hand out a response for the test to read; which one closes the
+      # body is the helper's business, and the status constants are noise in a fixture.
+      - path: _test\.go
+        linters: [bodyclose, usestdlibvars]
+
+      # The mDNS responder is Go's registrar only where no system one is borrowed
+      # (advertise_other.go is !darwin), so on macOS every responder symbol is unused
+      # by design. This turns the dead-code check off for these two files on every
+      # platform; make cross vets every target, but go vet has no unused analyzer.
+      - path: internal/discovery/(discovery|mdns)\.go
+        linters: [unused]
+
+      # startHelper is called from default_darwin.go only: unused on Linux by design.
+      - path: internal/watch/helper\.go
+        linters: [unused]
+
+      # Stat_t.Dev is int32 on darwin (the conversion is needed) and uint64 on
+      # Linux (it is not): one file, two platforms.
+      - path: internal/library/dev_unix\.go
+        linters: [unconvert]
+
+      # Error strings are sentences shown verbatim in the Activity page, so they
+      # are capitalised on purpose (internal/trailers/trailers_test.go asserts it).
+      - path: internal/trailers/trailers\.go
+        linters: [staticcheck]
+        text: ST1005
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

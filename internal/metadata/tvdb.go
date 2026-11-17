@@ -77,8 +77,8 @@ func tvdbMask(s string) string {
 	return `"***"`
 }
 
-// String, GoString and LogValue leave the key and the PIN out of anything that
-// prints or logs the options.
+// String leaves the key and the PIN out of anything that prints or logs the
+// options; GoString and LogValue do the same.
 func (o TVDBOptions) String() string {
 	return fmt.Sprintf("TVDBOptions{Key: %s, PIN: %s, BaseURL: %q, Language: %q}", tvdbMask(o.Key), tvdbMask(o.PIN), o.BaseURL, o.Language)
 }
@@ -123,8 +123,8 @@ type TVDBClient struct {
 	sleep func(ctx context.Context, d time.Duration) error
 }
 
-// String, GoString and LogValue leave the key, the PIN and the token out of
-// anything that prints or logs the client.
+// String leaves the key, the PIN and the token out of anything that prints or
+// logs the client; GoString and LogValue do the same.
 func (c *TVDBClient) String() string {
 	return fmt.Sprintf("TVDBClient{BaseURL: %q, Language: %q}", c.base, c.lang)
 }

@@ -219,7 +219,7 @@ type TitleInput struct {
 	Collection  *Collection // nil = the title belongs to none
 	Collections []Collection
 	Credits     []Credit
-	Seasons    []Season // the seasons fetched; others are left alone
+	Seasons     []Season // the seasons fetched; others are left alone
 	// ResetSeasons makes Seasons the only seasons the title has: the others, and their
 	// episodes, are removed (a change of episode order renumbers them all).
 	ResetSeasons bool

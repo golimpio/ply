@@ -89,7 +89,8 @@ func (d *feed) Read(p []byte) (int, error) { return d.r.Read(p) }
 func (d *feed) WriteTo(w io.Writer) (int64, error) {
 	<-d.gate
 	n, err := copyChunks(w, d.r, d.size)
-	if s, ok := err.(*shortFileError); ok {
+	var s *shortFileError
+	if errors.As(err, &s) {
 		d.cut.Store(s)
 	}
 	return n, err

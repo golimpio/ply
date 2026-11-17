@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"cmp"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -49,34 +50,22 @@ func cleanCertification(s string) string {
 	return strings.TrimSpace(reMPAAPrefix.ReplaceAllString(s, ""))
 }
 
-// firstNonEmpty returns the first argument that is not empty.
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
 // localTitle builds a title from what the files themselves say: the NFO, and
 // failing that the tags embedded in the media file. ok is false when there is no
 // title text to build one from. The title has no TMDB id (source "nfo").
 func localTitle(kind string, n NFO, tags probe.Tags) (in *store.TitleInput, ok bool) {
-	title := n.Title
+	title := cmp.Or(n.Title, tags.Title)
 	if kind == store.KindSeries {
-		title = firstNonEmpty(n.Title, tags.Show)
-	} else {
-		title = firstNonEmpty(n.Title, tags.Title)
+		title = cmp.Or(n.Title, tags.Show)
 	}
 	if title == "" {
 		return nil, false
 	}
 	in = &store.TitleInput{Title: store.Title{
 		Kind: kind, Title: title, OriginalTitle: n.OriginalTitle,
-		SortTitle:   firstNonEmpty(n.SortTitle, SortTitle(title)),
+		SortTitle:   cmp.Or(n.SortTitle, SortTitle(title)),
 		Year:        firstInt(n.Year, tags.Year),
-		Overview:    firstNonEmpty(n.Plot, n.Outline, tags.Description),
+		Overview:    cmp.Or(n.Plot, n.Outline, tags.Description),
 		Tagline:     n.Tagline,
 		ReleaseDate: n.Premiered,
 		RuntimeMin:  n.RuntimeMin, Rating: n.Rating, VoteCount: n.Votes,
@@ -109,8 +98,10 @@ func nfoCredits(n NFO) []store.Credit {
 	var credits []store.Credit
 	actors := append([]NFOActor(nil), n.Actors...)
 	for i, a := range actors {
-		credits = append(credits, store.Credit{Person: store.Person{Name: a.Name, Profile: ""}, Kind: store.CreditCast,
-			Character: a.Role, Order: firstInt(a.Order, i)})
+		credits = append(credits, store.Credit{
+			Person: store.Person{Name: a.Name, Profile: ""}, Kind: store.CreditCast,
+			Character: a.Role, Order: firstInt(a.Order, i),
+		})
 	}
 	order := 0
 	for _, d := range n.Directors {
@@ -140,13 +131,13 @@ func overlayNFO(in *store.TitleInput, n NFO) bool {
 	}
 	if n.Title != "" && in.Title.Title != n.Title {
 		in.Title.Title = n.Title
-		in.SortTitle = firstNonEmpty(n.SortTitle, SortTitle(n.Title))
+		in.SortTitle = cmp.Or(n.SortTitle, SortTitle(n.Title))
 		changed = true
 	} else if n.SortTitle != "" {
 		set(&in.SortTitle, n.SortTitle)
 	}
 	set(&in.OriginalTitle, n.OriginalTitle)
-	set(&in.Overview, firstNonEmpty(n.Plot, n.Outline))
+	set(&in.Overview, cmp.Or(n.Plot, n.Outline))
 	set(&in.Tagline, n.Tagline)
 	set(&in.ReleaseDate, n.Premiered)
 	set(&in.Certification, cleanCertification(n.MPAA))

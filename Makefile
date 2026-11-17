@@ -174,7 +174,7 @@ lint: ## golangci-lint, when it is installed
 	golangci-lint run ./...
 
 .PHONY: verify
-verify: check test test-race test-integration e2e build ## Everything a change should pass before commit
+verify: check lint test test-race test-integration e2e build ## Everything a change should pass before commit
 
 # ---- iOS & tvOS -----------------------------------------------------------------
 

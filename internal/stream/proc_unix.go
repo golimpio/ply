@@ -83,7 +83,7 @@ func usage(ps *os.ProcessState) (cpu time.Duration, maxRSS int64) {
 	if !ok {
 		return 0, 0
 	}
-	maxRSS = int64(ru.Maxrss)
+	maxRSS = ru.Maxrss
 	if runtime.GOOS != "darwin" {
 		maxRSS *= 1024 // kilobytes on Linux
 	}

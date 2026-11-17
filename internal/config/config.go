@@ -153,7 +153,7 @@ func envDuration(name string, def time.Duration) (time.Duration, error) {
 	}
 	d, err := time.ParseDuration(v)
 	if err != nil {
-		return 0, fmt.Errorf("%s=%q: %v", name, v, err)
+		return 0, fmt.Errorf("%s=%q: %w", name, v, err)
 	}
 	return d, nil
 }
@@ -177,8 +177,8 @@ func envString(name, def string) string {
 // it says plainly when it has gone.
 const DefaultStreamIdle = 60 * time.Second
 
-// StreamIdleEnv, when set to a Go duration, replaces the default of
-// -stream-idle. It exists so tests and scripts can shorten the timeout
+// StreamIdleEnv is the variable that replaces the default of -stream-idle when
+// it holds a Go duration. It exists so tests and scripts can shorten the timeout
 // without touching the command line; the flag still wins.
 const StreamIdleEnv = "PLY_STREAM_IDLE"
 

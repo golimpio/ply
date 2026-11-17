@@ -16,13 +16,16 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          # go.mod's `go` line, the language version the module needs. setup-go
+          # ignores the `toolchain` line; 1.27 resolves to the newest 1.27 patch,
+          # which is that toolchain.
+          go-version-file: go.mod
           cache: true
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: 'npm'
           cache-dependency-path: web/package-lock.json
 
@@ -30,6 +33,11 @@ jobs:
         run: |
           make fmt-check
           make vet
+
+      - name: Lint Go
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
+          "$(go env GOPATH)/bin/golangci-lint" run ./...
 
       - name: Test Go
         run: make test-go

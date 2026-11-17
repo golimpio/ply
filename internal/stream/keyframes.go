@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -75,7 +75,7 @@ func parseKeyframes(r io.Reader) (kf []float64, start float64, err error) {
 			kf = append(kf, v)
 		}
 	}
-	sort.Float64s(kf)
+	slices.Sort(kf)
 	return kf, start, sc.Err()
 }
 

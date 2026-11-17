@@ -319,8 +319,7 @@ func TestSubtitleSearchUnconfigured(t *testing.T) {
 	if resp.Code != 200 {
 		t.Fatalf("search status = %d, want 200", resp.Code)
 	}
-	var res SubtitleSearchResponse
-	res = decode[SubtitleSearchResponse](t, resp)
+	res := decode[SubtitleSearchResponse](t, resp)
 	if res.Configured {
 		t.Fatalf("expected configured = false, got true")
 	}

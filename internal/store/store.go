@@ -7,11 +7,12 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -343,7 +344,7 @@ func migrationFiles() ([]migrationFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	slices.SortFunc(entries, func(a, b fs.DirEntry) int { return strings.Compare(a.Name(), b.Name()) })
 	files := make([]migrationFile, 0, len(entries))
 	for _, e := range entries {
 		num, _, _ := strings.Cut(e.Name(), "_")

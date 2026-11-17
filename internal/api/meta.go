@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -128,8 +129,10 @@ func (s *Server) handlePerson(w http.ResponseWriter, r *http.Request) {
 	}
 	primary := s.ratingsPrimary(r.Context())
 	for _, c := range d.Credits {
-		out.Credits = append(out.Credits, PersonCredit{TitleID: c.Title.ID, Kind: c.Kind, Job: c.Job, Character: c.Character,
-			Title: s.titleCard(c.Title, primary)})
+		out.Credits = append(out.Credits, PersonCredit{
+			TitleID: c.Title.ID, Kind: c.Kind, Job: c.Job, Character: c.Character,
+			Title: s.titleCard(c.Title, primary),
+		})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -339,8 +342,10 @@ func (s *Server) handleCollection(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, CollectionDetail{ID: c.ID, Name: c.Name, Overview: c.Overview,
-		Poster: s.imageURL(c.Poster, posterSize), Backdrop: s.imageURL(c.Backdrop, backdropSize), Titles: s.titleCards(c.Titles, s.ratingsPrimary(r.Context()))})
+	writeJSON(w, http.StatusOK, CollectionDetail{
+		ID: c.ID, Name: c.Name, Overview: c.Overview,
+		Poster: s.imageURL(c.Poster, posterSize), Backdrop: s.imageURL(c.Backdrop, backdropSize), Titles: s.titleCards(c.Titles, s.ratingsPrimary(r.Context())),
+	})
 }
 
 // ---- shows ----
@@ -473,27 +478,20 @@ func (s *Server) showDetail(ctx context.Context, sh store.Show) (ShowDetail, err
 		}
 	}
 	m, year, overview := s.showMeta(sh.Name, row, hasRow, brief, hasBrief, primary)
-	out := ShowDetail{Show: sh.Name, EpisodeCounts: episodeCounts(sh.EpisodeCounts), LatestAddedAt: sh.LatestAddedAt, Year: year, Overview: overview, MetaFields: m, Meta: detail,
-		Seasons: []SeasonInfo{}}
+	out := ShowDetail{
+		Show: sh.Name, EpisodeCounts: episodeCounts(sh.EpisodeCounts), LatestAddedAt: sh.LatestAddedAt, Year: year, Overview: overview, MetaFields: m, Meta: detail,
+		Seasons: []SeasonInfo{},
+	}
 
 	for _, n := range sh.Seasons {
 		si := SeasonInfo{Season: n, Name: seasonName(n), EpisodeCounts: episodeCounts(sh.BySeason[n])}
 		if se, ok := stored[n]; ok {
-			si.Name = firstNonEmpty(se.Name, si.Name)
+			si.Name = cmp.Or(se.Name, si.Name)
 			si.Overview, si.AirDate, si.Poster = se.Overview, se.AirDate, s.imageURL(se.Poster, posterSize)
 		}
 		out.Seasons = append(out.Seasons, si)
 	}
 	return out, nil
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func (s *Server) handleShow(w http.ResponseWriter, r *http.Request) {
@@ -770,8 +768,10 @@ func (s *Server) handlePatchTitle(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.text() {
-		err := s.Store.PatchTitle(r.Context(), id, store.TitlePatch{Title: req.Title, SortTitle: req.SortTitle, Year: req.Year,
-			Overview: req.Overview, Tagline: req.Tagline})
+		err := s.Store.PatchTitle(r.Context(), id, store.TitlePatch{
+			Title: req.Title, SortTitle: req.SortTitle, Year: req.Year,
+			Overview: req.Overview, Tagline: req.Tagline,
+		})
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "title not found")
 			return
@@ -845,8 +845,10 @@ func (s *Server) handleReview(w http.ResponseWriter, r *http.Request) {
 	primary := s.ratingsPrimary(r.Context())
 	out := make([]ReviewEntry, len(list))
 	for i, e := range list {
-		out[i] = ReviewEntry{Kind: e.Kind, Show: e.Show, Title: e.Title, Year: e.Year, MatchState: e.MatchState,
-			NeedsReview: e.NeedsReview, Score: e.Score}
+		out[i] = ReviewEntry{
+			Kind: e.Kind, Show: e.Show, Title: e.Title, Year: e.Year, MatchState: e.MatchState,
+			NeedsReview: e.NeedsReview, Score: e.Score,
+		}
 		if e.ItemID != 0 {
 			out[i].ItemID = new(e.ItemID)
 		}
@@ -895,8 +897,10 @@ func (s *Server) handleMetadataSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]Candidate, len(res))
 	for i, c := range res {
-		out[i] = Candidate{Source: c.Source, ID: c.ID, Title: c.Title, OriginalTitle: c.OriginalTitle, Year: c.Year, Overview: c.Overview,
-			Poster: s.imageURL(c.Poster, "w185"), Score: c.Score}
+		out[i] = Candidate{
+			Source: c.Source, ID: c.ID, Title: c.Title, OriginalTitle: c.OriginalTitle, Year: c.Year, Overview: c.Overview,
+			Poster: s.imageURL(c.Poster, "w185"), Score: c.Score,
+		}
 		if c.Source == metadata.SourceTVDB {
 			out[i].TVDBID = c.ID
 		} else {
@@ -912,10 +916,12 @@ func (s *Server) settingsView(ctx context.Context) SettingsView {
 	v := SettingsView{Language: metadata.DefaultLanguage}
 	if s.Settings != nil {
 		r := s.Settings.Resolve(ctx)
-		v = SettingsView{TMDBKeySet: r.KeySet(), TMDBKeySource: string(r.KeySource), MetadataEnabled: r.Enabled,
+		v = SettingsView{
+			TMDBKeySet: r.KeySet(), TMDBKeySource: string(r.KeySource), MetadataEnabled: r.Enabled,
 			MetadataForcedOff: r.ForcedOff, Language: r.Language,
 			TVDBKeySet: r.TVDBKeySet(), TVDBPINSet: r.TVDBPINSet(), TVDBKeySource: string(r.TVDBKeySource), TVDBPINSource: string(r.TVDBPINSource),
-			MDBListKeySet: r.MDBListKeySet(), MDBListKeySource: string(r.MDBListKeySource)}
+			MDBListKeySet: r.MDBListKeySet(), MDBListKeySource: string(r.MDBListKeySource),
+		}
 		tmdb, tvdb, mdb := s.Settings.KeyTest(ctx, r, metadata.SourceTMDB), s.Settings.KeyTest(ctx, r, metadata.SourceTVDB),
 			s.Settings.KeyTest(ctx, r, metadata.SourceMDBList)
 		v.TMDBKeyTestedAt, v.TMDBKeyTestOK = tmdb.At, tmdb.OK
@@ -989,9 +995,11 @@ func (s *Server) handlePatchSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if metadataChange {
-		err := s.Settings.Update(r.Context(), metadata.Update{Key: req.TMDBKey, Enabled: req.MetadataEnabled, Language: req.Language,
+		err := s.Settings.Update(r.Context(), metadata.Update{
+			Key: req.TMDBKey, Enabled: req.MetadataEnabled, Language: req.Language,
 			TVDBKey: req.TVDBKey, TVDBPIN: req.TVDBPIN, MDBListKey: req.MDBListKey, RatingsPrimary: req.RatingsPrimary,
-			RatingsShown: req.RatingsShown})
+			RatingsShown: req.RatingsShown,
+		})
 		switch {
 		case err == nil:
 		case errors.Is(err, metadata.ErrInvalidSetting), errors.Is(err, metadata.ErrKeyRejected), errors.Is(err, metadata.ErrTVDBRejected),

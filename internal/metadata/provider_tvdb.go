@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"net/http"
@@ -110,11 +111,13 @@ func (p *TVDBProvider) SearchSeries(ctx context.Context, query string, year int)
 		if y == 0 {
 			y = yearOf(r.FirstAirTime)
 		}
-		out = append(out, Candidate{ID: id, Source: SourceTVDB,
-			Title: firstNonEmpty(r.Translations[code], r.Name), OriginalTitle: r.Name, Year: y,
-			Overview: firstNonEmpty(r.Overviews[code], r.Overview), Poster: TVDBImageRef(firstNonEmpty(r.ImageURL, r.Thumbnail)),
+		out = append(out, Candidate{
+			ID: id, Source: SourceTVDB,
+			Title: cmp.Or(r.Translations[code], r.Name), OriginalTitle: r.Name, Year: y,
+			Overview: cmp.Or(r.Overviews[code], r.Overview), Poster: TVDBImageRef(cmp.Or(r.ImageURL, r.Thumbnail)),
 			// TVDB gives no popularity: its relevance order stands in for it.
-			Popularity: float64(len(res) - i)})
+			Popularity: float64(len(res) - i),
+		})
 	}
 	return out, nil
 }
@@ -133,8 +136,10 @@ func (p *TVDBProvider) Find(ctx context.Context, source, id string) (movies, ser
 		}
 		for _, m := range matches {
 			if s := m.Series; s != nil && s.ID != 0 {
-				series = append(series, Candidate{ID: s.ID, Source: SourceTVDB, Title: s.Name, OriginalTitle: s.Name,
-					Year: firstInt(yearOf(s.FirstAired), atoi(s.Year)), Overview: s.Overview, Poster: TVDBImageRef(s.Image)})
+				series = append(series, Candidate{
+					ID: s.ID, Source: SourceTVDB, Title: s.Name, OriginalTitle: s.Name,
+					Year: firstInt(yearOf(s.FirstAired), atoi(s.Year)), Overview: s.Overview, Poster: TVDBImageRef(s.Image),
+				})
 			}
 		}
 	}
@@ -202,14 +207,17 @@ func (p *TVDBProvider) Person(ctx context.Context, id int64) (*store.Person, err
 			}
 		}
 	}
-		wiki := d.RemoteIDs.Get("Wikidata")
-		if wiki == "" {
-			wiki = d.RemoteIDs.Get("Wikipedia")
-		}
-		return &store.Person{TVDBID: d.ID, TMDBID: d.RemoteIDs.TMDBID(), Name: d.Name, Profile: TVDBImageRef(d.Image),
-			Biography: bio, Birthday: d.Birth, Deathday: d.Death, PlaceOfBirth: d.BirthPlace, IMDbID: d.RemoteIDs.IMDbID(),
-			WikidataID: wiki}, nil
+	wiki := d.RemoteIDs.Get("Wikidata")
+	if wiki == "" {
+		wiki = d.RemoteIDs.Get("Wikipedia")
+	}
+	return &store.Person{
+		TVDBID: d.ID, TMDBID: d.RemoteIDs.TMDBID(), Name: d.Name, Profile: TVDBImageRef(d.Image),
+		Biography: bio, Birthday: d.Birth, Deathday: d.Death, PlaceOfBirth: d.BirthPlace, IMDbID: d.RemoteIDs.IMDbID(),
+		WikidataID: wiki,
+	}, nil
 }
+
 // Changes is TVDB's updates feed for shows, from start on; end is not used (the
 // feed has no end), and movies have none.
 func (p *TVDBProvider) Changes(ctx context.Context, kind string, start, _ time.Time) ([]int64, error) {
@@ -271,12 +279,12 @@ func bestTVDBArtwork(arts []TVDBArtwork, kind int64, code string) string {
 			continue
 		}
 		rank := 0
-		switch {
-		case a.Language == code:
+		switch a.Language {
+		case code:
 			rank = 3
-		case a.Language == "":
+		case "":
 			rank = 2
-		case a.Language == "eng":
+		case "eng":
 			rank = 1
 		}
 		if rank > bestRank || (rank == bestRank && a.Score > bestScore) {
@@ -296,12 +304,12 @@ func tvdbInput(s *TVDBSeries, eps []TVDBEpisode, order, seasonKind, lang string)
 	}
 	in := &store.TitleInput{Title: store.Title{
 		Kind: store.KindSeries, TVDBID: s.ID, TMDBID: s.RemoteIDs.TMDBID(), IMDbID: s.RemoteIDs.IMDbID(),
-		Title:         firstNonEmpty(s.Translations.Name(lang), s.Name),
+		Title:         cmp.Or(s.Translations.Name(lang), s.Name),
 		OriginalTitle: s.Name, Year: firstInt(yearOf(s.FirstAired), atoi(s.Year)),
-		Overview:    firstNonEmpty(s.Translations.Overview(lang), s.Overview),
+		Overview:    cmp.Or(s.Translations.Overview(lang), s.Overview),
 		ReleaseDate: s.FirstAired, EndDate: s.LastAired, Status: s.Status.Name, RuntimeMin: s.AverageRuntime,
 		Certification: tvdbCertification(s.ContentRatings, lang),
-		Poster:        firstNonEmpty(bestTVDBArtwork(s.Artworks, tvdbArtPoster, code), TVDBImageRef(s.Image)),
+		Poster:        cmp.Or(bestTVDBArtwork(s.Artworks, tvdbArtPoster, code), TVDBImageRef(s.Image)),
 		Backdrop:      bestTVDBArtwork(s.Artworks, tvdbArtBackground, code),
 		Logo:          bestTVDBArtwork(s.Artworks, tvdbArtClearLogo, code),
 		Source:        store.SourceTVDB, EpisodeOrder: order,
@@ -334,8 +342,10 @@ func tvdbInput(s *TVDBSeries, eps []TVDBEpisode, order, seasonKind, lang string)
 			se = &store.Season{Number: season}
 			bySeason[season] = se
 		}
-		se.Episodes = append(se.Episodes, store.Episode{Season: season, Number: number, Name: e.Name, Overview: e.Overview,
-			AirDate: e.Aired, RuntimeMin: e.Runtime, Still: TVDBImageRef(e.Image)})
+		se.Episodes = append(se.Episodes, store.Episode{
+			Season: season, Number: number, Name: e.Name, Overview: e.Overview,
+			AirDate: e.Aired, RuntimeMin: e.Runtime, Still: TVDBImageRef(e.Image),
+		})
 		if e.Aired != "" && (se.AirDate == "" || e.Aired < se.AirDate) {
 			se.AirDate = e.Aired
 		}
@@ -394,13 +404,17 @@ func tvdbCredits(chars []TVDBCharacter) []store.Credit {
 	slices.SortStableFunc(cast, func(a, b TVDBCharacter) int { return a.Sort - b.Sort })
 	var out []store.Credit
 	for i, c := range cast[:min(len(cast), maxCast)] {
-		out = append(out, store.Credit{Person: store.Person{TVDBID: c.PeopleID, Name: c.PersonName, Profile: TVDBImageRef(c.PersonImgURL)},
-			Kind: store.CreditCast, Character: c.Name, Order: i})
+		out = append(out, store.Credit{
+			Person: store.Person{TVDBID: c.PeopleID, Name: c.PersonName, Profile: TVDBImageRef(c.PersonImgURL)},
+			Kind:   store.CreditCast, Character: c.Name, Order: i,
+		})
 	}
 	return append(out, orderCrew(crew)...)
 }
 
 func tvdbCrew(c TVDBCharacter, job string) store.Credit {
-	return store.Credit{Person: store.Person{TVDBID: c.PeopleID, Name: c.PersonName, Profile: TVDBImageRef(c.PersonImgURL)},
-		Kind: store.CreditCrew, Job: job}
+	return store.Credit{
+		Person: store.Person{TVDBID: c.PeopleID, Name: c.PersonName, Profile: TVDBImageRef(c.PersonImgURL)},
+		Kind:   store.CreditCrew, Job: job,
+	}
 }
