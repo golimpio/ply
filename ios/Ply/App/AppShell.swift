@@ -110,6 +110,30 @@ enum AppTab: Hashable {
     case series
     case settings
     case search
+
+    var title: String {
+        switch self {
+        case .home: "Home"
+        case .films: "Films"
+        case .series: "Series"
+        case .settings: "Settings"
+        case .search: "Search"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .home: "house"
+        case .films: "video"
+        case .series: "tv"
+        case .settings: "switch.2"
+        case .search: "magnifyingglass"
+        }
+    }
+
+    var role: TabRole? {
+        self == .search ? .search : nil
+    }
 }
 
 struct MainTabs: View {
@@ -122,21 +146,11 @@ struct MainTabs: View {
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            tabItem("Home", kind: .home, value: .home) {
-                HomeView()
-            }
-            tabItem("Films", kind: .films, value: .films) {
-                MoviesView()
-            }
-            tabItem("Series", kind: .series, value: .series) {
-                ShowsView()
-            }
-            tabItem("Settings", kind: .settings, value: .settings) {
-                SettingsView()
-            }
-            tabItem("Search", kind: .search, value: .search, role: .search) {
-                BrowseView()
-            }
+            tabItem(.home) { HomeView() }
+            tabItem(.films) { MoviesView() }
+            tabItem(.series) { ShowsView() }
+            tabItem(.settings) { SettingsView() }
+            tabItem(.search) { BrowseView() }
         }
         .tabViewStyle(.sidebarAdaptable)
         .tabBarMinimizeBehavior(.onScrollDown)
@@ -147,21 +161,19 @@ struct MainTabs: View {
     }
 
     private func tabItem<Content: View>(
-        _ title: String,
-        kind: PlyTabIcon.Kind,
-        value: AppTab,
-        role: TabRole? = nil,
+        _ tab: AppTab,
         @ViewBuilder content: () -> Content
     ) -> some TabContent<AppTab> {
-        Tab(value: value, role: role) {
+        Tab(value: tab, role: tab.role) {
             content()
         } label: {
-            let icon = PlyTabIcon.templateImage(for: kind, filled: selectedTab == value)
             if showTabLabels {
-                Label { Text(title) } icon: { Image(uiImage: icon) }
+                Label(tab.title, systemImage: tab.systemImage)
+                    .symbolVariant(.none)
             } else {
-                Image(uiImage: icon)
-                    .accessibilityLabel(title)
+                Image(systemName: tab.systemImage)
+                    .symbolVariant(.none)
+                    .accessibilityLabel(tab.title)
             }
         }
     }

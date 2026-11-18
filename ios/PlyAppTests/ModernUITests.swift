@@ -174,7 +174,12 @@ nonisolated final class ModernUITests: XCTestCase {
         XCTAssertEqual(tabCount, 5, "Expected Home, Films, Series, Settings, and Search tabs")
         if !tabVC.tabs.isEmpty {
             XCTAssertTrue(tabVC.tabs.contains { $0 is UISearchTab }, "Expected native UISearchTab for Tab(role: .search)")
-            XCTAssertTrue(tabVC.tabs.allSatisfy { $0.image != nil }, "All tabs should carry rendered custom PlyTabIcon images")
+            XCTAssertTrue(tabVC.tabs.allSatisfy { $0.image?.isSymbolImage == true }, "All tabs should render native SF Symbols")
+            XCTAssertEqual(AppTab.home.systemImage, "house")
+            XCTAssertEqual(AppTab.films.systemImage, "video")
+            XCTAssertEqual(AppTab.series.systemImage, "tv")
+            XCTAssertEqual(AppTab.settings.systemImage, "switch.2")
+            XCTAssertEqual(AppTab.search.systemImage, "magnifyingglass")
             XCTAssertTrue(tabVC.tabs.allSatisfy { $0.title.isEmpty }, "Tab bar labels should be hidden when ply.showTabLabels is false")
 
             defaults.set(true, forKey: PlyPreferences.showTabLabelsKey)

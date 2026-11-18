@@ -179,19 +179,4 @@ nonisolated final class PlyLogoTests: XCTestCase {
         XCTAssertEqual(PlyDesign.headerLogoSize, 22 * 1.3, accuracy: 0.01)
         XCTAssertEqual(logoSize, PlyDesign.headerLogoSize, accuracy: 0.01)
     }
-
-    #if os(iOS)
-    @MainActor
-    func testPlyTabIconRendersTemplateImagesForAllTabs() {
-        for kind in PlyTabIcon.Kind.allCases {
-            for filled in [false, true] {
-                let image = PlyTabIcon.templateImage(for: kind, filled: filled)
-                XCTAssertEqual(image.renderingMode, .alwaysTemplate, "Tab icon \(kind) must be template for Liquid Glass tinting")
-                XCTAssertGreaterThan(image.size.width, 16)
-                XCTAssertGreaterThan(image.size.height, 16)
-                XCTAssertNotNil(image.pngData(), "Expected rasterized glyph for \(kind) filled=\(filled)")
-            }
-        }
-    }
-    #endif
 }

@@ -57,6 +57,9 @@
     "API" : {
 
     },
+    "Appearance" : {
+
+    },
     "Attributes" : {
 
     },
@@ -166,9 +169,6 @@
 
     },
     "Home" : {
-
-    },
-    "Language" : {
 
     },
     "Loading details…" : {
@@ -319,6 +319,9 @@
 
     },
     "Show All" : {
+
+    },
+    "Show tab labels" : {
 
     },
     "Show watched" : {
