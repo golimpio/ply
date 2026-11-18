@@ -7,6 +7,11 @@ import (
 	"strings"
 )
 
+// filmsBelowSQL is the probe for the film files inside a trailer's owner folder:
+// a byte range on path (belowCond), which seeks the UNIQUE(path) index where the
+// substr form scanned every movie, once per trailer candidate.
+var filmsBelowSQL = `SELECT ` + itemCols + ` FROM items WHERE kind = ? AND ` + belowCond("path", "?")
+
 // TitleTrailers returns the trailers of a title (docs/M13-TRAILERS.md, "Whose trailer it
 // is"), ordered by path. A trailer has no title of its own: it belongs to the film whose
 // files are in its owner folder, or to the show of its Show.
@@ -25,15 +30,14 @@ func (s *Store) TitleTrailers(ctx context.Context, titleID int64) ([]Item, error
 	candidates, err := queryItems(ctx, s.ro, `SELECT `+prefixed("t.", itemCols)+` FROM items t
 		WHERE t.kind = ? AND t.show = '' AND t.owner_dir <> '' AND EXISTS (
 			SELECT 1 FROM items m WHERE m.kind = ? AND m.title_id = ?
-				AND substr(m.path, 1, length(t.owner_dir) + 1) = t.owner_dir || '/')
+				AND `+belowCond("m.path", "t.owner_dir")+`)
 		ORDER BY t.path`, []any{KindTrailer, KindMovie, titleID})
 	if err != nil {
 		return nil, err
 	}
 	var out []Item
 	for _, t := range candidates {
-		films, err := queryItems(ctx, s.ro, `SELECT `+itemCols+` FROM items
-			WHERE kind = ? AND substr(path, 1, length(?) + 1) = ? || '/'`, []any{KindMovie, t.OwnerDir, t.OwnerDir})
+		films, err := queryItems(ctx, s.ro, filmsBelowSQL, []any{KindMovie, t.OwnerDir, t.OwnerDir})
 		if err != nil {
 			return nil, err
 		}

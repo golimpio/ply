@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -111,5 +112,46 @@ func TestPersonFilmographyRoundTrip(t *testing.T) {
 	}
 	if err := s.SetPersonFilmography(ctx, 99999, "ref", entries, 1); !errors.Is(err, ErrNotFound) {
 		t.Errorf("SetPersonFilmography(99999) err = %v, want ErrNotFound", err)
+	}
+}
+
+// The in_library check seeks an index for each provider id (migration 021):
+// without titles_imdb the imdb lookup falls back to scanning every title of the
+// kind, per entry. Assert the plan's seek, not a timing.
+func TestFilmographyInLibrarySeeksEveryId(t *testing.T) {
+	s, _ := openTemp(t)
+	plan := explainPlan(t, s, filmographySQL, 1)
+	if !strings.Contains(plan, "kind=? AND imdb_id=?") {
+		t.Errorf("the filmography's imdb lookup does not seek its index:\n%s", plan)
+	}
+}
+
+// Migration 021 adds the imdb index and drops the three no query reads. From
+// version 19, so the test does not depend on migrations another branch added.
+func TestMigration021Indexes(t *testing.T) {
+	old, path := openAtVersion(t, 19)
+	dropped := []string{"person_filmography_person_pop", "person_filmography_person_year", "episodes_imdb"}
+	for _, idx := range dropped {
+		var n int
+		if err := old.rw.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, idx).Scan(&n); err != nil || n != 1 {
+			t.Fatalf("control: index %s at version 20: %d, %v", idx, n, err)
+		}
+	}
+	if err := old.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var n int
+	if err := s.ro.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'titles_imdb'`).Scan(&n); err != nil || n != 1 {
+		t.Errorf("titles_imdb = %d, %v; want 1", n, err)
+	}
+	for _, idx := range dropped {
+		if err := s.ro.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, idx).Scan(&n); err != nil || n != 0 {
+			t.Errorf("index %s = %d, %v; want gone", idx, n, err)
+		}
 	}
 }

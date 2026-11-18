@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 // Library folder types, as in the folders table (the same strings as
@@ -250,8 +249,8 @@ func (s *Store) RootItems(ctx context.Context, root string) ([]RootItem, error) 
 // under, lowest id first: the folder's own items, and the rows an earlier configuration
 // left under another root, which the scan has yet to move to it.
 func (s *Store) ItemsBelow(ctx context.Context, dir string) ([]RootItem, error) {
-	prefix := strings.TrimSuffix(dir, "/") + "/"
-	return s.rootItems(ctx, `WHERE substr(path, 1, ?) = ?`, utf8.RuneCountInString(prefix), prefix) // substr counts characters
+	d := strings.TrimSuffix(dir, "/")
+	return s.rootItems(ctx, `WHERE `+belowCond("path", "?"), d, d)
 }
 
 func (s *Store) rootItems(ctx context.Context, where string, args ...any) ([]RootItem, error) {

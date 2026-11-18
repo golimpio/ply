@@ -4,7 +4,45 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 )
+
+// The two ways a title is in the library: a film file links to it, or an episode
+// of a show linked to it does.
+const (
+	filmJoin   = `JOIN items i ON i.title_id = t.id`
+	seriesJoin = `JOIN series_matches sm ON sm.title_id = t.id
+		JOIN items e ON e.kind = 'episode' AND e.show = sm.show`
+)
+
+// inLibraryExists is one term of the filmography's in_library check: the title
+// found by one provider id. One EXISTS per id, not an OR of the three inside one
+// EXISTS: SQLite only indexes an OR when every term has an index and its
+// statistics favour that plan; a separate EXISTS seeks its index whatever the
+// statistics say. tmdb and tvdb have theirs in UNIQUE (kind, id); titles_imdb
+// (migration 021) is imdb's.
+func inLibraryExists(join, idCol, guard string) string {
+	return `EXISTS (SELECT 1 FROM titles t ` + join + `
+		WHERE t.kind = f.kind AND t.` + idCol + ` = f.` + idCol + ` AND f.` + idCol + ` ` + guard + `)`
+}
+
+// filmographySQL reads a person's stored external credits, best first, each with
+// whether the library has that title.
+var filmographySQL = `
+	SELECT f.kind, f.tmdb_id, f.tvdb_id, f.imdb_id, f.title, f.original_title,
+	       f.year, f.release_date, f.character, f.job, f.department, f.credit_kind,
+	       f.poster, f.backdrop, f.rating, f.vote_count, f.popularity, f.episode_count,
+	       CASE WHEN (` + strings.Join([]string{
+	inLibraryExists(filmJoin, "tmdb_id", "> 0"),
+	inLibraryExists(filmJoin, "imdb_id", "<> ''"),
+	inLibraryExists(filmJoin, "tvdb_id", "> 0"),
+	inLibraryExists(seriesJoin, "tmdb_id", "> 0"),
+	inLibraryExists(seriesJoin, "imdb_id", "<> ''"),
+	inLibraryExists(seriesJoin, "tvdb_id", "> 0"),
+}, " OR ") + `) THEN 1 ELSE 0 END AS in_library
+	FROM person_filmography f
+	WHERE f.person_id = ?
+	ORDER BY f.ord`
 
 // GetPersonFilmography returns what is stored of a person's external filmography.
 // ErrNotFound for an unknown person.
@@ -19,33 +57,7 @@ func (s *Store) GetPersonFilmography(ctx context.Context, personID int64) (Perso
 		if err != nil {
 			return err
 		}
-		rows, err := q.QueryContext(ctx, `
-			SELECT f.kind, f.tmdb_id, f.tvdb_id, f.imdb_id, f.title, f.original_title,
-			       f.year, f.release_date, f.character, f.job, f.department, f.credit_kind,
-			       f.poster, f.backdrop, f.rating, f.vote_count, f.popularity, f.episode_count,
-			       CASE WHEN (
-			           EXISTS (
-			               SELECT 1 FROM titles t
-			               JOIN items i ON i.title_id = t.id
-			               WHERE t.kind = f.kind AND (
-			                   (f.tmdb_id > 0 AND t.tmdb_id = f.tmdb_id) OR
-			                   (f.imdb_id <> '' AND t.imdb_id = f.imdb_id) OR
-			                   (f.tvdb_id > 0 AND t.tvdb_id = f.tvdb_id)
-			               )
-			           ) OR EXISTS (
-			               SELECT 1 FROM titles t
-			               JOIN series_matches sm ON sm.title_id = t.id
-			               JOIN items e ON e.kind = 'episode' AND e.show = sm.show
-			               WHERE t.kind = f.kind AND (
-			                   (f.tmdb_id > 0 AND t.tmdb_id = f.tmdb_id) OR
-			                   (f.imdb_id <> '' AND t.imdb_id = f.imdb_id) OR
-			                   (f.tvdb_id > 0 AND t.tvdb_id = f.tvdb_id)
-			               )
-			           )
-			       ) THEN 1 ELSE 0 END AS in_library
-			FROM person_filmography f
-			WHERE f.person_id = ?
-			ORDER BY f.ord`, personID)
+		rows, err := q.QueryContext(ctx, filmographySQL, personID)
 		if err != nil {
 			return err
 		}

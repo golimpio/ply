@@ -122,6 +122,13 @@ M12 adds `schedules(task TEXT PK, enabled INT, at_minute INT 0..1439, days TEXT 
 last_run INT, updated_at INT)`: the background tasks' times, kept in the database so a restart neither repeats a
 run nor loses one (`docs/M12-SCHEDULES.md`).
 
+Prefix lookups are byte ranges, not `substr`: `ItemsBelow`, `SettingsWithPrefix` and the trailer folder probes use
+`store.belowCond` / `store.prefixCond` (`col >= prefix AND col < successor(prefix)`), which seeks the index on the
+column and is exact for the raw bytes paths keep — Go's rune count and SQLite's character count can disagree on
+malformed UTF-8 (an overlong or surrogate sequence). Migration 021 adds `titles(kind, imdb_id)` (the filmography's
+`in_library` check looks a title up by each id in a separate EXISTS, which seeks its index whatever the statistics
+say), drops three indexes no query reads, and runs `ANALYZE` once: the planner had no statistics to choose indexes by.
+
 ## Probe
 `ffprobe -v error -print_format json -show_format -show_streams -i <ABS path>` with a context timeout.
 Keep `codec_tag_string`, drop ones that look like `[0][0][0][0]`. Container normalisation from `format_name`

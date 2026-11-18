@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"time"
-	"unicode/utf8"
 )
 
 // GetSetting returns the stored value of key; ok is false when there is none.
@@ -33,8 +32,8 @@ func (s *Store) DeleteSetting(ctx context.Context, key string) error {
 
 // SettingsWithPrefix returns the stored settings whose key starts with prefix, by key.
 func (s *Store) SettingsWithPrefix(ctx context.Context, prefix string) (map[string]string, error) {
-	rows, err := s.ro.QueryContext(ctx, `SELECT key, value FROM settings WHERE substr(key, 1, ?) = ?`,
-		utf8.RuneCountInString(prefix), prefix) // substr counts characters
+	cond, args := prefixCond("key", prefix)
+	rows, err := s.ro.QueryContext(ctx, `SELECT key, value FROM settings WHERE `+cond, args...)
 	if err != nil {
 		return nil, err
 	}
