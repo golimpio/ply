@@ -7,6 +7,7 @@
   import { theme, toggleTheme } from '../lib/theme.svelte';
   import ActivityIndicator from './ActivityIndicator.svelte';
   import Icon from './Icon.svelte';
+  import PlyLogo from './PlyLogo.svelte';
 
   // Pinned at the top at all times; frosted once the page scrolls under it.
   let scrolled = $state(false);
@@ -22,7 +23,7 @@
 <svelte:window onscroll={() => (scrolled = window.scrollY > 8)} />
 
 <header class="bar" class:scrolled>
-  <a class="brand" href={href.home} aria-label="ply home">Ply</a>
+  <a class="brand" href={href.home} aria-label="ply home"><PlyLogo /></a>
   <nav aria-label="Library">
     <a href={href.home} aria-current={section === 'home' ? 'page' : undefined}>
       Programme{#if totalCount}<span class="nav-count tabular">{totalCount}</span>{/if}
@@ -96,11 +97,8 @@
     box-shadow: var(--shadow-bar);
   }
   .brand {
-    font-family: var(--font-display);
-    font-style: italic;
-    font-weight: var(--fw-regular);
-    font-size: var(--fs-3xl-2);
-    letter-spacing: var(--tracking-brand);
+    display: inline-flex;
+    align-items: center;
     line-height: var(--lh-none);
     margin-right: var(--space-0500);
   }

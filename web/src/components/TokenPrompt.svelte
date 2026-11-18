@@ -1,4 +1,6 @@
 <script lang="ts">
+  import PlyLogo from './PlyLogo.svelte';
+
   let {
     serverName = '',
     error = '',
@@ -17,7 +19,7 @@
 
 <main class="gate">
   <form class="panel" onsubmit={submit}>
-    <h1>ply</h1>
+    <h1><PlyLogo variant="gate" /><span class="sr-only">ply</span></h1>
     <p class="muted">{serverName ? `${serverName} requires an access token.` : 'This server requires an access token.'}</p>
     <input
       type="password"
