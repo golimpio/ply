@@ -403,9 +403,11 @@ started the test host suspended and never resumed it, so a run hung until it tim
   A service seen on several interfaces is listed once.
 - **Pairing:** when `authRequired`, the six-digit code; the device token is kept in the Keychain by server id, and a
   401 goes back to pairing. The app registers as `kind` `ios`, `ipados` or `tvos`, `app` `ply-ios` or `ply-tvos`.
-- **Browsing:** Home (Continue Watching, Coming Up, the newest films), Movies (sort and 4K/HDR/unwatched
-  filters), Shows (sort by name, newest file, rating or episode count; unwatched only; a whole season or show
-  can be marked watched), and Browse: a search over films, shows, episodes, people, genres and collections,
+- **Browsing:** Home (the featured posters fanned like a hand of cards on iPhone and iPad, the ones either side dimmed
+  so the centre poster leads, `FanDeck.swift`, and a scrolling row on Apple TV; Continue Watching, Coming Up, the
+  newest films), Movies (sort and 4K/HDR/unwatched filters), Shows (sort by name, newest file, rating or episode
+  count; unwatched only; a whole season or show can be marked watched), and Browse: a search over films, shows,
+  episodes, people, genres and collections,
   ranked by the web's own matcher (`Core/Fuzzy.swift`, ported from `web/src/lib/fuzzy.ts`: accents folded in
   both directions, a word start and a run of characters ahead of a scattered match), a People page over the
   server's search (`GET /api/people?q=`, the only list of people it has), the collections and genres

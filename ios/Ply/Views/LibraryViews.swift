@@ -12,6 +12,12 @@ struct PeekingCanvasDeckView: View {
     @Environment(PlaybackScene.self) private var playbackScene
     @State private var activeItemId: Int64?
     @State private var playImpactTrigger = 0
+    #if os(iOS)
+    /// The poster a fan drag started on, while the finger is down; the deck follows the finger from there.
+    /// Its id, not its place: Continue Watching can reorder the list mid-drag.
+    @State private var dragAnchor: Int64?
+    @State private var dragTranslation: CGFloat = 0
+    #endif
 
     private var activeItem: Item? {
         if let id = activeItemId, let item = items.first(where: { $0.id == id }) {
@@ -41,6 +47,10 @@ struct PeekingCanvasDeckView: View {
     var body: some View {
         if !items.isEmpty, let active = activeItem {
             VStack(spacing: PlyDesign.deckMetadataSpacing) {
+                #if os(iOS)
+                fanDeck(active: active)
+                    .frame(height: cardHeight + PlyDesign.deckCardsVerticalPadding)
+                #else
                 GeometryReader { proxy in
                     let screenWidth = proxy.size.width
                     let sideInset = max(16, (screenWidth - cardWidth) / 2)
@@ -69,6 +79,7 @@ struct PeekingCanvasDeckView: View {
                     .scrollClipDisabled()
                 }
                 .frame(height: cardHeight + PlyDesign.deckCardsVerticalPadding)
+                #endif
 
                 // Position indicator + Editorial Title & Wide-Tracked Metadata Block
                 VStack(spacing: PlyDesign.deckMetadataSpacing) {
@@ -136,6 +147,68 @@ struct PeekingCanvasDeckView: View {
             }
         }
     }
+
+    #if os(iOS)
+    private var activeIndex: Int {
+        items.firstIndex { $0.id == activeItemId } ?? 0
+    }
+
+    /// One card of drag: the gap between neighbouring posters, so the centre one moves with the finger.
+    private var fanSpacing: CGFloat { CGFloat(FanPose.spacing(cardWidth: Double(cardWidth))) }
+
+    /// Where the deck is, in cards: under the finger while dragging, else on the active card.
+    private var fanPosition: Double {
+        guard let dragAnchor else { return Double(activeIndex) }
+        let anchor = items.firstIndex { $0.id == dragAnchor } ?? activeIndex
+        return FanDeckMotion.position(
+            anchor: anchor, translation: dragTranslation, spacing: fanSpacing, count: items.count)
+    }
+
+    /// The posters fanned like a hand of cards, the neighbours dimmed (`FanDeck.swift`).
+    private func fanDeck(active: Item) -> some View {
+        let position = fanPosition
+        return ZStack {
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                canvasCard(item, isCenter: item.id == active.id)
+                    .modifier(FanPlacement(
+                        distance: Double(index) - position, cardWidth: cardWidth, cornerRadius: cornerRadius))
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .gesture(HorizontalPan(onChange: fanDragChanged, onEnd: fanDragEnded))
+        // VoiceOver's three-finger swipe, which the scroll view this replaced answered.
+        .accessibilityScrollAction { edge in
+            let delta = edge == .trailing ? 1 : edge == .leading ? -1 : 0
+            let next = FanDeckMotion.step(from: activeIndex, by: delta, count: items.count)
+            withAnimation(FanDeckMotion.settle(initialVelocity: 0)) { activeItemId = items[next].id }
+        }
+    }
+
+    /// The card under the centre becomes active as it passes, so the details and the haptic tick follow the finger.
+    private func fanDragChanged(_ translation: CGFloat) {
+        withAnimation(FanDeckMotion.follow) {
+            if dragAnchor == nil { dragAnchor = activeItemId ?? items.first?.id }
+            dragTranslation = translation
+            let nearest = min(max(Int(fanPosition.rounded()), 0), items.count - 1)
+            if items[nearest].id != activeItemId { activeItemId = items[nearest].id }
+        }
+    }
+
+    private func fanDragEnded(_ translation: CGFloat, _ velocity: CGFloat) {
+        guard let dragAnchor else { return }
+        let anchor = items.firstIndex { $0.id == dragAnchor } ?? activeIndex
+        let position = fanPosition
+        let target = FanDeckMotion.target(
+            anchor: anchor, translation: translation, velocity: velocity, spacing: fanSpacing, count: items.count)
+        let speed = FanDeckMotion.springVelocity(from: position, to: target, velocity: velocity, spacing: fanSpacing)
+        withAnimation(FanDeckMotion.settle(initialVelocity: speed)) {
+            self.dragAnchor = nil
+            dragTranslation = 0
+            activeItemId = items[target].id
+        }
+    }
+    #endif
 
     private func rowFrameReporter(_ id: String) -> some View {
         GeometryReader { geo in
