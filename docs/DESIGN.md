@@ -261,7 +261,7 @@ bad input → 400, TMDB unreachable → 502, lookups off (no key / `-metadata=fa
 | PUT | `/api/schedules/{task}` | (M12) `{enabled?, at?, days?}`, one field or all; 400 for a time or a day that is not one, 404 for an unknown task; wakes the scheduler |
 | POST | `/api/schedules/{task}/run` | (M12) queues the task now as a person's request → 204; 409 with the reason when it is blocked or already queued |
 | GET | `/api/images/tmdb/{size}/{file}` | size ∈ `w92 w185 w342 w500 w780 w1280 original`, file `^[A-Za-z0-9_-]+\.(jpg\|png\|svg)$` else 400; downloaded once into `<data>/images`, `Cache-Control: public, max-age=31536000, immutable`; not available → 404 |
-| GET | `/api/images/local/{item\|series}/{id}/{poster\|backdrop\|thumb}` | sidecar art (path from the DB, must be a regular file whose bytes sniff as an image) or a cover extracted from the media file; `no-cache` |
+| GET | `/api/images/local/{item\|series}/{id}/{poster\|backdrop\|thumb}`, `/api/images/local/season/{titleId}/{n}` | sidecar art (path from the DB, must be a regular file whose bytes sniff as an image) or a cover extracted from the media file; `season` serves a season's sidecar poster (M6, migration 020); `no-cache` |
 
 ```
 ItemSummary {id, kind, title, year, show, season, episode, episodeTitle, durationSec, container, videoCodec,

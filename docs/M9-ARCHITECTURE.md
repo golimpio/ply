@@ -412,7 +412,13 @@ The aim is a "now playing" that is always right, including a cast to Apple TV or
     - Before each item (`WorkerOptions.Pace`) it yields to that, to a stalled viewer, a CPU transcode and browsing.
     - `Spec.Light` keeps it in the light lane, so it never waits behind a full scan.
     - Outside a job (`paceFor`) the same pace waits on the governor directly.
-  - `cache.prune` (50): after each scan.
+  - `cache.prune` (50): after each scan. Reclaims what the library no longer uses: the frame-grab art and subtitles
+    of files that are gone or changed (`art.Prune`, `subs.Prune`), the extracted embedded covers of gone items, and
+    any cached provider image (`images/tmdb|tvdb/<size>/…`) whose ref no title, season, episode, person, collection
+    or filmography uses any more (`Store.LiveImageRefs` → `ImageCache.Prune`). A replaced poster thus leaves nothing
+    behind and the image cache does not grow without bound; it skips in-flight `.dl-` download temps, so a prune
+    never aborts a concurrent fetch. Artwork refs are pinned first-wins (`docs/M6-METADATA.md`), so a refresh never
+    orphans a poster the library still shows.
   - `subs.preextract` (50, key `subs:<itemID>`, light lane; `Need` and `YieldNeed` are the item's disk): writes an
     item's text subtitles to the cache. It does not start while a play reads from the disk (a play being set up counts),
     yields between its reads, and the run is suspended if a play starts. One job in the queue at a time
