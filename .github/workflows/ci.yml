@@ -11,21 +11,19 @@ jobs:
     name: Server and Web
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7.1.0
         with:
-          # go.mod's `go` line, the language version the module needs. setup-go
-          # ignores the `toolchain` line; 1.27 resolves to the newest 1.27 patch,
-          # which is that toolchain.
+          # Use the toolchain pinned in go.mod.
           go-version-file: go.mod
           cache: true
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7.1.0
         with:
-          node-version: 24
+          node-version: 26
           cache: 'npm'
           cache-dependency-path: web/package-lock.json
 
@@ -47,6 +45,7 @@ jobs:
           make deps
           make check-web
           make test-web
+          make web
 
   apple-clients:
     name: iOS & tvOS

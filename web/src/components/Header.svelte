@@ -78,7 +78,7 @@
     height: calc(var(--bar-h) + env(safe-area-inset-top));
     display: flex;
     align-items: center;
-    gap: 1.15rem;
+    gap: var(--space-1150);
     padding: calc(env(safe-area-inset-top) + var(--bar-pad-y)) var(--gutter) var(--bar-pad-y);
     background: transparent;
     border-bottom: var(--bar-line) solid transparent;
@@ -102,21 +102,21 @@
     font-size: var(--fs-3xl-2);
     letter-spacing: var(--tracking-brand);
     line-height: var(--lh-none);
-    margin-right: 0.5rem;
+    margin-right: var(--space-0500);
   }
   nav {
     display: flex;
     align-items: baseline;
-    gap: 1.5rem;
+    gap: var(--space-1500);
   }
   nav a {
     display: inline-flex;
     align-items: baseline;
-    gap: 0.35rem;
+    gap: var(--space-0350);
     color: var(--text-muted);
     font-size: var(--fs-sm-3);
     font-weight: var(--fw-medium);
-    padding: 0.35rem 0;
+    padding: var(--space-0350) 0;
     border-bottom: 2px solid transparent;
     transition: color var(--motion-hover);
   }

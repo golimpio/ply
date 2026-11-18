@@ -3,17 +3,10 @@
   import Icon from './Icon.svelte';
 
   // Back to the previous view, or with none (a deep link) to the page's parent, named on the button.
-  // `over` floats it at the top of a page that opens with a full-bleed hero. `pending`: the page
-  // doesn't know its parent yet (an episode, before the item is in); with no previous view either,
-  // the button keeps its place but is neither seen nor reachable, rather than naming the wrong page.
-  let {
-    fallback = undefined,
-    over = false,
-    pending = false,
-  }: { fallback?: BackTarget; over?: boolean; pending?: boolean } = $props();
+  // `over` floats it at the top of a page that opens with a full-bleed hero.
+  let { fallback, over = false }: { fallback?: BackTarget; over?: boolean } = $props();
 
   const to = $derived(backTarget(fallback));
-  const unknown = $derived(pending && !to.previous);
 
   function back(e: MouseEvent) {
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; // a new tab, etc.
@@ -22,26 +15,22 @@
   }
 </script>
 
-{#if unknown}
-  <span class="btn back pending" class:over aria-hidden="true"><Icon name="left" /><span class="truncate">Back</span></span>
-{:else}
-  <a class="btn back" class:over href={to.hash} aria-label={to.previous ? 'Back' : `Back to ${to.label}`} onclick={back}>
-    <Icon name="left" /><span class="truncate">{to.label}</span>
-  </a>
-{/if}
+<a class="btn back" class:over href={to.hash} aria-label={to.previous ? 'Back' : `Back to ${to.label}`} onclick={back}>
+  <Icon name="left" /><span class="truncate">{to.label}</span>
+</a>
 
 <style>
   .back {
     display: inline-flex;
     align-items: center;
     min-height: 2.25rem;
-    gap: 0.35rem;
-    padding: 0.35rem 0.95rem 0.35rem 0.65rem;
+    gap: var(--space-0350);
+    padding: var(--space-0350) var(--space-0950) var(--space-0350) var(--space-0650);
     font-size: var(--fs-sm-3);
     font-weight: var(--fw-medium);
     width: fit-content;
     max-width: 100%;
-    margin-bottom: 0.85rem;
+    margin-bottom: var(--space-0850);
     background: var(--glass);
     border: 1px solid var(--glass-line);
     backdrop-filter: var(--glass-blur);
@@ -57,13 +46,10 @@
     border-color: var(--glass-line-hover);
     color: var(--text);
   }
-  .pending {
-    visibility: hidden;
-  }
   /* On a picture: glass, like the badges and chips set on one. */
   .over {
     position: absolute;
-    top: calc(env(safe-area-inset-top) + var(--bar-h) + 0.5rem);
+    top: calc(env(safe-area-inset-top) + var(--bar-h) + var(--space-0500));
     left: var(--gutter);
     z-index: var(--z-over);
     max-width: calc(100% - 2 * var(--gutter));

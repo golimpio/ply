@@ -141,22 +141,6 @@
   --paper-100-a86: rgb(242 239 233 / 0.86);
   --tungsten-400-a08: rgb(226 99 71 / 0.14);
 
-  /* Spacing scale (rem), for shared classes and new work. */
-  --space-1: 0.25rem;
-  --space-2: 0.4rem;
-  --space-3: 0.5rem;
-  --space-4: 0.6rem;
-  --space-5: 0.75rem;
-  --space-6: 0.85rem;
-  --space-7: 0.9rem;
-  --space-8: 1rem;
-  --space-9: 1.1rem;
-  --space-10: 1.25rem;
-  --space-11: 1.5rem;
-  --space-12: 2rem;
-  --space-13: 2.5rem;
-  --space-14: 4rem;
-
   /* Radii. */
   --radius-2: 2px;
   --radius-4: 4px;
@@ -218,6 +202,55 @@
   --size-2600: 2.6rem;
 
   /* ======== Semantic tokens ======== */
+
+  /* Spacing lengths, shared by layouts and controls. The rem suffixes are thousandths. */
+  --space-0050: 0.05rem;
+  --space-0100: 0.1rem;
+  --space-0150: 0.15rem;
+  --space-0200: 0.2rem;
+  --space-0225: 0.225rem;
+  --space-0250: 0.25rem;
+  --space-0300: 0.3rem;
+  --space-0350: 0.35rem;
+  --space-0400: 0.4rem;
+  --space-0450: 0.45rem;
+  --space-0500: 0.5rem;
+  --space-0550: 0.55rem;
+  --space-0600: 0.6rem;
+  --space-0650: 0.65rem;
+  --space-0700: 0.7rem;
+  --space-0750: 0.75rem;
+  --space-0800: 0.8rem;
+  --space-0850: 0.85rem;
+  --space-0900: 0.9rem;
+  --space-0950: 0.95rem;
+  --space-1000: 1rem;
+  --space-1100: 1.1rem;
+  --space-1150: 1.15rem;
+  --space-1200: 1.2rem;
+  --space-1250: 1.25rem;
+  --space-1350: 1.35rem;
+  --space-1500: 1.5rem;
+  --space-1600: 1.6rem;
+  --space-1750: 1.75rem;
+  --space-2000: 2rem;
+  --space-2250: 2.25rem;
+  --space-2500: 2.5rem;
+  --space-2750: 2.75rem;
+  --space-3000: 3rem;
+  --space-3500: 3.5rem;
+  --space-3750: 3.75rem;
+  --space-4000: 4rem;
+  --space-4250: 4.25rem;
+  --space-5500: 5.5rem;
+  --space-6000: 6rem;
+  --space-px-2: 2px;
+  --space-px-3: 3px;
+  --space-px-4: 4px;
+  --space-px-16: 16px;
+  --space-px-26: 26px;
+  --kbd-pad-y: 0.1em;
+  --kbd-pad-x: 0.35em;
 
   /* Surfaces: the room, what is raised from it, what floats over it. */
   --surface-room: var(--velvet-950);
@@ -416,13 +449,13 @@
   --spinner-line: 2px;
   --spinner-size-lg: 2.75rem;
   --spinner-line-lg: 3px;
-  --settings-list-gap: var(--space-5); /* between the panels of a list in Settings */
-  --settings-row-gap: var(--space-8); /* between what a settings panel says and its button */
+  --settings-list-gap: var(--space-0750); /* between the panels of a list in Settings */
+  --settings-row-gap: var(--space-1000); /* between what a settings panel says and its button */
   --volume-w: 5.5rem; /* the player's volume slider, open */
   --chip-h: 2rem; /* a rating chip */
   --chip-pad: 0.2rem 0.7rem;
   --chip-gap: 0.4rem;
-  --ratings-gap: var(--space-11); /* between rating chips under a title */
+  --ratings-gap: var(--space-1500); /* between rating chips under a title */
   --page-max: 68rem;
   /* The centred column of a film's or a series' page. */
   --detail-max: 72rem;

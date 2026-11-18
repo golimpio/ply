@@ -78,14 +78,14 @@
 
 <style>
   .controls {
-    margin: 1.25rem 0 1.75rem;
+    margin: var(--space-1250) 0 var(--space-1750);
   }
   .empty {
-    margin-top: 1.25rem;
+    margin-top: var(--space-1250);
   }
   .sk-name {
     height: 2.6rem;
     width: min(14rem, 70%);
-    margin-bottom: 4.25rem;
+    margin-bottom: var(--space-4250);
   }
 </style>

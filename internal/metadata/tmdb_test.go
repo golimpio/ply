@@ -961,11 +961,21 @@ func TestResponsesAreCappedAtEightMiB(t *testing.T) {
 	f := newFakeTMDB(t)
 	f.handle("/movie/1", "", big(7<<20))
 	f.handle("/movie/2", "", big(9<<20))
+	const validPrefix = `{"id": 1, "overview": "valid prefix"}`
+	exact := validPrefix + strings.Repeat(" ", maxResponseBytes-len(validPrefix))
+	f.handle("/movie/3", "", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, exact) })
+	f.handle("/movie/4", "", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, exact+"x") })
 	c := testClient(t, f)
 	if m, err := c.MovieDetails(t.Context(), 1); err != nil || len(m.Overview) != 7<<20 {
 		t.Errorf("7 MiB response: %v", err)
 	}
-	if _, err := c.MovieDetails(t.Context(), 2); err == nil || !IsTransient(err) {
-		t.Errorf("9 MiB response: err = %v; it is cut off at 8 MiB and so cannot be read", err)
+	if _, err := c.MovieDetails(t.Context(), 2); !errors.Is(err, errResponseTooLarge) || !IsTransient(err) {
+		t.Errorf("9 MiB response: err = %v; want a transient size error", err)
+	}
+	if m, err := c.MovieDetails(t.Context(), 3); err != nil || m.Overview != "valid prefix" {
+		t.Errorf("8 MiB response: %v, %v; want the complete movie", m, err)
+	}
+	if _, err := c.MovieDetails(t.Context(), 4); !errors.Is(err, errResponseTooLarge) {
+		t.Errorf("valid JSON prefix followed by a byte beyond the limit: err = %v; want a size error", err)
 	}
 }

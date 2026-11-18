@@ -92,17 +92,17 @@
   .key-fields {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: var(--space-0500);
   }
   .key-field {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: var(--space-0250);
   }
   .key-buttons {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-0500);
     flex-wrap: wrap;
   }
   .key-message {

@@ -114,9 +114,9 @@
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
-    gap: 0.5rem 1rem;
+    gap: var(--space-0500) var(--space-1000);
     padding: 0 var(--gutter);
-    margin-bottom: 1rem;
+    margin-bottom: var(--space-1000);
   }
   .chapter-idx {
     font-family: var(--font-mono);
@@ -132,7 +132,7 @@
     color: var(--text-muted);
   }
   .subhead {
-    padding: 0 var(--gutter) 1rem;
+    padding: 0 var(--gutter) var(--space-1000);
   }
   .more {
     font-family: var(--font-mono);
@@ -142,7 +142,7 @@
   .arrows {
     margin-left: auto;
     display: flex;
-    gap: 0.4rem;
+    gap: var(--space-0400);
     align-self: center;
   }
   .arrows .btn {
@@ -156,7 +156,7 @@
     display: grid;
     grid-auto-flow: column;
     grid-auto-columns: clamp(230px, 22vw, 320px);
-    gap: 1.35rem;
+    gap: var(--space-1350);
     overflow-x: auto;
     overscroll-behavior-x: contain;
     scroll-snap-type: x mandatory;
@@ -165,7 +165,7 @@
   }
   ul.poster {
     grid-auto-columns: clamp(190px, 18.5vw, 275px);
-    gap: clamp(16px, 2vw, 26px);
+    gap: clamp(var(--space-px-16), 2vw, var(--space-px-26));
   }
   ul.person {
     grid-auto-columns: clamp(100px, 9vw, 136px);

@@ -44,10 +44,10 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 0.4rem;
+    gap: var(--space-0400);
     height: 2.5rem;
     min-width: 2.5rem;
-    padding: 0 0.6rem;
+    padding: 0 var(--space-0600);
     color: var(--text-muted);
     border: 1px solid transparent;
     border-radius: var(--radius-pill);
@@ -76,7 +76,7 @@
     border-color: var(--line-control);
   }
   .count {
-    padding: 0 0.75rem 0 0.6rem;
+    padding: 0 var(--space-0750) 0 var(--space-0600);
   }
   .paused,
   .failed {

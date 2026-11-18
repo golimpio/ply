@@ -696,7 +696,7 @@
       <summary title="Playback details" aria-label="Playback details">
         <span class="badge">{methodLabel(playback.method)}</span>
       </summary>
-      <div class="why-body">
+      <div class="why-body panel-card">
         <p class="muted">
           video: {playback.videoAction}, audio: {playback.audioAction}
         </p>
@@ -783,7 +783,7 @@
 </div>
 
 {#if !active && wireless}
-  <div class="remote" aria-label="AirPlay playback">
+  <div class="remote panel-card" aria-label="AirPlay playback">
     <span class="truncate">AirPlay · {title}</span>
     <!-- Like other back links, this fixed controller is not a library scroll anchor. -->
     <a class="btn back" href={href.play(item.id)}>Controls</a>
@@ -821,10 +821,6 @@
   }
   .remote,
   .why-body {
-    background: var(--surface-panel);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
-    backdrop-filter: var(--glass-blur);
     box-shadow: var(--shadow-popover);
   }
   .remote span {
@@ -880,8 +876,8 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 0.6rem;
-    padding: 1rem;
+    gap: var(--space-0600);
+    padding: var(--space-1000);
     text-align: center;
     background: var(--scrim-player);
   }
@@ -905,22 +901,22 @@
     cursor: pointer;
     display: flex;
     align-items: center;
-    gap: 0.6rem;
+    gap: var(--space-0600);
   }
   .why-body {
     position: absolute;
     top: 100%;
     right: max(var(--gutter-player), env(safe-area-inset-right));
     max-width: min(26rem, calc(100vw - 2rem));
-    padding: 0.6rem 0.8rem;
+    padding: var(--space-0600) var(--space-0800);
   }
   .why p,
   .why ul {
     margin: 0;
   }
   .why ul {
-    margin-top: 0.4rem;
-    padding-left: 1.2rem;
+    margin-top: var(--space-0400);
+    padding-left: var(--space-1200);
     color: var(--text-muted);
   }
 

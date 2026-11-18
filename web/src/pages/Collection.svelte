@@ -72,6 +72,6 @@
     color: var(--text-lede);
   }
   .heading {
-    margin: 0.5rem 0 1.25rem;
+    margin: var(--space-0500) 0 var(--space-1250);
   }
 </style>

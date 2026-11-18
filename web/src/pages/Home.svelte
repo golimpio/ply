@@ -1,11 +1,9 @@
 <script lang="ts">
   import {
     api,
-    type GenreCount,
     type ItemDetail,
     type ItemSummary,
     type MovieCard,
-    type Settings,
     type TitleCard,
     type UpcomingShow,
   } from '../lib/api';
@@ -36,6 +34,7 @@
   } from '../lib/meta';
   import { ratingScore, ratingValue, titleRatings } from '../lib/ratings';
   import { morph } from '../lib/nav';
+  import { resource } from '../lib/resource.svelte';
   import { href } from '../lib/router.svelte';
   import { app, rescan, scan } from '../lib/state.svelte';
   import { artOf, progressOf } from '../lib/ui-types';
@@ -44,11 +43,6 @@
   import MediaCard from '../components/MediaCard.svelte';
   import Rail from '../components/Rail.svelte';
   import Rating from '../components/Rating.svelte';
-
-  let continueItems = $state<ItemSummary[]>([]);
-  let upcoming = $state<UpcomingShow[]>([]);
-  let genreRails = $state<{ genre: GenreCount; titles: TitleCard[] }[]>([]);
-  let settings = $state<Settings>();
 
   // Interactive Evening Lens & Curated Focus state (Variation II: Living Repertory & Moods)
   type MoodLens = 'weeknight' | 'double' | 'noir' | 'epic' | 'unwatched' | 'series';
@@ -67,36 +61,34 @@
   $effect(() => {
     void app.libraryVersion;
     void ensureLibrary();
-    api.continueWatching().then(
-      (list) => (continueItems = list),
-      () => (continueItems = []),
-    );
-    api.upcoming().then(
-      (list) => (upcoming = list),
-      () => (upcoming = []), // the metadata is extra: the page works without it
-    );
+  });
+
+  const continueResource = resource(() => {
+    void app.libraryVersion;
+    return api.continueWatching().catch(() => []);
+  });
+  const upcomingResource = resource(() => {
+    void app.libraryVersion;
+    return api.upcoming().catch(() => []);
   });
 
   // Curated genre showcases mixing both films and series.
-  $effect(() => {
+  const genreResource = resource(async () => {
     void app.libraryVersion;
-    let stale = false;
-    api
-      .genres()
-      .then(async (genres) => {
-        const top = genres.filter((g) => g.count >= 4).sort((a, b) => b.count - a.count).slice(0, 3);
-        const rails = await Promise.all(
-          top.map(async (genre) => ({ genre, titles: uniqueTitles(await api.titles({ genre: genre.id })) })),
-        );
-        if (!stale) genreRails = rails.filter((r) => r.titles.length);
-      })
-      .catch(() => {
-        if (!stale) genreRails = []; // the metadata is extra: the page works without it
-      });
-    return () => {
-      stale = true;
-    };
+    try {
+      const genres = await api.genres();
+      const top = genres.filter((g) => g.count >= 4).sort((a, b) => b.count - a.count).slice(0, 3);
+      const rails = await Promise.all(
+        top.map(async (genre) => ({ genre, titles: uniqueTitles(await api.titles({ genre: genre.id })) })),
+      );
+      return rails.filter((r) => r.titles.length);
+    } catch {
+      return [];
+    }
   });
+  const continueItems = $derived(continueResource.data ?? []);
+  const upcoming = $derived(upcomingResource.data ?? []);
+  const genreRails = $derived(genreResource.data ?? []);
 
   // One card per title: a repeated key would stop the whole page rendering.
   function uniqueTitles(list: TitleCard[]): TitleCard[] {
@@ -122,14 +114,11 @@
       // storage unavailable: hidden for this visit only
     }
   }
-  $effect(() => {
+  const settingsResource = resource(() => {
     void app.libraryVersion;
-    if (dismissed) return;
-    api.settings().then(
-      (s) => (settings = s),
-      () => (settings = undefined),
-    );
+    return dismissed ? Promise.resolve(undefined) : api.settings().catch(() => undefined);
   });
+  const settings = $derived(settingsResource.data);
   const showSetup = $derived(
     !dismissed && !!settings && !settings.tmdbKeySet && settings.metadataEnabled && !settings.metadataForcedOff,
   );
@@ -718,15 +707,15 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.75rem 1.25rem;
-    padding: 0.85rem var(--gutter);
+    gap: var(--space-0750) var(--space-1250);
+    padding: var(--space-0850) var(--gutter);
     border-bottom: 1px solid var(--line);
     font-size: var(--fs-xs);
   }
   .lens-pills {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-0500);
     overflow-x: auto;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
@@ -743,7 +732,7 @@
     text-transform: uppercase;
     letter-spacing: var(--tracking-widest);
     color: var(--text-faint);
-    margin-right: 0.25rem;
+    margin-right: var(--space-0250);
   }
   .lens-pills :global(.chip[aria-pressed='true']) {
     color: var(--text);
@@ -760,13 +749,13 @@
   .spread {
     display: grid;
     grid-template-columns: 1fr;
-    gap: clamp(1.75rem, 3.5vw, 3rem);
+    gap: clamp(var(--space-1750), 3.5vw, var(--space-3000));
     align-items: start;
-    padding: clamp(1.75rem, 3.5vw, 2.75rem) var(--gutter) var(--shelf-pad-y);
+    padding: clamp(var(--space-1750), 3.5vw, var(--space-2750)) var(--gutter) var(--shelf-pad-y);
   }
   .spread.hero.has-companion {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: clamp(2rem, 3.5vw, 3.5rem);
+    gap: clamp(var(--space-2000), 3.5vw, var(--space-3500));
   }
   .spread-feature {
     min-width: 0;
@@ -777,9 +766,9 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.65rem;
+    gap: var(--space-0650);
     min-height: 1.5rem;
-    margin-bottom: 0.85rem;
+    margin-bottom: var(--space-0850);
     font-family: var(--font-mono);
     font-size: var(--fs-2xs-2);
     text-transform: uppercase;
@@ -799,7 +788,7 @@
     border-radius: var(--radius);
     background: var(--surface-control);
     box-shadow: var(--ring-hairline);
-    margin-bottom: 1.15rem;
+    margin-bottom: var(--space-1150);
   }
   .feature-art :global(.picture),
   .companion-art :global(.picture) {
@@ -829,13 +818,13 @@
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
-    gap: 0.45rem;
+    gap: var(--space-0450);
     font-family: var(--font-mono);
     font-size: var(--fs-2xs-2);
     letter-spacing: 0.04em;
     color: var(--text-muted);
     text-transform: uppercase;
-    margin-bottom: 0.45rem;
+    margin-bottom: var(--space-0450);
   }
   .companion-tag {
     font-family: var(--font-mono);
@@ -846,7 +835,7 @@
   }
   .hero-scores {
     list-style: none;
-    margin: 0 0 1.25rem 0;
+    margin: 0 0 var(--space-1250) 0;
     padding: 0;
     display: flex;
     flex-wrap: wrap;
@@ -857,7 +846,7 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.75rem;
+    gap: var(--space-0750);
   }
   .hero-actions :global(.icon) {
     width: 0.95rem;
@@ -866,7 +855,7 @@
 
   /* Right Column: Double Bill Companion Desk */
   .double-bill-desk {
-    padding-left: clamp(1.75rem, 3vw, 3rem);
+    padding-left: clamp(var(--space-1750), 3vw, var(--space-3000));
     border-left: 1px solid var(--line);
     min-width: 0;
     display: flex;
@@ -876,9 +865,9 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 1rem;
+    gap: var(--space-1000);
     min-height: 1.5rem;
-    margin-bottom: 0.85rem;
+    margin-bottom: var(--space-0850);
     font-family: var(--font-mono);
     font-size: var(--fs-2xs-2);
     text-transform: uppercase;
@@ -888,7 +877,7 @@
   .desk-kicker {
     display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-0500);
   }
   .desk-kicker .dot {
     width: 0.4rem;
@@ -913,7 +902,7 @@
 
 
   .rails {
-    padding-bottom: 4rem;
+    padding-bottom: var(--space-4000);
     position: relative;
   }
   .setup {
@@ -921,9 +910,9 @@
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 1rem 2rem;
-    margin: 1.5rem var(--gutter) 2.25rem;
-    padding: 1.1rem 1.25rem;
+    gap: var(--space-1000) var(--space-2000);
+    margin: var(--space-1500) var(--gutter) var(--space-2250);
+    padding: var(--space-1100) var(--space-1250);
     background:
       radial-gradient(120% 140% at 0% 0%, color-mix(in oklab, var(--accent) 16%, transparent), transparent 60%),
       var(--surface-panel);
@@ -932,7 +921,7 @@
     backdrop-filter: var(--glass-blur);
   }
   .setup h2 {
-    margin-bottom: 0.2rem;
+    margin-bottom: var(--space-0200);
   }
   .setup p {
     margin: 0;
@@ -940,22 +929,22 @@
   }
   .setup-actions {
     display: flex;
-    gap: 0.6rem;
+    gap: var(--space-0600);
   }
   .empty {
     max-width: 34rem;
     margin: 0 auto;
   }
   .loading {
-    padding: 0 0 4rem;
+    padding: 0 0 var(--space-4000);
   }
   .hero-sk {
     height: min(62vh, 48vw);
   }
   .row-sk {
     display: flex;
-    gap: 1.1rem;
-    padding: 2.25rem var(--gutter) 0;
+    gap: var(--space-1100);
+    padding: var(--space-2250) var(--gutter) 0;
     overflow: hidden;
   }
   .card-sk {
@@ -969,13 +958,13 @@
     .double-bill-desk {
       padding-left: 0;
       border-left: 0;
-      padding-top: 1.5rem;
+      padding-top: var(--space-1500);
       border-top: 1px solid var(--line);
     }
   }
   @media (max-width: 600px) {
     .rails {
-      padding-bottom: 6rem;
+      padding-bottom: var(--space-6000);
     }
     .hero-sk {
       height: 56vh;

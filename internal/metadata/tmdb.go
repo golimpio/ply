@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"maps"
 	"net/http"
@@ -35,7 +34,6 @@ const (
 	DefaultMaxInFlight = 4
 	DefaultMaxWait     = 30 * time.Second // the longest Retry-After the client sits out
 	maxRateRetries     = 2
-	maxResponseBytes   = 8 << 20
 	maxChangePages     = 200
 )
 
@@ -367,6 +365,9 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, out any) er
 			c.pause(wait)
 		}
 		release()
+		if errors.Is(err, errResponseTooLarge) {
+			return &Error{Op: op, Status: status, Transient: true, Message: err.Error(), Err: err}
+		}
 		if err != nil {
 			return c.failure(ctx, op, err)
 		}
@@ -413,12 +414,7 @@ func (c *Client) do(ctx context.Context, target string) (status int, header http
 	if err != nil {
 		return 0, nil, nil, err
 	}
-	defer resp.Body.Close()
-	body, err = io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-	if err != nil {
-		return 0, nil, nil, err
-	}
-	return resp.StatusCode, resp.Header, body, nil
+	return readProviderResponse(resp)
 }
 
 // failure turns a transport error into an Error without the URL net/http puts

@@ -196,7 +196,7 @@
       {/if}
     </p>
   {:else if pasted}
-    <div class="pasted">
+    <div class="pasted panel-card">
       <p>{pastedLabel(pasted)}</p>
       <button class="btn primary" disabled={busy} onclick={() => apply(pasted.ref)}>Use this {what}</button>
     </div>
@@ -257,47 +257,43 @@
   .search {
     display: grid;
     grid-template-columns: 1fr 5.5rem auto;
-    gap: 0.5rem;
+    gap: var(--space-0500);
   }
   input {
     width: 100%;
-    padding: 0.5rem 0.85rem;
+    padding: var(--space-0500) var(--space-0850);
   }
   .pasted {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 1rem;
-    margin-top: 1rem;
-    padding: 0.75rem 0.9rem;
-    background: var(--surface-panel);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
-    backdrop-filter: var(--glass-blur);
+    gap: var(--space-1000);
+    margin-top: var(--space-1000);
+    padding: var(--space-0750) var(--space-0900);
   }
   .pasted p {
     margin: 0;
     font-weight: var(--fw-semibold);
   }
   .error {
-    margin: 1rem 0 0;
+    margin: var(--space-1000) 0 0;
   }
   .error .link {
-    margin-left: 0.5rem;
+    margin-left: var(--space-0500);
   }
   .results {
     list-style: none;
-    margin: 1rem 0 0;
+    margin: var(--space-1000) 0 0;
     padding: 0;
     display: grid;
-    gap: 0.25rem;
+    gap: var(--space-0250);
   }
   .result {
     display: grid;
     grid-template-columns: 3.4rem 1fr;
-    gap: 0.9rem;
+    gap: var(--space-0900);
     width: 100%;
-    padding: 0.5rem;
+    padding: var(--space-0500);
     font: inherit;
     text-align: left;
     color: inherit;
@@ -324,11 +320,11 @@
     font-weight: var(--fw-semibold-2);
   }
   .title .badge {
-    margin-left: 0.5rem;
+    margin-left: var(--space-0500);
     vertical-align: 0.1em;
   }
   .year {
-    margin-left: 0.5rem;
+    margin-left: var(--space-0500);
     color: var(--text-muted);
     font-weight: var(--fw-medium);
     font-variant-numeric: tabular-nums;
@@ -337,7 +333,7 @@
     font-size: var(--fs-xs-3);
   }
   .overview {
-    margin: 0.2rem 0 0;
+    margin: var(--space-0200) 0 0;
     color: var(--text-muted);
     font-size: var(--fs-sm);
     display: -webkit-box;
@@ -347,10 +343,10 @@
     overflow: hidden;
   }
   .none {
-    padding: 1rem 0.5rem;
+    padding: var(--space-1000) var(--space-0500);
   }
   .by-id {
-    margin: 0.75rem 0.5rem 0;
+    margin: var(--space-0750) var(--space-0500) 0;
     font-size: var(--fs-sm-3);
   }
   .link-btn {

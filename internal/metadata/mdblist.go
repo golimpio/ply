@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -327,8 +326,7 @@ func (c *MDBListClient) get(ctx context.Context, path string, out any) error {
 		}
 		release, err := c.acquire(ctx)
 		if err != nil {
-			var me *MDBListError
-			if errors.As(err, &me) {
+			if me, ok := errors.AsType[*MDBListError](err); ok {
 				me.Op = op
 				return me
 			}
@@ -435,15 +433,7 @@ func (c *MDBListClient) do(ctx context.Context, target string) (status int, head
 	if err != nil {
 		return 0, nil, nil, err
 	}
-	defer resp.Body.Close()
-	body, err = io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
-	if err != nil {
-		return 0, nil, nil, err
-	}
-	if len(body) > maxResponseBytes {
-		return resp.StatusCode, resp.Header, nil, errors.New("response too large")
-	}
-	return resp.StatusCode, resp.Header, body, nil
+	return readProviderResponse(resp)
 }
 
 // failure turns a transport error into an MDBListError without the URL net/http puts in its
@@ -452,8 +442,7 @@ func (c *MDBListClient) failure(ctx context.Context, op string, err error) error
 	if ctx.Err() != nil {
 		return fmt.Errorf("mdblist %s: %w", op, ctx.Err())
 	}
-	var ue *url.Error
-	if errors.As(err, &ue) {
+	if ue, ok := errors.AsType[*url.Error](err); ok {
 		err = ue.Err
 	}
 	msg := tidyMessage(c.redact(err.Error()), maxMDBListMessage)

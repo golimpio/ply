@@ -101,16 +101,16 @@
 <style>
   .fields {
     display: grid;
-    gap: 0.9rem;
+    gap: var(--space-0900);
   }
   .pair {
     display: grid;
     grid-template-columns: 1fr 6rem;
-    gap: 0.75rem;
+    gap: var(--space-0750);
   }
   label {
     display: grid;
-    gap: 0.3rem;
+    gap: var(--space-0300);
   }
   label span {
     font-size: var(--fs-xs-3);
@@ -120,7 +120,7 @@
   textarea {
     width: 100%;
     min-height: auto;
-    padding: 0.55rem 0.8rem;
+    padding: var(--space-0550) var(--space-0800);
     resize: vertical;
   }
   .note,

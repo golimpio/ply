@@ -199,7 +199,7 @@
       <h1>Activity</h1>
       <p class="muted">What ply does in the background. Playing and browsing always come first.</p>
     </div>
-    <div class="pause" class:paused={snap.paused}>
+    <div class="pause panel-card" class:paused={snap.paused}>
       <div>
         <span class="label" id="queue-switch">Background work</span>
         <span class="small muted">
@@ -220,7 +220,7 @@
 
   {#if !activity.loaded}
     {#if activity.error}
-      <div class="panel empty">
+      <div class="panel empty panel-card">
         <p class="err">{activity.error}</p>
         <button class="btn" onclick={() => activity.refresh()}>Try again</button>
       </div>
@@ -231,7 +231,7 @@
     <section class="tiers" aria-labelledby="tiers-h">
       <h2 id="tiers-h" class="sr-only">What has priority now</h2>
       <p class="headline" role="status">{tiers.headline}</p>
-      <ol class="lanes">
+      <ol class="lanes panel-card">
         {#each tiers.lanes as lane, i (lane.key)}
           <li class="lane {lane.state}" data-lane={lane.key}>
             <span class="rank" aria-hidden="true">{i + 1}</span>
@@ -247,7 +247,7 @@
     {#if sessions?.length}
       <section aria-labelledby="playing-h">
         <h2 id="playing-h">Playing now<span class="count">{sessions.length}</span></h2>
-        <ul class="panel">
+        <ul class="panel panel-card">
           {#each sessions as p (p.id)}
             <li class="row" data-session={p.id}>
               <div class="what">
@@ -281,7 +281,7 @@
     <section aria-labelledby="running-h">
       <h2 id="running-h">Running{#if snap.running.length}<span class="count">{snap.running.length}</span>{/if}</h2>
       {#if snap.running.length}
-        <ul class="panel">
+        <ul class="panel panel-card">
           {#each snap.running as j (j.id)}
             <li class="row job" class:held={!!j.held} data-job={j.id}>
               <div class="what">
@@ -319,7 +319,7 @@
           {/each}
         </ul>
       {:else}
-        <p class="empty-note muted">
+        <p class="empty-note muted panel-card">
           {snap.paused && snap.queued.length
             ? 'Nothing running: the queue is paused.'
             : 'Nothing running. ply rescans your folders on a schedule, and new files are picked up within seconds.'}
@@ -330,7 +330,7 @@
     <section aria-labelledby="queued-h">
       <h2 id="queued-h">Up next{#if snap.queued.length}<span class="count">{snap.queued.length}</span>{/if}</h2>
       {#if snap.queued.length}
-        <ol class="panel">
+        <ol class="panel panel-card">
           {#each groups as g, gi (g.jobs[0].id)}
             {#if g.jobs.length === 1}
               {@render queuedRow(g.jobs[0], gi === 0)}
@@ -351,7 +351,7 @@
           {/each}
         </ol>
       {:else}
-        <p class="empty-note muted">Nothing waiting.</p>
+        <p class="empty-note muted panel-card">Nothing waiting.</p>
       {/if}
     </section>
 
@@ -366,7 +366,7 @@
         </div>
       </div>
       {#if shown.length}
-        <ul class="panel history">
+        <ul class="panel history panel-card">
           {#each shown as j (j.id)}
             <li class="row past {j.state}" data-job={j.id}>
               <span class="mark" aria-hidden="true"><Icon name={j.state === 'done' ? 'check' : j.state === 'failed' ? 'alert' : 'close'} /></span>
@@ -391,7 +391,7 @@
           <button class="btn sm ghost more" onclick={() => (showAll = true)}>Show {history.length - shown.length} more</button>
         {/if}
       {:else}
-        <p class="empty-note muted">{filter === 'failed' ? 'No failures in the last week.' : 'Nothing has run in the last week.'}</p>
+        <p class="empty-note muted panel-card">{filter === 'failed' ? 'No failures in the last week.' : 'Nothing has run in the last week.'}</p>
       {/if}
     </section>
   {/if}
@@ -400,11 +400,11 @@
 <style>
   .activity {
     display: grid;
-    gap: 2.25rem;
+    gap: var(--space-2250);
   }
   section {
     display: grid;
-    gap: 0.75rem;
+    gap: var(--space-0750);
     min-width: 0;
   }
   p {
@@ -424,26 +424,22 @@
     flex-wrap: wrap;
     align-items: flex-end;
     justify-content: space-between;
-    gap: 1rem 2rem;
+    gap: var(--space-1000) var(--space-2000);
   }
   .intro {
     display: grid;
-    gap: 0.4rem;
+    gap: var(--space-0400);
   }
   .pause {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: var(--space-1000);
     max-width: 24rem;
-    padding: 0.7rem 0.8rem 0.7rem 1rem;
-    background: var(--surface-panel);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
-    backdrop-filter: var(--glass-blur);
+    padding: var(--space-0700) var(--space-0800) var(--space-0700) var(--space-1000);
   }
   .pause > div {
     display: grid;
-    gap: 0.1rem;
+    gap: var(--space-0100);
   }
   .pause .label {
     font-weight: var(--fw-semibold-2);
@@ -462,7 +458,7 @@
 
   /* ---- the tiers, in priority order */
   .tiers {
-    gap: 0.9rem;
+    gap: var(--space-0900);
   }
   .headline {
     font-size: var(--fs-base);
@@ -476,17 +472,13 @@
     padding: 0;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    background: var(--surface-panel);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
-    backdrop-filter: var(--glass-blur);
     overflow: hidden;
   }
   .lane {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    padding: 0.85rem 1rem;
+    gap: var(--space-0750);
+    padding: var(--space-0850) var(--space-1000);
     min-width: 0;
   }
   .lane + .lane {
@@ -546,10 +538,6 @@
     list-style: none;
     margin: 0;
     padding: 0;
-    background: var(--surface-panel);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
-    backdrop-filter: var(--glass-blur);
     overflow: hidden;
   }
   .panel ol {
@@ -560,8 +548,8 @@
   .row {
     display: flex;
     align-items: center;
-    gap: 0.75rem 1rem;
-    padding: 0.8rem 1rem;
+    gap: var(--space-0750) var(--space-1000);
+    padding: var(--space-0800) var(--space-1000);
     min-width: 0;
   }
   .panel > li + li,
@@ -571,7 +559,7 @@
   .what {
     flex: 1;
     display: grid;
-    gap: 0.35rem;
+    gap: var(--space-0350);
     min-width: 0;
   }
   .title {
@@ -582,7 +570,7 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.2rem 0.9rem;
+    gap: var(--space-0200) var(--space-0900);
     font-size: var(--fs-xs-3);
   }
   .retry {
@@ -598,13 +586,13 @@
     flex-wrap: wrap;
     align-items: center;
     justify-content: flex-end;
-    gap: 0.5rem;
+    gap: var(--space-0500);
   }
   .btn.sm {
     min-height: 2rem;
-    padding: 0.25rem 0.85rem;
+    padding: var(--space-0250) var(--space-0850);
     font-size: var(--fs-xs-3);
-    gap: 0.35rem;
+    gap: var(--space-0350);
   }
   .btn.ghost {
     background: transparent;
@@ -623,18 +611,14 @@
     background: color-mix(in oklab, var(--danger) 85%, var(--lighten));
   }
   .empty-note {
-    padding: 0.9rem 1.1rem;
-    background: var(--surface-panel);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
-    backdrop-filter: var(--glass-blur);
+    padding: var(--space-0900) var(--space-1100);
     font-size: var(--fs-sm-4);
   }
   .panel.empty {
     display: grid;
     justify-items: start;
-    gap: 0.75rem;
-    padding: 1.1rem 1.25rem;
+    gap: var(--space-0750);
+    padding: var(--space-1100) var(--space-1250);
   }
   .block {
     height: 14rem;
@@ -648,7 +632,7 @@
     display: grid;
     grid-template-columns: 3.4rem 5.2rem;
     justify-items: end;
-    padding-top: 0.05rem;
+    padding-top: var(--space-0050);
   }
   .elapsed {
     font-size: var(--fs-xs-3);
@@ -658,8 +642,8 @@
     display: inline-flex;
     align-items: center;
     justify-self: start;
-    gap: 0.4rem;
-    padding: 0.15rem 0.6rem 0.15rem 0.45rem;
+    gap: var(--space-0400);
+    padding: var(--space-0150) var(--space-0600) var(--space-0150) var(--space-0450);
     font-size: var(--fs-xs-3);
     font-weight: var(--fw-medium-2);
     color: var(--warn);
@@ -674,7 +658,7 @@
   .bar {
     position: relative;
     height: 4px;
-    margin: 0.35rem 0 0.1rem;
+    margin: var(--space-0350) 0 var(--space-0100);
     background: var(--surface-control);
     border-radius: var(--radius-pill);
     overflow: hidden;
@@ -710,8 +694,8 @@
   .group summary {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    padding: 0.8rem 1rem;
+    gap: var(--space-0750);
+    padding: var(--space-0800) var(--space-1000);
     cursor: pointer;
     list-style: none;
   }
@@ -743,12 +727,12 @@
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 0.75rem;
+    gap: var(--space-0750);
   }
   .chip {
     display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: var(--space-0400);
   }
   .chip-n {
     font-size: var(--fs-xs);
@@ -813,7 +797,7 @@
 
   @media (max-width: 600px) {
     .activity {
-      gap: 1.75rem;
+      gap: var(--space-1750);
     }
     .pause {
       max-width: none;
@@ -836,7 +820,7 @@
     /* Running jobs keep their time and Cancel beside the title. */
     .row.job {
       flex-wrap: nowrap;
-      gap: 0.5rem;
+      gap: var(--space-0500);
     }
     .job .actions {
       width: auto;

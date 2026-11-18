@@ -42,14 +42,14 @@
     height: 4.5rem;
   }
   h2 {
-    margin: 2rem 0 0;
+    margin: var(--space-2000) 0 0;
     font-size: var(--fs-2xl-2);
     font-weight: var(--fw-semibold-2);
     color: var(--text);
   }
   .where {
     max-width: 34ch;
-    margin: 0.85rem 0 0;
+    margin: var(--space-0850) 0 0;
     font-size: var(--fs-base);
     line-height: var(--lh-body-2);
     color: var(--text-lede);
@@ -60,7 +60,7 @@
       height: 3.25rem;
     }
     h2 {
-      margin-top: 1.5rem;
+      margin-top: var(--space-1500);
     }
   }
 </style>

@@ -146,6 +146,7 @@ is off or nothing matches → NFO alone (`source=nfo`). Fuzz test the parser.
 - Rate limit: token bucket 20 req/s, 4 concurrent requests; 429 → honour `Retry-After`; 5xx/network →
   item stays `pending` with backoff 1m, 5m, 30m, 2h, 6h (cap) and `match_attempts++`. Offline never marks a
   file `unmatched`.
+- TMDB, TVDB and MDBList JSON responses are limited to 8 MiB. Oversized responses produce an error.
 - Refresh: daily, re-fetch titles whose `fetched_at` is older than 7 days for series that are not ended /
   movies released in the last 90 days, 30 days for everything else. `locked` titles keep text fields but
   still refresh images/credits. A season with new files and no `episodes` rows is fetched immediately.

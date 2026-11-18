@@ -38,12 +38,12 @@
     min-height: 100dvh;
     display: grid;
     place-items: center;
-    padding: 1rem;
+    padding: var(--space-1000);
   }
   .panel {
     width: min(360px, 100%);
     display: grid;
-    gap: 0.9rem;
+    gap: var(--space-0900);
   }
   h1 {
     margin: 0;
@@ -53,7 +53,7 @@
   }
   input {
     font: inherit;
-    padding: 0.5rem 1.1rem;
+    padding: var(--space-0500) var(--space-1100);
     color: var(--text);
     background: var(--surface-room);
     border: 1px solid var(--line);

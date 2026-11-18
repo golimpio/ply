@@ -261,8 +261,8 @@
   .head {
     display: flex;
     align-items: center;
-    gap: 1.5rem 2.5rem;
-    margin-bottom: 2rem;
+    gap: var(--space-1500) var(--space-2500);
+    margin-bottom: var(--space-2000);
   }
   .portrait {
     flex: none;
@@ -279,25 +279,25 @@
     flex: 1;
     max-width: 46rem;
     display: grid;
-    gap: 1rem;
+    gap: var(--space-1000);
     align-content: start;
   }
   .links {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem;
+    gap: var(--space-0500);
   }
   .ext-link {
     text-decoration: none;
     font-size: var(--fs-xs);
     min-height: 1.85rem;
-    padding: 0.2rem 0.75rem;
+    padding: var(--space-0200) var(--space-0750);
   }
   .bio {
     display: grid;
     justify-items: start;
-    gap: 0.75rem;
-    margin-bottom: 3rem;
+    gap: var(--space-0750);
+    margin-bottom: var(--space-3000);
   }
   .bio p {
     margin: 0;
@@ -326,18 +326,18 @@
     margin-top: var(--shelf-pad-y);
   }
   .library {
-    margin-bottom: 1.75rem;
+    margin-bottom: var(--space-1750);
   }
   .group + .group {
-    margin-top: 2.5rem;
+    margin-top: var(--space-2500);
   }
   h3 {
-    margin-bottom: 1rem;
+    margin-bottom: var(--space-1000);
     font-size: var(--fs-lg);
     font-weight: var(--fw-semibold-2);
   }
   .n {
-    margin-left: 0.6rem;
+    margin-left: var(--space-0600);
     font-weight: var(--fw-regular);
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
@@ -361,7 +361,7 @@
     .head {
       flex-direction: column;
       align-items: flex-start;
-      margin-bottom: 1.75rem;
+      margin-bottom: var(--space-1750);
     }
     .portrait {
       width: 8.5rem;
@@ -370,7 +370,7 @@
       width: 100%;
     }
     .bio {
-      margin-bottom: 2.25rem;
+      margin-bottom: var(--space-2250);
     }
     /* As the shared .poster-grid below 600 px, from 700 px here (the head stacks there too). */
     .poster-grid {

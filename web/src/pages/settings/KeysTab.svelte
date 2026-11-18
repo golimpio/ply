@@ -55,7 +55,7 @@
 <style>
   .key-status {
     display: grid;
-    gap: 0.3rem;
+    gap: var(--space-0300);
   }
   .key-status p {
     margin: 0;

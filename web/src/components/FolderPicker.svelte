@@ -175,7 +175,7 @@
 <style>
   .where {
     display: flex;
-    gap: 0.5rem;
+    gap: var(--space-0500);
   }
   .where input {
     flex: 1;
@@ -184,12 +184,12 @@
   }
   .crumbs {
     display: flex;
-    gap: 0.4rem;
-    margin: 0.75rem 0 0.5rem;
+    gap: var(--space-0400);
+    margin: var(--space-0750) 0 var(--space-0500);
   }
   .btn.small {
     min-height: 2rem;
-    padding: 0.25rem 0.7rem;
+    padding: var(--space-0250) var(--space-0700);
     font-size: var(--fs-xs-3);
   }
   .btn.small :global(svg) {
@@ -214,15 +214,15 @@
   .list ul {
     list-style: none;
     margin: 0;
-    padding: 0.3rem;
+    padding: var(--space-0300);
   }
   .list p {
     margin: 0;
-    padding: 0.9rem 1rem;
+    padding: var(--space-0900) var(--space-1000);
   }
   .still {
     display: block;
-    margin-top: 0.25rem;
+    margin-top: var(--space-0250);
     color: var(--text-muted);
     overflow-wrap: anywhere;
   }
@@ -232,10 +232,10 @@
   .dir {
     display: flex;
     align-items: center;
-    gap: 0.65rem;
+    gap: var(--space-0650);
     width: 100%;
     min-height: 2.4rem;
-    padding: 0.35rem 0.7rem;
+    padding: var(--space-0350) var(--space-0700);
     font: inherit;
     font-size: var(--fs-md-2);
     text-align: left;
@@ -263,21 +263,21 @@
   .kind {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 0.6rem;
-    margin: 1rem 0 0;
+    gap: var(--space-0600);
+    margin: var(--space-1000) 0 0;
     padding: 0;
     border: 0;
   }
   .kind legend {
-    margin-bottom: 0.5rem;
+    margin-bottom: var(--space-0500);
     padding: 0;
     overflow-wrap: anywhere;
   }
   .kind label {
     display: flex;
-    gap: 0.6rem;
+    gap: var(--space-0600);
     align-items: flex-start;
-    padding: 0.7rem 0.8rem;
+    padding: var(--space-0700) var(--space-0800);
     border: 1px solid var(--line);
     border-radius: var(--radius);
     cursor: pointer;
@@ -291,18 +291,18 @@
     outline-offset: 2px;
   }
   .kind input {
-    margin: 0.2rem 0 0;
+    margin: var(--space-0200) 0 0;
     accent-color: var(--accent);
   }
   .kind label > span {
     display: grid;
-    gap: 0.15rem;
+    gap: var(--space-0150);
   }
   .kind .muted {
     font-size: var(--fs-xs-3);
   }
   .error {
-    margin: 0.75rem 0 0;
+    margin: var(--space-0750) 0 0;
   }
   @media (max-width: 600px) {
     .kind {

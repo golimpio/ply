@@ -643,7 +643,7 @@
             <Icon name="cc" />
           </button>
           {#if menu === 'subs'}
-            <div class="menu" role="menu" aria-label="Subtitles">
+            <div class="menu panel-card" role="menu" aria-label="Subtitles">
               <button role="menuitemradio" aria-checked={selectedSubtitle === null} onclick={() => { onSelectSubtitle(null); menu = null; }}>Off</button>
               {#each subtitles as s (s.id)}
                 <button role="menuitemradio" aria-checked={selectedSubtitle === s.id} onclick={() => { onSelectSubtitle(s.id); menu = null; }}>
@@ -660,7 +660,7 @@
             <Icon name="audio" />
           </button>
           {#if menu === 'audio'}
-            <div class="menu" role="menu" aria-label="Audio track">
+            <div class="menu panel-card" role="menu" aria-label="Audio track">
               {#each audioTracks as a (a.id)}
                 <button role="menuitemradio" aria-checked={selectedAudio === a.id} onclick={() => { onSelectAudio(a.id); menu = null; }}>
                   {a.label}
@@ -685,7 +685,7 @@
               <Icon name="airplay" />
             </button>
             {#if menu === 'airplay'}
-              <div class="menu" role="menu" aria-label="AirPlay devices">
+              <div class="menu panel-card" role="menu" aria-label="AirPlay devices">
                 {#each receivers as r (r.id)}
                   <button role="menuitem" onclick={() => { menu = null; onReceiver!(r.id); }}>{r.name}</button>
                 {/each}
@@ -739,7 +739,7 @@
   /* Into the safe areas: an iPhone held sideways has its notch and corners on the left and right. */
   .top,
   .bottom {
-    padding: 0.75rem max(var(--gutter-player), env(safe-area-inset-right)) 0.75rem
+    padding: var(--space-0750) max(var(--gutter-player), env(safe-area-inset-right)) var(--space-0750)
       max(var(--gutter-player), env(safe-area-inset-left));
   }
   .top {
@@ -747,13 +747,13 @@
     z-index: var(--z-over);
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    padding-top: max(0.75rem, env(safe-area-inset-top));
+    gap: var(--space-0750);
+    padding-top: max(var(--space-0750), env(safe-area-inset-top));
     background: linear-gradient(to bottom, var(--scrim-player-top), transparent);
   }
   .bottom {
     grid-row: 3;
-    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+    padding-bottom: max(var(--space-0750), env(safe-area-inset-bottom));
     /* Not "to top, scrim, transparent": with a literal colour the minifier rewrote it into this
        top-to-bottom form, which Chrome rasterises a row differently; it leaves var() gradients
        alone, so this form keeps the pixels the tokens started from (see Hero.svelte's scrim). */
@@ -843,7 +843,7 @@
     position: absolute;
     left: 0;
     bottom: 1.6rem;
-    padding: 0.15rem 0.45rem;
+    padding: var(--space-0150) var(--space-0450);
     font-size: var(--fs-xs);
     font-weight: var(--fw-semibold);
     background: var(--surface-tooltip);
@@ -855,8 +855,8 @@
     flex-wrap: wrap;
     min-width: 0;
     align-items: center;
-    gap: 0.25rem;
-    margin-top: 0.35rem;
+    gap: var(--space-0250);
+    margin-top: var(--space-0350);
   }
   .grow {
     flex: 1;
@@ -915,7 +915,7 @@
     opacity: 1;
   }
   .time {
-    margin-left: calc(0.5rem + var(--volume-w));
+    margin-left: calc(var(--space-0500) + var(--volume-w));
     font-size: var(--fs-sm-3);
     transform: translateX(calc(-1 * var(--volume-w)));
     transition: transform var(--motion-toggle) var(--ease);
@@ -933,17 +933,13 @@
     min-width: 12rem;
     max-height: 50vh;
     overflow-y: auto;
-    padding: 0.35rem;
-    background: var(--surface-panel);
-    backdrop-filter: var(--glass-blur);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
+    padding: var(--space-0350);
     box-shadow: var(--shadow-popover);
   }
   .menu button {
     display: block;
     width: 100%;
-    padding: 0.55rem 0.8rem 0.55rem 2rem;
+    padding: var(--space-0550) var(--space-0800) var(--space-0550) var(--space-2000);
     font: inherit;
     font-size: var(--fs-sm-3);
     text-align: left;
@@ -967,7 +963,7 @@
     top: 50%;
     width: 0.45rem;
     height: 0.45rem;
-    margin-top: -0.225rem;
+    margin-top: calc(-1 * var(--space-0225));
     border-radius: var(--radius-round);
     background: var(--tint);
   }
@@ -983,7 +979,7 @@
       display: none;
     }
     .time {
-      margin-left: 0.5rem;
+      margin-left: var(--space-0500);
       transform: none;
     }
   }

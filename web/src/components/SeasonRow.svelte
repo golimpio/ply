@@ -221,16 +221,16 @@
   .row {
     display: flex;
     flex-wrap: nowrap;
-    gap: 1rem;
+    gap: var(--space-1000);
     min-width: 0;
     overflow-x: auto;
     overscroll-behavior-x: contain;
     scroll-snap-type: x mandatory;
     scrollbar-width: none;
     /* Room for the selected ring and the focus ring, which the scroll box would clip. */
-    margin: calc(-1 * var(--focus-offset) - 4px);
-    padding: calc(var(--focus-offset) + 4px);
-    scroll-padding-inline: calc(var(--focus-offset) + 4px);
+    margin: calc(-1 * var(--focus-offset) - var(--space-px-4));
+    padding: calc(var(--focus-offset) + var(--space-px-4));
+    scroll-padding-inline: calc(var(--focus-offset) + var(--space-px-4));
   }
   .row::-webkit-scrollbar {
     display: none;
@@ -268,7 +268,7 @@
     position: relative; /* holds its sr-only words */
     flex: none;
     display: grid;
-    gap: 0.15rem;
+    gap: var(--space-0150);
     align-content: start;
     width: var(--season-w);
     padding: 0;
@@ -284,7 +284,7 @@
   }
   .frame {
     position: relative;
-    margin-bottom: 0.45rem;
+    margin-bottom: var(--space-0450);
     border-radius: var(--radius);
     box-shadow: var(--ring-hairline);
     transition: box-shadow var(--motion-hover);
@@ -308,7 +308,7 @@
   .over {
     position: absolute;
     inset: auto 0 0;
-    padding: 1.6rem 0.5rem 0.5rem;
+    padding: var(--space-1600) var(--space-0500) var(--space-0500);
     font-weight: var(--fw-bold);
     font-size: var(--fs-sm);
     line-height: var(--lh-tight);

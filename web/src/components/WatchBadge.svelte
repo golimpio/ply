@@ -18,7 +18,7 @@
     position: relative; /* holds its sr-only words */
     display: inline-flex;
     align-items: center;
-    gap: 0.3rem;
+    gap: var(--space-0300);
   }
   .done {
     color: var(--ok);

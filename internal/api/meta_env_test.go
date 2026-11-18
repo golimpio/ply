@@ -201,7 +201,7 @@ var testURLKey = []byte("a test secret for the url tokens")
 
 // withTok is how the server writes the URL of a picture when a token is configured.
 func withTok(u string) string {
-	return (&Server{Options: Options{Token: apiToken}, urls: newURLSigner(testURLKey, apiToken)}).pictureURL(u)
+	return (&Server{Token: apiToken, urls: newURLSigner(testURLKey, apiToken)}).pictureURL(u)
 }
 
 var _ = fmt.Sprint

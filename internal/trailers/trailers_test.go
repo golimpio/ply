@@ -433,13 +433,11 @@ func TestEnsureConcurrent(t *testing.T) {
 	var wg sync.WaitGroup
 	ids := make([]int64, 8)
 	for i := range ids {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if d, err := e.s.Ensure(context.Background(), e.title); err == nil && d != nil {
 				ids[i] = d.JobID
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	snap := e.q.Snapshot()

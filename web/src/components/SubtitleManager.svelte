@@ -503,15 +503,15 @@
   .sub-manager {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: var(--space-0750);
   }
 
   /* Tabs: the shared .chip pill, in a row above the line that divides them from the panel. */
   .tabs {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem;
-    padding-bottom: 0.6rem;
+    gap: var(--space-0500);
+    padding-bottom: var(--space-0600);
     border-bottom: 1px solid var(--line-quiet);
   }
   .tab-count {
@@ -523,7 +523,7 @@
   .tab-panel {
     display: flex;
     flex-direction: column;
-    gap: 0.6rem;
+    gap: var(--space-0600);
     /* Room for the empty state or one track, so switching tabs does not make the dialog jump. */
     min-height: 11rem;
   }
@@ -532,8 +532,8 @@
   .notice {
     display: flex;
     align-items: flex-start;
-    gap: 0.6rem;
-    padding: 0.75rem 0.85rem;
+    gap: var(--space-0600);
+    padding: var(--space-0750) var(--space-0850);
     font-size: var(--fs-sm-2);
     color: var(--text-muted);
     background: var(--surface-room);
@@ -544,7 +544,7 @@
     width: 1.15rem;
     height: 1.15rem;
     flex: none;
-    margin-top: 0.25rem;
+    margin-top: var(--space-0250);
   }
   .notice.ok {
     color: var(--ok);
@@ -553,7 +553,7 @@
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 0.4rem;
+    gap: var(--space-0400);
   }
   .notice-text p {
     margin: 0;
@@ -566,7 +566,7 @@
   .row-list {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: var(--space-0500);
     margin: 0;
     padding: 0;
     list-style: none;
@@ -575,14 +575,14 @@
     max-height: 20rem;
     overflow-y: auto;
     /* Room for the focus ring, which the scroll box would clip. */
-    margin: calc(-1 * var(--focus-offset) - 2px);
-    padding: calc(var(--focus-offset) + 2px);
+    margin: calc(-1 * var(--focus-offset) - var(--space-px-2));
+    padding: calc(var(--focus-offset) + var(--space-px-2));
   }
   .row {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    padding: 0.75rem 0.85rem;
+    gap: var(--space-0750);
+    padding: var(--space-0750) var(--space-0850);
     background: var(--surface-panel);
     border: 1px solid var(--line-quiet);
     border-radius: var(--radius-row);
@@ -596,7 +596,7 @@
     flex: none;
     min-width: 3rem;
     min-height: 2rem;
-    padding: 0 0.4rem;
+    padding: 0 var(--space-0400);
     font-size: var(--fs-2xs);
     font-weight: var(--fw-bold);
     letter-spacing: var(--tracking-wider);
@@ -610,7 +610,7 @@
   .row-body {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: var(--space-0250);
     flex: 1 1 auto;
     min-width: 0;
   }
@@ -618,7 +618,7 @@
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 0.4rem;
+    gap: var(--space-0400);
     min-width: 0;
     font-size: var(--fs-md);
     font-weight: var(--fw-semibold-2);
@@ -639,8 +639,8 @@
     align-items: center;
     justify-content: center;
     flex: 1 1 auto;
-    gap: 0.4rem;
-    padding: 1.25rem 1rem;
+    gap: var(--space-0400);
+    padding: var(--space-1250) var(--space-1000);
     text-align: center;
     background: var(--surface-room);
     border: 1px dashed var(--line);
@@ -666,8 +666,8 @@
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
-    gap: 0.5rem;
-    margin-top: 0.5rem;
+    gap: var(--space-0500);
+    margin-top: var(--space-0500);
   }
 
   /* Search: the shared .settings-input as the pill that holds the icon and the field. */
@@ -675,12 +675,12 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-0500);
   }
   .search-field {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-0500);
     flex: 1 1 12rem;
     min-width: 0;
   }
@@ -716,8 +716,8 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 0.4rem;
-    padding: 1.5rem 1rem;
+    gap: var(--space-0400);
+    padding: var(--space-1500) var(--space-1000);
     text-align: center;
     background: var(--surface-room);
     border: 1px dashed var(--line);
@@ -749,12 +749,12 @@
   .upload-options {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: var(--space-0500);
   }
   .field {
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
+    gap: var(--space-0400);
     max-width: 18rem;
   }
   .field-label {
@@ -764,7 +764,7 @@
   .checkbox {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-0500);
     font-size: var(--fs-sm);
     color: var(--text);
     cursor: pointer;

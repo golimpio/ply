@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"ply/internal/sysprio"
 )
 
 // ExtractKeyframes lists the keyframe times of the first video stream of
@@ -33,7 +35,7 @@ func ExtractKeyframes(ctx context.Context, ffprobe, path string, nice int) ([]fl
 		return nil, fmt.Errorf("start %s: %w", ffprobe, err)
 	}
 	if nice != 0 {
-		setNice(cmd.Process.Pid, nice)
+		sysprio.Background(cmd.Process.Pid, nice)
 	}
 	kf, start, perr := parseKeyframes(out)
 	werr := cmd.Wait()

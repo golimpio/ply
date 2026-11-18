@@ -65,8 +65,6 @@ func ownedByUs(fi os.FileInfo) bool {
 	return !ok || int(st.Uid) == os.Geteuid()
 }
 
-func setNice(pid, nice int) { _ = syscall.Setpriority(syscall.PRIO_PROCESS, pid, nice) }
-
 // processAlive reports whether a process with this pid exists.
 func processAlive(pid int) bool {
 	err := syscall.Kill(pid, 0)

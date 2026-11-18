@@ -149,19 +149,19 @@
 <style>
   .schedule {
     list-style: none;
-    gap: 0.75rem;
+    gap: var(--space-0750);
   }
   .head {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 1rem;
+    gap: var(--space-1000);
   }
   .text {
     min-width: 0;
   }
   .head h3 {
-    margin: 0 0 0.25rem;
+    margin: 0 0 var(--space-0250);
   }
   .detail,
   .warning {
@@ -172,12 +172,12 @@
     display: grid;
     grid-template-columns: auto 1fr;
     align-items: start;
-    gap: 0.75rem var(--gutter);
+    gap: var(--space-0750) var(--gutter);
   }
   .time {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-0500);
   }
   .days {
     margin: 0;
@@ -187,7 +187,7 @@
   }
   .days legend {
     padding: 0;
-    margin-bottom: 0.4rem;
+    margin-bottom: var(--space-0400);
     color: var(--text-muted);
     font-size: var(--fs-sm);
   }
@@ -198,14 +198,14 @@
   }
   .days .hint {
     font-size: var(--fs-sm);
-    margin-top: 0.4rem;
+    margin-top: var(--space-0400);
   }
   .foot {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 0.75rem;
+    gap: var(--space-0750);
   }
   .state,
   .message {

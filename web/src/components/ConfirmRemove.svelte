@@ -47,7 +47,7 @@
     display: inline-flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.5rem 0.6rem;
+    gap: var(--space-0500) var(--space-0600);
   }
   .question {
     font-size: var(--fs-sm);

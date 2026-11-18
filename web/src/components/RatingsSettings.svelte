@@ -219,7 +219,7 @@
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 0.75rem 2rem;
+    gap: var(--space-0750) var(--space-2000);
   }
   .shown {
     margin: 0;
@@ -232,16 +232,16 @@
   }
   .shown ul {
     list-style: none;
-    margin: 0.6rem 0 0;
+    margin: var(--space-0600) 0 0;
     padding: 0;
     display: grid;
-    gap: 0.25rem;
+    gap: var(--space-0250);
   }
   .shown li {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    padding: 0.35rem 0.75rem;
+    gap: var(--space-0750);
+    padding: var(--space-0350) var(--space-0750);
     border-radius: var(--radius-pill);
   }
   .shown li:hover,
@@ -267,7 +267,7 @@
   }
   .moves {
     display: inline-flex;
-    gap: 0.25rem;
+    gap: var(--space-0250);
     flex: none;
   }
   .move {
@@ -275,7 +275,7 @@
     min-height: var(--chip-h);
   }
   .attribution {
-    gap: 0.5rem;
+    gap: var(--space-0500);
     font-size: var(--fs-sm);
   }
 </style>

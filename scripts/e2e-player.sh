@@ -21,7 +21,11 @@ fi
 work=$(mktemp -d "${TMPDIR:-/tmp}/ply-e2e-player.XXXXXX")
 pid=
 cleanup() {
-  if [ -n "$pid" ]; then kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; fi
+  if [ -n "$pid" ]; then
+    "$bin" -stop -force -data "$work/data" >/dev/null 2>&1 || true
+    if kill -0 "$pid" 2>/dev/null; then kill "$pid" 2>/dev/null || true; fi
+    wait "$pid" 2>/dev/null || true
+  fi
   rm -rf "$work"
 }
 trap cleanup EXIT INT TERM

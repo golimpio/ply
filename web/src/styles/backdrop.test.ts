@@ -16,7 +16,7 @@ const unprefixed = (body: string) => /(^|;)backdrop-filter:/.test(body);
 describe('backdrop-filter in the built CSS', () => {
   it.each([
     ['the dialogs (Dialog, the search palette)', /^dialog\.svelte-/, 2],
-    ['the menu', /^\.list\.svelte-/, 1],
+    ['shared panels and menus', /(?:^|,)\.panel-card(?:,|$)/, 1],
     ["the header, once scrolled", /^\.bar\.scrolled\.svelte-/, 1],
     ['the tab bar', /^\.tabs\.svelte-/, 1],
   ])('%s: unprefixed, for Chrome and Firefox', (_, selector, at_least) => {

@@ -79,7 +79,7 @@
   {#if limit.playing.length}
     <ul aria-label={limit.limit === 'transcodes' ? 'Being converted' : 'Playing now'}>
       {#each limit.playing as p (p.id)}
-        <li data-session={p.id}>
+        <li class="panel-card" data-session={p.id}>
           <div class="what">
             <span class="title truncate">{p.title}</span>
             <span class="muted">
@@ -117,7 +117,7 @@
   .limit {
     width: min(32rem, 100%);
     display: grid;
-    gap: 0.75rem;
+    gap: var(--space-0750);
     text-align: left;
   }
   h2 {
@@ -135,18 +135,14 @@
     margin: 0;
     padding: 0;
     display: grid;
-    gap: 0.4rem;
+    gap: var(--space-0400);
   }
   li {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.75rem;
-    padding: 0.5rem 0.5rem 0.5rem 0.8rem;
-    background: var(--surface-panel);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
-    backdrop-filter: var(--glass-blur);
+    gap: var(--space-0750);
+    padding: var(--space-0500) var(--space-0500) var(--space-0500) var(--space-0800);
   }
   .what {
     display: grid;
@@ -169,7 +165,7 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.6rem 1rem;
+    gap: var(--space-0600) var(--space-1000);
   }
   .small {
     font-size: var(--fs-sm);

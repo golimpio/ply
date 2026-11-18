@@ -43,9 +43,6 @@ const tvdbRejected = "TVDB rejected the key or PIN"
 // tvdbSeasonTypes are the orders /series/{id}/episodes/{season-type} knows.
 var tvdbSeasonTypes = []string{"default", "official", "dvd", "absolute", "alternate", "regional"}
 
-// errTVDBTooLarge is a body that is longer than maxResponseBytes.
-var errTVDBTooLarge = errors.New("response too large")
-
 // TVDBOptions configures NewTVDBClient.
 type TVDBOptions struct {
 	// Key is the project's API key. PIN is the user's subscriber PIN: a key under
@@ -633,9 +630,9 @@ func (c *TVDBClient) exchange(ctx context.Context, op, method, path string, q ur
 		}
 		release()
 		if err != nil {
-			if errors.Is(err, errTVDBTooLarge) {
+			if errors.Is(err, errResponseTooLarge) {
 				// Asking again gets the same answer: final.
-				return 0, nil, &TVDBError{Op: op, Status: status, Message: "response too large"}
+				return 0, nil, &TVDBError{Op: op, Status: status, Message: err.Error()}
 			}
 			return 0, nil, c.failure(ctx, op, err)
 		}
@@ -680,15 +677,7 @@ func (c *TVDBClient) do(ctx context.Context, method, target string, reqBody []by
 	if err != nil {
 		return 0, nil, nil, err
 	}
-	defer resp.Body.Close()
-	body, err = io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
-	if err != nil {
-		return 0, nil, nil, err
-	}
-	if len(body) > maxResponseBytes {
-		return resp.StatusCode, resp.Header, nil, errTVDBTooLarge
-	}
-	return resp.StatusCode, resp.Header, body, nil
+	return readProviderResponse(resp)
 }
 
 // decode reads a 200 answer: its "data" into out and its "links" into links.

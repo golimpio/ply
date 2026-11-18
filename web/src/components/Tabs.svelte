@@ -127,18 +127,18 @@
 <style>
   .tabs {
     display: grid;
-    gap: 1.75rem;
+    gap: var(--space-1750);
     min-width: 0;
   }
   .tablist {
     display: flex;
-    gap: 0.5rem;
+    gap: var(--space-0500);
     min-width: 0;
     overflow-x: auto;
     scrollbar-width: none;
     /* Room for the focus ring, which the scroll box would clip. */
-    margin: calc(-1 * var(--focus-offset) - 2px);
-    padding: calc(var(--focus-offset) + 2px);
+    margin: calc(-1 * var(--focus-offset) - var(--space-px-2));
+    padding: calc(var(--focus-offset) + var(--space-px-2));
   }
   .tablist::-webkit-scrollbar {
     display: none;
@@ -169,13 +169,13 @@
     .tabs {
       grid-template-columns: var(--side-nav-w) minmax(0, 1fr);
       align-items: start;
-      gap: 2.5rem;
+      gap: var(--space-2500);
     }
     .tablist {
       position: sticky;
       top: calc(var(--bar-h) + 1.25rem);
       flex-direction: column;
-      gap: 0.25rem;
+      gap: var(--space-0250);
       overflow: visible;
     }
     .tablist.fade-before,

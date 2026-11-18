@@ -26,7 +26,7 @@
       z-index: var(--z-bar);
       display: grid;
       grid-template-columns: repeat(6, 1fr);
-      padding: 0.35rem 0.5rem calc(0.35rem + env(safe-area-inset-bottom));
+      padding: var(--space-0350) var(--space-0500) calc(var(--space-0350) + env(safe-area-inset-bottom));
       background: var(--surface-tabbar);
       /* Unprefixed only: the build adds -webkit- itself, and drops this one when both are written. */
       backdrop-filter: var(--blur-bar);
@@ -37,9 +37,9 @@
   button {
     display: grid;
     justify-items: center;
-    gap: 0.15rem;
+    gap: var(--space-0150);
     min-height: 44px;
-    padding: 0.3rem 0;
+    padding: var(--space-0300) 0;
     font: inherit;
     font-size: var(--fs-3xs);
     font-weight: var(--fw-medium-2);

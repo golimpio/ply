@@ -456,8 +456,7 @@ func TestMDBListErrors(t *testing.T) {
 			t.Errorf("%s: unauthorized %v, not found %v, transient %v; want %v, %v, %v (%v)", tc.name,
 				IsUnauthorized(err), IsNotFound(err), IsTransient(err), tc.unauth, tc.notFound, tc.transient, err)
 		}
-		var me *MDBListError
-		if !errors.As(err, &me) {
+		if _, ok := errors.AsType[*MDBListError](err); !ok {
 			t.Errorf("%s: the error is not an *MDBListError: %T", tc.name, err)
 		}
 		if srv.count() != 1 {
@@ -713,8 +712,7 @@ func TestMDBListNeverShowsTheKey(t *testing.T) {
 		t.Fatalf("a server that is not there: %v", err)
 	}
 	check("a transport error", err)
-	var me *MDBListError
-	if errors.As(err, &me) {
+	if me, ok := errors.AsType[*MDBListError](err); ok {
 		check("its cause", me.Err)
 		for e := error(me); e != nil; e = errors.Unwrap(e) {
 			check("a link of its chain", e.Error())
@@ -816,13 +814,11 @@ func TestMDBListLimiter(t *testing.T) {
 	c, _ := quickMDB(t, srv, func(o *MDBListOptions) { o.MaxInFlight = 2 })
 	var wg sync.WaitGroup
 	for i := range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if _, err := c.ByTMDB(t.Context(), MDBListMovie, int64(i+1)); err != nil {
 				t.Error(err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if peak.Load() > 2 {

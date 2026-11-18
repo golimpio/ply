@@ -342,11 +342,11 @@
     margin: 0;
     padding: 0;
     display: grid;
-    gap: 0.6rem;
+    gap: var(--space-0600);
   }
   .folders li {
     display: grid;
-    gap: 0.35rem;
+    gap: var(--space-0350);
   }
   .folders p {
     margin: 0;
@@ -355,7 +355,7 @@
   .head {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
+    gap: var(--space-0600);
     min-width: 0;
   }
   .head :global(svg) {
@@ -372,7 +372,7 @@
   .tag {
     flex: none;
     margin-left: auto;
-    padding: 0.1rem 0.55rem;
+    padding: var(--space-0100) var(--space-0550);
     font-size: var(--fs-2xs-3);
     color: var(--text-muted);
     border: 1px solid var(--line);
@@ -388,8 +388,8 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.6rem 0.9rem;
-    margin-top: 0.4rem;
+    gap: var(--space-0600) var(--space-0900);
+    margin-top: var(--space-0400);
   }
   .note {
     flex: 1 1 14rem;
@@ -398,14 +398,14 @@
   /* Movies | TV shows: two buttons, the folder's type pressed. */
   .seg {
     display: inline-flex;
-    padding: 3px;
+    padding: var(--space-px-3);
     background: var(--surface-room);
     border: 1px solid var(--line);
     border-radius: var(--radius-pill);
   }
   .seg button {
     min-height: 2rem;
-    padding: 0.2rem 0.9rem;
+    padding: var(--space-0200) var(--space-0900);
     font: inherit;
     font-size: var(--fs-sm-2);
     color: var(--text-muted);
@@ -436,21 +436,21 @@
     margin-left: auto;
     display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-0500);
   }
   .library-actions {
     display: flex;
     flex-wrap: wrap;
     justify-content: space-between;
     align-items: center;
-    gap: 0.6rem 1rem;
-    margin-top: 1rem;
+    gap: var(--space-0600) var(--space-1000);
+    margin-top: var(--space-1000);
   }
   .add {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.6rem 1rem;
+    gap: var(--space-0600) var(--space-1000);
   }
   .add p {
     margin: 0;
@@ -460,30 +460,30 @@
   }
   .forget {
     display: flex;
-    gap: 0.6rem;
+    gap: var(--space-0600);
     align-items: flex-start;
-    margin: 0.9rem 0 0;
+    margin: var(--space-0900) 0 0;
     cursor: pointer;
   }
   .forget input {
-    margin: 0.25rem 0 0;
+    margin: var(--space-0250) 0 0;
     accent-color: var(--danger);
   }
   .forget > span {
     display: grid;
-    gap: 0.15rem;
+    gap: var(--space-0150);
   }
   .forget .muted {
     font-size: var(--fs-xs-3);
   }
   .wait {
-    margin: 0.75rem 0 0;
+    margin: var(--space-0750) 0 0;
   }
   .error {
-    margin: 0.75rem 0 0;
+    margin: var(--space-0750) 0 0;
   }
   .error .muted {
     display: block;
-    margin-top: 0.2rem;
+    margin-top: var(--space-0200);
   }
 </style>

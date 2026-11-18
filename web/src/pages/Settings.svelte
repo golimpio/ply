@@ -64,16 +64,16 @@
 <style>
   .settings {
     display: grid;
-    gap: 2rem;
+    gap: var(--space-2000);
   }
   /* What the tabs share. */
   .panel-body {
     display: grid;
-    gap: 2.75rem;
+    gap: var(--space-2750);
   }
   .panel-body :global(section) {
     display: grid;
-    gap: 1rem;
+    gap: var(--space-1000);
     min-width: 0;
   }
   .panel-body :global(.lead) {
@@ -92,8 +92,8 @@
   }
   @media (max-width: 600px) {
     .settings {
-      gap: 1.5rem;
-      padding-bottom: 6rem;
+      gap: var(--space-1500);
+      padding-bottom: var(--space-6000);
     }
   }
 </style>

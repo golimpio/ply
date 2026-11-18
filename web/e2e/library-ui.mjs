@@ -275,16 +275,20 @@ const scenarios = {
     const counts = [];
     const max = await page.evaluate(() => document.documentElement.scrollHeight - innerHeight);
     check('the page is as tall as 5,000 films', max > (FILMS / n - 2) * 300, `${max} px for ${n} columns`);
-    let centred = true;
+    const emptyViewports = [];
     for (const f of [0, 0.1, 0.33, 0.5, 0.77, 0.9, 1]) {
       await page.evaluate((y) => window.scrollTo(0, y), Math.round(max * f));
       await frames(page, 3);
       counts.push(await cardCount(page));
-      // The positive control: there are cards where the screen is.
-      centred &&= await page.evaluate(() => !!document.elementFromPoint(innerWidth / 2, innerHeight / 2)?.closest('a.card, .row'));
+      // A single sample can fall in a row gap. Require an actual card in the viewport.
+      const showsCards = await page.locator('main a.card').evaluateAll((cards) => cards.some((card) => {
+        const { left, top, right, bottom, width, height } = card.getBoundingClientRect();
+        return width > 0 && height > 0 && left < innerWidth && right > 0 && top < innerHeight && bottom > 0;
+      }));
+      if (!showsCards) emptyViewports.push(f);
     }
     check(`never more than ${most} cards in the page (${n} columns)`, Math.max(...counts) <= most && Math.min(...counts) > 0, counts.join(' '));
-    check('and cards on screen at every place', centred);
+    check('and cards on screen at every place', emptyViewports.length === 0, emptyViewports.join(', '));
     check('the last film is there at the bottom', (await page.locator(`a.card[href="#/item/${sorted().at(-1).id}"]`).count()) === 1);
     check('the DOM stays small', (await page.evaluate(() => document.getElementsByTagName('*').length)) < 2500);
     const list = await page.evaluate(() => {
@@ -331,12 +335,14 @@ const scenarios = {
     check('and the first is gone from the page', (await page.locator(`a.card[href="#/item/${sorted()[0].id}"]`).count()) === 0);
     await context.close();
 
-    // At 2x a 177 px column needs 354 px: w500, the next size up from w342. Pinned.
-    const hi = await open(browser, { scale: 2 });
+    // Widen the viewport so a 2x column needs more than w342 but fits in w500.
+    const hi = await open(browser, { width: 1480, scale: 2 });
     await movies(hi.page);
     await hi.page.locator('main a.card img.loaded').first().waitFor();
     const two = await hi.page.locator('main a.card img').first().evaluate((i) => ({ sizes: i.sizes, width: i.getBoundingClientRect().width, src: i.currentSrc }));
-    check('at 2x: sizes is still the column, and the srcset picks w500', two.sizes === `${Math.ceil(two.width)}px` && two.width * 2 > 342 && two.src.includes('/w500/'), JSON.stringify(two));
+    const needed = Math.ceil(two.width) * 2;
+    check('at 2x: fixture needs more than w342 and fits w500', needed > 342 && needed <= 500, JSON.stringify(two));
+    check('at 2x: sizes is still the column, and the srcset picks w500', two.sizes === `${Math.ceil(two.width)}px` && two.src.includes('/w500/'), JSON.stringify(two));
     await hi.context.close();
   },
 

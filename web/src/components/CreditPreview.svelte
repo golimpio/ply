@@ -147,7 +147,7 @@
     min-width: 0;
     display: flex;
     align-items: flex-start;
-    gap: 1.25rem;
+    gap: var(--space-1250);
   }
   .poster {
     flex: none;
@@ -159,8 +159,8 @@
   .who {
     min-width: 0;
     display: grid;
-    gap: 0.6rem;
-    padding-top: 0.25rem;
+    gap: var(--space-0600);
+    padding-top: var(--space-0250);
   }
   .title,
   .details p {
@@ -181,26 +181,26 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.5rem 0.75rem;
+    gap: var(--space-0500) var(--space-0750);
   }
   .role {
     margin: 0;
   }
   .role strong {
     color: var(--text);
-    margin-right: 0.25rem;
+    margin-right: var(--space-0250);
   }
   .details {
     display: grid;
     /* The cast scrolls inside the column: its row of cards must not widen the dialog. */
     grid-template-columns: minmax(0, 1fr);
-    gap: 1.1rem;
-    padding-top: 0.5rem;
+    gap: var(--space-1100);
+    padding-top: var(--space-0500);
   }
   .loading {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
+    gap: var(--space-0600);
   }
   .tagline {
     font-family: var(--font-display);
@@ -218,26 +218,26 @@
     list-style: none;
   }
   h3 {
-    margin: 0 0 0.85rem;
+    margin: 0 0 var(--space-0850);
     font-size: var(--fs-sm);
     font-weight: var(--fw-semibold-2);
   }
   .cast {
     list-style: none;
     margin: 0;
-    padding: 0 0 0.25rem;
+    padding: 0 0 var(--space-0250);
     display: grid;
     grid-auto-flow: column;
     grid-auto-columns: 5.5rem;
-    gap: 1rem;
+    gap: var(--space-1000);
     overflow-x: auto;
     scrollbar-width: thin;
   }
   .actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.6rem;
-    padding-top: 0.25rem;
+    gap: var(--space-0600);
+    padding-top: var(--space-0250);
   }
   @media (max-width: 600px) {
     .poster {

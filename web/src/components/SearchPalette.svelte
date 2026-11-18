@@ -261,7 +261,7 @@
   }
   input {
     width: 100%;
-    padding: 1.1rem 1.25rem;
+    padding: var(--space-1100) var(--space-1250);
     font: inherit;
     font-size: var(--fs-xl);
     color: var(--text);
@@ -276,15 +276,15 @@
   ul {
     list-style: none;
     margin: 0;
-    padding: 0.4rem;
+    padding: var(--space-0400);
     overflow-y: auto;
   }
   li[role='option'] {
     display: grid;
     grid-template-columns: 6.5rem 1fr;
     align-items: center;
-    gap: 0.9rem;
-    padding: 0.45rem;
+    gap: var(--space-0900);
+    padding: var(--space-0450);
     border-radius: var(--radius);
     cursor: pointer;
   }
@@ -311,7 +311,7 @@
   }
   .sub {
     display: flex;
-    gap: 0.75rem;
+    gap: var(--space-0750);
   }
   .sub,
   .empty,
@@ -322,6 +322,6 @@
   .empty,
   .tip {
     margin: 0;
-    padding: 1rem 1.25rem;
+    padding: var(--space-1000) var(--space-1250);
   }
 </style>

@@ -61,7 +61,7 @@
   {:else}
     <ul class="review">
       {#each review.data as r (`${r.kind}:${r.itemId ?? r.show}`)}
-        <li>
+        <li class="panel-card">
           <div class="poster">
             <Picture img={r.candidate?.poster ? { src: imageUrl(r.candidate.poster, 'w92') } : null} ratio="2 / 3" label={r.title} />
           </div>
@@ -119,18 +119,14 @@
     margin: 0;
     padding: 0;
     display: grid;
-    gap: 0.5rem;
+    gap: var(--space-0500);
   }
   .review li {
     display: grid;
     grid-template-columns: 2.6rem 1fr auto;
     align-items: center;
-    gap: 0.9rem;
-    padding: 0.65rem 0.85rem;
-    background: var(--surface-panel);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
-    backdrop-filter: var(--glass-blur);
+    gap: var(--space-0900);
+    padding: var(--space-0650) var(--space-0850);
   }
   .review .poster {
     border-radius: var(--radius-sm);
@@ -146,15 +142,15 @@
     font-weight: var(--fw-semibold-2);
   }
   .review .year {
-    margin-left: 0.5rem;
+    margin-left: var(--space-0500);
     font-weight: var(--fw-medium);
   }
   .review p {
-    margin: 0.1rem 0 0;
+    margin: var(--space-0100) 0 0;
     font-size: var(--fs-sm);
   }
   .episodes {
-    margin-top: 0.3rem;
+    margin-top: var(--space-0300);
     font-size: var(--fs-xs-3);
   }
   .episodes summary {
@@ -162,8 +158,8 @@
     cursor: pointer;
   }
   .episodes ul {
-    margin: 0.35rem 0 0;
-    padding-left: 1.1rem;
+    margin: var(--space-0350) 0 0;
+    padding-left: var(--space-1100);
   }
   .episodes code {
     overflow-wrap: anywhere;

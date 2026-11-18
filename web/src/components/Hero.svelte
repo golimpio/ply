@@ -83,13 +83,13 @@
       linear-gradient(90deg, var(--scrim-hero-side) 0%, var(--scrim-hero-side-mid) 45%, transparent 75%);
   }
   .content {
-    padding: calc(var(--bar-h) + 2rem) var(--gutter) clamp(1.5rem, 4vw, 3rem);
+    padding: calc(var(--bar-h) + var(--space-2000)) var(--gutter) clamp(var(--space-1500), 4vw, var(--space-3000));
     max-width: min(68rem, 100%);
     display: grid;
-    gap: 0.85rem;
+    gap: var(--space-0850);
   }
   .back .content {
-    padding-top: calc(var(--bar-h) + 3.75rem);
+    padding-top: calc(var(--bar-h) + var(--space-3750));
   }
   .content :global(h1) {
     font-size: var(--fs-display);

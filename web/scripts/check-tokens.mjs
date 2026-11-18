@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Every colour, font, font size, radius and motion value of the web UI comes from
 // src/styles/tokens.css. This finds the ones that don't: raw colours (hex, rgb()/hsl()/...,
-// named colours), raw font-family and font-size, raw border-radius, and raw durations or easings in
-// transition and animation. It also finds a var() that names a custom property the app never
+// named colours), raw font-family, font-size, line-height, border-radius, fixed spacing lengths,
+// and raw durations or easings in transition and animation. It also finds a var() that names a custom property the app never
 // defines, which the browser drops without a word. It reads the <style> blocks of .svelte files and
 // every .css file under src, except tokens.css itself, and prints file:line for each.
 //
@@ -51,6 +51,8 @@ const SYSTEM = new Set(
     'highlighttext selecteditem selecteditemtext mark marktext graytext accentcolor accentcolortext').split(' '),
 );
 const KEYWORDS = /^(inherit|initial|unset|revert|revert-layer)$/;
+const SPACING = /^(?:row-gap|column-gap|gap|margin(?:-[\w-]+)?|padding(?:-[\w-]+)?)$/;
+const FIXED_LENGTH = /(?<![\w.#-])-?(?:\d*\.)?\d+(?:rem|em|px|ch|ex|cm|mm|in|pt|pc|q|cap|ic|lh|rlh)(?![\w-])/gi;
 const MOTION = /^(transition|animation)(-(duration|timing-function|delay))?$/;
 const EASINGS = /(?<![\w-])(linear|ease|ease-in|ease-out|ease-in-out|step-start|step-end)(?![\w-])|(?<![\w-])(cubic-bezier|steps|linear)\(/i;
 const DURATION = /(?<![\w.-])\d*\.?\d+m?s(?![\w-])/i;
@@ -73,6 +75,11 @@ function problem(prop, value) {
   if (prop === 'font-family') return `raw font-family "${v}": use --font-text, --font-display or --font-mono`;
   if (prop === 'font') return `raw font shorthand "${v}": use font: inherit, or the font-* properties with tokens`;
   if (prop === 'font-size') return `raw font-size "${v}": use a --fs-* token`;
+  if (prop === 'line-height' && bare !== 'normal') return `raw line-height "${v}": use a --lh-* token`;
+  if (SPACING.test(prop)) {
+    const length = [...bare.matchAll(FIXED_LENGTH)].find(([n]) => Number.parseFloat(n) !== 0)?.[0];
+    if (length) return `raw spacing "${length}" in ${prop}: use a --space-* or layout token`;
+  }
   if (/^border(-(top|bottom|start|end)-(left|right|start|end))?-radius$/.test(prop)) {
     const raw = bare.split(/[\s/]+/).filter((t) => t && t !== 'TOKEN' && t !== '0' && !KEYWORDS.test(t));
     return raw.length ? `raw border-radius "${v}": use a --radius-* token` : '';

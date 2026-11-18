@@ -61,7 +61,7 @@
     <Icon name="more" />
   </button>
   {#if open}
-    <div class="list" role="menu" aria-label={label}>
+    <div class="list panel-card" role="menu" aria-label={label}>
       {#each shown as item (item.label)}
         <button
           role="menuitem"
@@ -86,17 +86,12 @@
     top: calc(100% + 0.4rem);
     left: 0;
     min-width: 13rem;
-    padding: 0.35rem;
+    padding: var(--space-0350);
     display: grid;
-    background: var(--surface-panel);
-    /* Unprefixed only: the build adds -webkit- itself, and drops this one when both are written. */
-    backdrop-filter: var(--glass-blur);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
     box-shadow: var(--shadow-menu);
   }
   [role='menuitem'] {
-    padding: 0.6rem 0.8rem;
+    padding: var(--space-0600) var(--space-0800);
     font: inherit;
     text-align: left;
     color: var(--text);

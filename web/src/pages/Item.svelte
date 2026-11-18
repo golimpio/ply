@@ -351,7 +351,7 @@
   <div class="skeleton hero-sk" aria-busy="true"></div>
 {:else}
   <Hero {item} label={item.show || item.title} landing>
-    <BackButton fallback={parent} pending={!item && !detail.error} />
+    <BackButton fallback={parent} />
     {#if isEpisode && item.show}
       <a class="show link" href={href.show(item.show, item.season)}>{meta?.title || item.show}</a>
     {/if}
@@ -525,13 +525,13 @@
     {#if siblings.prev || siblings.next}
       <nav class="siblings" aria-label="Other episodes">
         {#if siblings.prev}
-          <a href={href.item(siblings.prev.id)}>
+          <a class="panel-card" href={href.item(siblings.prev.id)}>
             <span class="muted">Previous</span>
             <span class="truncate">{episodeLabel(siblings.prev.season, siblings.prev.episode)} {epTitle(siblings.prev)}</span>
           </a>
         {/if}
         {#if siblings.next}
-          <a class="next" href={href.item(siblings.next.id)}>
+          <a class="next panel-card" href={href.item(siblings.next.id)}>
             <span class="muted">Next</span>
             <span class="truncate">{episodeLabel(siblings.next.season, siblings.next.episode)} {epTitle(siblings.next)}</span>
           </a>
@@ -690,7 +690,7 @@
   .rating {
     display: inline-flex;
     align-items: center;
-    gap: 0.3rem;
+    gap: var(--space-0300);
     color: var(--text);
     font-weight: var(--fw-semibold-2);
   }
@@ -700,21 +700,21 @@
     color: var(--rating-star);
   }
   .body {
-    padding: 1.25rem var(--gutter) 0;
+    padding: var(--space-1250) var(--gutter) 0;
     max-width: var(--detail-max);
     margin-inline: auto; /* the detail column sits centred on a wide screen */
     display: grid;
-    gap: 2rem;
+    gap: var(--space-2000);
   }
   .body:last-of-type {
     padding-top: var(--shelf-pad-y);
-    padding-bottom: 4rem;
+    padding-bottom: var(--space-4000);
   }
   .notice {
     margin: 0;
   }
   .versions .chip {
-    margin-bottom: 0.6rem;
+    margin-bottom: var(--space-0600);
   }
   .versions ul {
     list-style: none;
@@ -729,17 +729,13 @@
   .siblings {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 1rem;
-    margin-top: 1rem;
+    gap: var(--space-1000);
+    margin-top: var(--space-1000);
   }
   .siblings a {
     display: grid;
-    gap: 0.1rem;
-    padding: 0.85rem 1rem;
-    background: var(--surface-panel);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
-    backdrop-filter: var(--glass-blur);
+    gap: var(--space-0100);
+    padding: var(--space-0850) var(--space-1000);
     transition:
       background var(--motion-hover),
       border-color var(--motion-hover);
@@ -765,27 +761,27 @@
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 0.75rem;
-    padding: 1.1rem 0;
+    gap: var(--space-0750);
+    padding: var(--space-1100) 0;
   }
   .file-title {
     font-size: var(--fs-2xl);
   }
   .file-body {
     display: grid;
-    gap: 1.75rem;
-    padding: 0 0 1.75rem;
+    gap: var(--space-1750);
+    padding: 0 0 var(--space-1750);
   }
   .file-block {
     display: grid;
-    gap: 0.75rem;
+    gap: var(--space-0750);
     min-width: 0;
   }
   /* The heading belongs to the reasons under it: more space over it, less under it. */
   .file-why {
     display: grid;
-    gap: 0.4rem;
-    margin-top: 0.75rem;
+    gap: var(--space-0400);
+    margin-top: var(--space-0750);
   }
   .file-facts th,
   .file-facts td {
@@ -809,7 +805,7 @@
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 0.75rem;
+    gap: var(--space-0750);
   }
   .source {
     margin: 0;
@@ -817,16 +813,16 @@
   }
   .reasons {
     margin: 0;
-    padding-left: 1.2rem;
+    padding-left: var(--space-1200);
     color: var(--text-muted);
     font-size: var(--fs-sm-3);
     line-height: var(--lh-body-2);
   }
   .reasons li + li {
-    margin-top: 0.35rem;
+    margin-top: var(--space-0350);
   }
   .reasons .muted {
-    margin-left: 0.6rem;
+    margin-left: var(--space-0600);
   }
   .wrap {
     overflow-wrap: anywhere;

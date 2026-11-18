@@ -28,7 +28,7 @@
 
 <style>
   .collections {
-    padding-bottom: 2rem;
+    padding-bottom: var(--space-2000);
   }
   .collections-body {
     display: grid;
@@ -44,8 +44,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 1rem;
-    padding: 0.85rem 0;
+    gap: var(--space-1000);
+    padding: var(--space-0850) 0;
     border-bottom: 1px solid var(--line);
     color: var(--text);
     text-decoration: none;

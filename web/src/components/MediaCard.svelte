@@ -145,7 +145,7 @@
     top: 8px;
     left: 8px;
     display: flex;
-    gap: 4px;
+    gap: var(--space-px-4);
   }
   .corner {
     position: absolute;
@@ -153,10 +153,10 @@
     right: 8px;
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--space-px-4);
   }
   .note {
-    padding: 0.15rem 0.5rem;
+    padding: var(--space-0150) var(--space-0500);
     border-radius: var(--radius-pill);
     background: var(--accent);
     color: var(--on-accent);
@@ -177,7 +177,7 @@
     background: var(--accent);
   }
   .title {
-    margin-top: 0.65rem;
+    margin-top: var(--space-0650);
     font-family: var(--font-display);
     font-size: var(--fs-xl);
     font-weight: var(--fw-regular);
@@ -189,8 +189,8 @@
     display: flex;
     align-items: center;
     height: 1lh;
-    gap: 0.55rem;
-    margin-top: 0.15rem;
+    gap: var(--space-0550);
+    margin-top: var(--space-0150);
     color: var(--text-muted);
     font-family: var(--font-mono);
     font-size: var(--fs-xs);
@@ -214,11 +214,11 @@
   .rating :global(.score-chip) {
     display: inline-flex;
     align-items: center;
-    gap: 0.25rem;
+    gap: var(--space-0250);
     border: none;
     background: transparent;
     padding: 0;
-    line-height: 1;
+    line-height: var(--lh-none);
   }
   .rating :global(.glyph) {
     height: 1.15em;

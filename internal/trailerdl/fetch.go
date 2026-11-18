@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"math/rand/v2"
 	"net/http"
 	"os"
@@ -186,9 +187,7 @@ func (f *Fetcher) download(ctx context.Context, s Stream, h http.Header, path st
 		if err != nil {
 			return err
 		}
-		for k, v := range h {
-			req.Header[k] = v
-		}
+		maps.Copy(req.Header, h)
 		req.Header.Set("Range", "bytes="+strconv.FormatInt(from, 10)+"-"+strconv.FormatInt(to, 10))
 		resp, err := c.Do(req)
 		if err != nil {

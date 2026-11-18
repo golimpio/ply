@@ -42,6 +42,10 @@ describe('check-tokens', () => {
     ['a font size', 'font-size: 0.85rem;'],
     ['a font size behind !important', 'font-size: 12px !important;'],
     ['a radius', 'border-radius: 8px;'],
+    ['a line height', 'line-height: 1;'],
+    ['a fixed gap', 'gap: 0.5rem;'],
+    ['fixed padding mixed with a dynamic inset', 'padding-block: calc(env(safe-area-inset-top) + 4px);'],
+    ['a negative margin', 'margin-inline-start: -0.25rem;'],
     ['a radius after a /', 'border-radius: var(--radius) / 50%;'],
     ['a corner radius', 'border-top-left-radius: 50%;'],
     ['a logical corner radius', 'border-start-start-radius: 4px;'],
@@ -66,6 +70,9 @@ describe('check-tokens', () => {
     ['a semantic token', 'background: var(--surface);'],
     ['a token behind !important', 'font-size: var(--fs-sm) !important;'],
     ['an elliptical radius of tokens', 'border-radius: var(--radius) / var(--radius-lg);'],
+    ['viewport-relative layout spacing', 'margin-top: 8vh;'],
+    ['zero spacing', 'gap: 0;'],
+    ['a line-height keyword', 'line-height: normal;'],
     ['an animation name', 'animation-name: ease-spin;'],
   ])('lets through %s', (_, d) => {
     expect(decl(d)).toEqual([]);

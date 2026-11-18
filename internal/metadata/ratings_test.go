@@ -2349,12 +2349,12 @@ func TestRatingsPreferences(t *testing.T) {
 	}
 
 	for name, u := range map[string]Update{
-		"an unknown primary":        {RatingsPrimary: ptrTo("omdb")},
-		"the audience score":        {RatingsPrimary: ptrTo("rt_audience")}, // it cannot be the primary
-		"an empty primary":          {RatingsPrimary: ptrTo("")},
+		"an unknown primary":        {RatingsPrimary: new("omdb")},
+		"the audience score":        {RatingsPrimary: new("rt_audience")}, // it cannot be the primary
+		"an empty primary":          {RatingsPrimary: new("")},
 		"an unknown source":         {RatingsShown: &[]string{"imdb", "omdb"}},
 		"a source twice":            {RatingsShown: &[]string{"imdb", "imdb"}},
-		"a bad list beside a good":  {RatingsPrimary: ptrTo("imdb"), RatingsShown: &[]string{"x"}},
+		"a bad list beside a good":  {RatingsPrimary: new("imdb"), RatingsShown: &[]string{"x"}},
 		"capitals are not a source": {RatingsShown: &[]string{"IMDb"}},
 	} {
 		if err := e.settings.Update(ctx, u); !errors.Is(err, ErrInvalidSetting) {
@@ -2382,8 +2382,6 @@ func TestRatingsPreferences(t *testing.T) {
 		t.Errorf("unreadable stored list = %v", shown)
 	}
 }
-
-func ptrTo[T any](v T) *T { return &v }
 
 func TestRatingsAvailable(t *testing.T) {
 	ctx := t.Context()

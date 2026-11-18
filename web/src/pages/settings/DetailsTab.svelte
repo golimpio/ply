@@ -198,16 +198,16 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 1rem 2rem;
+    gap: var(--space-1000) var(--space-2000);
   }
   .row + .row {
-    padding-top: 1.1rem;
+    padding-top: var(--space-1100);
     border-top: 1px solid var(--line);
   }
   .status .buttons {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.6rem;
+    gap: var(--space-0600);
   }
   @media (max-width: 600px) {
     .row {

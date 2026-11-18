@@ -137,21 +137,21 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 1rem 2rem;
+    gap: var(--space-1000) var(--space-2000);
   }
   .row + .row,
   [role='status'] + .row {
-    padding-top: 1.1rem;
+    padding-top: var(--space-1100);
     border-top: 1px solid var(--line);
   }
   .lock {
-    margin-top: 0.3rem;
+    margin-top: var(--space-0300);
     font-size: var(--fs-sm);
   }
   input {
     flex: none;
     width: 5.5rem;
-    padding: 0.45rem 1rem;
+    padding: var(--space-0450) var(--space-1000);
     text-align: center;
     font-variant-numeric: tabular-nums;
   }

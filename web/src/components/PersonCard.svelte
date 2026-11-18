@@ -42,7 +42,7 @@
     font-size: var(--fs-2xl);
   }
   .name {
-    margin-top: 0.65rem;
+    margin-top: var(--space-0650);
     font-weight: var(--fw-semibold-2);
     font-size: var(--fs-sm-4);
     line-height: var(--lh-snug);

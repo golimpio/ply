@@ -378,7 +378,16 @@ try {
     const rows = await s.page.evaluate(() => [...document.querySelectorAll('.overlay.limit li')].map((li) => li.textContent.replace(/\s+/g, ' ').trim()));
     check('CAP1 lists what is playing', rows.length === 2 && rows[0].includes('Alien') && rows[1].includes('Arrival'), JSON.stringify(rows));
     check('CAP1 with the client and the position', rows[0].includes('192.168.1.20 · Safari') && rows[0].includes('Paused at 12:34') && rows[1].includes('At 1:02:05'), JSON.stringify(rows));
-    check('CAP1 a Stop for each', (await s.page.getByRole('button', { name: /^Stop / }).count()) === 2);
+    const limit = s.page.getByRole('region', { name: "This video can't start yet" });
+    const entries = limit.getByRole('listitem');
+    const stopsPerEntry = await Promise.all((await entries.all()).map((entry) =>
+      entry.getByRole('button', { name: /^Stop / }).count(),
+    ));
+    check('CAP1 a Stop for each', stopsPerEntry.length === 2 && stopsPerEntry.every((count) => count === 1));
+    const borders = await entries.evaluateAll((items) =>
+      items.map((item) => getComputedStyle(item).borderTopWidth),
+    );
+    check('CAP1 each playing entry has its panel border', borders.length === 2 && borders.every((border) => border === '1px'));
     check('CAP1 Try again', await s.page.getByRole('button', { name: 'Try again' }).isVisible());
     check('CAP1 the countdown', /Trying again in [45] s/.test(text), text);
     const link = s.page.getByRole('link', { name: 'Raise the limit in Settings' });

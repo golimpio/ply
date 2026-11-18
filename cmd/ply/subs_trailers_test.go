@@ -16,7 +16,7 @@ func TestSubsFeederSkipsTrailers(t *testing.T) {
 	}
 	f := &subsFeeder{gen: gen, cancelled: map[int64]bool{}}
 	text := []probe.Stream{{Index: 0, Type: "video", Codec: "h264"}, {Index: 1, Type: "subtitle", Codec: "subrip", Language: "eng"}}
-	film := store.Entry{Item: store.Item{ID: 1, Kind: store.KindMovie, Path: "/m/a.mkv"}, Streams: text}
+	film := store.Entry{ID: 1, Kind: store.KindMovie, Path: "/m/a.mkv", Streams: text}
 	if !f.wants(film) {
 		t.Fatal("control: a film with a text track is wanted")
 	}

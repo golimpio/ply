@@ -92,7 +92,7 @@ const settings = {
 
 /**
  * A fresh page on the mocked server (about:blank first: a deep link has an entry before it).
- *   slowItems  ms before the library and the items' details are answered
+ *   beforeItems  promise to wait for before answering library or item requests
  *   shrink     titles the genre has lost by its second fetch, from the top (the library changed)
  *   many       a library of this many films instead (no episodes)
  */
@@ -112,7 +112,7 @@ async function open(browser, opts = {}) {
     if (p === '/api/info') return json(route, { id: 'x', name: 'e2e', version: 'dev', authRequired: false });
     if (p === '/api/receivers') return json(route, []); // no AirPlay targets: the plain picker button
     if (p === '/api/scan') return json(route, { running: false, itemCount: items.length, watching: [] });
-    if (opts.slowItems && p.startsWith('/api/items')) await sleep(opts.slowItems);
+    if (opts.beforeItems && p.startsWith('/api/items')) await opts.beforeItems;
     if (p === '/api/items') return routeItems(route, items);
     if (p === '/api/shows') return json(route, SHOWS);
     if (['/api/continue', '/api/upcoming', '/api/folders', '/api/metadata/review', '/api/sessions'].includes(p)) return json(route, []);
@@ -311,7 +311,7 @@ const scenarios = {
       ['#/item/2001', 'Lost', '#/shows/Lost?s=1'],
       ['#/shows/Lost', 'Shows', '#/shows'],
       ['#/person/31', 'Home', '#/'],
-      ['#/collection/9', 'Home', '#/'],
+      ['#/collection/9', 'Collections', '#/collections'],
       ['#/genre/18', 'Home', '#/'],
     ];
     for (const [from, label, to] of want) {
@@ -555,28 +555,22 @@ const scenarios = {
   // Mutant caught: the Back button of an episode reached by a deep link naming Movies (the film
   // fallback) until the item is in, then its show.
   async "An episode's deep link: Back names its show, never Movies"(browser) {
-    const { context, page } = await open(browser, { slowItems: 800 });
-    await fresh(page, '#/item/2001');
-    const labels = new Set();
-    const boxes = [];
-    let sawPending = false; // the positive control: there was a time the item wasn't known
-    const end = Date.now() + 2500;
-    while (Date.now() < end) {
-      const box = await page.evaluate(() => {
-        const b = document.querySelector('.back')?.getBoundingClientRect();
-        return b ? `${b.left},${b.top},${b.height}` : null;
-      });
-      if (box && boxes.at(-1) !== box) boxes.push(box);
-      sawPending ||= (await page.locator('span.back.pending').count()) > 0;
-      if (await back(page).count()) labels.add(await text(back(page)));
-      if (labels.has('Lost')) break;
-      await sleep(30);
+    const items = Promise.withResolvers();
+    const { context, page } = await open(browser, { beforeItems: items.promise });
+    try {
+      await fresh(page, '#/item/2001');
+      const skeleton = page.locator('.skeleton.hero-sk[aria-busy="true"]');
+      await skeleton.waitFor();
+      check('the episode is still loading', await skeleton.isVisible());
+      check('Back stays out of the loading skeleton', (await back(page).count()) === 0);
+      items.resolve();
+      await back(page).waitFor();
+      check('Back says Lost once the episode is known', (await text(back(page))) === 'Lost', await text(back(page)));
+      check('the Back link points to the correct season', (await back(page).getAttribute('href')) === '#/shows/Lost?s=1');
+    } finally {
+      items.resolve();
+      await context.close();
     }
-    check('the episode was unknown for a while (slow details)', sawPending);
-    const placeKept = boxes.length === 1 && (await page.locator('span.back.pending').count()) === 0;
-    check('Back only ever says Lost', JSON.stringify([...labels]) === '["Lost"]', JSON.stringify([...labels]));
-    check('its place was kept while unknown (no shift)', placeKept, `${JSON.stringify(boxes)}`);
-    await context.close();
   },
 
   // Mutants caught: the Collections tab missing or after Search rather than Series; the tab routing

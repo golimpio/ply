@@ -52,7 +52,7 @@
   .controls {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.75rem 2rem;
-    margin: 1.25rem 0 1.75rem;
+    gap: var(--space-0750) var(--space-2000);
+    margin: var(--space-1250) 0 var(--space-1750);
   }
 </style>

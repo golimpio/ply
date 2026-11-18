@@ -415,17 +415,17 @@
 
 <style>
   .body {
-    padding: 1.25rem var(--gutter) 0;
+    padding: var(--space-1250) var(--gutter) 0;
     max-width: var(--detail-max);
     margin-inline: auto; /* the detail column sits centred on a wide screen */
     display: grid;
-    gap: 2rem;
+    gap: var(--space-2000);
   }
   .cast {
-    padding-bottom: 4rem;
+    padding-bottom: var(--space-4000);
   }
   .body:last-child {
-    padding-bottom: 4rem;
+    padding-bottom: var(--space-4000);
   }
   .notice {
     margin: 0;
@@ -433,7 +433,7 @@
   .order {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: var(--space-0750);
     margin-inline-start: auto;
   }
   .order label {
@@ -447,15 +447,15 @@
     opacity: 0.6;
   }
   .order-msg {
-    margin: 0.75rem 0 0;
+    margin: var(--space-0750) 0 0;
   }
   .season {
     padding-bottom: var(--shelf-pad-y);
   }
   .season-top {
     display: grid;
-    row-gap: 2.5rem;
-    column-gap: 1.25rem;
+    row-gap: var(--space-2500);
+    column-gap: var(--space-1250);
     min-width: 0;
   }
   /* One season: its card beside its name and button, not a row with one card in it. */
@@ -466,35 +466,35 @@
   .solo .season-head {
     flex-direction: column;
     align-items: flex-start;
-    gap: 0.4rem;
+    gap: var(--space-0400);
   }
   .solo .season-head button {
-    margin-top: 0.6rem;
+    margin-top: var(--space-0600);
   }
   /* Beside a lone card the head is a column: the order goes under its button, not across the page. */
   .solo .order {
     margin-inline-start: 0;
-    margin-top: 0.4rem;
+    margin-top: var(--space-0400);
   }
   .season-head {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.5rem 1rem;
+    gap: var(--space-0500) var(--space-1000);
   }
   .season-head h2 {
     margin: 0;
   }
   .mark-error {
-    margin: 0.75rem 0 0;
+    margin: var(--space-0750) 0 0;
   }
   .season-overview {
-    margin: 0.9rem 0 0;
+    margin: var(--space-0900) 0 0;
     max-width: 65ch;
   }
   .episodes {
     list-style: none;
-    margin: 1.25rem 0 0;
+    margin: var(--space-1250) 0 0;
     padding: 0;
     display: grid;
     border-top: 1px solid var(--line);
@@ -502,9 +502,9 @@
   .episodes li {
     display: flex;
     align-items: center;
-    gap: 1rem;
-    padding: 0.9rem 0.5rem;
-    margin: 0 -0.5rem;
+    gap: var(--space-1000);
+    padding: var(--space-0900) var(--space-0500);
+    margin: 0 calc(-1 * var(--space-0500));
     border-bottom: 1px solid var(--line);
     border-radius: var(--radius-item);
     transition: background var(--motion-hover);
@@ -522,7 +522,7 @@
     display: grid;
     grid-template-columns: clamp(8rem, 22vw, 13rem) 1fr;
     align-items: center;
-    gap: 1.25rem;
+    gap: var(--space-1250);
   }
   .ep:focus-visible {
     outline: none;
@@ -567,7 +567,7 @@
   }
   .line {
     display: flex;
-    gap: 0.75rem;
+    gap: var(--space-0750);
     align-items: baseline;
   }
   .num {
@@ -583,13 +583,13 @@
     line-height: var(--lh-tight);
   }
   .small {
-    margin-top: 0.2rem;
-    padding-left: 2.25rem;
+    margin-top: var(--space-0200);
+    padding-left: var(--space-2250);
     font-size: var(--fs-sm);
   }
   .ep-overview {
-    margin: 0.35rem 0 0;
-    padding-left: 2.25rem;
+    margin: var(--space-0350) 0 0;
+    padding-left: var(--space-2250);
     max-width: 70ch;
     color: var(--text-muted);
     font-size: var(--fs-sm-3);
@@ -606,7 +606,7 @@
   @media (max-width: 600px) {
     .ep {
       grid-template-columns: 7.5rem 1fr;
-      gap: 0.8rem;
+      gap: var(--space-0800);
       align-items: start;
     }
     .small,
