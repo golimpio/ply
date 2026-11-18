@@ -39,10 +39,10 @@ struct ShowView: View {
             heroStage(detail)
 
             actionButtons
-                .padding(.horizontal, PlyDesign.contentHorizontalPadding)
 
             if let overview = detail?.overview ?? detail?.meta?.overview {
                 Text(overview).font(.callout).padding(.horizontal)
+                    .detailFrameReporter("showOverview")
             }
 
             HStack {
@@ -123,28 +123,20 @@ struct ShowView: View {
 
     @ViewBuilder
     private var actionButtons: some View {
-        let buttons = HStack(spacing: 12) {
+        DetailActionRow {
             if let titleId = detail?.meta?.id {
                 TrailerButton(titleId: titleId)
             }
 
             DetailActionButton(
-                title: allShowWatched ? "Show watched" : "Mark show watched",
+                title: allShowWatched ? "Series watched" : "Mark series watched",
                 systemImage: allShowWatched ? "checkmark.circle.fill" : "checkmark.circle",
                 prominent: allShowWatched,
                 tint: allShowWatched ? .plyAccent : nil
             ) {
                 setShowWatched(!allShowWatched)
             }
-
-            Spacer()
         }
-
-        #if os(iOS)
-        GlassEffectContainer(spacing: 12) { buttons }
-        #else
-        buttons
-        #endif
     }
 
     private func setShowWatched(_ watched: Bool) {

@@ -4,6 +4,38 @@ import UIKit
 import XCTest
 @testable import Ply
 
+/// Answers every request with a small PNG after a short delay (so concurrent loads overlap) and counts them.
+private nonisolated final class CountingImageURLProtocol: URLProtocol {
+    nonisolated(unsafe) private static var started = 0
+    private static let lock = NSLock()
+    /// How many loads began, read under the same lock the loader threads write under.
+    static var requests: Int { lock.withLock { started } }
+    private static let png: Data = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).pngData { ctx in
+        UIColor.orange.setFill()
+        ctx.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+    }
+
+    static func reset() {
+        lock.withLock { started = 0 }
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        Self.lock.withLock { Self.started += 1 }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) { [self] in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+                                           headerFields: ["Content-Type": "image/png"])!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Self.png)
+            client?.urlProtocolDidFinishLoading(self)
+        }
+    }
+
+    override func stopLoading() {}
+}
+
 nonisolated final class SpatialCanvasTests: XCTestCase {
     func testTonedColorClampsBrightWhiteAndPreservesChroma() {
         let white = PosterPaletteExtractor.tonedColor(red: 255, green: 255, blue: 255)
@@ -62,20 +94,42 @@ nonisolated final class SpatialCanvasTests: XCTestCase {
         XCTAssertEqual(PosterPalette.fallback.meshColors.count, 9)
     }
 
+    /// Home's backdrop starts in the colours it last showed, so a cold launch is not a dark screen while the
+    /// library and the first poster load over the network.
+    func testHomePaletteSurvivesARelaunch() throws {
+        let suite = "ply.tests.palette.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        XCTAssertEqual(PosterPalette.lastShown(in: defaults), .fallback, "A first launch starts from the fallback")
+        let shown = PosterPalette(
+            topLeft: PaletteColor(r: 0.4, g: 0.2, b: 0.1),
+            topRight: PaletteColor(r: 0.3, g: 0.3, b: 0.1),
+            bottomLeft: PaletteColor(r: 0.1, g: 0.1, b: 0.2),
+            bottomRight: PaletteColor(r: 0.5, g: 0.2, b: 0.05),
+            center: PaletteColor(r: 0.2, g: 0.15, b: 0.1)
+        )
+        shown.remember(in: defaults)
+        XCTAssertEqual(PosterPalette.lastShown(in: defaults), shown, "The next launch starts in the colours shown last")
+    }
+
+    /// The poster Home shows and the one its backdrop samples are one download: the palette waits on the card's
+    /// own load instead of fetching the same file again beside it.
     @MainActor
-    func testSpatialPortalStateOpenAndDismiss() throws {
-        let json = Data(#"{"id":42,"kind":"movie","title":"Arrival","durationSec":6960}"#.utf8)
-        let item = try JSONDecoder().decode(Item.self, from: json)
-        let state = SpatialPortalState()
+    func testPaletteSamplingSharesThePosterDownload() async throws {
+        CountingImageURLProtocol.reset()
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [CountingImageURLProtocol.self]
+        let pipeline = ImagePipeline(session: URLSession(configuration: config))
+        let url = try XCTUnwrap(URL(string: "http://127.0.0.1:1/art/poster.png"))
 
-        XCTAssertFalse(state.isPresented)
-        state.open(item)
-        XCTAssertTrue(state.isPresented)
-        XCTAssertEqual(state.expandedItem?.id, 42)
+        async let shown = pipeline.image(for: url)
+        async let sampled = pipeline.cgImage(for: url)
+        let (image, cgImage) = await (shown, sampled)
 
-        state.dismiss()
-        XCTAssertFalse(state.isPresented)
-        XCTAssertNil(state.expandedItem)
+        XCTAssertNotNil(image, "Positive control: the card's image loaded")
+        XCTAssertNotNil(cgImage, "Positive control: the palette's image loaded")
+        XCTAssertEqual(CountingImageURLProtocol.requests, 1, "One poster, one download")
     }
 
     func testWrappingFlowLayoutPreservesVariableWidthsAndWrapsRows() {
@@ -181,8 +235,7 @@ nonisolated final class SpatialCanvasTests: XCTestCase {
             ("Film", AnyView(ItemDetailView(id: movie.id, seedItem: movie))),
             ("Episode", AnyView(ItemDetailView(id: episode.id, seedItem: episode))),
             ("Series", AnyView(ShowView(name: "The Artful Dodger"))),
-            ("Collection", AnyView(CollectionView(id: collection.id, name: collection.name, seedCollection: collection))),
-            ("FilmPortal", AnyView(ItemDetailView(id: movie.id, seedItem: movie, onDismissPortal: {})))
+            ("Collection", AnyView(CollectionView(id: collection.id, name: collection.name, seedCollection: collection)))
         ]
 
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)

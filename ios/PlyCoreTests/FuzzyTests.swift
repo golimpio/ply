@@ -176,3 +176,40 @@ private func ids(_ rows: [Item]) -> [Int64] { rows.map(\.id) }
         #expect(ShowOrder.latestAddedAt([try item(1, "Heat", addedAt: 99)]).isEmpty)
     }
 }
+
+@Suite struct SearchHistoryTests {
+    private func makeDefaults() -> (UserDefaults, String) {
+        let suite = "com.ply.tests.search.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        return (defaults, suite)
+    }
+
+    @Test func recordsTrimmedCaseInsensitiveUniqueQueriesCappedAtMax() {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        #expect(SearchHistory.record("   ", defaults: defaults).isEmpty)
+        for q in ["Heat", "Lost", "Dark", "Paris", "Dune", "Moon", "Arrival"] {
+            SearchHistory.record(q, defaults: defaults)
+        }
+        #expect(SearchHistory.load(defaults: defaults).count == SearchHistory.maxCount)
+        #expect(SearchHistory.load(defaults: defaults).first == "Arrival")
+        #expect(!SearchHistory.load(defaults: defaults).contains("Heat"))
+
+        // Re-recording an existing query (different case/whitespace) promotes it without duplicating.
+        SearchHistory.record("  dune  ", defaults: defaults)
+        let list = SearchHistory.load(defaults: defaults)
+        #expect(list.first == "dune")
+        #expect(list.filter { $0.caseInsensitiveCompare("dune") == .orderedSame }.count == 1)
+
+        SearchHistory.remove("DUNE", defaults: defaults)
+        #expect(!SearchHistory.load(defaults: defaults).contains("dune"))
+
+        SearchHistory.clear(defaults: defaults)
+        #expect(SearchHistory.load(defaults: defaults).isEmpty)
+    }
+
+    @Test func searchScopesExcludeGenres() {
+        #expect(SearchScope.allCases.map(\.rawValue) == ["All", "Films", "Series", "People", "Collections"])
+    }
+}

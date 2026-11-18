@@ -93,10 +93,10 @@
     "Choose another server" : {
 
     },
-    "Clear search" : {
+    "Clear" : {
 
     },
-    "Close details" : {
+    "Clear search" : {
 
     },
     "Collections" : {
@@ -126,13 +126,13 @@
     "Device id" : {
 
     },
+    "Dismiss filter menu" : {
+
+    },
     "Downloading subtitles…" : {
 
     },
     "Downloading trailer" : {
-
-    },
-    "Era" : {
 
     },
     "Fast scroll" : {
@@ -142,6 +142,9 @@
 
     },
     "Filter" : {
+
+    },
+    "Find films, series, episodes, people, and collections." : {
 
     },
     "Forget %@?" : {
@@ -156,16 +159,7 @@
     "Forgetting the server removes this device's token; the owner can also revoke it in Settings › Devices." : {
 
     },
-    "From start" : {
-
-    },
     "Genre" : {
-
-    },
-    "Genres" : {
-
-    },
-    "Genres come from the library's metadata. Search above works for everything already." : {
 
     },
     "HDR" : {
@@ -189,22 +183,16 @@
     "Mark season watched" : {
 
     },
-    "Mark show watched" : {
+    "Mark series watched" : {
 
     },
     "More details couldn’t be loaded right now." : {
-
-    },
-    "Movies" : {
 
     },
     "Name" : {
 
     },
     "No %@ collections" : {
-
-    },
-    "No genres yet" : {
 
     },
     "No Subtitles Available" : {
@@ -252,9 +240,6 @@
     "People" : {
 
     },
-    "People come from the titles in your library." : {
-
-    },
     "People search failed: %@" : {
 
     },
@@ -276,10 +261,16 @@
     "Read more" : {
 
     },
+    "Recent Searches" : {
+
+    },
     "Release Era" : {
 
     },
     "Remove %@ filter" : {
+
+    },
+    "Remove %@ from recent searches" : {
 
     },
     "Reset Filters" : {
@@ -288,22 +279,19 @@
     "Resume" : {
 
     },
-    "Resume from %@" : {
-
-    },
     "Search" : {
 
     },
     "Search films" : {
 
     },
-    "Search for a person" : {
-
-    },
-    "Search people" : {
+    "Search in" : {
 
     },
     "Search series" : {
+
+    },
+    "Search your library" : {
 
     },
     "Season" : {
@@ -315,6 +303,9 @@
     "Series" : {
 
     },
+    "Series watched" : {
+
+    },
     "Server" : {
 
     },
@@ -322,12 +313,6 @@
 
     },
     "Show tab labels" : {
-
-    },
-    "Show watched" : {
-
-    },
-    "Shows" : {
 
     },
     "Some of the browse lists could not be loaded" : {
@@ -348,16 +333,13 @@
     "The episodes could not be loaded" : {
 
     },
-    "The search failed: %@" : {
-
-    },
     "This device" : {
 
     },
     "This removes the pairing token stored on this device. You will need a new pairing code to reconnect if authentication is required." : {
 
     },
-    "Titles, shows, episodes, people, genres" : {
+    "Titles, series, episodes, people" : {
 
     },
     "Trailer" : {

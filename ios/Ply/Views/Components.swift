@@ -10,6 +10,8 @@ nonisolated extension Color {
 
 nonisolated enum PlyPreferences {
     static let showTabLabelsKey = "ply.showTabLabels"
+    /// The colours Home's backdrop last showed, so the next launch starts in them (`PosterPalette.lastShown`).
+    static let homePaletteKey = "ply.home.palette"
 
     enum Movies {
         static let sortKey = "ply.movies.sort"
@@ -128,7 +130,25 @@ nonisolated struct PlyLogoPlayShape: Shape {
 /// The ply brand mark (alias to PlyLogo for consistent authentic branding across all views).
 typealias PlyBrand = PlyLogo
 
-/// An inline top search bar used on tvOS where navigation-drawer search is unavailable.
+/// Shared frame reporter used by search layout verification tests.
+nonisolated struct SearchLayoutFramesKey: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, rhs in rhs })
+    }
+}
+
+extension View {
+    func reportSearchFrame(_ key: String) -> some View {
+        overlay {
+            GeometryReader { geo in
+                Color.clear.preference(key: SearchLayoutFramesKey.self, value: [key: geo.frame(in: .global)])
+            }
+        }
+    }
+}
+
+/// An inline search field: the TV's search page, and the Films and Series filters.
 struct PlySearchField: View {
     @Binding var text: String
     var prompt: String
@@ -155,17 +175,21 @@ struct PlySearchField: View {
                     text = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.subheadline)
+                        .font(.system(size: 18, weight: .medium))
                         .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Clear search")
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.leading, 14)
+        .padding(.trailing, text.isEmpty ? 14 : 8)
+        .padding(.vertical, 8)
         #if os(iOS)
-        .plySubtleCapsule(strokeOpacity: 0.14)
+        .frame(minHeight: PlyDesign.iconButtonSize)
+        .plyGlassCapsule(tintOpacity: 0.14, interactive: true)
         #else
         .background(.quaternary, in: .rect(cornerRadius: 12))
         #endif
@@ -245,7 +269,6 @@ enum Route: Hashable {
     case item(Int64)
     case show(String)
     case person(Int64)
-    case people
     case genre(Int64, String)
     case collection(Int64, String)
     case collections(CollectionKindFilter)
@@ -654,7 +677,6 @@ extension View {
             case let .item(id): ItemDetailView(id: id)
             case let .show(name): ShowView(name: name)
             case let .person(id): PersonView(id: id)
-            case .people: PeopleView()
             case let .genre(id, name): GenreView(id: id, name: name)
             case let .collection(id, name): CollectionView(id: id, name: name)
             case let .collections(kind): AllCollectionsView(kind: kind)
@@ -720,6 +742,12 @@ enum Format {
     static func runtime(_ seconds: Double) -> String {
         let minutes = Int((seconds / 60).rounded())
         return minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : "\(minutes)m"
+    }
+
+    /// "88m left", "123m left": what is left of a play in whole minutes, rounded up so a few seconds
+    /// still read as "1m left" rather than nothing.
+    static func timeLeft(_ seconds: Double) -> String {
+        "\(max(1, Int((seconds / 60).rounded(.up))))m left"
     }
 
     /// "1:02:03", "24:13".
@@ -934,7 +962,7 @@ struct Shelf<Content: View, Trailing: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: PlyDesign.sectionHeaderSpacing) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -1051,18 +1079,20 @@ struct EpisodesFailure: View {
 // MARK: - Glass Surfaces, Play & Close Controls
 
 extension View {
-    @ViewBuilder func plyGlassCircle(tintOpacity: Double = 0.18) -> some View {
+    /// A glass circle, darkened by default; `tint: .plyAccent` with opacity 1 is the selected state, the same
+    /// amber a highlighted `plyControlPill` takes.
+    @ViewBuilder func plyGlassCircle(tintOpacity: Double = 0.18, tint: Color = .black) -> some View {
         #if os(iOS)
         glassEffect(
             tintOpacity > 0
-                ? .regular.tint(Color.black.opacity(tintOpacity)).interactive()
+                ? .regular.tint(tint.opacity(tintOpacity)).interactive()
                 : .regular.interactive(),
             in: .circle
         )
         #else
         self
             .background(.ultraThinMaterial, in: Circle())
-            .background(Color.black.opacity(tintOpacity), in: Circle())
+            .background(tint.opacity(tintOpacity), in: Circle())
             .overlay(Circle().strokeBorder(.white.opacity(0.24), lineWidth: 0.85))
             .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
         #endif
@@ -1174,29 +1204,38 @@ struct HeroPlayButton: View {
     }
 }
 
-/// Standard-sized 44pt-tall glass overlay icon glyph shared by single circular controls and grouped pills.
-struct GlassOverlayIconGlyph: View {
-    let systemImage: String
-    var color: Color = .white
-    var width: CGFloat = PlyDesign.iconButtonSize
-
-    var body: some View {
-        Image(systemName: systemImage)
-            .font(.system(size: PlyDesign.iconButtonGlyphSize, weight: .semibold))
-            .foregroundStyle(color)
-            .frame(width: width, height: PlyDesign.iconButtonSize)
-            .contentShape(Rectangle())
-    }
-}
-
-/// Standard-sized 44×44 glass circular icon label for top-right overlay controls.
+/// Standard glass circular icon label (`width == height`) shared across all single-icon buttons.
 struct GlassCircleIconLabel: View {
     let systemImage: String
     var color: Color = .white
+    var size: CGFloat = PlyDesign.iconButtonSize
+    var glyphSize: CGFloat = PlyDesign.iconButtonGlyphSize
+    var tintOpacity: Double = 0.16
+    /// The chosen one of a group (Search's scope circles): filled in the accent, Control Center style, with a
+    /// dark glyph, since white on the amber falls short of the 3:1 contrast an icon needs.
+    var selected = false
 
     var body: some View {
-        GlassOverlayIconGlyph(systemImage: systemImage, color: color)
-            .plyGlassCircle(tintOpacity: 0.16)
+        GlassCircle(size: size, tintOpacity: tintOpacity, selected: selected) {
+            Image(systemName: systemImage)
+                .font(.system(size: glyphSize, weight: .semibold))
+                .foregroundStyle(selected ? .black : color)
+        }
+    }
+}
+
+/// The glass circle every single control sits in, around any glyph: an icon (`GlassCircleIconLabel`) or a
+/// short text (the player's speed). Selected, it is filled in the accent.
+struct GlassCircle<Content: View>: View {
+    var size: CGFloat = PlyDesign.iconButtonSize
+    var tintOpacity: Double = 0.16
+    var selected = false
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        content()
+            .frame(width: size, height: size)
+            .plyGlassCircle(tintOpacity: selected ? 1 : tintOpacity, tint: selected ? .plyAccent : .black)
             .contentShape(Circle())
     }
 }
@@ -1321,7 +1360,7 @@ struct PlyGlassPillBadge: View {
     }
 }
 
-/// Reusable Liquid Glass detail action button (`Trailer`, `Mark as watched`, `From start`, etc.).
+/// Reusable Liquid Glass detail action button (`Trailer`, `Mark as watched`, `Restart`, etc.).
 struct DetailActionButton: View {
     let title: String
     let systemImage: String
@@ -1337,6 +1376,49 @@ struct DetailActionButton: View {
         .plyGlassButtonStyle(prominent: prominent)
         .buttonBorderShape(.capsule)
         .tint(tint)
+    }
+}
+
+/// Preference key reporting global frames of detail screen hero facts, action row, and leading content below.
+nonisolated struct DetailLayoutFramesKey: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+extension View {
+    func detailFrameReporter(_ id: String) -> some View {
+        background(
+            GeometryReader { geo in
+                Color.clear.preference(key: DetailLayoutFramesKey.self, value: [id: geo.frame(in: .global)])
+            }
+        )
+    }
+}
+
+/// Shared row of `DetailActionButton` controls used under `DetailHeroStage` on film, series, and episode details.
+/// It wraps onto a second line when the buttons outgrow the width (a film with a trailer and a resume point
+/// has four), rather than running off the screen.
+struct DetailActionRow<Content: View>: View {
+    var extraBottomSpacing: CGFloat = PlyDesign.detailRowVerticalPadding
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        let spacing: CGFloat = 12
+        let row = WrappingFlowLayout(spacing: spacing, lineSpacing: spacing) {
+            content()
+        }
+        Group {
+            #if os(iOS)
+            GlassEffectContainer(spacing: spacing) { row }
+            #else
+            row
+            #endif
+        }
+        .padding(.horizontal, PlyDesign.contentHorizontalPadding)
+        .detailFrameReporter("actionRow")
+        .padding(.bottom, extraBottomSpacing)
     }
 }
 
@@ -1371,7 +1453,8 @@ struct DetailRowContent: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        .padding(.vertical, 10)
+        .detailFrameReporter("detailRow.\(title)")
+        .padding(.vertical, PlyDesign.detailRowVerticalPadding)
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
@@ -1443,16 +1526,15 @@ struct DetailBackdropScaffold<Content: View>: View {
             AmbientBackdropWash(path: backdropPath)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: PlyDesign.detailSectionSpacing) {
                     content()
                 }
             }
             .contentMargins(.bottom, bottomClearance, for: .scrollContent)
             #if os(iOS)
             .ignoresSafeArea(edges: .top)
-            .scrollEdgeEffectHidden(true, for: .top)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             #endif
+            .plyNoBlurHeader()
         }
         .coordinateSpace(name: coordinateSpaceName)
         #if os(iOS)
@@ -1472,19 +1554,9 @@ struct DetailHeroStage<Eyebrow: View>: View {
     var coordinateSpaceName: String = PlyDesign.detailCoordinateSpace
     var playAccessibilityLabel: String? = "Play"
     var onPlay: (() -> Void)? = nil
-    var portalNamespace: Namespace.ID? = nil
-    var matchedItemId: Int64? = nil
     @ViewBuilder let eyebrow: () -> Eyebrow
 
     @State private var playImpactTrigger = 0
-
-    private var activeNamespace: Namespace.ID? {
-        matchedItemId == nil ? nil : portalNamespace
-    }
-
-    private func matchedId(_ prefix: String) -> String {
-        matchedItemId.map { "\(prefix)-\($0)" } ?? prefix
-    }
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
@@ -1493,30 +1565,28 @@ struct DetailHeroStage<Eyebrow: View>: View {
                 height: PlyDesign.heroHeight,
                 coordinateSpaceName: coordinateSpaceName
             )
-            .spatialMatchedGeometry(id: matchedId("spatial-art"), in: activeNamespace)
 
             VStack(alignment: .leading, spacing: 6) {
                 eyebrow()
 
                 Text(title)
                     .plyHeroTitleStyle()
-                    .spatialMatchedGeometry(id: matchedId("spatial-title"), in: activeNamespace)
 
                 if !facts.isEmpty {
                     Text(facts.uppercased())
                         .plyMicroSpecsStyle(opacity: 0.75)
                         .lineLimit(1)
+                        .detailFrameReporter("heroFacts")
                 }
             }
             .padding(.horizontal, PlyDesign.contentHorizontalPadding)
-            .padding(.bottom, 16)
+            .padding(.bottom, PlyDesign.detailHeroBottomPadding)
 
             if let onPlay, let playAccessibilityLabel {
                 HeroPlayButton(accessibilityLabel: playAccessibilityLabel) {
                     playImpactTrigger += 1
                     onPlay()
                 }
-                .spatialMatchedGeometry(id: matchedId("spatial-play"), in: activeNamespace)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 .zIndex(10)
             }
@@ -1536,9 +1606,7 @@ extension DetailHeroStage where Eyebrow == EmptyView {
         facts: String,
         coordinateSpaceName: String = PlyDesign.detailCoordinateSpace,
         playAccessibilityLabel: String? = "Play",
-        onPlay: (() -> Void)? = nil,
-        portalNamespace: Namespace.ID? = nil,
-        matchedItemId: Int64? = nil
+        onPlay: (() -> Void)? = nil
     ) {
         self.init(
             backdropPath: backdropPath,
@@ -1547,8 +1615,6 @@ extension DetailHeroStage where Eyebrow == EmptyView {
             coordinateSpaceName: coordinateSpaceName,
             playAccessibilityLabel: playAccessibilityLabel,
             onPlay: onPlay,
-            portalNamespace: portalNamespace,
-            matchedItemId: matchedItemId,
             eyebrow: { EmptyView() }
         )
     }
@@ -1561,7 +1627,21 @@ nonisolated enum PlyDesign {
     static let headerLogoSize: CGFloat = 28.6
     /// Apple HIG standard touch target for top-bar circular icon buttons (`GlassCloseButton`, `GlassIconButton`).
     static let iconButtonSize: CGFloat = 44
+    /// Touch height of one recent-search row on the Search tab; the "Recent Searches" header takes the
+    /// same box so the block keeps a single vertical rhythm from the header down through the results.
+    static let recentSearchRowHeight: CGFloat = 28
+    /// Space the recent-search rhythm adds above and below each row's touch height.
+    static let recentSearchRowPadding: CGFloat = 2
+    /// Vertical space between recent-search rows, and between the header and the first result.
+    static let recentSearchSpacing: CGFloat = 6
+    /// `delete.left` draws inside its layout box with side bearings: at the recent-search row's size its
+    /// ink stops this far short of the trailing edge, so the icon is nudged out to end where `Clear`
+    /// does — and both on the page's trailing content edge.
+    static let recentSearchGlyphNudge: CGFloat = 1.5
     static let iconButtonGlyphSize: CGFloat = 17
+    /// Gap between grouped glass circles (Search's scope buttons): tight enough that five 44pt circles fit
+    /// beside the logo on a 375pt-wide iPhone.
+    static let glassCircleGroupSpacing: CGFloat = 6
     /// Unified size of all hero glass play buttons across Home, Film, Episode, and Series detail screens.
     static let heroPlaySize: CGFloat = 68
     static let heroPlayTouchSize: CGFloat = 76
@@ -1577,8 +1657,19 @@ nonisolated enum PlyDesign {
     static let overlayTopOffset: CGFloat = 8
     static let overlayTrailingPadding: CGFloat = 16
     static let overlayButtonSpacing: CGFloat = 12
-    /// Trailing clearance in `AVPlayerViewController` so our top-right track pill clears AVKit's 44pt Mute circle with `overlayButtonSpacing`.
-    static let playerTrackTrailingOffset: CGFloat = overlayTrailingPadding + iconButtonSize + overlayButtonSpacing
+    /// The player's back and forward 10 s circles, either side of its play/pause (`heroPlaySize`).
+    static let playerSkipSize: CGFloat = 54
+    /// Gap between the player's back, play/pause and forward circles.
+    static let playerTransportSpacing: CGFloat = 36
+    /// How dark the player's top and bottom scrims get behind its controls.
+    static let playerScrimOpacity: Double = 0.55
+    /// Height of the player's scrim gradients, top and bottom.
+    static let playerScrimHeight: CGFloat = 200
+    /// How far a text subtitle sits above the picture's foot, and how far while the controls show.
+    static let playerSubtitleLift: CGFloat = 32
+    static let playerSubtitleLiftWithControls: CGFloat = 132
+    /// How far down a swipe goes before it closes the player.
+    static let playerSwipeToClose: CGFloat = 120
     static let capsuleHorizontalPadding: CGFloat = 12
     static let capsuleVerticalPadding: CGFloat = 6
     static let filterPillHeight: CGFloat = {
@@ -1589,19 +1680,31 @@ nonisolated enum PlyDesign {
         #endif
     }()
     static let contentHorizontalPadding: CGFloat = 16
+    /// Gap between result rows in a search group.
+    static let resultRowSpacing: CGFloat = 4
+    /// Gap between titled sections of a page: Home's shelves, Search's result groups.
+    static let sectionSpacing: CGFloat = 28
+    /// Gap from a section's title to its content.
+    static let sectionHeaderSpacing: CGFloat = 10
+    /// Vertical spacing between sections inside `DetailBackdropScaffold`, plus matching top/bottom edge padding for detail hero & action row.
+    static let detailSectionSpacing: CGFloat = 18
+    static let detailRowVerticalPadding: CGFloat = 10
+    static let detailHeroBottomPadding: CGFloat = 10
     static let deckMetadataSpacing: CGFloat = 12
+    /// Larger breathing gap shared between page dots -> specs and deck telemetry pills -> Continue Watching.
+    static let deckSectionGap: CGFloat = 34
     static let deckCardsVerticalPadding: CGFloat = 16
     static let panelCornerRadius: CGFloat = 14
     static let heroCardCornerRadius: CGFloat = 32
-    /// Standard scroll-content bottom breathing room (native `TabView` manages tab bar safe-area insets on iOS 26).
-    static let standardBottomClearance: CGFloat = 28
+    /// Standard scroll-content bottom breathing room above the floating tab bar on iOS 26+.
+    static let standardBottomClearance: CGFloat = 64
     static let defaultDetailBottomClearance: CGFloat = standardBottomClearance
 }
 
 extension View {
     /// Places `PlyLogo` in the exact same top-left toolbar slot across all main tabs on iOS,
     /// without a pill or full-width header background so content scrolls cleanly underneath.
-    @ViewBuilder func plyMainPageLogo(color: Color = .white, hidden: Bool = false) -> some View {
+    @ViewBuilder func plyMainPageLogo(color: Color = .white) -> some View {
         #if os(iOS)
         self
             .navigationTitle("")
@@ -1610,18 +1713,18 @@ extension View {
                 ToolbarItem(placement: .topBarLeading) {
                     PlyLogo(size: PlyDesign.headerLogoSize, color: color)
                         .shadow(color: .black.opacity(0.35), radius: 4, y: 1)
+                        .reportSearchFrame("navLogo")
                 }
                 .sharedBackgroundVisibility(.hidden)
             }
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .toolbar(hidden ? .hidden : .visible, for: .navigationBar)
         #else
         self
         #endif
     }
 
     /// Places the standard top-right `GlassCloseButton` inside a modal or sheet navigation bar.
-    /// Using `.topBarTrailing` keeps close placement consistent with portal overlays and hides the
+    /// Using `.topBarTrailing` keeps close placement consistent with overlay controls and hides the
     /// extra UIKit system pill background on iOS 26 so there is never a nested double circle.
     @ViewBuilder func plyCloseToolbar(
         accessibilityLabel: String = "Close",
@@ -1639,37 +1742,100 @@ extension View {
         #endif
     }
 
-    /// Applies the standard bottom breathing clearance and disables the iOS 26 top scroll-edge
-    /// header fade when floating chrome sits over scrolling content.
-    @ViewBuilder func plyTabBarBottomClearance(transparentTopEdge: Bool = false) -> some View {
+    /// Disables iOS 26's blurred top scroll-edge header fade and navigation bar background so
+    /// floating chrome stays transparent and consistent across every screen in the app.
+    @ViewBuilder func plyNoBlurHeader() -> some View {
         #if os(iOS)
-        if transparentTopEdge {
-            contentMargins(.bottom, PlyDesign.standardBottomClearance, for: .scrollContent)
-                .scrollEdgeEffectHidden(true, for: .top)
-        } else {
-            contentMargins(.bottom, PlyDesign.standardBottomClearance, for: .scrollContent)
-        }
+        self
+            .scrollEdgeEffectHidden(true, for: .top)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         #else
-        contentMargins(.bottom, PlyDesign.standardBottomClearance, for: .scrollContent)
+        self
         #endif
     }
 
-    /// Unified height, typography, and Liquid Glass capsule styling shared across every sort,
-    /// active filter, and reset control in library filter bars.
-    @ViewBuilder func plyControlPill(highlighted: Bool = false, iconOnly: Bool = false) -> some View {
+    /// Applies the standard bottom breathing clearance and removes the blurred top header fade.
+    @ViewBuilder func plyTabBarBottomClearance() -> some View {
+        safeAreaPadding(.bottom, PlyDesign.standardBottomClearance)
+            .plyNoBlurHeader()
+    }
+
+    /// Tracks vertical scroll travel above resting top inset so floating header controls can scroll out cleanly.
+    @ViewBuilder func plyTrackVerticalScroll(_ offset: Binding<CGFloat>) -> some View {
+        #if os(iOS)
+        onScrollGeometryChange(for: CGFloat.self) { geo in
+            geo.contentOffset.y + geo.contentInsets.top
+        } action: { _, value in
+            offset.wrappedValue = value
+        }
+        #else
         self
-            .font(.footnote.weight(.medium))
-            .foregroundStyle(highlighted ? .white : .primary)
-            .padding(.horizontal, iconOnly ? 0 : PlyDesign.capsuleHorizontalPadding)
-            .frame(minWidth: PlyDesign.filterPillHeight, minHeight: PlyDesign.filterPillHeight, maxHeight: PlyDesign.filterPillHeight)
-            #if os(iOS)
-            .plyInteractiveGlassCapsule(tint: highlighted ? .plyAccent : nil)
-            #else
-            .background(
-                highlighted ? Color.plyAccent.opacity(0.32) : Color.white.opacity(0.12),
-                in: .capsule
-            )
-            .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 0.75))
-            #endif
+        #endif
+    }
+
+    /// Slides a floating top-bar control upward and fades it out as content scrolls up.
+    func plyScrollAway(scrollOffset: CGFloat) -> some View {
+        let travel = max(0, scrollOffset)
+        let visibility = max(0, 1 - Double(travel / (PlyDesign.iconButtonSize * 0.75)))
+        return offset(y: -travel)
+            .opacity(visibility)
+            .allowsHitTesting(visibility > 0.1)
+    }
+
+    /// Displays an inline centered navigation title in the back-button row on iOS that scrolls away
+    /// when scrolling while leaving the Back button pinned in place.
+    @ViewBuilder func plyScrollAwayInlineTitle(_ title: String, scrollOffset: CGFloat) -> some View {
+        #if os(iOS)
+        navigationTitle("")
+            .plyInlineTitle()
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .plyScrollAway(scrollOffset: scrollOffset)
+                }
+                .sharedBackgroundVisibility(.hidden)
+            }
+        #else
+        navigationTitle(title)
+            .plyInlineTitle()
+        #endif
+    }
+
+    /// Unified height, typography, and Liquid Glass capsule (or true circle when `iconOnly`)
+    /// shared across every sort, active filter, and reset control in library filter bars.
+    @ViewBuilder func plyControlPill(highlighted: Bool = false, iconOnly: Bool = false) -> some View {
+        if iconOnly {
+            self
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(highlighted ? .white : .primary)
+                .frame(width: PlyDesign.filterPillHeight, height: PlyDesign.filterPillHeight)
+                #if os(iOS)
+                .plyGlassCircle(tintOpacity: highlighted ? 0.25 : 0.14)
+                #else
+                .background(
+                    highlighted ? Color.plyAccent.opacity(0.32) : Color.white.opacity(0.12),
+                    in: Circle()
+                )
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.16), lineWidth: 0.75))
+                #endif
+                .contentShape(Circle())
+        } else {
+            self
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(highlighted ? .white : .primary)
+                .padding(.horizontal, PlyDesign.capsuleHorizontalPadding)
+                .frame(minWidth: PlyDesign.filterPillHeight, minHeight: PlyDesign.filterPillHeight, maxHeight: PlyDesign.filterPillHeight)
+                #if os(iOS)
+                .plyInteractiveGlassCapsule(tint: highlighted ? .plyAccent : nil)
+                #else
+                .background(
+                    highlighted ? Color.plyAccent.opacity(0.32) : Color.white.opacity(0.12),
+                    in: .capsule
+                )
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 0.75))
+                #endif
+        }
     }
 }

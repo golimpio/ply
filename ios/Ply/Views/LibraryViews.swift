@@ -3,9 +3,10 @@ import SwiftUI
 /// The Spatial Canvas & Peeking Deck spotlighting featured, in-progress, and recent items on Home.
 struct PeekingCanvasDeckView: View {
     let items: [Item]
-    var portalNamespace: Namespace.ID? = nil
-    var expandedItemId: Int64? = nil
-    var onOpenPortal: ((Item) -> Void)? = nil
+    #if os(iOS)
+    /// Where the centre poster's zoom into its film starts (`plyHeroDestination`); nil pushes `Route.item`.
+    var zoomNamespace: Namespace.ID? = nil
+    #endif
     var onActiveItemChange: ((Item) -> Void)? = nil
 
     @Environment(AppModel.self) private var model
@@ -86,6 +87,7 @@ struct PeekingCanvasDeckView: View {
                     if items.count > 1 {
                         deckPageIndicator(active: active)
                             .background(rowFrameReporter("indicator"))
+                            .padding(.bottom, PlyDesign.deckSectionGap - PlyDesign.deckMetadataSpacing)
                     }
 
                     let microSpecs = Format.facts(
@@ -103,11 +105,6 @@ struct PeekingCanvasDeckView: View {
                         .plyHeroTitleStyle(size: 28)
                         .lineLimit(1)
                         .multilineTextAlignment(.center)
-                        .spatialMatchedGeometry(
-                            id: "spatial-title-\(active.id)",
-                            in: portalNamespace,
-                            isSource: expandedItemId != active.id
-                        )
                         .background(rowFrameReporter("title"))
 
                     // Subtle Glass Telemetry Pills (Rating + Technical Badge)
@@ -244,11 +241,6 @@ struct PeekingCanvasDeckView: View {
             .aspectRatio(2 / 3, contentMode: .fill)
             .frame(width: cardWidth, height: cardHeight)
             .clipShape(.rect(cornerRadius: cornerRadius, style: .continuous))
-            .spatialMatchedGeometry(
-                id: "spatial-art-\(item.id)",
-                in: portalNamespace,
-                isSource: expandedItemId != item.id
-            )
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .strokeBorder(
@@ -264,19 +256,23 @@ struct PeekingCanvasDeckView: View {
 
         ZStack {
             #if os(iOS)
-            if let onOpenPortal {
-                Button {
+            if let zoomNamespace {
+                // The centre poster opens its film, zooming out of the card; a side poster comes to the centre.
+                Group {
                     if isCenter {
-                        onOpenPortal(item)
+                        NavigationLink(value: HeroItemRoute(item: item)) { cardArtwork }
                     } else {
-                        withAnimation(.spring(response: 0.38, dampingFraction: 0.84)) {
-                            activeItemId = item.id
+                        Button {
+                            withAnimation(.spring(response: 0.38, dampingFraction: 0.84)) {
+                                activeItemId = item.id
+                            }
+                        } label: {
+                            cardArtwork
                         }
                     }
-                } label: {
-                    cardArtwork
                 }
                 .buttonStyle(.plain)
+                .matchedTransitionSource(id: item.id, in: zoomNamespace)
                 .accessibilityLabel(item.isEpisode ? (item.show ?? item.title) : item.title)
             } else {
                 NavigationLink(value: Route.item(item.id)) { cardArtwork }
@@ -295,11 +291,6 @@ struct PeekingCanvasDeckView: View {
                 let start = item.resumeSec > 0 ? item.resumeSec : 0
                 model.play(PlayRequest(itemId: item.id, startSec: start), in: playbackScene)
             }
-            .spatialMatchedGeometry(
-                id: "spatial-play-\(item.id)",
-                in: portalNamespace,
-                isSource: expandedItemId != item.id
-            )
             .opacity(isCenter ? 1.0 : 0.0)
             .allowsHitTesting(isCenter)
             .accessibilityHidden(!isCenter)
@@ -328,12 +319,12 @@ struct HomeView: View {
     @Environment(Connection.self) private var connection
     @Environment(AppModel.self) private var model
     @Environment(PlaybackScene.self) private var playbackScene
-    @Environment(SpatialPortalState.self) private var portalState: SpatialPortalState?
 
-    @Namespace private var spatialPortalNS
+    @Namespace private var heroZoom
     @State private var activeHeroItem: Item?
-    @State private var backdropPalette: PosterPalette = .fallback
-    @State private var portalFeedbackTrigger = 0
+    @State private var backdropPalette = Self.launchPalette
+    /// The colours the last launch ended on, read once per launch rather than on every rebuild of Home.
+    private static let launchPalette = PosterPalette.lastShown()
 
     private var featuredItems: [Item] {
         let library = connection.library
@@ -355,11 +346,12 @@ struct HomeView: View {
         return list
     }
 
-    private var isPortalOpen: Bool {
+    /// The poster deck: on iOS its centre poster zooms into the film's page.
+    private var deck: some View {
         #if os(iOS)
-        portalState?.expandedItem != nil
+        PeekingCanvasDeckView(items: featuredItems, zoomNamespace: heroZoom) { activeHeroItem = $0 }
         #else
-        false
+        PeekingCanvasDeckView(items: featuredItems) { activeHeroItem = $0 }
         #endif
     }
 
@@ -387,77 +379,48 @@ struct HomeView: View {
                         #endif
 
                         if !featuredItems.isEmpty {
-                            PeekingCanvasDeckView(
-                                items: featuredItems,
-                                portalNamespace: spatialPortalNS,
-                                expandedItemId: portalState?.expandedItem?.id,
-                                onOpenPortal: { item in
-                                    portalFeedbackTrigger += 1
-                                    withAnimation(.spring(response: 0.52, dampingFraction: 0.84)) {
-                                        portalState?.open(item)
-                                    }
-                                },
-                                onActiveItemChange: { item in
-                                    activeHeroItem = item
-                                }
-                            )
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .padding(.top, 4)
+                            deck
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.top, 4)
                         }
                     } shelves: {
                         homeShelves(library)
                     }
                     .padding(.top)
                 }
-                .plyTabBarBottomClearance(transparentTopEdge: true)
-                .blur(radius: isPortalOpen ? 12 : 0)
-                .scaleEffect(isPortalOpen ? 0.94 : 1.0)
-                .opacity(isPortalOpen ? 0.35 : 1.0)
-                .allowsHitTesting(!isPortalOpen)
+                .plyTabBarBottomClearance()
                 .overlay { LibraryStatus(library: library, isEmpty: library.movies.isEmpty && library.shows.isEmpty) }
                 .plyRefreshable { await library.reload() }
-
-                #if os(iOS)
-                if let expanded = portalState?.expandedItem {
-                    ItemDetailView(
-                        id: expanded.id,
-                        seedItem: expanded,
-                        portalNamespace: spatialPortalNS,
-                        onDismissPortal: {
-                            portalFeedbackTrigger += 1
-                            withAnimation(.spring(response: 0.48, dampingFraction: 0.86)) {
-                                portalState?.dismiss()
-                            }
-                        }
-                    )
-                    .transition(.opacity.animation(.easeOut(duration: 0.18)))
-                    .zIndex(10)
-                }
-                #endif
             }
             .task(id: activeArtworkPath) {
-                backdropPalette = await PosterPaletteExtractor.shared.palette(for: connection.api.url(activeArtworkPath))
+                // Until a poster's colours are in, the backdrop keeps the last launch's (`PosterPalette.lastShown`):
+                // no library yet, or artwork that failed to load, must not drop it back to the dark fallback.
+                guard let url = connection.api.url(activeArtworkPath) else { return }
+                let palette = await PosterPaletteExtractor.shared.palette(for: url)
+                // A swipe on to another poster cancels this load: its late colours must not win or be kept.
+                guard !Task.isCancelled, palette != .fallback else { return }
+                backdropPalette = palette
+                palette.remember()
             }
             .task(id: library.generation) {
                 await connection.browse.loadHomeGenreRails()
             }
-            #if os(iOS)
-            .sensoryFeedback(.impact(flexibility: .soft, intensity: 0.8), trigger: portalFeedbackTrigger)
-            .toolbarVisibility(isPortalOpen ? .hidden : .visible, for: .tabBar)
-            #endif
-            .plyMainPageLogo(color: .white, hidden: isPortalOpen)
+            .plyMainPageLogo(color: .white)
             .plyDestinations()
+            #if os(iOS)
+            .plyHeroDestination(zoomingFrom: heroZoom)
+            #endif
         }
     }
 
-    /// Separates the peeking deck from the first shelf using `PlyDesign.deckMetadataSpacing` so
-    /// the gap below the telemetry pills matches the gap between the deck's metadata rows.
+    /// Separates the peeking deck from the first shelf using `PlyDesign.deckSectionGap` so
+    /// the gap below the telemetry pills matches the larger gap between the page indicator and specs.
     @ViewBuilder
     static func feedLayout<Deck: View, Shelves: View>(
         @ViewBuilder deck: () -> Deck,
         @ViewBuilder shelves: () -> Shelves
     ) -> some View {
-        VStack(alignment: .leading, spacing: PlyDesign.deckMetadataSpacing) {
+        VStack(alignment: .leading, spacing: PlyDesign.deckSectionGap) {
             deck()
             shelves()
         }
@@ -465,7 +428,7 @@ struct HomeView: View {
 
     @ViewBuilder
     private func homeShelves(_ library: LibraryModel) -> some View {
-        VStack(alignment: .leading, spacing: 28) {
+        VStack(alignment: .leading, spacing: PlyDesign.sectionSpacing) {
             if !library.continueWatching.isEmpty {
                 Shelf("Continue Watching", subtitle: "Pick up where you left off") {
                     ForEach(library.continueWatching) { item in
@@ -584,6 +547,7 @@ struct MoviesView: View {
     @AppStorage(PlyPreferences.Movies.only4KKey) private var only4K = false
     @AppStorage(PlyPreferences.Movies.onlyHDRKey) private var onlyHDR = false
     @AppStorage(PlyPreferences.Movies.onlyUnwatchedKey) private var onlyUnwatched = false
+    @State private var scrollOffset: CGFloat = 0
 
     private var selectedGenre: String? {
         get { selectedGenreRaw.isEmpty ? nil : selectedGenreRaw }
@@ -696,6 +660,7 @@ struct MoviesView: View {
                     #endif
 
                     LibraryFilterBar(
+                        collectionsKind: .films,
                         sort: $sort,
                         activeFilters: activeFilters,
                         onReset: resetControls
@@ -713,7 +678,8 @@ struct MoviesView: View {
                     }
                     .padding([.horizontal, .top])
                 }
-                .plyTabBarBottomClearance(transparentTopEdge: true)
+                .plyTrackVerticalScroll($scrollOffset)
+                .plyTabBarBottomClearance()
                 .plyFastScrollScrubber(
                     itemCount: filteredMovies.count,
                     labelAt: { label(for: filteredMovies[$0]) },
@@ -739,6 +705,7 @@ struct MoviesView: View {
             .plyRefreshable { await library.reload() }
             .plyLibraryFilterToolbar(
                 collectionsKind: .films,
+                scrollOffset: scrollOffset,
                 sort: $sort,
                 availableGenres: availableGenres,
                 selectedGenre: selectedGenreBinding,
@@ -779,6 +746,7 @@ struct ShowsView: View {
     @AppStorage(PlyPreferences.Shows.sortKey) private var sort: ShowSort = .title
     @AppStorage(PlyPreferences.Shows.decadeKey) private var selectedDecade: DecadeFilter = .all
     @AppStorage(PlyPreferences.Shows.onlyUnwatchedKey) private var onlyUnwatched = false
+    @State private var scrollOffset: CGFloat = 0
 
     private var activeFilters: [LibraryActiveFilter] {
         var items: [LibraryActiveFilter] = []
@@ -864,6 +832,7 @@ struct ShowsView: View {
                     #endif
 
                     LibraryFilterBar(
+                        collectionsKind: .series,
                         sort: $sort,
                         activeFilters: activeFilters,
                         onReset: resetControls
@@ -884,7 +853,8 @@ struct ShowsView: View {
                     }
                     .padding([.horizontal, .top])
                 }
-                .plyTabBarBottomClearance(transparentTopEdge: true)
+                .plyTrackVerticalScroll($scrollOffset)
+                .plyTabBarBottomClearance()
                 .plyFastScrollScrubber(
                     itemCount: filteredShows.count,
                     labelAt: { label(for: filteredShows[$0]) },
@@ -914,6 +884,7 @@ struct ShowsView: View {
             .task(id: library.generation) { if sort == .added { await library.ensureEpisodes() } }
             .plyLibraryFilterToolbar(
                 collectionsKind: .series,
+                scrollOffset: scrollOffset,
                 sort: $sort,
                 selectedDecade: $selectedDecade,
                 attributes: [
@@ -960,8 +931,9 @@ struct LibraryFilterAttribute: Identifiable {
     let isOn: Binding<Bool>
 }
 
-/// Reusable horizontal sort, active-filter, and reset pill bar shared by Films and Series.
+/// Reusable scrollable Collections, sort, active-filter, and reset pill bar shared by Films and Series.
 struct LibraryFilterBar<Sort: LibrarySortOption>: View {
+    let collectionsKind: CollectionKindFilter
     @Binding var sort: Sort
     let activeFilters: [LibraryActiveFilter]
     let onReset: () -> Void
@@ -980,6 +952,15 @@ struct LibraryFilterBar<Sort: LibrarySortOption>: View {
     @ViewBuilder
     var pillsContent: some View {
         filterChipRow {
+            #if os(tvOS)
+            NavigationLink(value: Route.collections(collectionsKind)) {
+                Text("Collections")
+                    .plyControlPill()
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(collectionsKind.rawValue) Collections")
+            #endif
+
             Menu {
                 Picker("Sort", selection: $sort) {
                     ForEach(Sort.allCases) { Text($0.rawValue).tag($0) }
@@ -996,8 +977,13 @@ struct LibraryFilterBar<Sort: LibrarySortOption>: View {
 
             if hasActiveSelection {
                 Button(action: onReset) {
-                    Image(systemName: "arrow.counterclockwise")
-                        .plyControlPill(iconOnly: true)
+                    GlassCircleIconLabel(
+                        systemImage: "arrow.counterclockwise",
+                        color: .primary,
+                        size: PlyDesign.filterPillHeight,
+                        glyphSize: 13,
+                        tintOpacity: 0.14
+                    )
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Reset Filters")
@@ -1006,100 +992,317 @@ struct LibraryFilterBar<Sort: LibrarySortOption>: View {
     }
 }
 
+/// Top-right Collections button matching the Filter button's height and scrolling away as the feed scrolls up.
+struct LibraryCollectionsToolbarButton: View {
+    let kind: CollectionKindFilter
+    let scrollOffset: CGFloat
+
+    var body: some View {
+        NavigationLink(value: Route.collections(kind)) {
+            Text("Collections")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.primary)
+                .padding(.horizontal, PlyDesign.contentHorizontalPadding)
+                .frame(height: PlyDesign.iconButtonSize)
+                #if os(iOS)
+                .plyInteractiveGlassCapsule()
+                #endif
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(kind.rawValue) Collections")
+        .plyScrollAway(scrollOffset: scrollOffset)
+    }
+}
+
 private struct LibraryFilterToolbarModifier<Sort: LibrarySortOption>: ViewModifier {
     let collectionsKind: CollectionKindFilter
+    let scrollOffset: CGFloat
     @Binding var sort: Sort
     let availableGenres: [String]
     let selectedGenre: Binding<String?>?
     @Binding var selectedDecade: DecadeFilter
     let attributes: [LibraryFilterAttribute]
     let hasActiveSelection: Bool
+    var externalMenuOpen: Binding<Bool>? = nil
     let onReset: () -> Void
+
+    @State private var internalMenuOpen = false
+    @State private var filterButtonGlobalFrame: CGRect = .zero
+
+    private var isMenuOpen: Bool {
+        get { externalMenuOpen?.wrappedValue ?? internalMenuOpen }
+        nonmutating set {
+            if let externalMenuOpen {
+                externalMenuOpen.wrappedValue = newValue
+            } else {
+                internalMenuOpen = newValue
+            }
+        }
+    }
+
+    private let dropdownGap: CGFloat = 8
+    private let dropdownWidth: CGFloat = 256
 
     func body(content: Content) -> some View {
         #if os(iOS)
-        content.toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                NavigationLink(value: Route.collections(collectionsKind)) {
-                    Image(systemName: "star.square.on.square")
-                        .font(.system(size: PlyDesign.iconButtonGlyphSize, weight: .semibold))
-                        .foregroundStyle(.primary)
+        content
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    LibraryCollectionsToolbarButton(kind: collectionsKind, scrollOffset: scrollOffset)
                 }
-                .accessibilityLabel("\(collectionsKind.rawValue) Collections")
-            }
+                .sharedBackgroundVisibility(.hidden)
 
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Section("Sort By") {
-                        Picker("Sort", selection: $sort) {
-                            ForEach(Sort.allCases) { Text($0.rawValue).tag($0) }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                            isMenuOpen.toggle()
                         }
+                    } label: {
+                        FilterButtonLabel(hasActive: hasActiveSelection)
                     }
-
-                    if !availableGenres.isEmpty, let selectedGenre {
-                        Section("Genre") {
-                            Picker("Genre", selection: selectedGenre) {
-                                Text("All Genres").tag(String?.none)
-                                ForEach(availableGenres, id: \.self) { genre in
-                                    Text(genre).tag(Optional(genre))
-                                }
-                            }
-                        }
+                    .buttonStyle(.plain)
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+                        filterButtonGlobalFrame = $0
                     }
-
-                    Section("Release Era") {
-                        Picker("Era", selection: $selectedDecade) {
-                            ForEach(DecadeFilter.allCases) { Text($0.rawValue).tag($0) }
-                        }
-                    }
-
-                    if !attributes.isEmpty {
-                        Section("Attributes") {
-                            ForEach(attributes) { attr in
-                                Toggle(attr.title, isOn: attr.isOn)
-                            }
-                        }
-                    }
-
-                    if hasActiveSelection {
-                        Section {
-                            Button(role: .destructive, action: onReset) {
-                                Label("Reset Filters", systemImage: "arrow.counterclockwise")
-                            }
-                        }
-                    }
-                } label: {
-                    FilterButtonLabel(hasActive: hasActiveSelection)
+                    .preference(key: FilterMenuFramesKey.self, value: filterButtonGlobalFrame == .zero ? [:] : ["filterButton": filterButtonGlobalFrame])
+                    .accessibilityLabel("Filter")
                 }
-                .tint(hasActiveSelection ? Color.plyAccent : .primary)
+                .sharedBackgroundVisibility(.hidden)
             }
-        }
+            .overlay(alignment: .topTrailing) {
+                if isMenuOpen {
+                    dropdownOverlay
+                }
+            }
+            .onDisappear { isMenuOpen = false }
         #else
         content
         #endif
     }
+
+    #if os(iOS)
+    @ViewBuilder
+    private var dropdownOverlay: some View {
+        GeometryReader { overlayGeo in
+            let overlayFrame = overlayGeo.frame(in: .global)
+            let topOffset: CGFloat = filterButtonGlobalFrame != .zero
+                ? max(8, filterButtonGlobalFrame.maxY - overlayFrame.minY + dropdownGap)
+                : 56
+            let trailingOffset: CGFloat = filterButtonGlobalFrame != .zero
+                ? max(PlyDesign.contentHorizontalPadding, overlayFrame.maxX - filterButtonGlobalFrame.maxX)
+                : PlyDesign.contentHorizontalPadding
+            let availableHeight: CGFloat = max(240, min(480, overlayFrame.height - topOffset - 24))
+
+            ZStack(alignment: .topTrailing) {
+                Color.black.opacity(0.001)
+                    .contentShape(.rect)
+                    .onTapGesture { closeMenu() }
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityLabel("Dismiss filter menu")
+
+                LibraryFilterDropdownMenu(
+                    sort: $sort,
+                    availableGenres: availableGenres,
+                    selectedGenre: selectedGenre,
+                    selectedDecade: $selectedDecade,
+                    attributes: attributes,
+                    hasActiveSelection: hasActiveSelection,
+                    maxHeight: availableHeight,
+                    width: dropdownWidth,
+                    onReset: {
+                        onReset()
+                        closeMenu()
+                    }
+                )
+                .background(GeometryReader { geo in
+                    Color.clear.preference(key: FilterMenuFramesKey.self, value: ["dropdown": geo.frame(in: .global)])
+                })
+                .padding(.top, topOffset)
+                .padding(.trailing, trailingOffset)
+                .transition(.scale(scale: 0.92, anchor: .topTrailing).combined(with: .opacity))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+        }
+        .ignoresSafeArea()
+    }
+
+    private func closeMenu() {
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+            isMenuOpen = false
+        }
+    }
+    #endif
 }
 
+#if os(iOS)
+/// Preference key reporting global frames for the Filter button, dropdown card, and its section rows.
+nonisolated struct FilterMenuFramesKey: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+/// Liquid Glass dropdown menu anchored below the top-trailing Filter circle button.
+/// Section order: Sort By (through Rating) -> Attributes -> Genre -> Release Era -> Reset.
+struct LibraryFilterDropdownMenu<Sort: LibrarySortOption>: View {
+    @Binding var sort: Sort
+    let availableGenres: [String]
+    let selectedGenre: Binding<String?>?
+    @Binding var selectedDecade: DecadeFilter
+    let attributes: [LibraryFilterAttribute]
+    let hasActiveSelection: Bool
+    var maxHeight: CGFloat = 460
+    var width: CGFloat = 256
+    let onReset: () -> Void
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
+
+        ScrollView {
+            VStack(alignment: .leading, spacing: 2) {
+                sectionHeader("Sort By")
+                ForEach(Sort.allCases) { option in
+                    menuRow(option.rawValue, selected: sort == option) {
+                        sort = option
+                    }
+                }
+
+                if !attributes.isEmpty {
+                    sectionDivider
+                    sectionHeader("Attributes")
+                    ForEach(attributes) { attr in
+                        menuRow(attr.title, selected: attr.isOn.wrappedValue) {
+                            attr.isOn.wrappedValue.toggle()
+                        }
+                    }
+                }
+
+                if !availableGenres.isEmpty, let selectedGenre {
+                    sectionDivider
+                    sectionHeader("Genre")
+                    menuRow("All Genres", selected: selectedGenre.wrappedValue == nil) {
+                        selectedGenre.wrappedValue = nil
+                    }
+                    ForEach(availableGenres, id: \.self) { genre in
+                        menuRow(genre, selected: selectedGenre.wrappedValue == genre) {
+                            selectedGenre.wrappedValue = genre
+                        }
+                    }
+                }
+
+                sectionDivider
+                sectionHeader("Release Era")
+                ForEach(DecadeFilter.allCases) { decade in
+                    menuRow(decade.rawValue, selected: selectedDecade == decade) {
+                        selectedDecade = decade
+                    }
+                }
+
+                if hasActiveSelection {
+                    sectionDivider
+                    Button(role: .destructive, action: onReset) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "arrow.counterclockwise")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(width: 18)
+                            Text("Reset Filters")
+                                .font(.subheadline.weight(.medium))
+                            Spacer(minLength: 0)
+                        }
+                        .foregroundStyle(.red)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 40)
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.vertical, 8)
+        }
+        .scrollIndicators(.hidden)
+        .frame(width: width)
+        .frame(maxHeight: maxHeight)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(.ultraThinMaterial, in: shape)
+        .background(Color.black.opacity(0.42), in: shape)
+        .overlay(shape.strokeBorder(Color.white.opacity(0.16), lineWidth: 0.75))
+        .shadow(color: .black.opacity(0.45), radius: 22, y: 10)
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .textCase(.uppercase)
+            .tracking(0.6)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 14)
+            .padding(.top, 6)
+            .padding(.bottom, 2)
+            .background(GeometryReader { geo in
+                Color.clear.preference(key: FilterMenuFramesKey.self, value: [title: geo.frame(in: .global)])
+            })
+    }
+
+    private var sectionDivider: some View {
+        Divider()
+            .overlay(Color.white.opacity(0.10))
+            .padding(.vertical, 4)
+    }
+
+    private func menuRow(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Color.plyAccent)
+                    .opacity(selected ? 1 : 0)
+                    .frame(width: 18)
+
+                Text(title)
+                    .font(.subheadline.weight(selected ? .semibold : .regular))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14)
+            .frame(minHeight: 38)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .background(GeometryReader { geo in
+            Color.clear.preference(key: FilterMenuFramesKey.self, value: [title: geo.frame(in: .global)])
+        })
+    }
+}
+#endif
+
 extension View {
-    /// Attaches the shared top-right iOS Collections shortcut and Filter menu across library screens.
+    /// Attaches the shared top-right iOS Collections shortcut (scroll-away) and Filter menu across library screens.
     func plyLibraryFilterToolbar<Sort: LibrarySortOption>(
         collectionsKind: CollectionKindFilter,
+        scrollOffset: CGFloat,
         sort: Binding<Sort>,
         availableGenres: [String] = [],
         selectedGenre: Binding<String?>? = nil,
         selectedDecade: Binding<DecadeFilter>,
         attributes: [LibraryFilterAttribute],
         hasActiveSelection: Bool,
+        isMenuOpen: Binding<Bool>? = nil,
         onReset: @escaping () -> Void
     ) -> some View {
         modifier(LibraryFilterToolbarModifier(
             collectionsKind: collectionsKind,
+            scrollOffset: scrollOffset,
             sort: sort,
             availableGenres: availableGenres,
             selectedGenre: selectedGenre,
             selectedDecade: selectedDecade,
             attributes: attributes,
             hasActiveSelection: hasActiveSelection,
+            externalMenuOpen: isMenuOpen,
             onReset: onReset
         ))
     }
@@ -1168,16 +1371,10 @@ struct SettingsView: View {
                     Text("Forgetting the server removes this device's token; the owner can also revoke it in Settings › Devices.")
                 }
             }
+            .plyTabBarBottomClearance()
+            .plyMainPageLogo(color: .primary)
             .navigationTitle("Settings")
             .plyInlineTitle()
-            #if os(iOS)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    PlyLogo(size: PlyDesign.headerLogoSize, color: .primary)
-                }
-                .sharedBackgroundVisibility(.hidden)
-            }
-            #endif
             .confirmationDialog(
                 "Forget \(info.name)?",
                 isPresented: $confirmingDisconnect,
@@ -1235,15 +1432,17 @@ struct ActiveFilterChip: View {
     }
 }
 
-/// Icon-only label for the top-trailing Filter button in library navigation bars.
+/// Circular 44×44 glass label for the top-trailing Filter button in library navigation bars.
 struct FilterButtonLabel: View {
     let hasActive: Bool
 
     var body: some View {
-        Image(systemName: "line.3.horizontal.decrease")
-            .font(.system(size: 15, weight: .semibold))
-            .foregroundStyle(hasActive ? Color.plyAccent : Color.primary)
-            .accessibilityLabel("Filter")
+        GlassCircleIconLabel(
+            systemImage: "line.3.horizontal.decrease",
+            color: hasActive ? .plyAccent : .white,
+            tintOpacity: 0
+        )
+        .accessibilityLabel("Filter")
     }
 }
 

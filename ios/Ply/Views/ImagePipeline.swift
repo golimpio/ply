@@ -24,31 +24,22 @@ final class ImagePipeline {
         #endif
     }
 
-    private static func cacheKey(for url: URL, maxPixelSize: Int?) -> String {
-        if let maxPixelSize, maxPixelSize > 0 {
-            return "\(url.absoluteString)#max=\(maxPixelSize)"
-        }
-        return url.absoluteString
-    }
-
     /// Synchronously returns a decoded image already resident in memory, avoiding placeholder flicker on scroll.
-    func cachedImage(for url: URL?, maxPixelSize: Int? = nil) -> UIImage? {
+    func cachedImage(for url: URL?) -> UIImage? {
         guard let url else { return nil }
-        return cache.object(forKey: Self.cacheKey(for: url, maxPixelSize: maxPixelSize) as NSString)
+        return cache.object(forKey: url.absoluteString as NSString)
     }
 
-    /// Returns a `Sendable` `CGImage`, preferring any full-size cached image before fetching a thumbnail.
-    func cgImage(for url: URL?, maxPixelSize: Int = 160) async -> CGImage? {
-        if let fullHit = cachedImage(for: url, maxPixelSize: nil)?.cgImage {
-            return fullHit
-        }
-        return await image(for: url, maxPixelSize: maxPixelSize)?.cgImage
+    /// A `Sendable` `CGImage` from the same coalesced full-size load `RemoteImage` makes, so a poster shown and
+    /// sampled at once (Home's card and its backdrop palette) downloads once.
+    func cgImage(for url: URL?) async -> CGImage? {
+        await image(for: url)?.cgImage
     }
 
-    /// Fetches, downsamples/decodes off the main actor, and caches the image, coalescing duplicate in-flight loads.
-    func image(for url: URL?, maxPixelSize: Int? = nil) async -> UIImage? {
+    /// Fetches, decodes off the main actor, and caches the image, coalescing duplicate in-flight loads.
+    func image(for url: URL?) async -> UIImage? {
         guard let url else { return nil }
-        let key = Self.cacheKey(for: url, maxPixelSize: maxPixelSize)
+        let key = url.absoluteString
         if let hit = cache.object(forKey: key as NSString) {
             return hit
         }
@@ -58,7 +49,7 @@ final class ImagePipeline {
 
         let session = self.session
         let task = Task<UIImage?, Never> {
-            await Self.fetchAndDecode(url: url, maxPixelSize: maxPixelSize, session: session)
+            await Self.fetchAndDecode(url: url, session: session)
         }
         inFlight[key] = task
         let decoded = await task.value
@@ -79,38 +70,23 @@ final class ImagePipeline {
 
     /// Pre-populates the memory cache (used by tests verifying image rendering without network I/O).
     func seed(_ image: UIImage, for url: URL) {
-        cache.setObject(image, forKey: Self.cacheKey(for: url, maxPixelSize: nil) as NSString)
+        cache.setObject(image, forKey: url.absoluteString as NSString)
     }
 
-    private nonisolated static func fetchAndDecode(
-        url: URL,
-        maxPixelSize: Int?,
-        session: URLSession
-    ) async -> UIImage? {
+    private nonisolated static func fetchAndDecode(url: URL, session: URLSession) async -> UIImage? {
         do {
             let (data, response) = try await session.data(from: url)
             if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                 return nil
             }
-            return decode(data: data, maxPixelSize: maxPixelSize)
+            return decode(data: data)
         } catch {
             return nil
         }
     }
 
-    nonisolated static func decode(data: Data, maxPixelSize: Int?) -> UIImage? {
+    nonisolated static func decode(data: Data) -> UIImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
-        if let maxPixelSize, maxPixelSize > 0 {
-            let options: [CFString: Any] = [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceShouldCacheImmediately: true,
-                kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
-            ]
-            if let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
-                return UIImage(cgImage: cgImage)
-            }
-        }
         let options: [CFString: Any] = [kCGImageSourceShouldCacheImmediately: true]
         guard let cgImage = CGImageSourceCreateImageAtIndex(source, 0, options as CFDictionary) else { return nil }
         return UIImage(cgImage: cgImage)

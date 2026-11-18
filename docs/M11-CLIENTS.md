@@ -405,28 +405,66 @@ started the test host suspended and never resumed it, so a run hung until it tim
   401 goes back to pairing. The app registers as `kind` `ios`, `ipados` or `tvos`, `app` `ply-ios` or `ply-tvos`.
 - **Browsing:** Home (the featured posters fanned like a hand of cards on iPhone and iPad, the ones either side dimmed
   so the centre poster leads, `FanDeck.swift`, and a scrolling row on Apple TV; Continue Watching, Coming Up, the
-  newest films), Movies (sort and 4K/HDR/unwatched filters), Shows (sort by name, newest file, rating or episode
-  count; unwatched only; a whole season or show can be marked watched), and Browse: a search over films, shows,
-  episodes, people, genres and collections,
-  ranked by the web's own matcher (`Core/Fuzzy.swift`, ported from `web/src/lib/fuzzy.ts`: accents folded in
-  both directions, a word start and a run of characters ahead of a scattered match), a People page over the
-  server's search (`GET /api/people?q=`, the only list of people it has), the collections and genres
-  themselves, a title's page (cast and crew, trailers, its other versions, collection links), a person's page
-  (library credits and filmography), a genre's and a collection's titles, a show's page; watched state. The
-  lists load together, except the episodes — the search's, and a show's newest file — which are fetched once,
-  when Browse opens or Shows sorts by newest, never with Home.
-- **Playing:** the `avplayer` profile in AVKit's own player, with `attempt`, a heartbeat every 10 s (`wireless`
-  while AirPlay is on), progress once the stream has reached where it starts, a new session where it was after a
-  404, and an end after a 410. The audio track can be chosen; a text subtitle is drawn from its WebVTT, a bitmap one
-  burned in (`subtitleIndex`); a text subtitle still downloading says so, and one that failed says that. An
-  episode that ends starts the next distinct episode (several files of one episode count once), and the lock
-  screen and remote controls show the play and act on it.
+  newest films; its backdrop takes its colours from the centred poster, sampled from the card's own download, and
+  each launch starts in the colours the last one showed, `PosterPalette.lastShown`), Films (sort,
+  genre/era/4K/HDR/unwatched filters, top-right Collections shortcut, and a circular Filter dropdown below the
+  button with Attributes just below Rating and above Genre), Series (sort by name, newest file, rating or episode
+  count; unwatched only;
+  top-right Collections shortcut; a whole season or show can be marked watched), and the iOS `Search` tab: the
+  system search tab (`Tab(role: .search)` with `.tabViewSearchActivation(.searchTabSelection)`), so the running iOS
+  decides how it is drawn (a detached glass circle or a tab in the bar), keeps it on screen while the bar is
+  minimized, focuses the field when the tab is selected and returns to the previous tab when search is dismissed.
+  Its page (`SearchTabView`) uses the system's own field (`.searchable`) and keeps the `PlyLogo` in the main pages'
+  `plyMainPageLogo` slot, in the bar even while searching; with a query, a row of 44pt glass circles, one per
+  `SearchScope`, sits right of the logo (All `list.dash`, Films and Series their tabs' symbols, People `person`,
+  Collections `square.grid.2x2`), the chosen one filled in the accent, Control Center style; result groups sit on
+  Home's shelf rhythm (`PlyDesign.sectionSpacing`, `sectionHeaderSpacing`), and it shows
+  only recent searches while the field is empty (no Genres / People / Collections buttons); those rows keep one
+  vertical rhythm — the ink under "Recent Searches" matches the ink between the results — with `Clear` and each
+  row's `delete.left` ending on the trailing content edge; poster search rows top-align titles by the `6pt` poster
+  corner radius. Home/Films/Series/Settings carry no search bar, and their tab icons are ply's own outline
+  symbols; the search tab's is the standard `magnifyingglass`, titled only when "Show tab labels" is on. Plus
+  `BrowseView` on tvOS: searching over films, shows, episodes,
+  people and collections, ranked by the web's own matcher (`Core/Fuzzy.swift`, ported from `web/src/lib/fuzzy.ts`:
+  accents folded in both directions, a word start and a run of characters ahead of a scattered match), the
+  collections and genres themselves, a title's page (cast and crew, trailers, its other versions, collection links),
+  a person's page (library credits and filmography), a genre's and a collection's titles, a show's page; watched
+  state. The lists load together, except the episodes — the search's, and a show's newest file — which are fetched
+  once, when search opens or Shows sorts by newest, never with Home.
+- **Playing:** the `avplayer` profile, in ply's own player on iPhone and iPad and AVKit's on Apple TV, with
+  `attempt`, a heartbeat every 10 s (`wireless` while AirPlay is on), progress once the stream has reached where
+  it starts, a new session where it was after a 404, and an end after a 410. The audio track can be chosen; a text
+  subtitle is drawn from its WebVTT, a bitmap one burned in (`subtitleIndex`); a text subtitle still downloading
+  says so, and one that failed says that. An episode that ends starts the next distinct episode (several files of
+  one episode count once), and the lock screen and remote controls show the play and act on it.
+- **The player (iOS, `PlayerView.swift`, 2026-11-19):** ply's own controls over an `AVPlayerLayer`, like the TV
+  and Infuse apps, not AVKit's, whose top bar could not be laid out to match the app. Every control is the one
+  44 pt glass circle (`GlassCircleIconLabel`) and they all show and hide together (`PlayerChrome`: a tap toggles,
+  3.5 s of playing hides, a pause or a scrub keeps them up, and with VoiceOver or Switch Control on they stay):
+  - top: close on the leading edge; Picture in Picture and the AirPlay route picker (`AVRoutePickerView`) on the
+    trailing edge, in one row;
+  - centre: back 10 s, play/pause, forward 10 s;
+  - bottom: the title (a film's name, or an episode's code and name) on the leading edge, then speed
+    (0.5×–2×), audio and subtitles (one menu, two sections), and mute on the trailing edge; under them the
+    timeline, a glass capsule with the time played and the time left, scrubbed by dragging anywhere along it.
+  - gestures: a pinch fills the screen or fits the picture; a swipe down closes.
+  The text subtitle is drawn under the controls and moves up while they show.
+- **The remote (iOS, `PlayerRemoteView`):** while the play is on a TV (`isExternalPlaybackActive`), the player's
+  picture gives way to a remote: the poster over its own colours, "Playing on" and the TV's name, the title and
+  its facts line, the timeline, back/play/forward, then speed, audio and subtitles, the TV's volume
+  (`MPVolumeView`) and Stop. It reads a `RemoteTransport` (state, position, commands), which `PlayerTransport`
+  implements for AirPlay today, so a Chromecast session can drive the same screen later. Closing the remote while the
+  TV keeps playing needs a mini-player above the tab bar: not built yet.
 - **AirPlay:** external playback switches to the `airplay` profile when the player's own AirPlay button connects,
   and back when it ends, so a text subtitle is the TV's `subtitleKey` rendition rather than a phone overlay. The
   targets of `GET /api/receivers` whose `base` is set are also offered as "Play on Apple TV", which asks for that
-  profile with `receiver` up front and routes the URLs to that TV's network. (Compiled, not exercised on hardware.)
-- **Picture in Picture:** on iOS. The player leaving the screen for the PiP window is not a close; restoring brings it
-  back, and closing the PiP window ends the play. (Compiled, not exercised here: it needs a device.)
+  profile with `receiver` up front and routes the URLs to that TV's network. A film's page carries that control in
+  its navigation bar's trailing slot, wherever it was opened from: every film opens the same pushed `ItemDetailView`,
+  Home's centre poster included (`HeroItemRoute`, a zoom transition out of the poster), so the page has one set of
+  chrome — back button, AirPlay, the tab bar. (Compiled, not exercised on hardware.)
+- **Picture in Picture:** on iOS, through `AVPictureInPictureController` on the player's layer (from the button, or
+  on its own when the app goes to the background). The player leaving the screen for the PiP window is not a close;
+  restoring brings it back, and closing the PiP window ends the play. (Compiled, not exercised here: it needs a device.)
 - **The feed:** `library` and `commands`, parsed byte by byte off the main actor; closed in the background and
   resumed with `Last-Event-ID`. Remote-control commands are acted on once and acked; the newest seq is remembered
   across launches, so one performed but not acked is not performed again.
@@ -447,7 +485,7 @@ started the test host suspended and never resumed it, so a run hung until it tim
   language needs those moved into the catalog first; the apps are English-only until a language is added. Still to
   come: the VoiceOver audit of every page and the Dynamic Type pass at the largest sizes.
 - **iPad:** several windows at once (the generated scene manifest allows them). `RootView` gives each window its
-  own `PlaybackScene` — its own AVKit presenter and its own hold on the play — while one `AppModel` keeps the single
+  own `PlaybackScene` — its own player presenter and its own hold on the play — while one `AppModel` keeps the single
   connection, feed, remote commands and play; a play started in one window ends the one in another where it was
   shown, and a remote command's play lands in the window that started the last one, or the newest to appear. The
   presenter resolves its window from the scene (`PlaybackScene.windowScene`, handed over by a `WindowSceneReader` in

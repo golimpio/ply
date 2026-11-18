@@ -131,15 +131,36 @@ enum AppTab: Hashable {
         }
     }
 
-    var role: TabRole? {
-        self == .search ? .search : nil
+    private struct IconCacheKey: Hashable {
+        let tab: AppTab
+        let labeled: Bool
+    }
+
+    private static var iconCache: [IconCacheKey: UIImage] = [:]
+
+    /// Locks the tab icon to the exact outline SF Symbol as a template `UIImage` so UIKit's `_UITabButton`
+    /// cannot substitute `.fill` variants on initial render or when toggling `Show tab labels`.
+    func templateIcon(labeled: Bool) -> UIImage {
+        let key = IconCacheKey(tab: self, labeled: labeled)
+        if let cached = Self.iconCache[key] { return cached }
+        let config = UIImage.SymbolConfiguration(pointSize: labeled ? 17 : 19, weight: .medium)
+        guard let symbol = UIImage(systemName: systemImage, withConfiguration: config)?
+            .withTintColor(.black, renderingMode: .alwaysOriginal) else {
+            return UIImage()
+        }
+        let format = UIGraphicsImageRendererFormat.default()
+        format.opaque = false
+        let rendered = UIGraphicsImageRenderer(size: symbol.size, format: format)
+            .image { _ in symbol.draw(in: CGRect(origin: .zero, size: symbol.size)) }
+            .withRenderingMode(.alwaysTemplate)
+        Self.iconCache[key] = rendered
+        return rendered
     }
 }
 
 struct MainTabs: View {
     @AppStorage(PlyPreferences.showTabLabelsKey) private var showTabLabels = false
     @State private var selectedTab: AppTab = .home
-    @State private var portalState = SpatialPortalState()
     @Environment(PlaybackScene.self) private var playbackScene: PlaybackScene?
 
     private var playerShown: Bool { playbackScene?.presentation.shown ?? false }
@@ -150,13 +171,20 @@ struct MainTabs: View {
             tabItem(.films) { MoviesView() }
             tabItem(.series) { ShowsView() }
             tabItem(.settings) { SettingsView() }
-            tabItem(.search) { BrowseView() }
+            // The system's search tab: the running iOS decides where it sits (a detached circle or in the
+            // bar), keeps it on screen when the bar minimizes, and owns the search field.
+            Tab(value: AppTab.search, role: .search) {
+                SearchTabView()
+            } label: {
+                searchLabel
+            }
         }
+        .id(showTabLabels)
         .tabViewStyle(.sidebarAdaptable)
         .tabBarMinimizeBehavior(.onScrollDown)
-        .environment(portalState)
+        // Selecting Search focuses its field; dismissing search returns to the tab it was opened from.
+        .tabViewSearchActivation(.searchTabSelection)
         .allowsHitTesting(!playerShown)
-        .onChange(of: selectedTab) { _, _ in resignKeyboard() }
         .onChange(of: playerShown) { _, shown in if shown { resignKeyboard() } }
     }
 
@@ -164,18 +192,28 @@ struct MainTabs: View {
         _ tab: AppTab,
         @ViewBuilder content: () -> Content
     ) -> some TabContent<AppTab> {
-        Tab(value: tab, role: tab.role) {
+        Tab(value: tab) {
             content()
         } label: {
-            if showTabLabels {
-                Label(tab.title, systemImage: tab.systemImage)
-                    .symbolVariant(.none)
-            } else {
-                Image(systemName: tab.systemImage)
-                    .symbolVariant(.none)
-                    .accessibilityLabel(tab.title)
-            }
+            tabLabel(tab.title, icon: Image(uiImage: tab.templateIcon(labeled: showTabLabels)))
+                .environment(\.symbolVariants, .none)
         }
+    }
+
+    /// A tab's icon, titled only when Settings › Show tab labels is on (the title is always spoken).
+    @ViewBuilder
+    private func tabLabel(_ title: String, icon: Image) -> some View {
+        if showTabLabels {
+            Label { Text(title) } icon: { icon }
+        } else {
+            icon
+                .accessibilityLabel(title)
+        }
+    }
+
+    /// Search keeps the standard search symbol; only ply's own tabs use `templateIcon`.
+    private var searchLabel: some View {
+        tabLabel(AppTab.search.title, icon: Image(systemName: AppTab.search.systemImage))
     }
 
     private func resignKeyboard() {
@@ -184,7 +222,6 @@ struct MainTabs: View {
 }
 #else
 struct MainTabs: View {
-    @State private var portalState = SpatialPortalState()
 
     var body: some View {
         TabView {
@@ -199,7 +236,6 @@ struct MainTabs: View {
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gear") }
         }
-        .environment(portalState)
     }
 }
 #endif

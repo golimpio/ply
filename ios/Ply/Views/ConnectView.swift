@@ -67,6 +67,7 @@ struct ConnectView: View {
                     }
                 }
             }
+            .plyNoBlurHeader()
             .navigationTitle("Connect to ply")
             .disabled(busy)
             .overlay { if busy { ProgressView().controlSize(.large) } }
@@ -133,6 +134,7 @@ struct PairView: View {
                     Button("Use another server") { model.chooseServer() }
                 }
             }
+            .plyNoBlurHeader()
             .navigationTitle("Pair this device")
             .disabled(busy)
             .overlay { if busy { ProgressView().controlSize(.large) } }

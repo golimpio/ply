@@ -35,10 +35,10 @@ import UIKit
     }
 }
 
-/// The window-level half of the player, as a scene needs it: AVKit's own presenter in the app, a
-/// stand-in in a test.
+/// The window-level half of the player, as a scene needs it: `PlayerPresenter` in the app, a stand-in in
+/// a test.
 @MainActor protocol PlaybackPresenting: AnyObject {
-    /// Shows the play over everything in this window, with AVKit's controls and gestures.
+    /// Shows the play over everything in this window, with the player's controls and gestures.
     func present(_ playback: PlaybackController, in windowScene: UIWindowScene?, onDismiss: @escaping () -> Void)
     /// Takes it down; `completion` when it is gone.
     func dismiss(completion: @escaping () -> Void)

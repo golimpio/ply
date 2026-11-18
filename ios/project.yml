@@ -66,6 +66,7 @@ targets:
       - path: Ply/Core/CommandHistory.swift
       - path: Ply/Core/NextEpisode.swift
       - path: Ply/Core/Fuzzy.swift
+      - path: Ply/Core/SearchHistory.swift
       - path: Ply/Core/ShowOrder.swift
       - path: Ply/Core/PeopleQuery.swift
       - path: Ply/Core/PlaybackPresentation.swift

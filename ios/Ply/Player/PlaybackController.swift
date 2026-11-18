@@ -118,6 +118,18 @@ enum PlaybackEnd {
         if armed { player.play() }
     }
 
+    /// Plays at `rate` (1 is normal speed) from now on: a paused play keeps it for when it resumes, and a
+    /// new stream (another audio track, a lost session) starts at it, since `play()` uses `defaultRate`.
+    func setSpeed(_ rate: Float) {
+        player.defaultRate = rate
+        if player.timeControlStatus != .paused { player.rate = rate }
+    }
+
+    /// The URL of one of the play's images (its poster), with its token when the server needs one.
+    func imageURL(_ path: String?) -> URL? {
+        api.url(path)
+    }
+
     func seek(to seconds: Double) {
         guard armed else {
             pendingSeek = max(0, seconds)

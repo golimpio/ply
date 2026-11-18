@@ -4,8 +4,6 @@ import SwiftUI
 struct ItemDetailView: View {
     let id: Int64
     var seedItem: Item? = nil
-    var portalNamespace: Namespace.ID? = nil
-    var onDismissPortal: (() -> Void)? = nil
 
     @Environment(Connection.self) private var connection
     @Environment(AppModel.self) private var model
@@ -16,19 +14,8 @@ struct ItemDetailView: View {
     @State private var audioIndex: Int?
     @State private var subtitle: SubtitleChoice?
     @State private var receivers: [Receiver] = []
-    @State private var portalDragOffset: CGFloat = 0
 
     private var routableReceivers: [Receiver] { receivers.filter(\.canRoute) }
-
-    private var portalDragScale: CGFloat {
-        max(0.84, 1.0 - (max(0, portalDragOffset) / 900))
-    }
-
-    #if os(iOS)
-    private var portalTopInset: CGFloat {
-        playbackScene.windowScene?.windows.first(where: \.isKeyWindow)?.safeAreaInsets.top ?? 0
-    }
-    #endif
 
     var body: some View {
         Group {
@@ -55,6 +42,12 @@ struct ItemDetailView: View {
     private func content(item: Item, detail d: ItemDetail?) -> some View {
         let backdropPath = item.isEpisode ? item.landscapeImage : item.backdrop ?? d?.meta?.backdrop ?? item.art?.backdrop ?? item.poster
 
+        let collections = resolvedCollections(for: d)
+        let versions = (!item.isEpisode ? item.titleId : nil).map { titleId in
+            connection.library.movies.filter { $0.titleId == titleId }
+        } ?? []
+        let hasLeadingDetailBeforeTracks = !collections.isEmpty || versions.count > 1 || d == nil
+
         return DetailBackdropScaffold(
             backdropPath: backdropPath,
             bottomClearance: PlyDesign.defaultDetailBottomClearance
@@ -63,41 +56,21 @@ struct ItemDetailView: View {
 
             // Action Buttons Row: [Trailer] and [Mark as watched] side-by-side
             if d != nil {
-                actionButtons(item)
+                actionButtons(
+                    item,
+                    extraBottomSpacing: hasLeadingDetailBeforeTracks ? PlyDesign.detailRowVerticalPadding : 0
+                )
             }
 
-            if let fraction = item.fraction {
-                VStack(alignment: .leading, spacing: 4) {
-                    ProgressBar(fraction: fraction)
-                    if item.resumeSec > 0 {
-                        Text("Resume from \(Format.clock(item.resumeSec))")
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
-                }
-                .padding(.horizontal)
-            }
-
-            if let collection = d?.meta?.collection, d?.meta?.collections?.isEmpty ?? true {
+            ForEach(collections, id: \.id) { collection in
                 NavigationLink(value: Route.collection(collection.id, collection.name)) {
                     Label(collection.name, systemImage: "rectangle.stack").font(.subheadline)
                 }
                 .padding(.horizontal)
-            } else {
-                ForEach(d?.meta?.collections ?? [], id: \.id) { collection in
-                    NavigationLink(value: Route.collection(collection.id, collection.name)) {
-                        Label(collection.name, systemImage: "rectangle.stack").font(.subheadline)
-                    }
-                    .padding(.horizontal)
-                }
             }
 
-            if !item.isEpisode, let titleId = item.titleId {
-                let versions = connection.library.movies.filter { $0.titleId == titleId }
-                if versions.count > 1 {
-                    versionsSection(versions, currentId: item.id)
-                }
+            if versions.count > 1 {
+                versionsSection(versions, currentId: item.id)
             }
 
             if let d {
@@ -120,26 +93,12 @@ struct ItemDetailView: View {
             DetailCreditShelves(cast: d?.meta?.cast, crew: d?.meta?.crew)
         }
         #if os(iOS)
-        .overlay(alignment: .topTrailing) {
-            if let onDismissPortal {
-                GlassEffectContainer(spacing: PlyDesign.overlayButtonSpacing) {
-                    HStack(spacing: PlyDesign.overlayButtonSpacing) {
-                        if d != nil {
-                            airplayMenu(item)
-                        }
-                        GlassCloseButton(accessibilityLabel: "Close details", action: onDismissPortal)
-                    }
-                }
-                .padding(.top, portalTopInset + PlyDesign.overlayTopOffset)
-                .padding(.trailing, PlyDesign.overlayTrailingPadding)
-            }
-        }
-        .modifier(PortalDragTransformModifier(active: onDismissPortal != nil && portalDragOffset > 0, offset: portalDragOffset, scale: portalDragScale))
         .toolbar {
-            if onDismissPortal == nil, d != nil, !routableReceivers.isEmpty {
+            if d != nil, !routableReceivers.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
-                    airplayMenu(item, glassStyle: false)
+                    airplayMenu(item)
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
         }
         #endif
@@ -150,14 +109,9 @@ struct ItemDetailView: View {
         let title = item.isEpisode
             ? (item.episodeTitle ?? d?.episodeInfo?.name ?? item.title)
             : (d?.meta?.title ?? item.title)
-        let facts = Format.facts(
-            item.year.map(String.init),
-            item.durationSec > 0 ? Format.runtime(item.durationSec) : nil,
-            d?.meta?.certification,
-            (item.rating ?? d?.meta?.rating)?.label
-        )
+        let facts = Self.heroFacts(item: item, detail: d)
 
-        let stage = DetailHeroStage(
+        DetailHeroStage(
             backdropPath: backdropPath,
             title: title,
             facts: facts,
@@ -165,9 +119,7 @@ struct ItemDetailView: View {
             onPlay: {
                 let start = item.resumeSec > 0 ? item.resumeSec : 0
                 play(from: start)
-            },
-            portalNamespace: portalNamespace,
-            matchedItemId: item.id
+            }
         ) {
             if item.isEpisode, let show = item.show {
                 NavigationLink(value: Route.show(show)) {
@@ -177,37 +129,33 @@ struct ItemDetailView: View {
                 }
             }
         }
+    }
 
-        #if os(iOS)
-        if let onDismissPortal {
-            stage.gesture(
-                DragGesture(minimumDistance: 12)
-                    .onChanged { value in
-                        if value.translation.height > 0 {
-                            portalDragOffset = value.translation.height * 0.72
-                        }
-                    }
-                    .onEnded { value in
-                        if value.translation.height > 110 || value.predictedEndTranslation.height > 260 {
-                            onDismissPortal()
-                        } else {
-                            withAnimation(.spring(response: 0.38, dampingFraction: 0.78)) {
-                                portalDragOffset = 0
-                            }
-                        }
-                    }
-            )
-        } else {
-            stage
+    /// The line under the title: year, runtime, certification, rating and, for a play in progress, what is
+    /// left of it ("2023 · 1h 33m · R · Metacritic 80 · 88m left").
+    static func heroFacts(item: Item, detail d: ItemDetail?) -> String {
+        Format.facts(
+            item.year.map(String.init),
+            item.durationSec > 0 ? Format.runtime(item.durationSec) : nil,
+            d?.meta?.certification,
+            (item.rating ?? d?.meta?.rating)?.label,
+            item.resumeSec > 0 ? Format.timeLeft(max(0, item.durationSec - item.resumeSec)) : nil
+        )
+    }
+
+    private func resolvedCollections(for d: ItemDetail?) -> [CollectionRef] {
+        if let collections = d?.meta?.collections, !collections.isEmpty {
+            return collections
         }
-        #else
-        stage
-        #endif
+        if let collection = d?.meta?.collection {
+            return [collection]
+        }
+        return []
     }
 
     @ViewBuilder
-    private func actionButtons(_ item: Item) -> some View {
-        let buttons = HStack(spacing: 12) {
+    private func actionButtons(_ item: Item, extraBottomSpacing: CGFloat) -> some View {
+        DetailActionRow(extraBottomSpacing: extraBottomSpacing) {
             // A film's own; an episode's title is its show's, whose trailer is on the show's page.
             if item.kind == "movie", let titleId = item.titleId {
                 TrailerButton(titleId: titleId)
@@ -222,49 +170,35 @@ struct ItemDetailView: View {
                 setWatched(!item.isWatched)
             }
 
+            // A play in progress can start over; carrying on is the hero's play button, and what is left is in
+            // the facts line.
             if item.resumeSec > 0 {
-                DetailActionButton(title: "From start", systemImage: "arrow.counterclockwise") {
+                DetailActionButton(title: "Restart", systemImage: "arrow.counterclockwise") {
                     play(from: 0)
                 }
+                .detailFrameReporter("restartButton")
             }
-
-            Spacer()
         }
-
-        #if os(iOS)
-        GlassEffectContainer(spacing: 12) { buttons }
-            .padding(.horizontal, PlyDesign.contentHorizontalPadding)
-        #else
-        buttons.padding(.horizontal, PlyDesign.contentHorizontalPadding)
-        #endif
     }
 
     /// Icon-only AirPlay routing menu shown on the top right of item details.
     /// Choosing a receiver starts playback on the server's `airplay` profile (MPEG-TS with burned/rendition
     /// subtitles); the viewer then selects the same TV in the player's AirPlay control.
-    @ViewBuilder
-    private func airplayMenu(_ item: Item, glassStyle: Bool = true) -> some View {
-        if !routableReceivers.isEmpty {
-            Menu {
-                ForEach(routableReceivers) { receiver in
-                    Button {
-                        play(from: item.resumeSec, receiver: receiver)
-                    } label: {
-                        Label(receiver.name, systemImage: "appletv")
-                    }
-                }
-            } label: {
-                if glassStyle {
-                    GlassCircleIconLabel(systemImage: "airplayvideo")
-                } else {
-                    Image(systemName: "airplayvideo")
-                        .font(.system(size: PlyDesign.iconButtonGlyphSize, weight: .semibold))
+    /// Shown only when there are receivers to route to (the toolbar item checks `routableReceivers`).
+    private func airplayMenu(_ item: Item) -> some View {
+        Menu {
+            ForEach(routableReceivers) { receiver in
+                Button {
+                    play(from: item.resumeSec, receiver: receiver)
+                } label: {
+                    Label(receiver.name, systemImage: "appletv")
                 }
             }
-            .buttonStyle(.plain)
-            .contentShape(Circle())
-            .accessibilityLabel("Play on Apple TV")
+        } label: {
+            GlassCircleIconLabel(systemImage: "airplayvideo")
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Play on Apple TV")
     }
 
     private func currentAudioLabel(_ audio: [MediaStream]) -> String {
@@ -464,25 +398,6 @@ struct ItemDetailView: View {
         } catch is CancellationError {
         } catch {
             self.error = error.localizedDescription
-        }
-    }
-}
-
-/// Applies sheet corner rounding, scale, and vertical offset only during an interactive portal pull-to-dismiss gesture,
-/// so resting portal and pushed detail screens share identical top-edge safe-area bleed.
-private struct PortalDragTransformModifier: ViewModifier {
-    let active: Bool
-    let offset: CGFloat
-    let scale: CGFloat
-
-    func body(content: Content) -> some View {
-        if active {
-            content
-                .clipShape(.rect(cornerRadius: 36, style: .continuous))
-                .scaleEffect(scale)
-                .offset(y: offset)
-        } else {
-            content
         }
     }
 }

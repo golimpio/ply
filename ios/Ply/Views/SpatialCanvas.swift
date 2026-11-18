@@ -4,7 +4,7 @@ import ImageIO
 import SwiftUI
 
 /// A single RGB sample in linear-friendly [0, 1] range for `PosterPalette`.
-nonisolated struct PaletteColor: Equatable, Sendable {
+nonisolated struct PaletteColor: Equatable, Sendable, Codable {
     let r: Double
     let g: Double
     let b: Double
@@ -27,7 +27,7 @@ nonisolated struct PaletteColor: Equatable, Sendable {
 }
 
 /// Five-region chromatic palette extracted from a poster or backdrop for `LivingMeshBackdrop`.
-nonisolated struct PosterPalette: Equatable, Sendable {
+nonisolated struct PosterPalette: Equatable, Sendable, Codable {
     let topLeft: PaletteColor
     let topRight: PaletteColor
     let bottomLeft: PaletteColor
@@ -50,6 +50,20 @@ nonisolated struct PosterPalette: Equatable, Sendable {
             bottomLeft.scaled(by: 0.80).color, center.scaled(by: 0.65).color, bottomRight.scaled(by: 0.80).color
         ]
     }
+
+    /// What Home's backdrop showed last time, or `fallback` on a first launch: the backdrop starts in it rather
+    /// than waiting for the library and a poster to load over the network.
+    static func lastShown(in defaults: UserDefaults = .standard) -> PosterPalette {
+        defaults.data(forKey: PlyPreferences.homePaletteKey)
+            .flatMap { try? JSONDecoder().decode(PosterPalette.self, from: $0) } ?? .fallback
+    }
+
+    /// Keeps this palette for the next launch's first frame. Only colours are stored, never the artwork's URL.
+    func remember(in defaults: UserDefaults = .standard) {
+        if let data = try? JSONEncoder().encode(self) {
+            defaults.set(data, forKey: PlyPreferences.homePaletteKey)
+        }
+    }
 }
 
 /// Extracts and caches quadrant `PosterPalette`s from artwork URLs using CoreImage `CIAreaAverage`.
@@ -63,7 +77,7 @@ actor PosterPaletteExtractor {
         guard let url else { return .fallback }
         if let cached = cache[url] { return cached }
 
-        guard let cgImage = await ImagePipeline.shared.cgImage(for: url, maxPixelSize: 160) else {
+        guard let cgImage = await ImagePipeline.shared.cgImage(for: url) else {
             return .fallback
         }
         let extracted = Self.extract(from: cgImage)
@@ -71,9 +85,16 @@ actor PosterPaletteExtractor {
         return extracted
     }
 
+    /// The longest side, in pixels, the palette samples: the poster arrives full size from the shared load, and
+    /// averaging a small copy costs the same colours for a fraction of the work.
+    private static let sampleSide: CGFloat = 160
+
     /// Synchronously samples four quadrants and the center region of `cgImage`.
     nonisolated static func extract(from cgImage: CGImage) -> PosterPalette {
-        let ciImage = CIImage(cgImage: cgImage)
+        let full = CIImage(cgImage: cgImage)
+        let longest = max(full.extent.width, full.extent.height)
+        let scale = longest > sampleSide ? sampleSide / longest : 1
+        let ciImage = full.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         let ext = ciImage.extent
         guard ext.width > 1, ext.height > 1 else { return .fallback }
 
@@ -202,29 +223,21 @@ struct LivingMeshBackdrop: View {
     }
 }
 
-/// Coordinates the in-place Spatial Portal expansion between `HomeView` and `MainTabs` chrome.
-@Observable
-final class SpatialPortalState {
-    var expandedItem: Item?
-    var isPresented: Bool { expandedItem != nil }
-
-    func open(_ item: Item) {
-        expandedItem = item
-    }
-
-    func dismiss() {
-        expandedItem = nil
-    }
+#if os(iOS)
+/// A film opened from Home's poster deck: the same `ItemDetailView` a `Route.item` push shows, reached by a
+/// zoom transition out of the tapped poster (`plyHeroDestination`). It carries the deck's item, so the page
+/// lands on the film itself while its details load, not on a spinner.
+struct HeroItemRoute: Hashable {
+    let item: Item
 }
 
 extension View {
-    /// Conditionally applies `matchedGeometryEffect` when participating in a Spatial Portal transition.
-    @ViewBuilder
-    func spatialMatchedGeometry(id: String, in namespace: Namespace.ID?, isSource: Bool = true) -> some View {
-        if let namespace {
-            matchedGeometryEffect(id: id, in: namespace, isSource: isSource)
-        } else {
-            self
+    /// Pushes `HeroItemRoute` as the shared item page, zooming out of the deck card that carries the same id.
+    func plyHeroDestination(zoomingFrom namespace: Namespace.ID) -> some View {
+        navigationDestination(for: HeroItemRoute.self) { route in
+            ItemDetailView(id: route.item.id, seedItem: route.item)
+                .navigationTransition(.zoom(sourceID: route.item.id, in: namespace))
         }
     }
 }
+#endif
