@@ -90,7 +90,7 @@ func TestWorkerShowsComeFromTVDBAndMoviesFromTMDB(t *testing.T) {
 	}
 
 	// Its artwork is cached under the TVDB tree, from the TVDB image address.
-	for _, f := range []string{"tvdb/w342/banners/posters/81189-10.jpg", "tvdb/w1280/banners/fanart/original/81189-1.jpg", "tmdb/w342/p603.jpg"} {
+	for _, f := range []string{"tvdb/w500/banners/posters/81189-10.jpg", "tvdb/w1280/banners/fanart/original/81189-1.jpg", "tmdb/w500/p603.jpg"} {
 		if _, err := os.Stat(filepath.Join(e.imgDir, filepath.FromSlash(f))); err != nil {
 			t.Errorf("not prefetched: %s", f)
 		}

@@ -796,7 +796,7 @@ func (s *Store) ReviewList(ctx context.Context) (list []ReviewEntry, err error) 
 // Seasons returns the stored seasons of a show with their stored episode counts.
 func (s *Store) Seasons(ctx context.Context, titleID int64) ([]Season, error) {
 	rows, err := s.ro.QueryContext(ctx, `
-		SELECT se.season, se.name, se.overview, se.poster, se.air_date,
+		SELECT se.season, se.name, se.overview, se.poster, se.local_poster, se.air_date,
 			(SELECT COUNT(*) FROM episodes e WHERE e.title_id = se.title_id AND e.season = se.season)
 		FROM seasons se WHERE se.title_id = ? ORDER BY se.season`, titleID)
 	if err != nil {
@@ -806,7 +806,7 @@ func (s *Store) Seasons(ctx context.Context, titleID int64) ([]Season, error) {
 	var out []Season
 	for rows.Next() {
 		var se Season
-		if err := rows.Scan(&se.Number, &se.Name, &se.Overview, &se.Poster, &se.AirDate, &se.EpisodeCount); err != nil {
+		if err := rows.Scan(&se.Number, &se.Name, &se.Overview, &se.Poster, &se.LocalPoster, &se.AirDate, &se.EpisodeCount); err != nil {
 			return nil, err
 		}
 		out = append(out, se)

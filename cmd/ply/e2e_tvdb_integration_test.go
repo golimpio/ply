@@ -282,11 +282,11 @@ func TestEndToEndTVDB(t *testing.T) {
 	}
 
 	// 2. The artwork of the TVDB show is served from the TVDB tree, from the cache.
-	if !strings.HasPrefix(anime.Poster, "/api/images/tvdb/w342/banners/posters/900001-1.jpg") {
+	if !strings.HasPrefix(anime.Poster, "/api/images/tvdb/w500/banners/posters/900001-1.jpg") {
 		t.Fatalf("poster = %q", anime.Poster)
 	}
 	waitFor(t, "the poster is prefetched", 30*time.Second, func() bool {
-		_, err := os.Stat(filepath.Join(data, "images", "tvdb", "w342", "banners", "posters", "900001-1.jpg"))
+		_, err := os.Stat(filepath.Join(data, "images", "tvdb", "w500", "banners", "posters", "900001-1.jpg"))
 		return err == nil
 	})
 	resp, body := c.do("GET", anime.Poster, "", nil)
@@ -294,8 +294,8 @@ func TestEndToEndTVDB(t *testing.T) {
 		resp.Header.Get("Cache-Control") != "public, max-age=31536000, immutable" {
 		t.Errorf("poster = %d %s %q", resp.StatusCode, resp.Header.Get("Content-Type"), body)
 	}
-	if n := tvdb.count("image /img/banners/posters/900001-1_t.jpg"); n != 1 {
-		t.Errorf("the small poster was fetched %d times, want once (the thumbnail, prefetched, then cached)", n)
+	if n := tvdb.count("image /img/banners/posters/900001-1.jpg"); n != 1 {
+		t.Errorf("the poster was fetched %d times, want once (prefetched, then cached)", n)
 	}
 	images := tvdb.count("image ")
 	for _, bad := range []string{"/api/images/tvdb/w342/banners/..%2f..%2fx.jpg", "/api/images/tvdb/w100/banners/posters/900001-1.jpg",

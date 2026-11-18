@@ -291,6 +291,10 @@
     }));
   });
 
+  // The spread's art blocks: half the width beside a companion above 960px, the full width
+  // otherwise (.spread.hero.has-companion) — not the 100vw of a full-bleed hero.
+  const SPREAD_ART_SIZES = '(max-width: 960px) 100vw, 50vw';
+
   // Companion film for the borderless Double Bill Pairing footnote.
   const companion = $derived.by((): MovieCard | undefined => {
     if (!feature) return undefined;
@@ -463,7 +467,7 @@
           </div>
 
           <a class="feature-art" href={href.item(feature.id)} onclick={morph}>
-            <Art item={feature} kind="backdrop" ratio="16 / 9" label={cardTitle(feature)} eager />
+            <Art item={feature} kind="backdrop" ratio="16 / 9" label={cardTitle(feature)} sizes={companion ? SPREAD_ART_SIZES : '100vw'} eager />
           </a>
 
           <div class="feature-copy">
@@ -526,7 +530,7 @@
           </div>
 
           <a class="companion-art" href={href.item(companion.id)} onclick={morph}>
-            <Art item={companion} kind="backdrop" ratio="16 / 9" label={companion.title} />
+            <Art item={companion} kind="backdrop" ratio="16 / 9" label={companion.title} sizes={SPREAD_ART_SIZES} />
           </a>
 
           <div class="companion-body">

@@ -248,7 +248,7 @@ func TestShowFromTVDBHasSourceOrderAndTVDBImageURLs(t *testing.T) {
 	if d.Meta == nil || d.Meta.Source != "tvdb" || d.Meta.EpisodeOrder != "aired" || d.Meta.TVDBID != 900001 || d.Meta.TMDBID != 900101 || d.Meta.ID != titleID {
 		t.Fatalf("meta = %+v", d.Meta)
 	}
-	if want := withTok("/api/images/tvdb/w342/banners/posters/900001-1.jpg"); d.Poster != want {
+	if want := withTok("/api/images/tvdb/w500/banners/posters/900001-1.jpg"); d.Poster != want {
 		t.Errorf("poster = %q, want %q", d.Poster, want)
 	}
 	if want := withTok("/api/images/tvdb/w1280/banners/fanart/original/900001-1.jpg"); d.Backdrop != want {
@@ -295,7 +295,7 @@ func TestPatchTitleEpisodeOrderRemapsTheFiles(t *testing.T) {
 		t.Errorf("TVDB calls = %q", got)
 	}
 	sd := decode[ShowDetail](t, m.get("/api/shows/Test%20Anime"))
-	if sd.Meta.EpisodeOrder != "absolute" || sd.Seasons[0].Poster != withTok("/api/images/tvdb/w342/banners/seasons/900001-abs.jpg") {
+	if sd.Meta.EpisodeOrder != "absolute" || sd.Seasons[0].Poster != withTok("/api/images/tvdb/w500/banners/seasons/900001-abs.jpg") {
 		t.Errorf("show after = %+v / %+v", sd.Meta, sd.Seasons)
 	}
 

@@ -285,7 +285,7 @@ func run() error {
 		roots []string
 	}
 	active.roots = rootPaths(roots)
-	queue = newQueue(queueDeps{store: st, gov: gov, scanner: scanner, worker: worker, art: artGen, subs: subGen, ratings: ratings,
+	queue = newQueue(queueDeps{store: st, gov: gov, scanner: scanner, worker: worker, art: artGen, subs: subGen, images: images, ratings: ratings,
 		roots: func() []string { active.Lock(); defer active.Unlock(); return slices.Clone(active.roots) }, log: log, events: feed})
 	if subGen != nil {
 		subsFeed = newSubsFeeder(st, queue, subGen, log)

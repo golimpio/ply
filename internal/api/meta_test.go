@@ -30,7 +30,7 @@ func TestItemListsCarryMetadata(t *testing.T) {
 		"logo":     movie.Logo,
 	} {
 		want := map[string]string{
-			"poster":   "/api/images/tmdb/w342/p603.jpg",
+			"poster":   "/api/images/tmdb/w500/p603.jpg",
 			"backdrop": "/api/images/tmdb/w1280/b603.jpg",
 			"logo":     "/api/images/tmdb/w500/l603.png",
 		}[field]
@@ -52,7 +52,7 @@ func TestItemListsCarryMetadata(t *testing.T) {
 	ep := byID[m.mkv]
 	if ep.TitleID == nil || *ep.TitleID != m.showTitle || ep.MatchState != "matched" || ep.EpisodeTitle != "Pilot Episode" ||
 		ep.Overview != "The beginning." || ep.Still != withTok("/api/images/tmdb/w500/still2.jpg") ||
-		ep.Poster != withTok("/api/images/tmdb/w342/show.jpg") || !slices.Equal(ep.Genres, []string{"Drama"}) {
+		ep.Poster != withTok("/api/images/tmdb/w500/show.jpg") || !slices.Equal(ep.Genres, []string{"Drama"}) {
 		t.Errorf("episode = %+v", ep)
 	}
 	if ep.Title != "Pilot" { // the file's own title is still the title
@@ -82,7 +82,7 @@ func TestItemListsCarryMetadata(t *testing.T) {
 	// Without a token configured the URLs have none.
 	open := newMetaEnv(t, "")
 	for _, it := range decode[[]ItemSummary](t, open.get("/api/items")) {
-		if it.ID == open.mp4 && it.Poster != "/api/images/tmdb/w342/p603.jpg" {
+		if it.ID == open.mp4 && it.Poster != "/api/images/tmdb/w500/p603.jpg" {
 			t.Errorf("poster without a token = %q", it.Poster)
 		}
 	}
@@ -148,7 +148,7 @@ func TestSidecarArtBeatsTMDBAndEmbeddedCoverComesLast(t *testing.T) {
 		}
 	}
 	read()
-	if got := byID[other.mp4].Poster; got != "/api/images/tmdb/w342/p603.jpg" {
+	if got := byID[other.mp4].Poster; got != "/api/images/tmdb/w500/p603.jpg" {
 		t.Fatalf("movie poster before it has a cover = %q", got)
 	}
 	if err := other.store.SetItemEmbeddedCover(ctx, other.mp4, 3); err != nil {
@@ -158,7 +158,7 @@ func TestSidecarArtBeatsTMDBAndEmbeddedCoverComesLast(t *testing.T) {
 	if e, err := other.store.GetEntry(ctx, other.mp4); err != nil || !strings.HasPrefix(e.LocalPoster, store.EmbeddedPrefix) {
 		t.Fatalf("movie local poster = %q, %v; want an embedded cover", e.LocalPoster, err)
 	}
-	if got := byID[other.mp4].Poster; got != "/api/images/tmdb/w342/p603.jpg" {
+	if got := byID[other.mp4].Poster; got != "/api/images/tmdb/w500/p603.jpg" {
 		t.Errorf("movie poster with an embedded cover = %q; TMDB's ranks above it", got)
 	}
 }
@@ -185,7 +185,7 @@ func TestEachVersionOfAMovieShowsItsOwnSidecarPoster(t *testing.T) {
 	if got, want := byID[m.multi].Backdrop, fmt.Sprintf("/api/images/local/item/%d/backdrop", m.multi); got != want {
 		t.Errorf("second file backdrop = %q, want %q", got, want)
 	}
-	if got := byID[m.mp4].Poster; got != "/api/images/tmdb/w342/p603.jpg" {
+	if got := byID[m.mp4].Poster; got != "/api/images/tmdb/w500/p603.jpg" {
 		t.Errorf("first file poster = %q; it has no sidecar, so TMDB's", got)
 	}
 }
@@ -254,7 +254,7 @@ func TestShowsListAndDetail(t *testing.T) {
 	if sh.Show != "Cool Show" || sh.EpisodeCount != 1 || !slices.Equal(sh.Seasons, []int{1}) || sh.LatestAddedAt <= 0 {
 		t.Errorf("show = %+v", sh)
 	}
-	if sh.TitleID == nil || *sh.TitleID != m.showTitle || sh.Poster != withTok("/api/images/tmdb/w342/show.jpg") ||
+	if sh.TitleID == nil || *sh.TitleID != m.showTitle || sh.Poster != withTok("/api/images/tmdb/w500/show.jpg") ||
 		sh.Backdrop != withTok("/api/images/tmdb/w1280/showb.jpg") || sh.Year == nil || *sh.Year != 2008 || sh.Overview != "A show." ||
 		!slices.Equal(sh.Genres, []string{"Drama"}) || sh.Rating == nil || sh.Rating.Value != 8.9 || sh.MatchState != "matched" || sh.NeedsReview {
 		t.Errorf("show metadata = %+v", sh)
@@ -268,7 +268,7 @@ func TestShowsListAndDetail(t *testing.T) {
 		t.Fatalf("seasons = %+v", d.Seasons)
 	}
 	if se := d.Seasons[0]; se.Season != 1 || se.Name != "The First Season" || se.Overview != "It starts." || se.AirDate != "2008-01-20" ||
-		se.Poster != withTok("/api/images/tmdb/w342/s1.jpg") || se.EpisodeCount != 1 {
+		se.Poster != withTok("/api/images/tmdb/w500/s1.jpg") || se.EpisodeCount != 1 {
 		t.Errorf("season = %+v", se)
 	}
 	// The name is found without regard to case, and 404s are JSON.
@@ -365,7 +365,7 @@ func TestPersonFilmography(t *testing.T) {
 	}
 
 	got := decode[[]PersonFilmographyEntry](t, m.get(fmt.Sprintf("/api/people/%d/filmography", m.personID)))
-	if len(got) != 1 || got[0].Title != "Speed" || got[0].Poster != "/api/images/tmdb/w342/speed.jpg" {
+	if len(got) != 1 || got[0].Title != "Speed" || got[0].Poster != "/api/images/tmdb/w500/speed.jpg" {
 		t.Errorf("filmography = %+v", got)
 	}
 
@@ -413,7 +413,7 @@ func TestGenresTitlesAndCollections(t *testing.T) {
 		return decode[[]TitleCard](t, m.get("/api/titles"+q))
 	}
 	if cards := titles(fmt.Sprintf("?genre=%d", m.genreID)); len(cards) != 1 || cards[0].ID != m.matrixTitle || cards[0].Kind != "movie" ||
-		cards[0].ItemID == nil || *cards[0].ItemID != m.mp4 || cards[0].Poster != withTok("/api/images/tmdb/w342/p603.jpg") {
+		cards[0].ItemID == nil || *cards[0].ItemID != m.mp4 || cards[0].Poster != withTok("/api/images/tmdb/w500/p603.jpg") {
 		t.Errorf("by genre = %+v", cards)
 	}
 	if cards := titles(fmt.Sprintf("?person=%d", m.personID)); len(cards) != 1 || cards[0].ID != m.matrixTitle {
@@ -436,7 +436,7 @@ func TestGenresTitlesAndCollections(t *testing.T) {
 	}
 
 	c := decode[CollectionDetail](t, m.get(fmt.Sprintf("/api/collections/%d", m.collectionID)))
-	if c.ID != m.collectionID || c.Name != "The Matrix Collection" || c.Overview != "Wake up." || c.Poster != withTok("/api/images/tmdb/w342/cp.jpg") ||
+	if c.ID != m.collectionID || c.Name != "The Matrix Collection" || c.Overview != "Wake up." || c.Poster != withTok("/api/images/tmdb/w500/cp.jpg") ||
 		len(c.Titles) != 1 || c.Titles[0].ID != m.matrixTitle {
 		t.Errorf("collection = %+v", c)
 	}
@@ -447,7 +447,7 @@ func TestGenresTitlesAndCollections(t *testing.T) {
 	list := decode[[]CollectionCard](t, m.get("/api/collections"))
 	if len(list) != 1 || list[0].ID != m.collectionID || list[0].Name != "The Matrix Collection" ||
 		list[0].Count != 1 || list[0].MovieCount != 1 || list[0].SeriesCount != 0 ||
-		list[0].Poster != withTok("/api/images/tmdb/w342/cp.jpg") {
+		list[0].Poster != withTok("/api/images/tmdb/w500/cp.jpg") {
 		t.Errorf("collections = %+v", list)
 	}
 

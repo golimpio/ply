@@ -99,6 +99,9 @@ describe('imageSrcset', () => {
     expect(m.imageSrcset('/api/images/tmdb/w342/abc.jpg', ['w92', 'w185'])).toBe(
       `${location.origin}/api/images/tmdb/w92/abc.jpg?token=t 92w, ${location.origin}/api/images/tmdb/w185/abc.jpg?token=t 185w`,
     );
+    expect(m.imageSrcset('/api/images/tmdb/w1280/b.jpg', ['w1280', 'original'])).toBe(
+      `${location.origin}/api/images/tmdb/w1280/b.jpg?token=t 1280w, ${location.origin}/api/images/tmdb/original/b.jpg?token=t 3840w`,
+    );
   });
 
   it('is one candidate for a sidecar image and empty for nothing', () => {

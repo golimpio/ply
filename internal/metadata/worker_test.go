@@ -251,8 +251,8 @@ func TestWorkerMatchesANewMovieAndPrefetchesItsImages(t *testing.T) {
 	if want := []string{`SearchMovies("The Matrix", 1999)`, "Movie(603)"}; !slices.Equal(e.fake.Calls(), want) {
 		t.Errorf("calls = %q, want %q", e.fake.Calls(), want)
 	}
-	// The poster (w342) and the backdrop (w1280) are on disk, nothing else.
-	for _, f := range []string{"tmdb/w342/p603.jpg", "tmdb/w1280/b603.jpg"} {
+	// The poster (w500) and the backdrop (w1280) are on disk, nothing else.
+	for _, f := range []string{"tmdb/w500/p603.jpg", "tmdb/w1280/b603.jpg"} {
 		if _, err := os.Stat(filepath.Join(e.imgDir, f)); err != nil {
 			t.Errorf("not prefetched: %s", f)
 		}
@@ -660,7 +660,7 @@ func TestWorkerMatchesAShowItsSeasonsAndNewSeasonsAtOnce(t *testing.T) {
 		t.Errorf("episodes = %+v, want seasons 1 and 2 only", eps)
 	}
 	// Posters were prefetched for the show, too.
-	if _, err := os.Stat(filepath.Join(e.imgDir, "tmdb", "w342", "bb.jpg")); err != nil {
+	if _, err := os.Stat(filepath.Join(e.imgDir, "tmdb", "w500", "bb.jpg")); err != nil {
 		t.Errorf("show poster not prefetched: %v", err)
 	}
 
@@ -1387,7 +1387,7 @@ func TestWorkerManualMatchDoesNotWaitForImagesOrFailAfterTheyHang(t *testing.T) 
 	if e.imgHits.Load() == 0 {
 		t.Error("the images were never asked for")
 	}
-	if _, err := os.Stat(filepath.Join(e.imgDir, "tmdb/w342/p603.jpg")); err == nil {
+	if _, err := os.Stat(filepath.Join(e.imgDir, "tmdb/w500/p603.jpg")); err == nil {
 		t.Error("an image arrived from a server that hangs")
 	}
 	// Close (what Run does on the way out) ends the background work.
@@ -1408,7 +1408,7 @@ func TestWorkerManualMatchPrefetchesInTheBackground(t *testing.T) {
 	if err := e.w.MatchMovie(e.ctx, id, metadata.Ref{TMDBID: 603}); err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range []string{"tmdb/w342/p603.jpg", "tmdb/w1280/b603.jpg"} {
+	for _, f := range []string{"tmdb/w500/p603.jpg", "tmdb/w1280/b603.jpg"} {
 		deadline := time.Now().Add(5 * time.Second)
 		for time.Now().Before(deadline) {
 			if _, err := os.Stat(filepath.Join(e.imgDir, f)); err == nil {

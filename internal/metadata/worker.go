@@ -562,7 +562,7 @@ func (w *Worker) prefetch(ctx context.Context, in *store.TitleInput) {
 	if w.o.Images == nil {
 		return
 	}
-	for _, x := range []struct{ size, ref string }{{"w342", in.Poster}, {"w1280", in.Backdrop}} {
+	for _, x := range []struct{ size, ref string }{{"w500", in.Poster}, {"w1280", in.Backdrop}} {
 		if ctx.Err() != nil {
 			return
 		}

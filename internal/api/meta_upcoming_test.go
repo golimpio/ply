@@ -97,7 +97,7 @@ func TestUpcomingListsAiringShowsSoonestFirst(t *testing.T) {
 	}
 	for i := range want {
 		tmdb := map[string]int{"Tonight": 104, "Alpha": 103, "Beta": 102, "Zeta": 101}[want[i].Show]
-		want[i].Poster = withTok(fmt.Sprintf("/api/images/tmdb/w342/p%d.jpg", tmdb))
+		want[i].Poster = withTok(fmt.Sprintf("/api/images/tmdb/w500/p%d.jpg", tmdb))
 		want[i].Backdrop = withTok(fmt.Sprintf("/api/images/tmdb/w1280/b%d.jpg", tmdb))
 	}
 	if len(got) != len(want) {
@@ -143,7 +143,7 @@ func TestUpcomingJSONShape(t *testing.T) {
 		t.Errorf("a show with no episode named has nextEpisode: %v", raw[1])
 	}
 	// Without a token configured the image URLs have none.
-	if raw[0]["poster"] != "/api/images/tmdb/w342/p101.jpg" || raw[0]["backdrop"] != "/api/images/tmdb/w1280/b101.jpg" {
+	if raw[0]["poster"] != "/api/images/tmdb/w500/p101.jpg" || raw[0]["backdrop"] != "/api/images/tmdb/w1280/b101.jpg" {
 		t.Errorf("images = %v / %v", raw[0]["poster"], raw[0]["backdrop"])
 	}
 }

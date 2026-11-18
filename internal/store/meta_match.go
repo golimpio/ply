@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -323,11 +324,13 @@ const (
 	ArtSeries = "series"
 )
 
-// LocalArt returns the sidecar artwork path of an item (id = item id) or a
-// show (id = SeriesMatch.ID) for slot "poster", "backdrop" or, for items,
-// "thumb". It returns ErrNotFound when there is none.
+// LocalArt returns the sidecar artwork path of an item (id = item id), a show
+// (id = SeriesMatch.ID) for slot "poster", "backdrop" or, for items, "thumb",
+// or a season (id = title id, slot = the season number). It returns ErrNotFound
+// when there is none.
 func (s *Store) LocalArt(ctx context.Context, kind string, id int64, slot string) (string, error) {
 	var query string
+	args := []any{id}
 	switch {
 	case kind == ArtItem && slot == "poster":
 		query = `SELECT local_poster FROM items WHERE id = ?`
@@ -339,11 +342,18 @@ func (s *Store) LocalArt(ctx context.Context, kind string, id int64, slot string
 		query = `SELECT local_poster FROM series_matches WHERE rowid = ?`
 	case kind == ArtSeries && slot == "backdrop":
 		query = `SELECT local_backdrop FROM series_matches WHERE rowid = ?`
+	case kind == ArtSeason:
+		season, err := strconv.Atoi(slot)
+		if err != nil {
+			return "", ErrNotFound
+		}
+		query = `SELECT local_poster FROM seasons WHERE title_id = ? AND season = ?`
+		args = []any{id, season}
 	default:
 		return "", ErrNotFound
 	}
 	var path string
-	err := s.ro.QueryRowContext(ctx, query, id).Scan(&path)
+	err := s.ro.QueryRowContext(ctx, query, args...).Scan(&path)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && path == "") {
 		return "", ErrNotFound
 	}

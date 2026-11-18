@@ -10,8 +10,10 @@ import (
 )
 
 // Sizes of TMDB images the API links to, per use. (TMDB's own size names.)
+// The poster is w500 so a high-DPI phone (a card ~160pt at 3x ≈ 480px) gets a
+// sharp file; the web rewrites sizes for its own srcset (see web/src/lib/meta.ts).
 const (
-	posterSize   = "w342"
+	posterSize   = "w500"
 	backdropSize = "w1280"
 	logoSize     = "w500"
 	profileSize  = "w185"

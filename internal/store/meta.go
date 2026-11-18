@@ -170,12 +170,13 @@ type Credit struct {
 // Season is one season of a show. Episodes are the fetched episodes of the
 // season; UpsertTitle replaces the season's episodes with them.
 type Season struct {
-	Number   int
-	Name     string
-	Overview string
-	Poster   string
-	AirDate  string
-	Episodes []Episode
+	Number      int
+	Name        string
+	Overview    string
+	Poster      string
+	LocalPoster string // sidecar poster path next to the show, '' = none
+	AirDate     string
+	Episodes    []Episode
 
 	// EpisodeCount is filled by Seasons: the number of stored episodes.
 	EpisodeCount int
@@ -429,9 +430,13 @@ func upsertTitleRow(ctx context.Context, tx *sql.Tx, in *TitleInput, plan *seaso
 	plan.wipe = oldSource == SourceTVDB && source != SourceTVDB
 	plan.oldOrder = oldOrder
 
-	// The text the user can edit stays when the title is locked. Images are
-	// never blanked: a source that has none right now must not remove the ones
-	// we have. A TVDB title that TVDB gives no TMDB id keeps the one it has.
+	// The text the user can edit stays when the title is locked. Artwork is
+	// pinned: once a poster, backdrop or logo is set, a refresh keeps it (the
+	// provider's current one fills it only while it is empty), so a rescan or a
+	// metadata refresh never swaps the picture the library shows. A different
+	// title is a different row, inserted with its own art; a sidecar that comes
+	// or goes is served over this ref (see pickArt), not stored here. Images are
+	// never blanked. A TVDB title that TVDB gives no TMDB id keeps the one it has.
 	idSet := `tmdb_id = ?, tvdb_id = ?`
 	if source == SourceTVDB {
 		idSet = `tmdb_id = COALESCE(?, tmdb_id), tvdb_id = ?`
@@ -446,9 +451,9 @@ func upsertTitleRow(ctx context.Context, tx *sql.Tx, in *TitleInput, plan *seaso
 			tagline    = CASE WHEN locked = 1 THEN tagline    ELSE ? END,
 			release_date = ?, end_date = ?, status = ?, runtime_min = ?, rating = ?, vote_count = ?,
 			certification = ?,
-			poster   = CASE WHEN ? <> '' THEN ? ELSE poster   END,
-			backdrop = CASE WHEN ? <> '' THEN ? ELSE backdrop END,
-			logo     = CASE WHEN ? <> '' THEN ? ELSE logo     END,
+			poster   = CASE WHEN poster   = '' THEN ? ELSE poster   END,
+			backdrop = CASE WHEN backdrop = '' THEN ? ELSE backdrop END,
+			logo     = CASE WHEN logo     = '' THEN ? ELSE logo     END,
 			collection_id = ?, source = ?, next_air_date = NULLIF(?, ''),
 			-- the next episode of a fetch that is not in the stored order is not the next one
 			next_episode_season = CASE WHEN ? THEN next_episode_season ELSE ? END,
@@ -460,7 +465,7 @@ func upsertTitleRow(ctx context.Context, tx *sql.Tx, in *TitleInput, plan *seaso
 		tmdb, tvdb, in.IMDbID, in.OriginalTitle,
 		in.Title.Title, in.SortTitle, in.Year, in.Overview, in.Tagline,
 		in.ReleaseDate, in.EndDate, in.Status, in.RuntimeMin, in.Rating, in.VoteCount, in.Certification,
-		in.Poster, in.Poster, in.Backdrop, in.Backdrop, in.Logo, in.Logo,
+		in.Poster, in.Backdrop, in.Logo,
 		collection, source, in.NextAirDate,
 		plan.skip, in.NextEpisodeSeason, plan.skip, in.NextEpisodeNumber, plan.skip, in.NextEpisodeName,
 		source, in.EpisodeOrder, fetched, now, id)
@@ -699,9 +704,32 @@ func setSeasons(ctx context.Context, tx *sql.Tx, titleID int64, seasons []Season
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO seasons (title_id, season, name, overview, poster, air_date) VALUES (?, ?, ?, ?, ?, ?)
 			ON CONFLICT (title_id, season) DO UPDATE SET name = excluded.name, overview = excluded.overview,
-				poster   = CASE WHEN excluded.poster <> '' THEN excluded.poster ELSE poster END,
+				poster   = CASE WHEN poster = '' THEN excluded.poster ELSE poster END,
 				air_date = excluded.air_date`,
 			titleID, se.Number, se.Name, se.Overview, se.Poster, se.AirDate); err != nil {
+			return err
+		}
+		// The stills already stored are kept: a refresh writes the episodes again
+		// and must not swap the picture of one that is there. A wipe (the show left
+		// TVDB, or a manual reset) has already deleted them, so a renumbered show
+		// takes the provider's stills fresh.
+		stills := map[int]string{}
+		srows, err := tx.QueryContext(ctx, `SELECT episode, still FROM episodes
+			WHERE title_id = ? AND season = ? AND still <> ''`, titleID, se.Number)
+		if err != nil {
+			return err
+		}
+		for srows.Next() {
+			var n int
+			var s string
+			if err := srows.Scan(&n, &s); err != nil {
+				srows.Close()
+				return err
+			}
+			stills[n] = s
+		}
+		srows.Close()
+		if err := srows.Err(); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM episodes WHERE title_id = ? AND season = ?`,
@@ -717,6 +745,10 @@ func setSeasons(ctx context.Context, tx *sql.Tx, titleID int64, seasons []Season
 			} else if old, ok := mem[[2]int{se.Number, ep.Number}]; ok {
 				imdb, src = old.imdb, old.src
 			}
+			still := ep.Still
+			if old := stills[ep.Number]; old != "" {
+				still = old
+			}
 			if _, err := tx.ExecContext(ctx, `
 				INSERT INTO episodes (title_id, season, episode, name, overview, air_date, runtime_min, still, rating,
 					imdb_id, imdb_src)
@@ -725,7 +757,7 @@ func setSeasons(ctx context.Context, tx *sql.Tx, titleID int64, seasons []Season
 					overview = excluded.overview, air_date = excluded.air_date,
 					runtime_min = excluded.runtime_min, still = excluded.still, rating = excluded.rating,
 					imdb_id = excluded.imdb_id, imdb_src = excluded.imdb_src`,
-				titleID, se.Number, ep.Number, ep.Name, ep.Overview, ep.AirDate, ep.RuntimeMin, ep.Still,
+				titleID, se.Number, ep.Number, ep.Name, ep.Overview, ep.AirDate, ep.RuntimeMin, still,
 				ep.Rating, imdb, src); err != nil {
 				return err
 			}

@@ -43,7 +43,8 @@ type queueDeps struct {
 	worker  *metadata.Worker
 	art     *art.Generator // may be nil
 	subs    *subs.Generator
-	ratings *metadata.Ratings // may be nil (M10)
+	images  *metadata.ImageCache // may be nil
+	ratings *metadata.Ratings    // may be nil (M10)
 	roots   func() []string   // the library folders now
 	log     *slog.Logger
 	events  *events.Hub // the live feed; nil: the queue's own
@@ -147,7 +148,7 @@ func newQueue(d queueDeps) *jobs.Queue {
 		Priority: jobs.PriorityCache,
 		Title:    func(json.RawMessage) string { return "Tidy the artwork and subtitle caches" },
 		Run: func(ctx context.Context, r *jobs.Run) error {
-			return pruneCaches(ctx, d.store, d.art, d.subs, d.log)
+			return pruneCaches(ctx, d.store, d.art, d.subs, d.images, d.log)
 		},
 	})
 	registerRatings(q, d)
@@ -235,8 +236,8 @@ func (c scanControl) Status(ctx context.Context) library.Status {
 
 // pruneCaches removes cached artwork and subtitles of items that are gone or
 // changed. Either generator may be nil.
-func pruneCaches(ctx context.Context, st *store.Store, artGen *art.Generator, subGen *subs.Generator, log *slog.Logger) error {
-	if artGen == nil && subGen == nil {
+func pruneCaches(ctx context.Context, st *store.Store, artGen *art.Generator, subGen *subs.Generator, images *metadata.ImageCache, log *slog.Logger) error {
+	if artGen == nil && subGen == nil && images == nil {
 		return nil
 	}
 	states, err := st.FileStates(ctx)
@@ -264,6 +265,16 @@ func pruneCaches(ctx context.Context, st *store.Store, artGen *art.Generator, su
 		}
 		if n > 0 {
 			log.Info("subtitle cache pruned", "files", n)
+		}
+	}
+	if images != nil {
+		refs, err := st.LiveImageRefs(ctx)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("image refs: %w", err))
+		} else if n, err := images.Prune(ctx, refs, live); err != nil {
+			errs = append(errs, fmt.Errorf("images: %w", err))
+		} else if n > 0 {
+			log.Info("image cache pruned", "files", n)
 		}
 	}
 	return errors.Join(errs...)

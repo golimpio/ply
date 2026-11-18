@@ -130,6 +130,7 @@ func (w *Worker) MatchShow(ctx context.Context, show string, ref Ref) error {
 	if err != nil {
 		return err
 	}
+	w.seasonArt(ctx, titleID, items, dirNames)
 	w.noteNFO(titleID, nfoPath)
 	w.committed(ctx, in)
 	return nil

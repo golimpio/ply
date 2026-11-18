@@ -1080,9 +1080,12 @@ export function mediaUrl(rel: string): string {
   return u.toString();
 }
 
-/** The TMDB image sizes the server serves (its allowlist, TVDB's images too), by width. */
-const IMAGE_SIZES = { w92: 92, w185: 185, w342: 342, w500: 500, w780: 780, w1280: 1280 } as const;
-export type ImageSize = keyof typeof IMAGE_SIZES | 'original';
+/**
+ * The TMDB image sizes the server serves (its allowlist, TVDB's images too), by width. `original`
+ * has no fixed width: 3840 (4K) labels it in a srcset, so only a slot wider than w1280 picks it.
+ */
+const IMAGE_SIZES = { w92: 92, w185: 185, w342: 342, w500: 500, w780: 780, w1280: 1280, original: 3840 } as const;
+export type ImageSize = keyof typeof IMAGE_SIZES;
 
 const TMDB_IMAGE = /^(\/api\/images\/tmdb\/)(w92|w185|w342|w500|w780|w1280|original)(\/[A-Za-z0-9_-]+\.(?:jpg|png|svg))(\?.*)?$/;
 // TVDB's paths have directories (/banners/posters/81189-1.jpg). As the server's TVDBImagePath: letters,
@@ -1107,7 +1110,7 @@ export function imageUrl(rel: string | null | undefined, size?: ImageSize): stri
  * A srcset for a TMDB or TVDB image at the given sizes ("…/w185/x.jpg 185w, …"); for any other URL
  * a single candidate, so that the attribute is still valid.
  */
-export function imageSrcset(rel: string | null | undefined, sizes: Exclude<ImageSize, 'original'>[] = ['w185', 'w342', 'w500']): string {
+export function imageSrcset(rel: string | null | undefined, sizes: ImageSize[] = ['w185', 'w342', 'w500']): string {
   if (!rel) return '';
   if (!sizedImage(rel)) return mediaUrl(rel);
   return sizes.map((sz) => `${imageUrl(rel, sz)} ${IMAGE_SIZES[sz]}w`).join(', ');

@@ -21,11 +21,13 @@ export interface Img {
   srcset?: string;
 }
 
-const POSTER_SIZES = ['w185', 'w342', 'w500'] as const;
+// Posters reach w780 (4K grids and detail posters at DPR 2), backdrops original (full-bleed
+// heroes on 4K/6K); wide rail cards stay small and cheap.
+const POSTER_SIZES = ['w185', 'w342', 'w500', 'w780'] as const;
 const WIDE_SIZES = ['w342', 'w500', 'w780'] as const;
-const BACKDROP_SIZES = ['w780', 'w1280'] as const;
+const BACKDROP_SIZES = ['w780', 'w1280', 'original'] as const;
 
-function tmdb(rel: string | undefined | null, sizes: readonly ('w92' | 'w185' | 'w342' | 'w500' | 'w780' | 'w1280')[], size: (typeof sizes)[number]): Img | null {
+function tmdb(rel: string | undefined | null, sizes: readonly ('w92' | 'w185' | 'w342' | 'w500' | 'w780' | 'w1280' | 'original')[], size: (typeof sizes)[number]): Img | null {
   if (!rel) return null;
   const srcset = imageSrcset(rel, [...sizes]);
   return { src: imageUrl(rel, size), srcset: srcset.includes(' ') ? srcset : undefined };

@@ -215,7 +215,7 @@
                 <Picture img={hit.portrait} ratio="1 / 1" label={hit.label} sizes="52px" />
               </div>
             {:else}
-              <div class="thumb"><Art item={hit.item} label={hit.label} /></div>
+              <div class="thumb"><Art item={hit.item} label={hit.label} sizes="6.5rem" /></div>
             {/if}
             <div class="text">
               <div class="title truncate">{hit.title}</div>

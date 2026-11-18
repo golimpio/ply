@@ -296,8 +296,12 @@ func TestLockedTitleKeepsEditedTextButRefreshesTheRest(t *testing.T) {
 		got.Tagline != "Tag The Matrix" || got.SortTitle != "Matrix, The" || !got.Locked {
 		t.Errorf("locked text was overwritten: %+v", got)
 	}
-	if got.Rating != 9.9 || got.OriginalTitle != "Original" || got.Poster != "tmdb:/new.jpg" {
-		t.Errorf("locked title did not refresh its data: %+v", got)
+	if got.Rating != 9.9 || got.OriginalTitle != "Original" {
+		t.Errorf("locked title did not refresh its non-image data: %+v", got)
+	}
+	// Artwork is pinned for every title, locked or not: a refresh keeps the poster.
+	if got.Poster != "tmdb:/p603.jpg" {
+		t.Errorf("locked title's poster was swapped on refresh: %q", got.Poster)
 	}
 	d, _ := s.GetTitleDetail(ctx, lockedID)
 	if len(d.Cast) != 1 || len(d.Crew) != 0 {
@@ -329,10 +333,12 @@ func TestUpsertTitleNeverBlanksImages(t *testing.T) {
 	if got.Poster != "tmdb:/p1.jpg" || got.Backdrop != "tmdb:/b1.jpg" || got.Logo != "tmdb:/l1.png" {
 		t.Errorf("images after a fetch without images: %+v", got)
 	}
+	// A later fetch with a different poster keeps the pinned one (artwork is
+	// first-wins); an empty one never blanks it.
 	bare.Poster = "tmdb:/new.jpg"
 	s.UpsertTitle(ctx, bare)
-	if got, _ = s.GetTitle(ctx, id); got.Poster != "tmdb:/new.jpg" {
-		t.Errorf("poster = %q, want the new one", got.Poster)
+	if got, _ = s.GetTitle(ctx, id); got.Poster != "tmdb:/p1.jpg" {
+		t.Errorf("poster = %q, want the pinned first one", got.Poster)
 	}
 }
 

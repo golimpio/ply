@@ -72,6 +72,7 @@ describe('pictures', () => {
     expect(p.src).toContain('/w342/p.jpg');
     expect(p.srcset).toContain('/w185/p.jpg 185w');
     expect(p.srcset).toContain('/w500/p.jpg 500w');
+    expect(p.srcset).toContain('/w780/p.jpg 780w');
     expect(posterImg({})).toBeNull();
     expect(posterImg(null)).toBeNull();
   });
@@ -88,12 +89,18 @@ describe('pictures', () => {
     expect(wideImg(item({ backdrop: T('w1280', 'b'), art }))!.src).toContain('/w500/b.jpg');
     expect(wideImg(item({ art }))!.src).toContain('/art/thumb');
     expect(wideImg(item({}))).toBeNull();
+    const w = wideImg(item({ backdrop: T('w1280', 'b'), art }))!;
+    expect(w.srcset).toContain('/w780/b.jpg 780w');
+    expect(w.srcset).not.toContain('/original/'); // a rail card stays cheap, even on 4K
   });
 
   it('backdrops: an episode its still, then the show backdrop, then the frame grab', () => {
     expect(backdropImg(item({ kind: 'episode', still: T('w780', 's'), backdrop: T('w1280', 'b'), art }))!.src).toContain('/w1280/s.jpg');
     expect(backdropImg(item({ kind: 'episode', backdrop: T('w1280', 'b'), art }))!.src).toContain('/w1280/b.jpg');
     expect(backdropImg(item({ art }))!.src).toContain('/art/backdrop');
+    const b = backdropImg(item({ backdrop: T('w1280', 'b'), art }))!;
+    expect(b.srcset).toContain('/w780/b.jpg 780w');
+    expect(b.srcset).toContain('/original/b.jpg 3840w'); // the full-bleed hero on 4K/6K
   });
 
   it("a show's wide card is its backdrop, else its first episode's frame grab", () => {

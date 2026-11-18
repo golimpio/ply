@@ -901,10 +901,10 @@ func TestWorkerFallbackMatchOfAnotherNameKeepsTheShowOnTVDB(t *testing.T) {
 		t.Errorf("episodes = %+v; the show lost TVDB's", eps)
 	}
 	// Nothing was stored, so TMDB's artwork was not fetched for it (the show's own is TVDB's).
-	if _, err := os.Stat(filepath.Join(e.imgDir, "tmdb", "w342", "bb.jpg")); err == nil {
+	if _, err := os.Stat(filepath.Join(e.imgDir, "tmdb", "w500", "bb.jpg")); err == nil {
 		t.Error("TMDB's poster was prefetched for a link that stored nothing")
 	}
-	if _, err := os.Stat(filepath.Join(e.imgDir, "tvdb", "w342", "banners", "posters", "81189-10.jpg")); err != nil {
+	if _, err := os.Stat(filepath.Join(e.imgDir, "tvdb", "w500", "banners", "posters", "81189-10.jpg")); err != nil {
 		t.Errorf("control: TVDB's own poster was not prefetched: %v", err)
 	}
 	if sm := e.series("Breaking Bad"); sm.TitleID != first || sm.State != store.MatchMatched {

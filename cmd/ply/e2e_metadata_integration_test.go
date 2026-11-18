@@ -301,7 +301,7 @@ func TestEndToEndMetadata(t *testing.T) {
 	if resp, _ := c.do("GET", strings.Split(matrix.Poster, "?")[0], "", nil); resp.StatusCode != 401 {
 		t.Errorf("poster without a token = %d, want 401", resp.StatusCode)
 	}
-	if n := tmdb.count("image /img/w342/p603.jpg"); n != 1 {
+	if n := tmdb.count("image /img/w500/p603.jpg"); n != 1 {
 		t.Errorf("the poster was downloaded %d times, want once (prefetched, then cached)", n)
 	}
 	if _, err := os.Stat(filepath.Join(data, "images", "tmdb", "w1280", "b603.jpg")); err != nil {

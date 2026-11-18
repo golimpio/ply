@@ -174,6 +174,113 @@ func (c *ImageCache) Close() {
 	c.wg.Wait()
 }
 
+// Prune drops the cached files the library no longer uses: a provider image
+// (tmdb/<size>/<file>, tvdb/<size>/<path>) whose ref is not in refs, and an
+// extracted cover (embedded/<id>.jpg) whose item is not in items. The current
+// poster's sizes stay; only refs that are gone lose their files, so a replaced
+// poster does not leave the old one behind. It returns how many files it removed.
+func (c *ImageCache) Prune(ctx context.Context, refs map[string]bool, items map[int64]int64) (int, error) {
+	if c == nil {
+		return 0, nil
+	}
+	n := 0
+	for _, prov := range []struct{ dir, prefix string }{{"tmdb", "tmdb:/"}, {"tvdb", "tvdb:/"}} {
+		base := filepath.Join(c.dir, prov.dir)
+		sizes, err := os.ReadDir(base)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return n, err
+		}
+		for _, sz := range sizes {
+			if !sz.IsDir() {
+				continue
+			}
+			root := filepath.Join(base, sz.Name())
+			cnt, err := c.pruneTree(ctx, root, root, prov.prefix, refs)
+			n += cnt
+			if err != nil {
+				return n, err
+			}
+		}
+	}
+	emb := filepath.Join(c.dir, "embedded")
+	entries, err := os.ReadDir(emb)
+	if err != nil && !os.IsNotExist(err) {
+		return n, err
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		id, ok := embeddedID(e.Name())
+		if !ok {
+			continue
+		}
+		if _, live := items[id]; live {
+			continue
+		}
+		if ctx.Err() != nil {
+			return n, ctx.Err()
+		}
+		if err := os.Remove(filepath.Join(emb, e.Name())); err != nil && !os.IsNotExist(err) {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
+// pruneTree removes the files under dir whose provider ref (prefix + the path
+// relative to root) is not in refs, descending into subdirectories (TVDB paths).
+func (c *ImageCache) pruneTree(ctx context.Context, root, dir, prefix string, refs map[string]bool) (int, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".dl-") {
+			continue // an in-flight download's temp file (fetch renames it into place)
+		}
+		path := filepath.Join(dir, e.Name())
+		if e.IsDir() {
+			cnt, err := c.pruneTree(ctx, root, path, prefix, refs)
+			n += cnt
+			if err != nil {
+				return n, err
+			}
+			continue
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return n, err
+		}
+		if refs[prefix+filepath.ToSlash(rel)] {
+			continue
+		}
+		if ctx.Err() != nil {
+			return n, ctx.Err()
+		}
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
+// embeddedID reads the item id of an extracted cover's file name ("<id>.jpg").
+func embeddedID(name string) (int64, bool) {
+	base, ok := strings.CutSuffix(name, ".jpg")
+	if !ok {
+		return 0, false
+	}
+	id, err := strconv.ParseInt(base, 10, 64)
+	return id, err == nil
+}
+
 // TMDB returns the path of the cached image, downloading it first when it is
 // not there. Concurrent callers for one image share one download. A caller whose
 // ctx ends stops waiting; the download goes on while another waits for it, and is

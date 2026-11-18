@@ -86,7 +86,7 @@ items  + title_id INT REFERENCES titles(id) ON DELETE SET NULL,   -- movies only
        + fingerprint TEXT NOT NULL DEFAULT ''  -- size-independent: sha256(first 64 KiB + last 64 KiB); move fallback
 series_matches(show TEXT PK /*items.show*/, title_id INT REFERENCES titles(id) ON DELETE SET NULL,
        match_state, needs_review, match_score, match_attempts, next_attempt_at, local_poster, local_backdrop)
-seasons(title_id FK CASCADE, season INT, name, overview, poster, air_date, PRIMARY KEY(title_id, season))
+seasons(title_id FK CASCADE, season INT, name, overview, poster, local_poster /*020: sidecar path*/, air_date, PRIMARY KEY(title_id, season))
 episodes(title_id FK CASCADE, season INT, episode INT, name, overview, air_date, runtime_min INT, still,
        rating REAL, PRIMARY KEY(title_id, season, episode))
 people(id PK, tmdb_id INT UNIQUE, name, profile TEXT, biography, birthday, deathday, place_of_birth,
@@ -104,13 +104,31 @@ Orphan titles/people/collections (no items left) are pruned after a scan, in one
 Moving/renaming a file keeps its item id (see Watching), so progress, match and edits survive.
 
 ## Images
-- Image refs are strings: `tmdb:/abc.jpg` (TMDB file path) or `local:<item|series>:<id>:<poster|backdrop|thumb>`.
+- Image refs are strings: `tmdb:/abc.jpg` (TMDB file path), `tvdb:/banners/…` (TVDB path), or
+  `local:<item|series>:<id>:<poster|backdrop|thumb>` / `local:season:<titleId>:<season>`.
+- **Artwork is pinned (first-wins).** Once a title's poster/backdrop/logo, a season's poster or an episode's
+  still is set, a rescan or metadata refresh keeps it: the provider's current image fills the slot only while it
+  is empty (`UpsertTitle`, `setSeasons`). A different title is a different row, inserted with its own art; a manual
+  reset (`ResetSeasons`) or leaving TVDB renumbers from the provider and takes its art fresh. A sidecar that comes
+  or goes is served over the stored ref (`pickArt`), never written into it. This is what lets a custom poster — or
+  one migrated from Plex — stay the picture the library shows. `locked` still protects the text fields; images are
+  pinned for every title, locked or not.
+- **One current image per slot, ready to display.** The cache keeps the sizes clients actually ask for (the web's
+  `srcset`, the API's per-use size), not every size and not old versions: `cache.prune` drops any
+  `images/tmdb|tvdb` file whose ref no title/season/episode/person/collection/filmography uses any more
+  (`Store.LiveImageRefs`, `ImageCache.Prune`), and an `images/embedded/<id>.jpg` whose item is gone. A replaced
+  poster thus leaves nothing behind. Sizes are TMDB's/TVDB's own renditions — the server does no image
+  transcoding; the client picks the file for its viewport/DPR and scales it.
+- **Sizes for the screens we serve.** The API links posters at `w500` (sharp on a 3× phone), backdrops `w1280`,
+  logos `w500`, profiles `w185`, stills `w500`. The web asks posters up to `w780` and full-bleed backdrops up to
+  `original` (4K/6K), with a `sizes` attribute per element so a small card never fetches a huge file; wide rail
+  cards stay ≤ `w780`.
 - `GET /api/images/tmdb/{size}/{file}`: size allowlist `w92 w185 w342 w500 w780 w1280 original`;
   file must match `^[A-Za-z0-9_-]+\.(jpg|png|svg)$`. Served from `<data>/images/tmdb/<size>/<file>`,
   downloaded once on a miss (single-flight per file, timeout, size cap 20 MB, written via temp file + rename),
   `Cache-Control: public, max-age=31536000, immutable`. Fails → 404 (UI falls back to frame-grab art).
 - `GET /api/images/local/{kind}/{id}/{slot}` serves sidecar artwork found by the scanner (path from the DB only).
-- After a match, the worker prefetches the poster (w342) and backdrop (w1280) so browsing is instant and keeps
+- After a match, the worker prefetches the poster (w500) and backdrop (w1280) so browsing is instant and keeps
   working offline; profile photos and stills are fetched lazily. After a manual match the prefetch runs in the
   background (the request is answered once the match is stored). At most 4 images are downloaded at once; a failed
   one is not retried for 10 minutes (at most 1024 failures are remembered).
@@ -125,6 +143,9 @@ Moving/renaming a file keeps its item id (see Watching), so progress, match and 
   backdrop `<base>-fanart`, `fanart`, `backdrop`, `background`; episode thumb `<base>-thumb`, `<base>`;
   show folder `poster`, `folder`, `fanart`, `backdrop`; season `seasonNN-poster`, `Season NN/poster`.
   Local beats TMDB. Folder-level names (`poster.jpg`) apply to a movie only when its folder holds one movie.
+  Season posters are read by the worker (`seasonArt`: `SeasonPoster` then `FolderPoster`) after a match, a refresh
+  and a sidecar change, stored in `seasons.local_poster` (migration 020) and served over the provider's via
+  `local:season:<titleId>:<season>`.
 
 ## NFO (`internal/metadata/nfo.go`)
 `<base>.nfo`, else `movie.nfo` in a one-movie folder; `tvshow.nfo` in the show folder; `<base>.nfo` for episodes.
@@ -148,8 +169,9 @@ is off or nothing matches → NFO alone (`source=nfo`). Fuzz test the parser.
   file `unmatched`.
 - TMDB, TVDB and MDBList JSON responses are limited to 8 MiB. Oversized responses produce an error.
 - Refresh: daily, re-fetch titles whose `fetched_at` is older than 7 days for series that are not ended /
-  movies released in the last 90 days, 30 days for everything else. `locked` titles keep text fields but
-  still refresh images/credits. A season with new files and no `episodes` rows is fetched immediately.
+  movies released in the last 90 days, 30 days for everything else. `locked` titles keep their text fields;
+  artwork is pinned for every title (see Images), and credits refresh. A season with new files and no `episodes`
+  rows is fetched immediately.
 - **Changes feed** (preferred over age-based refresh): once a day poll TMDB `/movie/changes` and `/tv/changes`
   (paged, last 24 h) and refresh only library titles in the set; last poll time in `settings`. If the last poll is
   older than 14 days (the endpoint's window), fall back to the age-based refresh above. A feed with more than 200
@@ -235,6 +257,17 @@ the site but are the source of the download, and the API sends only the trailers
 NFO write-back after a manual fix (`-nfo-write`); chapters (`-show_chapters`) for skip-intro / up-next;
 nameparse: multi-episode files (S01E01-E02), date-based episodes, anime absolute numbering. (Local trailer files: done
 in M13, `docs/M13-TRAILERS.md`.)
+
+**Plex migration (production cutover).** Import a Plex library's metadata into ply. Plex keeps the *selected*
+poster/art in opaque per-item bundles (`Metadata/Movies|TV Shows/<hash>.bundle/Contents/_combined/posters`,
+`Uploads/posters` for custom picks), mapped by `Plug-in Support/Databases/com.plexapp.plugins.library.db`. The
+migration reads each item's selected poster/backdrop, season posters and episode stills — via the Plex API
+`/library/metadata/<id>/thumb` (with `X-Plex-Token`) or the bundle + DB — and writes them as ply sidecars next to
+the media (`poster.jpg`, `seasonNN-poster.jpg`, `<base>-thumb.jpg`, …) or imports them as pinned artwork. Because
+artwork is first-wins and local beats TMDB, a migrated poster stays the picture ply shows and is never overwritten
+by a later TMDB refresh. Match Plex items to ply titles by IMDb/TMDB id (Plex agents carry them) or title+year;
+watch state/progress migrate separately. The sidecar names above are already the Kodi/Jellyfin/Plex local-asset
+conventions, so a Plex library that used Local Media Assets needs no art import at all.
 
 ## HTTP API additions
 All image URLs are relative and carry `?token=` like other media URLs.

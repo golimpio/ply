@@ -295,6 +295,7 @@ func reads() []routed {
 			_, err := s.LocalArt(ctx, ArtItem, 1, "poster")
 			return nf(err)
 		}},
+		{name: "LiveImageRefs", call: func(ctx context.Context, s *Store) error { _, err := s.LiveImageRefs(ctx); return err }},
 		{name: "Titles", call: func(ctx context.Context, s *Store) error { _, err := s.Titles(ctx, TitleFilter{}); return err }},
 		{name: "TitleCards", call: func(ctx context.Context, s *Store) error { _, err := s.TitleCards(ctx, []int64{1}); return err }},
 		{name: "Upcoming", call: func(ctx context.Context, s *Store) error { _, err := s.Upcoming(ctx, "2020-01-01", 10); return err }},
@@ -461,6 +462,7 @@ func writes() []routed {
 		{name: "DeferSeriesMatch", prio: prioLow, call: func(ctx context.Context, s *Store) error { return e(s.DeferSeriesMatch(ctx, "x", 5)) }},
 		{name: "SetItemArt", prio: prioLow, call: func(ctx context.Context, s *Store) error { return e(s.SetItemArt(ctx, 1, Art{Poster: "/a"})) }},
 		{name: "SetSeriesArt", prio: prioLow, call: func(ctx context.Context, s *Store) error { return e(s.SetSeriesArt(ctx, "x", Art{Poster: "/a"})) }},
+		{name: "SetSeasonArt", prio: prioLow, call: func(ctx context.Context, s *Store) error { return e(s.SetSeasonArt(ctx, 1, 1, "/a")) }},
 		{name: "MoveItem", prio: prioLow, call: func(ctx context.Context, s *Store) error { return e(s.MoveItem(ctx, 1, movie("/q.mp4", "Q"))) }},
 		{name: "SetFingerprint", prio: prioLow, call: func(ctx context.Context, s *Store) error { return s.SetFingerprint(ctx, 1, 1, 1, "f") }},
 		{name: "SetExternalSubtitles", prio: prioLow, call: func(ctx context.Context, s *Store) error {

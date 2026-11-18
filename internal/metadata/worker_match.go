@@ -121,6 +121,9 @@ func (w *Worker) linkSeries(ctx context.Context, show string, in *store.TitleInp
 	if !ok {
 		return false, false
 	}
+	if items, err := w.o.Store.ShowItems(ctx, show); err == nil {
+		w.seasonArt(ctx, titleID, items, w.names)
+	}
 	if t, err := w.o.Store.GetTitle(ctx, titleID); err == nil && t.Source == store.SourceTVDB && in.Source != store.SourceTVDB {
 		return true, false
 	}
@@ -350,6 +353,37 @@ func (w *Worker) episodeArt(ctx context.Context, items []store.Item, names func(
 		}
 		loc := EpisodeLocal(it.Path, names(filepath.Dir(it.Path)))
 		w.setArt(ctx, it.ID, store.Art{Poster: it.LocalPoster, Backdrop: it.LocalBackdrop, Thumb: loc.Thumb})
+	}
+}
+
+// seasonArt records the sidecar poster of each season that has files: a
+// seasonNN-poster next to the show, else a poster in the season's own folder.
+// It is read again after the title's seasons are written (a match, a refresh,
+// or a sidecar that came or went), so the local poster is the one shown.
+func (w *Worker) seasonArt(ctx context.Context, titleID int64, items []store.Item, names func(string) []string) {
+	if titleID == 0 || len(items) == 0 {
+		return
+	}
+	dir := showDir(items[0].Path)
+	showNames := names(dir)
+	bySeason := map[int]string{}
+	for _, it := range items {
+		if _, ok := bySeason[it.Season]; !ok {
+			bySeason[it.Season] = filepath.Dir(it.Path)
+		}
+	}
+	for n, epDir := range bySeason {
+		if ctx.Err() != nil {
+			return
+		}
+		poster := SeasonPoster(dir, showNames, n)
+		if poster == "" && epDir != dir {
+			poster = FolderPoster(epDir, names(epDir))
+		}
+		if err := w.o.Store.SetSeasonArt(ctx, titleID, n, poster); err != nil &&
+			!errors.Is(err, store.ErrNotFound) && ctx.Err() == nil {
+			w.noteError(err)
+		}
 	}
 }
 

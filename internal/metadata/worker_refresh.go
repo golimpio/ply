@@ -495,6 +495,9 @@ func (w *Worker) refreshShow(ctx context.Context, p *Providers, show string) {
 		}
 		return nil
 	})
+	if items, err := w.o.Store.ShowItems(ctx, show); err == nil {
+		w.seasonArt(ctx, sm.TitleID, items, w.names)
+	}
 }
 
 // refreshLinked fetches a linked TMDB or TVDB title again; a file without one (or whose
@@ -574,6 +577,9 @@ func (w *Worker) rereadEpisode(ctx context.Context, p *Providers, it store.Item,
 	sm, err := w.o.Store.GetSeriesMatch(ctx, it.Show)
 	if err != nil || sm.TitleID == 0 {
 		return
+	}
+	if items, err := w.o.Store.ShowItems(ctx, it.Show); err == nil {
+		w.seasonArt(ctx, sm.TitleID, items, dirNames)
 	}
 	t, err := w.o.Store.GetTitle(ctx, sm.TitleID)
 	if err != nil {

@@ -487,7 +487,8 @@ func (s *Server) showDetail(ctx context.Context, sh store.Show) (ShowDetail, err
 		si := SeasonInfo{Season: n, Name: seasonName(n), EpisodeCounts: episodeCounts(sh.BySeason[n])}
 		if se, ok := stored[n]; ok {
 			si.Name = cmp.Or(se.Name, si.Name)
-			si.Overview, si.AirDate, si.Poster = se.Overview, se.AirDate, s.imageURL(se.Poster, posterSize)
+			si.Overview, si.AirDate = se.Overview, se.AirDate
+			si.Poster = s.imageURL(pickArt(se.LocalPoster, store.LocalRef(store.ArtSeason, row.TitleID, fmt.Sprint(n)), se.Poster), posterSize)
 		}
 		out.Seasons = append(out.Seasons, si)
 	}
