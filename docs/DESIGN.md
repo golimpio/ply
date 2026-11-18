@@ -4,6 +4,10 @@ Local-only Plex-like media server. Hosts: macOS and Linux. One Go binary with an
 embedded Svelte web UI. Phase 2 (later, NOT now) is an iOS app (AVPlayer + AirPlay,
 Google Cast SDK) that consumes the same API — design the API so it drops in unchanged.
 
+> **Full system architecture:** [`ARCHITECTURE.md`](ARCHITECTURE.md) is the current component map and
+> data-flow overview (all packages, storage, the priority model, the pipelines). This doc is the detailed
+> design and HTTP API reference; [`M9-ARCHITECTURE.md`](M9-ARCHITECTURE.md) is the performance architecture.
+
 ## Working rules (all agents)
 
 - **Read `AGENTS.md` first.** Its rule 1, above every other, is to always use plumb MCP. Its other rules
