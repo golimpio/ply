@@ -40,7 +40,7 @@ struct PeekingCanvasDeckView: View {
 
     var body: some View {
         if !items.isEmpty, let active = activeItem {
-            VStack(spacing: 18) {
+            VStack(spacing: PlyDesign.deckMetadataSpacing) {
                 GeometryReader { proxy in
                     let screenWidth = proxy.size.width
                     let sideInset = max(16, (screenWidth - cardWidth) / 2)
@@ -68,10 +68,15 @@ struct PeekingCanvasDeckView: View {
                     .scrollPosition(id: $activeItemId)
                     .scrollClipDisabled()
                 }
-                .frame(height: cardHeight + 44)
+                .frame(height: cardHeight + PlyDesign.deckCardsVerticalPadding)
 
-                // Editorial Title & Wide-Tracked Metadata Block
-                VStack(spacing: 8) {
+                // Position indicator + Editorial Title & Wide-Tracked Metadata Block
+                VStack(spacing: PlyDesign.deckMetadataSpacing) {
+                    if items.count > 1 {
+                        deckPageIndicator(active: active)
+                            .background(rowFrameReporter("indicator"))
+                    }
+
                     let microSpecs = Format.facts(
                         active.year.map(String.init),
                         active.genres?.first ?? active.episodeCode,
@@ -80,6 +85,7 @@ struct PeekingCanvasDeckView: View {
                     if !microSpecs.isEmpty {
                         Text(microSpecs.uppercased())
                             .plyMicroSpecsStyle(opacity: 0.60)
+                            .background(rowFrameReporter("specs"))
                     }
 
                     Text(active.isEpisode ? (active.show ?? active.title) : active.title)
@@ -91,39 +97,21 @@ struct PeekingCanvasDeckView: View {
                             in: portalNamespace,
                             isSource: expandedItemId != active.id
                         )
+                        .background(rowFrameReporter("title"))
 
                     // Subtle Glass Telemetry Pills (Rating + Technical Badge)
-                    HStack(spacing: 8) {
-                        if !active.versionLabel.isEmpty {
-                            PlyGlassPillBadge(text: active.versionLabel)
-                        }
+                    if !active.versionLabel.isEmpty || active.rating != nil {
+                        HStack(spacing: 8) {
+                            if !active.versionLabel.isEmpty {
+                                PlyGlassPillBadge(text: active.versionLabel)
+                            }
 
-                        if let rating = active.rating {
-                            PlyGlassPillBadge(text: rating.label, systemImage: "star.fill", textOpacity: 1.0)
-                        }
-                    }
-                    .padding(.top, 2)
-
-                    if items.count > 1 {
-                        HStack(spacing: 6) {
-                            ForEach(Array(items.prefix(8).enumerated()), id: \.element.id) { _, item in
-                                if item.id == active.id {
-                                    Capsule()
-                                        .fill(LinearGradient.plyAmberHorizontal)
-                                        .frame(width: 22, height: 5)
-                                } else {
-                                    Circle()
-                                        .fill(Color.white.opacity(0.28))
-                                        .frame(width: 5.5, height: 5.5)
-                                        .onTapGesture {
-                                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                                activeItemId = item.id
-                                            }
-                                        }
-                                }
+                            if let rating = active.rating {
+                                PlyGlassPillBadge(text: rating.label, systemImage: "star.fill", textOpacity: 1.0)
                             }
                         }
-                        .padding(.top, 6)
+                        .padding(.top, 2)
+                        .background(rowFrameReporter("pills"))
                     }
                 }
                 .animation(.spring(response: 0.38, dampingFraction: 0.86), value: active.id)
@@ -144,6 +132,34 @@ struct PeekingCanvasDeckView: View {
             .onChange(of: activeItemId) { _, _ in
                 if let current = activeItem {
                     onActiveItemChange?(current)
+                }
+            }
+        }
+    }
+
+    private func rowFrameReporter(_ id: String) -> some View {
+        GeometryReader { geo in
+            Color.clear.preference(key: DeckRowFramesKey.self, value: [id: geo.frame(in: .global)])
+        }
+    }
+
+    @ViewBuilder
+    private func deckPageIndicator(active: Item) -> some View {
+        HStack(spacing: 6) {
+            ForEach(Array(items.prefix(8).enumerated()), id: \.element.id) { _, item in
+                if item.id == active.id {
+                    Capsule()
+                        .fill(LinearGradient.plyAmberHorizontal)
+                        .frame(width: 22, height: 5)
+                } else {
+                    Circle()
+                        .fill(Color.white.opacity(0.28))
+                        .frame(width: 5.5, height: 5.5)
+                        .onTapGesture {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                activeItemId = item.id
+                            }
+                        }
                 }
             }
         }
@@ -221,6 +237,14 @@ struct PeekingCanvasDeckView: View {
             radius: isCenter ? 20 : 10,
             y: isCenter ? 10 : 5
         )
+    }
+}
+
+/// Preference key reporting global frames for the four metadata rows below the peeking deck poster.
+nonisolated struct DeckRowFramesKey: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
     }
 }
 

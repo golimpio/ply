@@ -1594,6 +1594,8 @@ nonisolated enum PlyDesign {
         #endif
     }()
     static let contentHorizontalPadding: CGFloat = 16
+    static let deckMetadataSpacing: CGFloat = 12
+    static let deckCardsVerticalPadding: CGFloat = 16
     static let panelCornerRadius: CGFloat = 14
     static let heroCardCornerRadius: CGFloat = 32
     /// Standard scroll-content bottom breathing room (native `TabView` manages tab bar safe-area insets on iOS 26).

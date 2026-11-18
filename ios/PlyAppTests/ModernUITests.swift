@@ -417,5 +417,76 @@ nonisolated final class ModernUITests: XCTestCase {
         XCTAssertGreaterThan(showsAccentPixels, 15, "Series Filter icon must turn amber when Rating sort is selected")
         XCTAssertGreaterThan(moviesAccentPixels, 15, "Films Filter icon must turn amber when Rating sort is selected")
     }
+
+    @MainActor
+    func testPeekingCanvasDeckPlacesPageIndicatorBelowPosterAndSpacesRowsEvenly() async throws {
+        XCTAssertEqual(PlyDesign.deckMetadataSpacing, 12)
+        XCTAssertEqual(PlyDesign.deckCardsVerticalPadding, 16)
+
+        let serverInfo = try JSONDecoder().decode(
+            ServerInfo.self,
+            from: Data(#"{"id":"1","name":"Test","version":"1","authRequired":false,"api":1,"apiMin":1}"#.utf8)
+        )
+        let base = URL(string: "http://127.0.0.1:1")!
+        let device = DeviceContext(
+            id: "test-device-deck-layout",
+            registration: DeviceRegistration(name: "Test", kind: "ios", app: "ply", version: "1"),
+            nextAttempt: { 1 }
+        )
+        let connection = Connection(base: base, info: serverInfo, api: APIClient(base: base, token: nil, device: device))
+        let model = AppModel()
+        let playbackScene = PlaybackScene(presenter: PlayerPresenter())
+
+        let items: [Item] = try JSONDecoder().decode(
+            [Item].self,
+            from: Data(#"""
+            [
+              {"id":1,"kind":"movie","title":"You Hurt My Feelings","year":2023,"durationSec":5580,"genres":["Comedy"],"height":1080,"container":"mp4","rating":{"source":"metacritic","value":80,"scale":100}},
+              {"id":2,"kind":"movie","title":"Past Lives","year":2023,"durationSec":6360,"genres":["Drama"]}
+            ]
+            """#.utf8)
+        )
+
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        defer { window.isHidden = true }
+
+        var frames: [String: CGRect] = [:]
+        let host = UIHostingController(
+            rootView: ScrollView {
+                PeekingCanvasDeckView(items: items)
+            }
+            .onPreferenceChange(DeckRowFramesKey.self) { frames = $0 }
+            .environment(connection)
+            .environment(model)
+            .environment(playbackScene)
+        )
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+
+        for _ in 0..<50 {
+            window.layoutIfNeeded()
+            if frames.count == 4 {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let indicator = try XCTUnwrap(frames["indicator"], "Expected page indicator row")
+        let specs = try XCTUnwrap(frames["specs"], "Expected specs row")
+        let title = try XCTUnwrap(frames["title"], "Expected title row")
+        let pills = try XCTUnwrap(frames["pills"], "Expected telemetry pills row")
+
+        XCTAssertLessThan(indicator.maxY, specs.minY, "Page indicator must sit above specs (right below poster)")
+        XCTAssertLessThan(specs.maxY, title.minY, "Specs must sit above title")
+        XCTAssertLessThan(title.maxY, pills.minY, "Telemetry pills must sit below title")
+
+        let indicatorToSpecsGap = specs.minY - indicator.maxY
+        let specsToTitleGap = title.minY - specs.maxY
+        let titleToPillsGap = pills.minY - title.maxY
+        XCTAssertEqual(indicatorToSpecsGap, PlyDesign.deckMetadataSpacing, accuracy: 2.0)
+        XCTAssertEqual(specsToTitleGap, PlyDesign.deckMetadataSpacing, accuracy: 2.0)
+        XCTAssertGreaterThanOrEqual(titleToPillsGap, specsToTitleGap, "Title-to-pills gap should not be tighter than specs-to-title")
+    }
     #endif
 }
