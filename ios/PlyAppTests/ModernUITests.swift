@@ -455,7 +455,16 @@ nonisolated final class ModernUITests: XCTestCase {
         var frames: [String: CGRect] = [:]
         let host = UIHostingController(
             rootView: ScrollView {
-                PeekingCanvasDeckView(items: items)
+                HomeView.feedLayout {
+                    PeekingCanvasDeckView(items: items)
+                } shelves: {
+                    Shelf("Continue Watching", subtitle: "Pick up where you left off") {
+                        Text("Item").frame(width: 120, height: 80)
+                    }
+                    .background(GeometryReader { geo in
+                        Color.clear.preference(key: DeckRowFramesKey.self, value: ["firstShelf": geo.frame(in: .global)])
+                    })
+                }
             }
             .onPreferenceChange(DeckRowFramesKey.self) { frames = $0 }
             .environment(connection)
@@ -467,7 +476,7 @@ nonisolated final class ModernUITests: XCTestCase {
 
         for _ in 0..<50 {
             window.layoutIfNeeded()
-            if frames.count == 4 {
+            if frames.count == 5 {
                 break
             }
             try await Task.sleep(for: .milliseconds(20))
@@ -477,17 +486,21 @@ nonisolated final class ModernUITests: XCTestCase {
         let specs = try XCTUnwrap(frames["specs"], "Expected specs row")
         let title = try XCTUnwrap(frames["title"], "Expected title row")
         let pills = try XCTUnwrap(frames["pills"], "Expected telemetry pills row")
+        let firstShelf = try XCTUnwrap(frames["firstShelf"], "Expected Continue Watching shelf row")
 
         XCTAssertLessThan(indicator.maxY, specs.minY, "Page indicator must sit above specs (right below poster)")
         XCTAssertLessThan(specs.maxY, title.minY, "Specs must sit above title")
         XCTAssertLessThan(title.maxY, pills.minY, "Telemetry pills must sit below title")
+        XCTAssertLessThan(pills.maxY, firstShelf.minY, "First shelf must sit below telemetry pills")
 
         let indicatorToSpecsGap = specs.minY - indicator.maxY
         let specsToTitleGap = title.minY - specs.maxY
         let titleToPillsGap = pills.minY - title.maxY
+        let pillsToShelfGap = firstShelf.minY - pills.maxY
         XCTAssertEqual(indicatorToSpecsGap, PlyDesign.deckMetadataSpacing, accuracy: 2.0)
         XCTAssertEqual(specsToTitleGap, PlyDesign.deckMetadataSpacing, accuracy: 2.0)
         XCTAssertGreaterThanOrEqual(titleToPillsGap, specsToTitleGap, "Title-to-pills gap should not be tighter than specs-to-title")
+        XCTAssertEqual(pillsToShelfGap, indicatorToSpecsGap, accuracy: 2.0, "Gap between deck pills and Continue Watching must match indicator-to-specs gap")
     }
 
     @MainActor

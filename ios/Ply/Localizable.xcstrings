@@ -4,6 +4,9 @@
     "" : {
 
     },
+    "%@ Collections" : {
+
+    },
     "%@, %@" : {
       "localizations" : {
         "en" : {
@@ -90,16 +93,10 @@
     "Choose another server" : {
 
     },
-    "Clear all" : {
-
-    },
     "Clear search" : {
 
     },
     "Close details" : {
-
-    },
-    "Collection Type" : {
 
     },
     "Collections" : {
@@ -138,6 +135,9 @@
     "Era" : {
 
     },
+    "Fast scroll" : {
+
+    },
     "Films" : {
 
     },
@@ -163,6 +163,9 @@
 
     },
     "Genres" : {
+
+    },
+    "Genres come from the library's metadata. Search above works for everything already." : {
 
     },
     "HDR" : {
@@ -201,7 +204,7 @@
     "No %@ collections" : {
 
     },
-    "No genres or collections yet" : {
+    "No genres yet" : {
 
     },
     "No Subtitles Available" : {
@@ -318,9 +321,6 @@
     "Settings" : {
 
     },
-    "Show All" : {
-
-    },
     "Show tab labels" : {
 
     },
@@ -349,9 +349,6 @@
 
     },
     "The search failed: %@" : {
-
-    },
-    "They come from the library's metadata. Search above works for everything already." : {
 
     },
     "This device" : {

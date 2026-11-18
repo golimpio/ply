@@ -300,7 +300,7 @@ struct HomeView: View {
                 LivingMeshBackdrop(palette: backdropPalette)
 
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 28) {
+                    Self.feedLayout {
                         #if os(tvOS)
                         HStack(spacing: 12) {
                             PlyLogo(size: 36, color: .white)
@@ -330,77 +330,9 @@ struct HomeView: View {
                             )
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.top, 4)
-                            .padding(.bottom, 6)
                         }
-
-                        if !library.continueWatching.isEmpty {
-                            Shelf("Continue Watching", subtitle: "Pick up where you left off") {
-                                ForEach(library.continueWatching) { item in
-                                    NavigationLink(value: Route.item(item.id)) {
-                                        LandscapeCard(item: item).frame(width: shelfWideCardWidth)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
-
-                        if library.acclaimedFilms.count >= 2 {
-                            filmShelf(
-                                "World & Auteur Cinema",
-                                subtitle: "Godard, Wong Kar-wai, Wenders, Song, Kaurismäki",
-                                items: library.acclaimedFilms
-                            ) { movie in
-                                Format.facts(movie.year.map(String.init), movie.rating?.label)
-                            }
-                        }
-
-                        if library.shortFeatures.count >= 2 {
-                            filmShelf(
-                                "Acclaimed & Under 100 Minutes",
-                                subtitle: "Finishes before 22:00",
-                                items: library.shortFeatures
-                            ) { movie in
-                                Format.facts(
-                                    movie.year.map(String.init),
-                                    movie.durationSec > 0 ? Format.runtime(movie.durationSec) : nil
-                                )
-                            }
-                        }
-
-                        if !library.recentMovies.isEmpty {
-                            filmShelf(
-                                "Recently Added",
-                                subtitle: "Latest additions to your archive",
-                                items: library.recentMovies
-                            ) { movie in
-                                movie.year.map(String.init)
-                            }
-                        }
-
-                        if !library.upcoming.isEmpty {
-                            Shelf("Coming Up", subtitle: "Next in series") {
-                                ForEach(library.upcoming) { item in
-                                    NavigationLink(value: Route.show(item.show)) {
-                                        UpcomingCard(upcoming: item).frame(width: shelfWideCardWidth)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
-
-                        ForEach(connection.browse.homeGenreRails) { rail in
-                            Shelf(rail.genre.name, trailing: {
-                                NavigationLink(value: Route.genre(rail.genre.id, rail.genre.name)) {
-                                    Text("All \(rail.genre.count)")
-                                        .font(.subheadline.weight(.medium))
-                                        .foregroundStyle(.secondary)
-                                }
-                            }) {
-                                ForEach(rail.titles.prefix(30)) { card in
-                                    TitlePoster(card: card, width: shelfCardWidth)
-                                }
-                            }
-                        }
+                    } shelves: {
+                        homeShelves(library)
                     }
                     .padding(.top)
                 }
@@ -442,6 +374,93 @@ struct HomeView: View {
             #endif
             .plyMainPageLogo(color: .white, hidden: isPortalOpen)
             .plyDestinations()
+        }
+    }
+
+    /// Separates the peeking deck from the first shelf using `PlyDesign.deckMetadataSpacing` so
+    /// the gap below the telemetry pills matches the gap between the deck's metadata rows.
+    @ViewBuilder
+    static func feedLayout<Deck: View, Shelves: View>(
+        @ViewBuilder deck: () -> Deck,
+        @ViewBuilder shelves: () -> Shelves
+    ) -> some View {
+        VStack(alignment: .leading, spacing: PlyDesign.deckMetadataSpacing) {
+            deck()
+            shelves()
+        }
+    }
+
+    @ViewBuilder
+    private func homeShelves(_ library: LibraryModel) -> some View {
+        VStack(alignment: .leading, spacing: 28) {
+            if !library.continueWatching.isEmpty {
+                Shelf("Continue Watching", subtitle: "Pick up where you left off") {
+                    ForEach(library.continueWatching) { item in
+                        NavigationLink(value: Route.item(item.id)) {
+                            LandscapeCard(item: item).frame(width: shelfWideCardWidth)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            if library.acclaimedFilms.count >= 2 {
+                filmShelf(
+                    "World & Auteur Cinema",
+                    subtitle: "Godard, Wong Kar-wai, Wenders, Song, Kaurismäki",
+                    items: library.acclaimedFilms
+                ) { movie in
+                    Format.facts(movie.year.map(String.init), movie.rating?.label)
+                }
+            }
+
+            if library.shortFeatures.count >= 2 {
+                filmShelf(
+                    "Acclaimed & Under 100 Minutes",
+                    subtitle: "Finishes before 22:00",
+                    items: library.shortFeatures
+                ) { movie in
+                    Format.facts(
+                        movie.year.map(String.init),
+                        movie.durationSec > 0 ? Format.runtime(movie.durationSec) : nil
+                    )
+                }
+            }
+
+            if !library.recentMovies.isEmpty {
+                filmShelf(
+                    "Recently Added",
+                    subtitle: "Latest additions to your archive",
+                    items: library.recentMovies
+                ) { movie in
+                    movie.year.map(String.init)
+                }
+            }
+
+            if !library.upcoming.isEmpty {
+                Shelf("Coming Up", subtitle: "Next in series") {
+                    ForEach(library.upcoming) { item in
+                        NavigationLink(value: Route.show(item.show)) {
+                            UpcomingCard(upcoming: item).frame(width: shelfWideCardWidth)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            ForEach(connection.browse.homeGenreRails) { rail in
+                Shelf(rail.genre.name, trailing: {
+                    NavigationLink(value: Route.genre(rail.genre.id, rail.genre.name)) {
+                        Text("All \(rail.genre.count)")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }) {
+                    ForEach(rail.titles.prefix(30)) { card in
+                        TitlePoster(card: card, width: shelfCardWidth)
+                    }
+                }
+            }
         }
     }
 
