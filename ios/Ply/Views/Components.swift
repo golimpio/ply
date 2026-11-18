@@ -1194,15 +1194,28 @@ struct HeroPlayButton: View {
     }
 }
 
-/// Standard-sized 44×44 glass circular icon label for top-right overlay controls.
-struct GlassCircleIconLabel: View {
+/// Standard-sized 44pt-tall glass overlay icon glyph shared by single circular controls and grouped pills.
+struct GlassOverlayIconGlyph: View {
     let systemImage: String
+    var color: Color = .white
+    var width: CGFloat = PlyDesign.iconButtonSize
 
     var body: some View {
         Image(systemName: systemImage)
             .font(.system(size: PlyDesign.iconButtonGlyphSize, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(width: PlyDesign.iconButtonSize, height: PlyDesign.iconButtonSize)
+            .foregroundStyle(color)
+            .frame(width: width, height: PlyDesign.iconButtonSize)
+            .contentShape(Rectangle())
+    }
+}
+
+/// Standard-sized 44×44 glass circular icon label for top-right overlay controls.
+struct GlassCircleIconLabel: View {
+    let systemImage: String
+    var color: Color = .white
+
+    var body: some View {
+        GlassOverlayIconGlyph(systemImage: systemImage, color: color)
             .plyGlassCircle(tintOpacity: 0.16)
             .contentShape(Circle())
     }
@@ -1583,7 +1596,9 @@ nonisolated enum PlyDesign {
     }()
     static let overlayTopOffset: CGFloat = 8
     static let overlayTrailingPadding: CGFloat = 16
-    static let overlayButtonSpacing: CGFloat = 10
+    static let overlayButtonSpacing: CGFloat = 12
+    /// Trailing clearance in `AVPlayerViewController` so our top-right track pill clears AVKit's 44pt Mute circle with `overlayButtonSpacing`.
+    static let playerTrackTrailingOffset: CGFloat = overlayTrailingPadding + iconButtonSize + overlayButtonSpacing
     static let capsuleHorizontalPadding: CGFloat = 12
     static let capsuleVerticalPadding: CGFloat = 6
     static let filterPillHeight: CGFloat = {

@@ -300,7 +300,7 @@ struct SubtitleOverlay: View {
 }
 
 #if os(iOS)
-private extension PlayerPresenter {
+extension PlayerPresenter {
     func installTrackBar(playback: PlaybackController, on vc: AVPlayerViewController) {
         let chrome = PlayerTrackChrome(player: playback.player)
         let container = PassThroughOverlayView {
@@ -318,11 +318,12 @@ private extension PlayerPresenter {
         let host = UIHostingController(rootView: PlayerTrackPill(playback: playback, chrome: chrome))
         host.view.backgroundColor = .clear
         host.view.translatesAutoresizingMaskIntoConstraints = false
+        host.view.accessibilityIdentifier = "ply.player.trackPill"
         vc.addChild(host)
         container.addSubview(host.view)
         NSLayoutConstraint.activate([
-            host.view.topAnchor.constraint(equalTo: vc.view.safeAreaLayoutGuide.topAnchor, constant: 8),
-            host.view.trailingAnchor.constraint(equalTo: vc.view.safeAreaLayoutGuide.trailingAnchor, constant: -66),
+            host.view.topAnchor.constraint(equalTo: vc.view.safeAreaLayoutGuide.topAnchor, constant: PlyDesign.overlayTopOffset),
+            host.view.trailingAnchor.constraint(equalTo: vc.view.safeAreaLayoutGuide.trailingAnchor, constant: -PlyDesign.playerTrackTrailingOffset),
         ])
         trackHost = host
         host.didMove(toParent: vc)
@@ -330,7 +331,7 @@ private extension PlayerPresenter {
 }
 
 @Observable @MainActor
-private final class PlayerTrackChrome {
+final class PlayerTrackChrome {
     var visible = true
     private var hideTask: Task<Void, Never>?
     private var statusObservation: NSKeyValueObservation?
@@ -400,8 +401,9 @@ private final class PassThroughOverlayView: UIView {
     }
 }
 
-/// Compact frosted glass pill in AVPlayerViewController's top bar for Audio Channels and Subtitles (CC).
-private struct PlayerTrackPill: View {
+/// Compact frosted glass pill in AVPlayerViewController's top bar for Audio and Subtitles,
+/// sharing the same 44pt height, glyph scale, and glass capsule tokens as all overlay controls.
+struct PlayerTrackPill: View {
     let playback: PlaybackController
     let chrome: PlayerTrackChrome
 
@@ -410,8 +412,12 @@ private struct PlayerTrackPill: View {
         let subtitles = playback.availableSubtitles
         let hasActiveSubtitle = playback.selectedSubtitle != nil
 
-        HStack(spacing: 0) {
-            Menu {
+        HStack(spacing: 4) {
+            trackMenu(
+                systemImage: "speaker.wave.2",
+                color: .white,
+                accessibilityLabel: "Audio"
+            ) {
                 if audio.isEmpty {
                     Text("Default Audio")
                 } else {
@@ -427,20 +433,13 @@ private struct PlayerTrackPill: View {
                         }
                     }
                 }
-            } label: {
-                Image(systemName: "speaker.wave.2")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 40, height: 38)
-                    .contentShape(Rectangle())
             }
-            .accessibilityLabel("Audio")
 
-            Divider()
-                .frame(height: 16)
-                .overlay(Color.white.opacity(0.22))
-
-            Menu {
+            trackMenu(
+                systemImage: hasActiveSubtitle ? "captions.bubble.fill" : "captions.bubble",
+                color: hasActiveSubtitle ? .plyAccent : .white,
+                accessibilityLabel: "Subtitles"
+            ) {
                 Button {
                     Task { await playback.selectSubtitle(nil) }
                 } label: {
@@ -467,19 +466,26 @@ private struct PlayerTrackPill: View {
                         }
                     }
                 }
-            } label: {
-                Image(systemName: hasActiveSubtitle ? "captions.bubble.fill" : "captions.bubble")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(hasActiveSubtitle ? Color.orange : Color.white)
-                    .frame(width: 40, height: 38)
-                    .contentShape(Rectangle())
             }
-            .accessibilityLabel("Subtitles")
         }
+        .padding(.horizontal, 4)
         .plyGlassCapsule(strokeOpacity: 0.18, interactive: true)
         .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
         .opacity(chrome.visible ? 1 : 0)
         .allowsHitTesting(chrome.visible)
+    }
+
+    @ViewBuilder
+    private func trackMenu<MenuContent: View>(
+        systemImage: String,
+        color: Color,
+        accessibilityLabel: String,
+        @ViewBuilder content: () -> MenuContent
+    ) -> some View {
+        Menu(content: content) {
+            GlassOverlayIconGlyph(systemImage: systemImage, color: color)
+        }
+        .accessibilityLabel(accessibilityLabel)
     }
 }
 #elseif os(tvOS)

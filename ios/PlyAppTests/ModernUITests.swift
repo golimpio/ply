@@ -1,3 +1,4 @@
+import AVKit
 import SwiftUI
 import UIKit
 import XCTest
@@ -487,6 +488,55 @@ nonisolated final class ModernUITests: XCTestCase {
         XCTAssertEqual(indicatorToSpecsGap, PlyDesign.deckMetadataSpacing, accuracy: 2.0)
         XCTAssertEqual(specsToTitleGap, PlyDesign.deckMetadataSpacing, accuracy: 2.0)
         XCTAssertGreaterThanOrEqual(titleToPillsGap, specsToTitleGap, "Title-to-pills gap should not be tighter than specs-to-title")
+    }
+
+    @MainActor
+    func testPlayerTrackPillMatchesGlassOverlayHeightAndClearsTrailingControls() throws {
+        let base = URL(string: "http://127.0.0.1:1")!
+        let device = DeviceContext(
+            id: "test-device-player-pill",
+            registration: DeviceRegistration(name: "Test", kind: "ios", app: "ply", version: "1"),
+            nextAttempt: { 1 }
+        )
+        let api = APIClient(base: base, token: nil, device: device)
+        let playback = PlaybackController(api: api, request: PlayRequest(itemId: 1, startSec: 0))
+        let presenter = PlayerPresenter()
+
+        let vc = AVPlayerViewController()
+        vc.loadViewIfNeeded()
+        presenter.installTrackBar(playback: playback, on: vc)
+
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        defer { window.isHidden = true }
+        window.rootViewController = vc
+        window.makeKeyAndVisible()
+        window.layoutIfNeeded()
+
+        func findTrackPill(in view: UIView) -> UIView? {
+            if view.accessibilityIdentifier == "ply.player.trackPill" { return view }
+            for sub in view.subviews {
+                if let hit = findTrackPill(in: sub) { return hit }
+            }
+            return nil
+        }
+
+        let pillView = try XCTUnwrap(findTrackPill(in: vc.view), "Expected installed track pill view")
+        let pillFrame = pillView.convert(pillView.bounds, to: vc.view)
+        let safeFrame = vc.view.safeAreaLayoutGuide.layoutFrame
+
+        // Height matches standard 44pt overlay controls (GlassCloseButton / AVKit bar buttons).
+        let closeHeight = UIHostingController(rootView: GlassCloseButton {}).sizeThatFits(in: CGSize(width: 200, height: 200)).height
+        XCTAssertEqual(pillFrame.height, closeHeight, accuracy: 0.5)
+        XCTAssertEqual(pillFrame.height, PlyDesign.iconButtonSize, accuracy: 0.5)
+
+        // Trailing clearance gives proper separation beside AVKit's 44pt top-right Mute circle.
+        let trailingInset = safeFrame.maxX - pillFrame.maxX
+        XCTAssertEqual(trailingInset, PlyDesign.playerTrackTrailingOffset, accuracy: 0.5)
+        XCTAssertGreaterThanOrEqual(
+            trailingInset - (PlyDesign.overlayTrailingPadding + PlyDesign.iconButtonSize),
+            PlyDesign.overlayButtonSpacing - 0.5
+        )
     }
     #endif
 }
