@@ -134,7 +134,7 @@ func TestMigration021Indexes(t *testing.T) {
 	for _, idx := range dropped {
 		var n int
 		if err := old.rw.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, idx).Scan(&n); err != nil || n != 1 {
-			t.Fatalf("control: index %s at version 20: %d, %v", idx, n, err)
+			t.Fatalf("control: index %s at version 19: %d, %v", idx, n, err)
 		}
 	}
 	if err := old.Close(); err != nil {
