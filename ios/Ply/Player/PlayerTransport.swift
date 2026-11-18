@@ -1,12 +1,13 @@
-#if os(iOS)
-import AVFoundation
 import Observation
-import SwiftUI
 
 /// What a remote screen reads and drives: a play on a TV. `PlayerTransport` is AirPlay's; a Chromecast
-/// session can be another, and drive the same `PlayerRemoteView` (docs/M11-CLIENTS.md, "The remote").
+/// session can be another, and drive the same `PlayerRemoteView` and mini-player (docs/M11-CLIENTS.md,
+/// "The remote").
 protocol RemoteTransport: AnyObject, Observable {
+    var playback: PlaybackController { get }
     var isPlaying: Bool { get }
+    /// Whether the play is on a TV now.
+    var isExternal: Bool { get }
     /// Where the play is, or where the person is dragging the timeline to.
     var shownPosition: Double { get }
     var duration: Double { get }
@@ -19,6 +20,10 @@ protocol RemoteTransport: AnyObject, Observable {
     func seek(to seconds: Double)
     func setSpeed(_ speed: Float)
 }
+
+#if os(iOS)
+import AVFoundation
+import SwiftUI
 
 /// The state of a play as its controls show it, and what they ask of it: position, length, playing or
 /// not, speed, mute, and whether (and where) it is on a TV.
@@ -36,6 +41,8 @@ protocol RemoteTransport: AnyObject, Observable {
     /// Where the person is dragging the timeline to, shown in place of the player's position.
     private(set) var scrubPosition: Double?
     private var loadedDuration: Double = 0
+    /// Told when the play moves onto a TV (true) or back off it (false).
+    @ObservationIgnored var onExternalChange: ((Bool) -> Void)?
 
     @ObservationIgnored private var timeObserver: Any?
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
@@ -55,10 +62,7 @@ protocol RemoteTransport: AnyObject, Observable {
             },
             player.observe(\.isExternalPlaybackActive, options: [.initial, .new]) { [weak self] p, _ in
                 let external = p.isExternalPlaybackActive
-                Task { @MainActor in
-                    self?.isExternal = external
-                    self?.readRoute()
-                }
+                Task { @MainActor in self?.externalPlaybackChanged(external) }
             },
             player.observe(\.isMuted, options: [.initial, .new]) { [weak self] p, _ in
                 let muted = p.isMuted
@@ -124,6 +128,14 @@ protocol RemoteTransport: AnyObject, Observable {
 
     func toggleMute() {
         playback.player.isMuted.toggle()
+    }
+
+    /// The play moved onto a TV or back off it (AirPlay's own word, or a test's).
+    func externalPlaybackChanged(_ external: Bool) {
+        let changed = external != isExternal
+        isExternal = external
+        readRoute()
+        if changed { onExternalChange?(external) }
     }
 
     /// "1×", "1.5×", "0.75×".

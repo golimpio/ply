@@ -1670,6 +1670,8 @@ nonisolated enum PlyDesign {
     static let playerSubtitleLiftWithControls: CGFloat = 132
     /// How far down a swipe goes before it closes the player.
     static let playerSwipeToClose: CGFloat = 120
+    /// The mini-player's poster, at the height of the tab bar's accessory.
+    static let miniPlayerPosterHeight: CGFloat = 36
     static let capsuleHorizontalPadding: CGFloat = 12
     static let capsuleVerticalPadding: CGFloat = 6
     static let filterPillHeight: CGFloat = {

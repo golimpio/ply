@@ -163,7 +163,8 @@ struct MainTabs: View {
     @State private var selectedTab: AppTab = .home
     @Environment(PlaybackScene.self) private var playbackScene: PlaybackScene?
 
-    private var playerShown: Bool { playbackScene?.presentation.shown ?? false }
+    /// The player covers the tabs (not while it is stepped aside for the mini-player).
+    private var playerShown: Bool { playbackScene?.presentation.onScreen ?? false }
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -184,6 +185,7 @@ struct MainTabs: View {
         .tabBarMinimizeBehavior(.onScrollDown)
         // Selecting Search focuses its field; dismissing search returns to the tab it was opened from.
         .tabViewSearchActivation(.searchTabSelection)
+        .modifier(MiniPlayerAccessory(scene: playbackScene))
         .allowsHitTesting(!playerShown)
         .onChange(of: playerShown) { _, shown in if shown { resignKeyboard() } }
     }
@@ -218,6 +220,28 @@ struct MainTabs: View {
 
     private func resignKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+
+/// The mini-player in the tab bar's accessory while the play goes on, on a TV, with its remote hidden
+/// (docs/M11-CLIENTS.md, "The mini-player").
+private struct MiniPlayerAccessory: ViewModifier {
+    let scene: PlaybackScene?
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26.1, *) {
+            content.tabViewBottomAccessory(isEnabled: scene?.miniPlayer != nil) { miniPlayer }
+        } else {
+            // Always attached: adding the accessory only while there is a play would rebuild the tab view, and
+            // every tab would lose its place. iOS 26.0 hides an accessory with nothing in it.
+            content.tabViewBottomAccessory { miniPlayer }
+        }
+    }
+
+    @ViewBuilder private var miniPlayer: some View {
+        if let scene, let remote = scene.miniPlayer {
+            MiniPlayer(remote: remote, onExpand: { scene.expand() })
+        }
     }
 }
 #else

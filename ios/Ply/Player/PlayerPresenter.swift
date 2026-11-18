@@ -15,6 +15,10 @@ final class PlayerPresenter: NSObject, UIAdaptivePresentationControllerDelegate 
     /// not the person closing it. A restore brings the player back; closing the PiP window ends it.
     private var pipActive = false
     private var pipRestoring = false
+    /// The player stepped aside for the mini-player while the play goes on, on a TV: like Picture in
+    /// Picture, its leaving the window is not the person closing it.
+    private var collapsed = false
+    var onCollapse: (((any RemoteTransport)?) -> Void)?
 
     /// Shows the play, in place of the one showing; onDismiss is called when the person closes it.
     func present(_ playback: PlaybackController, in windowScene: UIWindowScene?, onDismiss: @escaping () -> Void) {
@@ -23,13 +27,14 @@ final class PlayerPresenter: NSObject, UIAdaptivePresentationControllerDelegate 
         vc.modalPresentationStyle = .fullScreen
         pipActive = false
         pipRestoring = false
+        collapsed = false
         vc.loadViewIfNeeded()
         // Should the player not say it was closed, its leaving the screen says it: a play nobody can
-        // see must not be kept alive by its heartbeats. Picture in Picture is the exception: the play
-        // is meant to be off the screen. It sits on the player's own view, not on AVKit's content
-        // overlay, because tvOS does not always vend one.
+        // see must not be kept alive by its heartbeats. Picture in Picture and the mini-player are the
+        // exceptions: the play is meant to be off the screen. It sits on the player's own view, not on
+        // AVKit's content overlay, because tvOS does not always vend one.
         vc.view.addSubview(WindowWatcher { [weak self, weak vc] in
-            guard let self, let vc, !self.pipActive, !self.pipRestoring,
+            guard let self, let vc, !self.pipActive, !self.pipRestoring, !self.collapsed,
                   vc.presentingViewController == nil || vc.isBeingDismissed else { return }
             self.closed(vc)
         })
@@ -67,15 +72,10 @@ final class PlayerPresenter: NSObject, UIAdaptivePresentationControllerDelegate 
 
     /// Closes the player; completion runs once it is gone (an alert can show then).
     func dismiss(completion: @escaping () -> Void = {}) {
-        guard let vc = current else {
+        guard let vc = release() else {
             completion()
             return
         }
-        current = nil
-        onDismiss = nil
-        pipActive = false
-        pipRestoring = false
-        Self.tearDown(vc)
         // A play that fails while the player is still coming up is dismissed once it is up.
         afterTransitions {
             if vc.presentingViewController != nil {
@@ -86,14 +86,50 @@ final class PlayerPresenter: NSObject, UIAdaptivePresentationControllerDelegate 
         }
     }
 
+    /// The window went away with the play in it: let go of the player, without a dismissal (there is no
+    /// window to dismiss it from) and without `onDismiss` (`AppModel` ends the play itself).
+    func forget() {
+        release()
+    }
+
+    /// Lets go of the play's player, its close callback and every off-screen state, and returns it.
+    @discardableResult private func release() -> UIViewController? {
+        guard let vc = current else { return nil }
+        current = nil
+        onDismiss = nil
+        pipActive = false
+        pipRestoring = false
+        collapsed = false
+        Self.tearDown(vc)
+        return vc
+    }
+
     /// The person closed the player showing.
     private func closed(_ vc: UIViewController) {
         guard current === vc else { return }
         let done = onDismiss
-        current = nil
-        onDismiss = nil
-        Self.tearDown(vc)
+        release()
         done?()
+    }
+
+    /// The mini-player was tapped: the player that stepped aside comes back over the app, the play
+    /// going on as it was.
+    func expand() {
+        guard collapsed, current != nil else { return }
+        // It may still be stepping aside: wait for that, as a Picture in Picture restore does. Until it
+        // is back, it stays collapsed, so its leaving the window is not taken for a close.
+        afterTransitions { [weak self] in
+            guard let self, self.collapsed, let vc = self.current,
+                  vc.presentingViewController == nil, let top = self.top() else { return }
+            self.collapsed = false
+            self.onCollapse?(nil)
+            #if os(iOS)
+            top.view.window?.endEditing(true)
+            #endif
+            top.present(vc, animated: true) { [weak self, weak vc] in
+                vc?.presentationController?.delegate = self
+            }
+        }
     }
 
     func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
@@ -148,6 +184,14 @@ extension PlayerPresenter: AVPictureInPictureControllerDelegate {
             guard let self, let vc else { return }
             self.userClosed(vc)
         }
+        vc.onCollapse = { [weak self, weak vc] in
+            guard let self, let vc else { return }
+            self.userCollapsed(vc)
+        }
+        vc.transport.onExternalChange = { [weak self, weak vc] external in
+            guard let self, let vc, !external else { return }
+            self.tvWentAway(vc)
+        }
         return vc
     }
 
@@ -162,6 +206,25 @@ extension PlayerPresenter: AVPictureInPictureControllerDelegate {
         afterTransitions {
             if vc.presentingViewController != nil { vc.dismiss(animated: true) }
         }
+    }
+
+    /// The chevron on the remote: the player steps aside for the mini-player and the play goes on, on
+    /// the TV. Only a play on a TV collapses: one on this screen would play on unseen.
+    private func userCollapsed(_ vc: PlayerViewController) {
+        guard current === vc, !collapsed, vc.transport.isExternal else { return }
+        collapsed = true
+        onCollapse?(vc.transport)
+        afterTransitions {
+            if vc.presentingViewController != nil, !vc.isBeingDismissed { vc.dismiss(animated: true) }
+        }
+    }
+
+    /// The TV went away under the mini-player: the play would go on, on this device, unseen. It pauses
+    /// where it was and its player comes back.
+    private func tvWentAway(_ vc: PlayerViewController) {
+        guard current === vc, collapsed else { return }
+        vc.playback.pause()
+        expand()
     }
 
     private func player(for controller: AVPictureInPictureController) -> PlayerViewController? {
@@ -256,6 +319,7 @@ final class PlayerViewController: UIViewController {
     let pictureInPicture = PlayerPictureInPicture()
     let pictureView = PlayerLayerView()
     var onClose: (() -> Void)?
+    var onCollapse: (() -> Void)?
     private weak var pictureInPictureDelegate: AVPictureInPictureControllerDelegate?
 
     init(playback: PlaybackController, pictureInPictureDelegate: AVPictureInPictureControllerDelegate) {
@@ -287,6 +351,7 @@ final class PlayerViewController: UIViewController {
             chrome: chrome,
             pictureInPicture: pictureInPicture,
             onClose: { [weak self] in self?.onClose?() },
+            onCollapse: { [weak self] in self?.onCollapse?() },
             onFill: { [weak self] fill in self?.setFill(fill) }
         )
         let host = UIHostingController(rootView: controls.preferredColorScheme(.dark))

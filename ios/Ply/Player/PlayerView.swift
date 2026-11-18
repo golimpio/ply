@@ -69,12 +69,14 @@ struct PlayerControls: View {
     let chrome: PlayerChrome
     let pictureInPicture: PlayerPictureInPicture
     var onClose: () -> Void
+    /// The remote's chevron: the player steps aside for the mini-player.
+    var onCollapse: () -> Void = {}
     /// A pinch: true fills the screen, false fits the whole picture.
     var onFill: (Bool) -> Void
 
     var body: some View {
         if transport.isExternal {
-            PlayerRemoteView(transport: transport, playback: transport.playback, onStop: onClose)
+            PlayerRemoteView(transport: transport, onCollapse: onCollapse, onStop: onClose)
         } else {
             ZStack {
                 gestureSurface
@@ -369,10 +371,23 @@ struct PlayerVolumeSlider: UIViewRepresentable {
 /// speed, tracks, the TV's volume and Stop.
 struct PlayerRemoteView: View {
     let transport: any RemoteTransport
-    let playback: PlaybackController
+    /// The chevron: the remote steps aside for the mini-player while the TV plays on.
+    var onCollapse: () -> Void
     var onStop: () -> Void
     @State private var poster: UIImage?
     @State private var palette: PosterPalette = .fallback
+
+    private var playback: PlaybackController { transport.playback }
+
+    /// A film's name, or a series' name and the episode's code: the remote's title, and the mini-player's.
+    static func headline(_ item: Item) -> String {
+        item.isEpisode ? Format.facts(item.show, item.episodeCode) : item.title
+    }
+
+    /// "Playing on Living Room", or "Playing on TV" while AirPlay has not named it.
+    static func whereItPlays(_ routeName: String?) -> Text {
+        if let routeName { Text("Playing on \(routeName)") } else { Text("Playing on TV") }
+    }
 
     var body: some View {
         let item = playback.itemDetail?.item
@@ -381,8 +396,10 @@ struct PlayerRemoteView: View {
                 .ignoresSafeArea()
             VStack(spacing: PlyDesign.sectionSpacing) {
                 HStack {
+                    GlassIconButton(systemImage: "chevron.down", accessibilityLabel: "Hide remote", action: onCollapse)
+                        .playerFrame("remoteCollapse")
                     Label {
-                        if let name = transport.routeName { Text("Playing on \(name)") } else { Text("Playing on TV") }
+                        Self.whereItPlays(transport.routeName)
                     } icon: {
                         Image(systemName: "tv")
                     }
@@ -406,7 +423,7 @@ struct PlayerRemoteView: View {
                 .accessibilityHidden(true)
                 .playerFrame("remotePoster")
                 VStack(spacing: PlyDesign.resultRowSpacing) {
-                    Text(item.map { $0.isEpisode ? Format.facts($0.show, $0.episodeCode) : $0.title } ?? "")
+                    Text(item.map(Self.headline) ?? "")
                         .plyHeroTitleStyle(size: 24)
                         .multilineTextAlignment(.center)
                     if let item {
@@ -442,6 +459,58 @@ struct PlayerRemoteView: View {
             poster = loaded
             palette = extracted
         }
+    }
+}
+
+/// The play on a TV while its remote is hidden (docs/M11-CLIENTS.md, "The mini-player"), in the tab
+/// bar's accessory: the poster, the title and where it plays; a tap brings the remote back, and the
+/// button plays or pauses.
+struct MiniPlayer: View {
+    let remote: any RemoteTransport
+    var onExpand: () -> Void
+    @Environment(\.tabViewBottomAccessoryPlacement) private var placement
+
+    var body: some View {
+        let item = remote.playback.itemDetail?.item
+        let title = item.map(PlayerRemoteView.headline) ?? ""
+        HStack(spacing: PlyDesign.sectionHeaderSpacing) {
+            Button(action: onExpand) {
+                HStack(spacing: PlyDesign.sectionHeaderSpacing) {
+                    RemoteImage(path: item?.poster, placeholder: "film")
+                        .frame(width: PlyDesign.miniPlayerPosterHeight * 2 / 3, height: PlyDesign.miniPlayerPosterHeight)
+                        .clipShape(.rect(cornerRadius: BrowseRow.posterCornerRadius))
+                        .playerFrame("miniPoster")
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(title)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                        // The bar's inline accessory, minimised beside the tabs, has room for one line.
+                        if placement != .inline {
+                            PlayerRemoteView.whereItPlays(remote.routeName)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .playerFrame("miniTitle")
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .combine)
+            .accessibilityHint("Shows the remote")
+            Button { remote.togglePlay() } label: {
+                Image(systemName: remote.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: PlyDesign.iconButtonGlyphSize, weight: .semibold))
+                    .frame(width: PlyDesign.iconButtonSize, height: PlyDesign.iconButtonSize)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(remote.isPlaying ? "Pause" : "Play")
+            .playerFrame("miniPlayPause")
+        }
+        .padding(.horizontal, PlyDesign.sectionHeaderSpacing)
     }
 }
 #endif

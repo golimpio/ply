@@ -450,11 +450,22 @@ started the test host suspended and never resumed it, so a run hung until it tim
   - gestures: a pinch fills the screen or fits the picture; a swipe down closes.
   The text subtitle is drawn under the controls and moves up while they show.
 - **The remote (iOS, `PlayerRemoteView`):** while the play is on a TV (`isExternalPlaybackActive`), the player's
-  picture gives way to a remote: the poster over its own colours, "Playing on" and the TV's name, the title and
-  its facts line, the timeline, back/play/forward, then speed, audio and subtitles, the TV's volume
-  (`MPVolumeView`) and Stop. It reads a `RemoteTransport` (state, position, commands), which `PlayerTransport`
-  implements for AirPlay today, so a Chromecast session can drive the same screen later. Closing the remote while the
-  TV keeps playing needs a mini-player above the tab bar: not built yet.
+  picture gives way to a remote: a chevron that hides it, "Playing on" and the TV's name, the poster over its own
+  colours, the title and its facts line, the timeline, back/play/forward, then speed, audio and subtitles, the
+  TV's volume (`MPVolumeView`) and Stop. It reads a `RemoteTransport` (state, position, commands), which
+  `PlayerTransport` implements for AirPlay today, so a Chromecast session can drive the same screen later.
+- **The mini-player (iOS, `MiniPlayer`, 2026-11-19):** the chevron hides the remote while the TV plays on. The
+  player steps aside, as it does for Picture in Picture (its leaving the window is not a close), and the window
+  keeps the play: `PlaybackPresentation.collapsed`, with `onScreen` false so the tabs take touches again, and
+  `PlaybackScene.miniPlayer` holding the transport. The mini-player sits in the tab bar's bottom accessory
+  (`tabViewBottomAccessory(isEnabled:)` from iOS 26.1; on 26.0 it stays attached, empty without a play, since
+  adding it only with one would rebuild the tab view and lose every tab's place): the poster, the title and
+  where it plays (one line when the bar is minimised), and play/pause. A tap brings the same player back, the
+  play going on; one during the player's stepping aside waits for it. Only a
+  play on a TV hides: one on the phone would play on unseen. If the TV goes away under the mini-player, the play
+  pauses and its player comes back. Stop stays on the remote; a play that ends, is replaced, or whose window
+  goes away (`PlaybackPresenting.forget`) takes the mini-player and its player with it. A next episode that
+  plays on its own comes up full screen, as any new play does.
 - **AirPlay:** external playback switches to the `airplay` profile when the player's own AirPlay button connects,
   and back when it ends, so a text subtitle is the TV's `subtitleKey` rendition rather than a phone overlay. The
   targets of `GET /api/receivers` whose `base` is set are also offered as "Play on Apple TV", which asks for that

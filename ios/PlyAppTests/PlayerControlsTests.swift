@@ -26,6 +26,21 @@ nonisolated final class PlayerControlsTests: XCTestCase {
         try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
     }
 
+    /// A window to present a player in, with UIKit's animations off while the test runs: these tests are
+    /// about what is presented, not how fast (the simulator's Slow Animations stretches one past a wait).
+    @MainActor
+    private func presentingWindow() throws -> UIWindow {
+        let window = UIWindow(windowScene: try scene())
+        window.rootViewController = UIViewController()
+        window.makeKeyAndVisible()
+        UIView.setAnimationsEnabled(false)
+        addTeardownBlock { @MainActor in
+            UIView.setAnimationsEnabled(true)
+            window.isHidden = true
+        }
+        return window
+    }
+
     /// Hosts `view` full screen and returns the frames its `playerFrame` calls publish, with the window.
     @MainActor
     private func frames<V: View>(of view: V, needs: [String]) throws -> (frames: [String: CGRect], window: UIWindow) {
@@ -107,10 +122,16 @@ nonisolated final class PlayerControlsTests: XCTestCase {
         let transport = PlayerTransport(playback: playback)
         defer { transport.detach() }
         let (f, window) = try frames(
-            of: PlayerRemoteView(transport: transport, playback: playback, onStop: {}),
-            needs: ["remoteRoute", "remotePoster", "remoteTitle", "remoteTimeline", "playPause", "remoteStop"]
+            of: PlayerRemoteView(transport: transport, onCollapse: {}, onStop: {}),
+            needs: ["remoteCollapse", "remoteRoute", "remotePoster", "remoteTitle", "remoteTimeline", "playPause",
+                    "remoteStop"]
         )
         defer { window.isHidden = true }
+        // The chevron that hides the remote leads the top row, before where it plays.
+        let collapse = try XCTUnwrap(f["remoteCollapse"])
+        XCTAssertEqual(collapse.width, PlyDesign.iconButtonSize, accuracy: 0.5)
+        XCTAssertEqual(collapse.midY, f["remoteRoute"]!.midY, accuracy: 1)
+        XCTAssertLessThan(collapse.maxX, f["remoteRoute"]!.minX)
         let order = ["remoteRoute", "remotePoster", "remoteTitle", "remoteTimeline", "playPause", "remoteStop"]
         for (upper, lower) in zip(order, order.dropFirst()) {
             XCTAssertLessThanOrEqual(try XCTUnwrap(f[upper], upper).maxY, try XCTUnwrap(f[lower], lower).minY,
@@ -213,10 +234,7 @@ nonisolated final class PlayerControlsTests: XCTestCase {
     /// the player off the screen: there is no AVKit button left to do it.
     @MainActor
     func testCloseEndsThePlayAndTakesThePlayerDown() throws {
-        let window = UIWindow(windowScene: try scene())
-        window.rootViewController = UIViewController()
-        window.makeKeyAndVisible()
-        defer { window.isHidden = true }
+        let window = try presentingWindow()
         let presenter = PlayerPresenter()
         var ended = 0
         presenter.present(playback("test-device-player-close"), in: window.windowScene) { ended += 1 }
@@ -233,6 +251,182 @@ nonisolated final class PlayerControlsTests: XCTestCase {
         spin { window.rootViewController?.presentedViewController == nil }
         XCTAssertEqual(ended, 1)
         XCTAssertNil(window.rootViewController?.presentedViewController)
+    }
+
+    /// The mini-player: the poster, then the title and where it plays, then play/pause at the trailing end.
+    @MainActor
+    func testMiniPlayerShowsThePosterTitleAndAPlayButtonInARow() throws {
+        let playback = playback("test-device-mini-layout")
+        let transport = PlayerTransport(playback: playback)
+        defer { transport.detach() }
+        let serverInfo = try JSONDecoder().decode(
+            ServerInfo.self,
+            from: Data(#"{"id":"1","name":"Test","version":"1","authRequired":false,"api":1,"apiMin":1}"#.utf8)
+        )
+        let base = URL(string: "http://127.0.0.1:1")!
+        let device = DeviceContext(
+            id: "test-device-mini-connection",
+            registration: DeviceRegistration(name: "Test", kind: "ios", app: "ply", version: "1"),
+            nextAttempt: { 1 }
+        )
+        let connection = Connection(base: base, info: serverInfo, api: APIClient(base: base, token: nil, device: device))
+        let (f, window) = try frames(
+            of: MiniPlayer(remote: transport, onExpand: {}).frame(height: 56).environment(connection),
+            needs: ["miniPoster", "miniTitle", "miniPlayPause"]
+        )
+        defer { window.isHidden = true }
+        let poster = try XCTUnwrap(f["miniPoster"]), title = try XCTUnwrap(f["miniTitle"])
+        let button = try XCTUnwrap(f["miniPlayPause"])
+        XCTAssertEqual(poster.height, PlyDesign.miniPlayerPosterHeight, accuracy: 0.5)
+        XCTAssertEqual(button.width, PlyDesign.iconButtonSize, accuracy: 0.5)
+        XCTAssertLessThanOrEqual(poster.maxX, title.minX)
+        XCTAssertLessThanOrEqual(title.maxX, button.minX)
+        for frame in [poster, title] { XCTAssertEqual(frame.midY, button.midY, accuracy: 1) }
+    }
+
+    /// Hiding the remote steps the player aside while the TV plays on: the play is not ended, the window
+    /// keeps it and shows the mini-player, and a tap on that brings the same player back. A play on this
+    /// screen never hides (it would play unseen); and if the TV goes away under the mini-player, the play
+    /// pauses and its player comes back.
+    @MainActor
+    func testHidingTheRemoteKeepsThePlayAndTheMiniPlayerBringsItBack() throws {
+        let window = try presentingWindow()
+        let playbackScene = PlaybackScene(presenter: PlayerPresenter())
+        playbackScene.windowScene = window.windowScene
+        var ended = 0
+        let playback = playback("test-device-mini-round-trip")
+        playbackScene.present(playback) { ended += 1 }
+        defer { playbackScene.dismiss {} }
+
+        func spin(until done: () -> Bool) {
+            let deadline = Date().addingTimeInterval(3)
+            while Date() < deadline, !done() { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+        }
+        var presented: PlayerViewController? { window.rootViewController?.presentedViewController as? PlayerViewController }
+        spin { presented != nil }
+        let player = try XCTUnwrap(presented)
+
+        // On this screen: nothing to hide to.
+        player.onCollapse?()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertTrue(presented === player)
+        XCTAssertNil(playbackScene.miniPlayer)
+
+        // On a TV: the player steps aside, the play goes on.
+        player.transport.externalPlaybackChanged(true)
+        player.onCollapse?()
+        spin { presented == nil }
+        XCTAssertNil(presented)
+        XCTAssertTrue(playbackScene.miniPlayer === player.transport)
+        XCTAssertTrue(playbackScene.presentation.shown, "the window still holds the play")
+        XCTAssertFalse(playbackScene.presentation.onScreen, "the tabs take touches again")
+        XCTAssertEqual(ended, 0)
+
+        playbackScene.expand()
+        spin { presented != nil }
+        XCTAssertTrue(presented === player, "the same player, the play going on")
+        XCTAssertNil(playbackScene.miniPlayer)
+        XCTAssertTrue(playbackScene.presentation.onScreen)
+        XCTAssertEqual(ended, 0)
+
+        // A tap on the mini-player while the player is still stepping aside waits for it, and does not end
+        // the play when the player leaves the window.
+        player.onCollapse?()
+        playbackScene.expand()
+        spin { presented == nil }
+        spin { presented != nil }
+        XCTAssertTrue(presented === player)
+        XCTAssertEqual(ended, 0)
+
+        // The TV goes away under the mini-player.
+        player.onCollapse?()
+        spin { presented == nil }
+        playback.player.play()
+        XCTAssertNotEqual(playback.player.timeControlStatus, .paused)
+        player.transport.externalPlaybackChanged(false)
+        spin { presented != nil }
+        XCTAssertTrue(presented === player)
+        XCTAssertEqual(playback.player.timeControlStatus, .paused, "it does not play on, unseen, on this device")
+        XCTAssertNil(playbackScene.miniPlayer)
+        XCTAssertEqual(ended, 0)
+
+        player.onClose?()
+        spin { presented == nil }
+        XCTAssertEqual(ended, 1)
+    }
+
+    /// What ends or replaces a play under the mini-player takes the mini-player with it, and nothing of
+    /// the old play comes back when its TV drops afterwards; a TV dropping while the player is on the screen
+    /// is only the picture coming back to the phone.
+    @MainActor
+    func testAPlayEndedOrReplacedUnderTheMiniPlayerLeavesNothingBehind() throws {
+        let window = try presentingWindow()
+        let playbackScene = PlaybackScene(presenter: PlayerPresenter())
+        playbackScene.windowScene = window.windowScene
+        defer { playbackScene.dismiss {} }
+        func spin(until done: () -> Bool) {
+            let deadline = Date().addingTimeInterval(3)
+            while Date() < deadline, !done() { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+        }
+        func settle() { RunLoop.current.run(until: Date().addingTimeInterval(0.5)) }
+        var presented: PlayerViewController? { window.rootViewController?.presentedViewController as? PlayerViewController }
+        var ended = 0
+        /// Presents a play, puts it on a TV and hides its remote; returns its player.
+        func collapsedPlay(_ id: String) throws -> PlayerViewController {
+            let play = playback(id)
+            playbackScene.present(play) { ended += 1 }
+            spin { presented?.playback === play }
+            let player = try XCTUnwrap(presented)
+            settle() // its first word from AirPlay ("not on a TV") lands before the test puts it on one
+            player.transport.externalPlaybackChanged(true)
+            player.onCollapse?()
+            spin { presented == nil }
+            XCTAssertTrue(playbackScene.miniPlayer === player.transport)
+            return player
+        }
+
+        // On the screen, a TV dropping leaves the play playing where it is.
+        let first = playback("test-device-mini-onscreen")
+        playbackScene.present(first) { ended += 1 }
+        spin { presented != nil }
+        let onScreen = try XCTUnwrap(presented)
+        first.player.play()
+        onScreen.transport.externalPlaybackChanged(true)
+        onScreen.transport.externalPlaybackChanged(false)
+        settle()
+        XCTAssertTrue(presented === onScreen)
+        XCTAssertNotEqual(first.player.timeControlStatus, .paused)
+        first.player.pause()
+
+        // A new play replaces the one under the mini-player, on the screen.
+        let replaced = try collapsedPlay("test-device-mini-replaced")
+        let replacing = playback("test-device-mini-replacing")
+        playbackScene.present(replacing) { ended += 1 }
+        spin { presented?.playback === replacing }
+        XCTAssertFalse(presented === replaced)
+        XCTAssertNil(playbackScene.miniPlayer)
+        XCTAssertTrue(playbackScene.presentation.onScreen)
+        replaced.transport.externalPlaybackChanged(false)
+        settle()
+        XCTAssertFalse(presented === replaced, "the replaced play's player does not come back")
+
+        // A play that ends under the mini-player takes it away.
+        let finished = try collapsedPlay("test-device-mini-finished")
+        playbackScene.dismiss {}
+        XCTAssertNil(playbackScene.miniPlayer)
+        XCTAssertFalse(playbackScene.presentation.shown)
+        finished.transport.externalPlaybackChanged(false)
+        settle()
+        XCTAssertNil(presented, "an ended play's player does not come back when its TV drops")
+
+        // The window goes away under the mini-player (AppModel then closes the play, which drops the TV).
+        let forgotten = try collapsedPlay("test-device-mini-forgotten")
+        playbackScene.forget()
+        XCTAssertNil(playbackScene.miniPlayer)
+        forgotten.transport.externalPlaybackChanged(false)
+        settle()
+        XCTAssertNil(presented, "a forgotten play's player does not come back when its TV drops")
+        XCTAssertEqual(ended, 0, "none of these was the person closing a player")
     }
 
     /// Nothing the player sets up (its controls' closures, observers, Picture in Picture, the hide timer)
