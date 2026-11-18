@@ -538,5 +538,37 @@ nonisolated final class ModernUITests: XCTestCase {
             PlyDesign.overlayButtonSpacing - 0.5
         )
     }
+
+    @MainActor
+    func testFastScrollScrubberThumbHandleIsCompactIconOnlyWithoutText() throws {
+        let scrubber = FastScrollScrubber(
+            itemCount: 100,
+            currentIndex: 12,
+            currentLabel: "2023",
+            currentTitle: "Asteroid City",
+            onScrub: { _ in },
+            isVisible: .constant(true),
+            isDragging: .constant(false),
+            progress: .constant(0.25)
+        )
+
+        let handleHost = UIHostingController(rootView: scrubber.thumbHandle)
+        let size = handleHost.sizeThatFits(in: CGSize(width: 200, height: 200))
+        XCTAssertEqual(size.width, 34, accuracy: 0.5)
+        XCTAssertEqual(size.height, 38, accuracy: 0.5)
+
+        // Thumb handle must never contain any rendered label text ("2023") — only arrow icons.
+        let labels = handleHost.view.accessibilityElements?.compactMap { ($0 as AnyObject).accessibilityLabel ?? nil } ?? []
+        XCTAssertFalse(labels.contains { $0.contains("2023") })
+        func findAnyLabelText(in view: UIView) -> [String] {
+            var texts: [String] = []
+            if let label = view as? UILabel, let t = label.text, !t.isEmpty { texts.append(t) }
+            if let acc = view.accessibilityLabel, !acc.isEmpty { texts.append(acc) }
+            for sub in view.subviews { texts.append(contentsOf: findAnyLabelText(in: sub)) }
+            return texts
+        }
+        let found = findAnyLabelText(in: handleHost.view)
+        XCTAssertFalse(found.contains { $0.contains("2023") })
+    }
     #endif
 }

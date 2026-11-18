@@ -405,34 +405,37 @@ struct FastScrollScrubber: View {
         currentLabel.isEmpty ? "•" : currentLabel
     }
 
-    private var thumbPill: some View {
-        VStack(spacing: 3) {
-            Circle()
-                .fill(Color.plyAmberHighlight)
-                .frame(width: 5, height: 5)
-
-            Text(activeLabel)
-                .font(.system(size: activeLabel.count > 2 ? 10 : 11, weight: .bold, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-
-            Image(systemName: "chevron.up.chevron.down")
-                .font(.system(size: 8, weight: .bold))
-                .foregroundStyle(.secondary)
-        }
-        .frame(minWidth: 28)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 8)
-        .glassEffect(.regular.interactive(), in: .capsule)
-        .overlay(
-            Capsule()
-                .strokeBorder(Color.plyAmberHighlight.opacity(isDragging ? 0.9 : 0.25), lineWidth: isDragging ? 1.5 : 1)
+    nonisolated static var thumbTabShape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(
+            topLeadingRadius: 19,
+            bottomLeadingRadius: 19,
+            bottomTrailingRadius: 0,
+            topTrailingRadius: 0,
+            style: .continuous
         )
-        .shadow(color: Color.black.opacity(0.32), radius: isDragging ? 10 : 6, y: 3)
-        .scaleEffect(isDragging ? 1.10 : 1.0)
+    }
+
+    var thumbHandle: some View {
+        VStack(spacing: 3) {
+            Image(systemName: "arrowtriangle.up.fill")
+            Image(systemName: "arrowtriangle.down.fill")
+        }
+        .font(.system(size: 8, weight: .bold))
+        .foregroundStyle(isDragging ? Color.plyAccent : Color.primary)
+        .frame(width: 34, height: 38)
+        .glassEffect(.regular.interactive(), in: Self.thumbTabShape)
+        .overlay(
+            Self.thumbTabShape
+                .strokeBorder(
+                    isDragging ? Color.plyAccent.opacity(0.85) : Color.white.opacity(0.18),
+                    lineWidth: isDragging ? 1.5 : 0.75
+                )
+        )
+        .shadow(color: Color.black.opacity(0.32), radius: isDragging ? 10 : 6, x: -2, y: 2)
+        .scaleEffect(isDragging ? 1.08 : 1.0, anchor: .trailing)
         .animation(.spring(response: 0.24, dampingFraction: 0.72), value: isDragging)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Fast scroll")
     }
 
     private var loupeView: some View {
@@ -485,29 +488,28 @@ struct FastScrollScrubber: View {
                     .allowsHitTesting(false)
 
                 if isVisible {
-                    Capsule()
-                        .fill(Color.white.opacity(isDragging ? 0.22 : 0.10))
-                        .frame(width: 3, height: trackH)
-                        .padding(.top, FastScrollMetrics.defaultTopInset)
-                        .padding(.trailing, 18)
-                        .allowsHitTesting(false)
-                        .transition(.opacity)
-
                     if isDragging {
+                        Capsule()
+                            .fill(Color.white.opacity(0.22))
+                            .frame(width: 3, height: trackH)
+                            .padding(.top, FastScrollMetrics.defaultTopInset)
+                            .padding(.trailing, 14)
+                            .allowsHitTesting(false)
+                            .transition(.opacity)
+
                         loupeView
-                            .padding(.trailing, 72)
+                            .padding(.trailing, 54)
                             .offset(y: currentY - 30)
                             .allowsHitTesting(false)
                             .transition(.scale(scale: 0.9, anchor: .trailing).combined(with: .opacity))
                     }
 
-                    thumbPill
+                    thumbHandle
                         .frame(
                             width: FastScrollMetrics.thumbHitSize.width,
                             height: FastScrollMetrics.thumbHitSize.height,
                             alignment: .trailing
                         )
-                        .padding(.trailing, 4)
                         .contentShape(Rectangle())
                         .offset(y: currentY - (FastScrollMetrics.thumbHitSize.height / 2))
                         .gesture(
@@ -533,7 +535,7 @@ struct FastScrollScrubber: View {
                                     lastReportedIndex = -1
                                 }
                         )
-                        .transition(.scale(scale: 0.85, anchor: .trailing).combined(with: .opacity))
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
             .coordinateSpace(name: Self.trackCoordinateSpace)
