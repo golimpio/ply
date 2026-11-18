@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-enum CollectionKindFilter: String, CaseIterable, Identifiable {
+nonisolated enum CollectionKindFilter: String, CaseIterable, Identifiable, Hashable, Sendable {
     case films = "Films"
     case series = "Series"
 

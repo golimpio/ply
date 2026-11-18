@@ -243,7 +243,7 @@ nonisolated final class ModernUITests: XCTestCase {
                 if let found = findNavController(from: host), let item = found.topViewController?.navigationItem {
                     nav = found
                     trailingCount = (item.rightBarButtonItems?.count ?? 0) + item.trailingItemGroups.flatMap(\.barButtonItems).count
-                    if trailingCount > 0 { break }
+                    if trailingCount >= 2 { break }
                 }
                 try await Task.sleep(for: .milliseconds(20))
             }
@@ -251,7 +251,7 @@ nonisolated final class ModernUITests: XCTestCase {
             let resolvedNav = try XCTUnwrap(nav, "\(label) should host UINavigationController")
             let topItem = try XCTUnwrap(resolvedNav.topViewController?.navigationItem)
             XCTAssertNil(topItem.searchController, "\(label) must not attach a search bar when Search tab is dedicated")
-            XCTAssertGreaterThan(trailingCount, 0, "\(label) should keep Filter in topBarTrailing")
+            XCTAssertEqual(trailingCount, 2, "\(label) should host Collections (star.square.on.square) left of Filter in topBarTrailing")
         }
     }
 
@@ -356,7 +356,7 @@ nonisolated final class ModernUITests: XCTestCase {
                 window.layoutIfNeeded()
                 if let nav = findNav(host), let item = nav.topViewController?.navigationItem {
                     let count = (item.rightBarButtonItems?.count ?? 0) + item.trailingItemGroups.flatMap(\.barButtonItems).count
-                    if count > 0 {
+                    if count >= 2 {
                         resolvedNav = nav
                         break
                     }

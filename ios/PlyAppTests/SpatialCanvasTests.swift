@@ -160,13 +160,17 @@ nonisolated final class SpatialCanvasTests: XCTestCase {
             Item.self,
             from: Data(#"{"id":20,"kind":"episode","title":"The Yankee Dodge","show":"The Artful Dodger","season":1,"episode":1,"durationSec":2940,"still":"/art/hero-ep.png"}"#.utf8)
         )
+        let collection = try JSONDecoder().decode(
+            CollectionDetail.self,
+            from: Data(#"{"id":5,"name":"Alice in Wonderland Collection","overview":"Wonderland.","backdrop":"/art/hero-col.png","titles":[]}"#.utf8)
+        )
 
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 40))
         let brightArt = renderer.image { ctx in
             UIColor(red: 0.95, green: 0.45, blue: 0.15, alpha: 1.0).setFill()
             ctx.fill(CGRect(x: 0, y: 0, width: 40, height: 40))
         }
-        for path in ["/art/hero-film.png", "/art/hero-ep.png"] {
+        for path in ["/art/hero-film.png", "/art/hero-ep.png", "/art/hero-col.png"] {
             if let url = connection.api.url(path) {
                 ImagePipeline.shared.seed(brightArt, for: url)
             }
@@ -177,6 +181,7 @@ nonisolated final class SpatialCanvasTests: XCTestCase {
             ("Film", AnyView(ItemDetailView(id: movie.id, seedItem: movie))),
             ("Episode", AnyView(ItemDetailView(id: episode.id, seedItem: episode))),
             ("Series", AnyView(ShowView(name: "The Artful Dodger"))),
+            ("Collection", AnyView(CollectionView(id: collection.id, name: collection.name, seedCollection: collection))),
             ("FilmPortal", AnyView(ItemDetailView(id: movie.id, seedItem: movie, onDismissPortal: {})))
         ]
 
@@ -207,6 +212,9 @@ nonisolated final class SpatialCanvasTests: XCTestCase {
 
             // Positive control: the navigation bar really sits below the status bar (> 44pt from screen top).
             XCTAssertGreaterThan(nav.navigationBar.frame.maxY, 44, "\(entry.name): expected non-zero navigation bar height")
+            if entry.name == "Collection" {
+                XCTAssertTrue((detailVC.navigationItem.title ?? "").isEmpty, "Collection detail must not repeat its title in the navigation bar")
+            }
             let minY = try XCTUnwrap(observedMinY, "\(entry.name): HeroBackdropArtwork did not report its minY")
             XCTAssertLessThanOrEqual(minY, 1.0, "\(entry.name): HeroBackdropArtwork stopped below top edge at y=\(minY)")
 

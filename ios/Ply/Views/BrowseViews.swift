@@ -109,26 +109,6 @@ struct BrowseView: View {
                     retry: { Task { await browse.load() } }
                 )
             }
-            if !browse.collections.isEmpty {
-                Shelf("Collections") {
-                    NavigationLink(value: Route.collections) {
-                        Text("Show All")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Color.plyAccent)
-                    }
-                    .buttonStyle(.plain)
-                } content: {
-                    ForEach(browse.collections) { collection in
-                        NavigationLink(value: Route.collection(collection.id, collection.name)) {
-                            PosterCard(title: collection.name,
-                                       caption: collection.count == 1 ? "1 title" : "\(collection.count) titles",
-                                       image: collection.poster)
-                                .frame(width: shelfCardWidth)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
             EpisodesFailure()
             if !browse.genres.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
@@ -156,9 +136,9 @@ struct BrowseView: View {
                     .padding(.horizontal)
                 }
             }
-            if browse.loaded, browse.collections.isEmpty, browse.genres.isEmpty, browse.error == nil {
-                ContentUnavailableView("No genres or collections yet", systemImage: "square.grid.2x2",
-                                       description: Text("They come from the library's metadata. Search above works for everything already."))
+            if browse.loaded, browse.genres.isEmpty, browse.error == nil {
+                ContentUnavailableView("No genres yet", systemImage: "square.grid.2x2",
+                                       description: Text("Genres come from the library's metadata. Search above works for everything already."))
             } else if !browse.loaded {
                 ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
             }
@@ -870,40 +850,47 @@ struct GenreView: View {
 struct CollectionView: View {
     let id: Int64
     let name: String
+    var seedCollection: CollectionDetail? = nil
     @Environment(Connection.self) private var connection
     @State private var collection: CollectionDetail?
     @State private var error: String?
 
+    private var activeCollection: CollectionDetail? { collection ?? seedCollection }
+
     var body: some View {
-        ScrollView {
-            if let collection {
-                VStack(alignment: .leading, spacing: 16) {
-                    Backdrop(path: collection.backdrop ?? collection.titles.first?.backdrop)
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(collection.name).font(.title.bold())
-                        if let overview = collection.overview, !overview.isEmpty {
-                            Text(overview).font(.callout)
-                        }
-                        Text(collection.titles.count == 1 ? "1 title in your library" : "\(collection.titles.count) titles in your library")
-                            .font(.subheadline).foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal)
-                    titleGrid(collection.titles)
-                        .padding(.horizontal)
+        let current = activeCollection
+        let backdropPath = current?.backdrop ?? current?.titles.first?.backdrop ?? current?.poster ?? current?.titles.first?.poster
+
+        DetailBackdropScaffold(backdropPath: backdropPath) {
+            if let current {
+                DetailHeroStage(
+                    backdropPath: backdropPath,
+                    title: current.name,
+                    facts: current.titles.count == 1 ? "1 title in your library" : "\(current.titles.count) titles in your library",
+                    playAccessibilityLabel: nil
+                )
+
+                if let overview = current.overview, !overview.isEmpty {
+                    Text(overview)
+                        .font(.callout)
+                        .padding(.horizontal, PlyDesign.contentHorizontalPadding)
                 }
+
+                titleGrid(current.titles)
+                    .padding(.horizontal, PlyDesign.contentHorizontalPadding)
             }
         }
-        .plyTabBarBottomClearance()
-        .navigationTitle(name)
-        .plyInlineTitle()
         .overlay {
-            if let error, collection == nil {
+            if let error, current == nil {
                 ContentUnavailableView("Cannot load this collection", systemImage: "exclamationmark.triangle",
                                        description: Text(error))
-            } else if collection == nil {
+            } else if current == nil {
                 ProgressView()
             }
         }
+        #if os(tvOS)
+        .navigationTitle(name)
+        #endif
         .task { await load() }
     }
 
@@ -918,45 +905,35 @@ struct CollectionView: View {
     }
 }
 
-/// Full-grid browser for all collections with a top `( Films | Series )` filter.
+/// Full-grid collections browser opened from Films or Series, matching their poster grid layout.
 struct AllCollectionsView: View {
+    let kind: CollectionKindFilter
     @Environment(Connection.self) private var connection
-    @State private var kind: CollectionKindFilter = .films
 
     private var filteredCollections: [CollectionCard] {
-        connection.browse.collections(for: kind)
+        connection.browse.collections(for: kind).sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
     }
 
     var body: some View {
         let browse = connection.browse
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(spacing: 16) {
-                    Picker("Collection Type", selection: $kind) {
-                        ForEach(CollectionKindFilter.allCases) { option in
-                            Text(option.rawValue).tag(option)
+                LazyVGrid(columns: posterColumns, spacing: 16) {
+                    ForEach(filteredCollections) { collection in
+                        NavigationLink(value: Route.collection(collection.id, collection.name)) {
+                            PosterCard(
+                                title: collection.name,
+                                caption: collection.count == 1 ? "1 title" : "\(collection.count) titles",
+                                image: collection.poster
+                            )
                         }
+                        .buttonStyle(.plain)
+                        .id(collection.id)
                     }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 360)
-                    .padding(.horizontal, 24)
-                    .padding(.top, 8)
-
-                    LazyVGrid(columns: posterColumns, spacing: 16) {
-                        ForEach(filteredCollections) { collection in
-                            NavigationLink(value: Route.collection(collection.id, collection.name)) {
-                                PosterCard(
-                                    title: collection.name,
-                                    caption: collection.count == 1 ? "1 title" : "\(collection.count) titles",
-                                    image: collection.poster
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .id(collection.id)
-                        }
-                    }
-                    .padding(.horizontal)
                 }
+                .padding([.horizontal, .top])
             }
             .plyTabBarBottomClearance()
             .plyFastScrollScrubber(
@@ -970,7 +947,7 @@ struct AllCollectionsView: View {
             if browse.loaded && filteredCollections.isEmpty {
                 ContentUnavailableView(
                     "No \(kind.rawValue.lowercased()) collections",
-                    systemImage: "rectangle.stack",
+                    systemImage: "star.square.on.square",
                     description: Text("Collections with \(kind.rawValue.lowercased()) titles in your library will appear here.")
                 )
             } else if !browse.loaded || (browse.resolvingCollectionKinds && filteredCollections.isEmpty) {
@@ -983,7 +960,7 @@ struct AllCollectionsView: View {
             await browse.load()
             await browse.resolveCollectionKindsIfNeeded()
         }
-        .task(id: browse.collections.count) {
+        .task {
             if !browse.loaded { await browse.load() }
             await browse.resolveCollectionKindsIfNeeded()
         }

@@ -248,7 +248,7 @@ enum Route: Hashable {
     case people
     case genre(Int64, String)
     case collection(Int64, String)
-    case collections
+    case collections(CollectionKindFilter)
 }
 
 /// The poster grid of the library and browse pages: a phone's cards, or the TV's, watched from across
@@ -657,7 +657,7 @@ extension View {
             case .people: PeopleView()
             case let .genre(id, name): GenreView(id: id, name: name)
             case let .collection(id, name): CollectionView(id: id, name: name)
-            case .collections: AllCollectionsView()
+            case let .collections(kind): AllCollectionsView(kind: kind)
             }
         }
     }
@@ -1009,28 +1009,6 @@ struct LibraryStatus: View {
             ContentUnavailableView("Nothing here yet", systemImage: "film.stack",
                                    description: Text("Add folders to the library on ply's web page."))
         }
-    }
-}
-
-/// A wide picture at the top of a page, fading into it.
-struct Backdrop: View {
-    let path: String?
-
-    var body: some View {
-        RemoteImage(path: path, placeholder: "photo")
-            .aspectRatio(16 / 9, contentMode: .fit)
-            .overlay(alignment: .bottom) {
-                LinearGradient(colors: [.clear, Self.pageBackground], startPoint: .center, endPoint: .bottom)
-            }
-    }
-
-    /// The colour a page fades into. tvOS has no `systemBackground`; its pages are black.
-    private static var pageBackground: Color {
-        #if os(tvOS)
-        .black
-        #else
-        Color(.systemBackground)
-        #endif
     }
 }
 

@@ -646,6 +646,7 @@ struct MoviesView: View {
             }
             .plyRefreshable { await library.reload() }
             .plyLibraryFilterToolbar(
+                collectionsKind: .films,
                 sort: $sort,
                 availableGenres: availableGenres,
                 selectedGenre: selectedGenreBinding,
@@ -820,6 +821,7 @@ struct ShowsView: View {
             .task(id: sort) { if sort == .added { await library.ensureEpisodes() } }
             .task(id: library.generation) { if sort == .added { await library.ensureEpisodes() } }
             .plyLibraryFilterToolbar(
+                collectionsKind: .series,
                 sort: $sort,
                 selectedDecade: $selectedDecade,
                 attributes: [
@@ -913,6 +915,7 @@ struct LibraryFilterBar<Sort: LibrarySortOption>: View {
 }
 
 private struct LibraryFilterToolbarModifier<Sort: LibrarySortOption>: ViewModifier {
+    let collectionsKind: CollectionKindFilter
     @Binding var sort: Sort
     let availableGenres: [String]
     let selectedGenre: Binding<String?>?
@@ -924,6 +927,15 @@ private struct LibraryFilterToolbarModifier<Sort: LibrarySortOption>: ViewModifi
     func body(content: Content) -> some View {
         #if os(iOS)
         content.toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink(value: Route.collections(collectionsKind)) {
+                    Image(systemName: "star.square.on.square")
+                        .font(.system(size: PlyDesign.iconButtonGlyphSize, weight: .semibold))
+                        .foregroundStyle(.primary)
+                }
+                .accessibilityLabel("\(collectionsKind.rawValue) Collections")
+            }
+
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Section("Sort By") {
@@ -977,8 +989,9 @@ private struct LibraryFilterToolbarModifier<Sort: LibrarySortOption>: ViewModifi
 }
 
 extension View {
-    /// Attaches the shared top-right iOS Filter menu across library screens.
+    /// Attaches the shared top-right iOS Collections shortcut and Filter menu across library screens.
     func plyLibraryFilterToolbar<Sort: LibrarySortOption>(
+        collectionsKind: CollectionKindFilter,
         sort: Binding<Sort>,
         availableGenres: [String] = [],
         selectedGenre: Binding<String?>? = nil,
@@ -988,6 +1001,7 @@ extension View {
         onReset: @escaping () -> Void
     ) -> some View {
         modifier(LibraryFilterToolbarModifier(
+            collectionsKind: collectionsKind,
             sort: sort,
             availableGenres: availableGenres,
             selectedGenre: selectedGenre,
