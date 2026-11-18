@@ -446,7 +446,7 @@ struct HomeView: View {
     }
 }
 
-enum MovieSort: String, CaseIterable, Identifiable {
+nonisolated enum MovieSort: String, LibrarySortOption {
     case title = "A to Z"
     case added = "Recently Added"
     case year = "Newest"
@@ -454,6 +454,7 @@ enum MovieSort: String, CaseIterable, Identifiable {
     case rating = "Rating"
 
     var id: String { rawValue }
+    static let defaultSort: Self = .title
 }
 
 struct MoviesView: View {
@@ -461,23 +462,56 @@ struct MoviesView: View {
     #if os(tvOS)
     @State private var query = ""
     #endif
-    @State private var sort: MovieSort = .title
-    @State private var selectedGenre: String? = nil
-    @State private var selectedDecade: DecadeFilter = .all
-    @State private var only4K = false
-    @State private var onlyHDR = false
-    @State private var onlyUnwatched = false
+    @AppStorage(PlyPreferences.Movies.sortKey) private var sort: MovieSort = .title
+    @AppStorage(PlyPreferences.Movies.genreKey) private var selectedGenreRaw = ""
+    @AppStorage(PlyPreferences.Movies.decadeKey) private var selectedDecade: DecadeFilter = .all
+    @AppStorage(PlyPreferences.Movies.only4KKey) private var only4K = false
+    @AppStorage(PlyPreferences.Movies.onlyHDRKey) private var onlyHDR = false
+    @AppStorage(PlyPreferences.Movies.onlyUnwatchedKey) private var onlyUnwatched = false
+
+    private var selectedGenre: String? {
+        get { selectedGenreRaw.isEmpty ? nil : selectedGenreRaw }
+    }
+
+    private var selectedGenreBinding: Binding<String?> {
+        Binding(
+            get: { selectedGenreRaw.isEmpty ? nil : selectedGenreRaw },
+            set: { selectedGenreRaw = $0 ?? "" }
+        )
+    }
+
     private var availableGenres: [String] {
         let all = connection.library.movies.flatMap { $0.genres ?? [] }
         return Array(Set(all)).sorted()
     }
 
-    private var hasActiveFilters: Bool {
-        selectedGenre != nil || selectedDecade != .all || only4K || onlyHDR || onlyUnwatched
+    private var activeFilters: [LibraryActiveFilter] {
+        var items: [LibraryActiveFilter] = []
+        if let genre = selectedGenre {
+            items.append(LibraryActiveFilter(id: "genre-\(genre)", title: genre) { selectedGenreRaw = "" })
+        }
+        if selectedDecade != .all {
+            items.append(LibraryActiveFilter(id: "decade", title: selectedDecade.rawValue) { selectedDecade = .all })
+        }
+        if only4K {
+            items.append(LibraryActiveFilter(id: "4k", title: "4K") { only4K = false })
+        }
+        if onlyHDR {
+            items.append(LibraryActiveFilter(id: "hdr", title: "HDR") { onlyHDR = false })
+        }
+        if onlyUnwatched {
+            items.append(LibraryActiveFilter(id: "unwatched", title: "Unwatched") { onlyUnwatched = false })
+        }
+        return items
     }
 
-    private func resetFilters() {
-        selectedGenre = nil
+    private var hasActiveSelection: Bool {
+        sort.hasActiveSelection(filters: activeFilters)
+    }
+
+    private func resetControls() {
+        sort = .defaultSort
+        selectedGenreRaw = ""
         selectedDecade = .all
         only4K = false
         onlyHDR = false
@@ -545,46 +579,11 @@ struct MoviesView: View {
                         .padding(.top, 10)
                     #endif
 
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        filterChipRow {
-                            Menu {
-                                Picker("Sort", selection: $sort) {
-                                    ForEach(MovieSort.allCases) { Text($0.rawValue).tag($0) }
-                                }
-                            } label: {
-                                Label(sort.rawValue, systemImage: "arrow.up.arrow.down")
-                                    .font(.footnote)
-                            }
-                            .plyGlassButtonStyle()
-                            .buttonBorderShape(.capsule)
-
-                            if let genre = selectedGenre {
-                                ActiveFilterChip(title: genre) {
-                                    selectedGenre = nil
-                                }
-                            }
-
-                            if selectedDecade != .all {
-                                ActiveFilterChip(title: selectedDecade.rawValue) {
-                                    selectedDecade = .all
-                                }
-                            }
-
-                            FilterChip(title: "4K", isOn: $only4K)
-                            FilterChip(title: "HDR", isOn: $onlyHDR)
-                            FilterChip(title: "Unwatched", isOn: $onlyUnwatched)
-
-                            if hasActiveFilters {
-                                Button("Clear all") {
-                                    resetFilters()
-                                }
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(.horizontal)
-                        .padding(.top, 4)
-                    }
+                    LibraryFilterBar(
+                        sort: $sort,
+                        activeFilters: activeFilters,
+                        onReset: resetControls
+                    )
 
                     LazyVGrid(columns: posterColumns, spacing: 16) {
                         ForEach(filteredMovies) { movie in
@@ -608,13 +607,13 @@ struct MoviesView: View {
             }
             .overlay {
                 #if os(tvOS)
-                if (!query.isEmpty || hasActiveFilters) && filteredMovies.isEmpty {
+                if (!query.isEmpty || !activeFilters.isEmpty) && filteredMovies.isEmpty {
                     ContentUnavailableView.search(text: query.isEmpty ? "filtered films" : query)
                 } else {
                     LibraryStatus(library: library, isEmpty: library.movies.isEmpty)
                 }
                 #else
-                if hasActiveFilters && filteredMovies.isEmpty {
+                if !activeFilters.isEmpty && filteredMovies.isEmpty {
                     ContentUnavailableView.search(text: "filtered films")
                 } else {
                     LibraryStatus(library: library, isEmpty: library.movies.isEmpty)
@@ -622,55 +621,19 @@ struct MoviesView: View {
                 #endif
             }
             .plyRefreshable { await library.reload() }
-            .toolbar {
-                #if os(iOS)
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Section("Sort By") {
-                            Picker("Sort", selection: $sort) {
-                                ForEach(MovieSort.allCases) { Text($0.rawValue).tag($0) }
-                            }
-                        }
-
-                        if !availableGenres.isEmpty {
-                            Section("Genre") {
-                                Picker("Genre", selection: $selectedGenre) {
-                                    Text("All Genres").tag(String?.none)
-                                    ForEach(availableGenres, id: \.self) { genre in
-                                        Text(genre).tag(Optional(genre))
-                                    }
-                                }
-                            }
-                        }
-
-                        Section("Release Era") {
-                            Picker("Era", selection: $selectedDecade) {
-                                ForEach(DecadeFilter.allCases) { Text($0.rawValue).tag($0) }
-                            }
-                        }
-
-                        Section("Attributes") {
-                            Toggle("4K UHD", isOn: $only4K)
-                            Toggle("HDR", isOn: $onlyHDR)
-                            Toggle("Unwatched", isOn: $onlyUnwatched)
-                        }
-
-                        if hasActiveFilters {
-                            Section {
-                                Button(role: .destructive) {
-                                    resetFilters()
-                                } label: {
-                                    Label("Reset Filters", systemImage: "arrow.counterclockwise")
-                                }
-                            }
-                        }
-                    } label: {
-                        FilterButtonLabel(hasActive: hasActiveFilters)
-                    }
-                    .tint(hasActiveFilters ? Color.plyAccent : .primary)
-                }
-                #endif
-            }
+            .plyLibraryFilterToolbar(
+                sort: $sort,
+                availableGenres: availableGenres,
+                selectedGenre: selectedGenreBinding,
+                selectedDecade: $selectedDecade,
+                attributes: [
+                    LibraryFilterAttribute(id: "4k", title: "4K UHD", isOn: $only4K),
+                    LibraryFilterAttribute(id: "hdr", title: "HDR", isOn: $onlyHDR),
+                    LibraryFilterAttribute(id: "unwatched", title: "Unwatched", isOn: $onlyUnwatched)
+                ],
+                hasActiveSelection: hasActiveSelection,
+                onReset: resetControls
+            )
             #if os(iOS)
             .plyMainPageLogo()
             #else
@@ -681,13 +644,14 @@ struct MoviesView: View {
     }
 }
 
-enum ShowSort: String, CaseIterable, Identifiable {
+nonisolated enum ShowSort: String, LibrarySortOption {
     case title = "A to Z"
     case added = "Recently Updated"
     case rating = "Rating"
     case episodes = "Most Episodes"
 
     var id: String { rawValue }
+    static let defaultSort: Self = .title
 }
 
 struct ShowsView: View {
@@ -695,15 +659,27 @@ struct ShowsView: View {
     #if os(tvOS)
     @State private var query = ""
     #endif
-    @State private var sort: ShowSort = .title
-    @State private var selectedDecade: DecadeFilter = .all
-    @State private var onlyUnwatched = false
+    @AppStorage(PlyPreferences.Shows.sortKey) private var sort: ShowSort = .title
+    @AppStorage(PlyPreferences.Shows.decadeKey) private var selectedDecade: DecadeFilter = .all
+    @AppStorage(PlyPreferences.Shows.onlyUnwatchedKey) private var onlyUnwatched = false
 
-    private var hasActiveFilters: Bool {
-        selectedDecade != .all || onlyUnwatched
+    private var activeFilters: [LibraryActiveFilter] {
+        var items: [LibraryActiveFilter] = []
+        if selectedDecade != .all {
+            items.append(LibraryActiveFilter(id: "decade", title: selectedDecade.rawValue) { selectedDecade = .all })
+        }
+        if onlyUnwatched {
+            items.append(LibraryActiveFilter(id: "unwatched", title: "Unwatched") { onlyUnwatched = false })
+        }
+        return items
     }
 
-    private func resetFilters() {
+    private var hasActiveSelection: Bool {
+        sort.hasActiveSelection(filters: activeFilters)
+    }
+
+    private func resetControls() {
+        sort = .defaultSort
         selectedDecade = .all
         onlyUnwatched = false
     }
@@ -770,38 +746,11 @@ struct ShowsView: View {
                         .padding(.top, 10)
                     #endif
 
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        filterChipRow {
-                            Menu {
-                                Picker("Sort", selection: $sort) {
-                                    ForEach(ShowSort.allCases) { Text($0.rawValue).tag($0) }
-                                }
-                            } label: {
-                                Label(sort.rawValue, systemImage: "arrow.up.arrow.down")
-                                    .font(.footnote)
-                            }
-                            .plyGlassButtonStyle()
-                            .buttonBorderShape(.capsule)
-
-                            if selectedDecade != .all {
-                                ActiveFilterChip(title: selectedDecade.rawValue) {
-                                    selectedDecade = .all
-                                }
-                            }
-
-                            FilterChip(title: "Unwatched", isOn: $onlyUnwatched)
-
-                            if hasActiveFilters {
-                                Button("Clear all") {
-                                    resetFilters()
-                                }
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(.horizontal)
-                        .padding(.top, 4)
-                    }
+                    LibraryFilterBar(
+                        sort: $sort,
+                        activeFilters: activeFilters,
+                        onReset: resetControls
+                    )
 
                     if sort == .added {
                         EpisodesFailure()
@@ -828,13 +777,13 @@ struct ShowsView: View {
             }
             .overlay {
                 #if os(tvOS)
-                if (!query.isEmpty || hasActiveFilters) && filteredShows.isEmpty {
+                if (!query.isEmpty || !activeFilters.isEmpty) && filteredShows.isEmpty {
                     ContentUnavailableView.search(text: query.isEmpty ? "filtered series" : query)
                 } else {
                     LibraryStatus(library: library, isEmpty: library.shows.isEmpty)
                 }
                 #else
-                if hasActiveFilters && filteredShows.isEmpty {
+                if !activeFilters.isEmpty && filteredShows.isEmpty {
                     ContentUnavailableView.search(text: "filtered series")
                 } else {
                     LibraryStatus(library: library, isEmpty: library.shows.isEmpty)
@@ -846,42 +795,15 @@ struct ShowsView: View {
             // that sort is chosen, and again after a reload has forgotten it.
             .task(id: sort) { if sort == .added { await library.ensureEpisodes() } }
             .task(id: library.generation) { if sort == .added { await library.ensureEpisodes() } }
-            .toolbar {
-                #if os(iOS)
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Section("Sort By") {
-                            Picker("Sort", selection: $sort) {
-                                ForEach(ShowSort.allCases) { Text($0.rawValue).tag($0) }
-                            }
-                        }
-
-                        Section("Release Era") {
-                            Picker("Era", selection: $selectedDecade) {
-                                ForEach(DecadeFilter.allCases) { Text($0.rawValue).tag($0) }
-                            }
-                        }
-
-                        Section("Attributes") {
-                            Toggle("Unwatched Only", isOn: $onlyUnwatched)
-                        }
-
-                        if hasActiveFilters {
-                            Section {
-                                Button(role: .destructive) {
-                                    resetFilters()
-                                } label: {
-                                    Label("Reset Filters", systemImage: "arrow.counterclockwise")
-                                }
-                            }
-                        }
-                    } label: {
-                        FilterButtonLabel(hasActive: hasActiveFilters)
-                    }
-                    .tint(hasActiveFilters ? Color.plyAccent : .primary)
-                }
-                #endif
-            }
+            .plyLibraryFilterToolbar(
+                sort: $sort,
+                selectedDecade: $selectedDecade,
+                attributes: [
+                    LibraryFilterAttribute(id: "unwatched", title: "Unwatched Only", isOn: $onlyUnwatched)
+                ],
+                hasActiveSelection: hasActiveSelection,
+                onReset: resetControls
+            )
             #if os(iOS)
             .plyMainPageLogo()
             #else
@@ -894,6 +816,162 @@ struct ShowsView: View {
         let left = show.episodeCount - (show.watchedEpisodes ?? 0)
         if left > 0 && left < show.episodeCount { return "\(left) left" }
         return show.episodeCount == 1 ? "1 episode" : "\(show.episodeCount) episodes"
+    }
+}
+
+nonisolated protocol LibrarySortOption: Hashable, Identifiable, CaseIterable, Sendable where AllCases: RandomAccessCollection {
+    var rawValue: String { get }
+    static var defaultSort: Self { get }
+}
+
+extension LibrarySortOption {
+    func hasActiveSelection(filters: [LibraryActiveFilter]) -> Bool {
+        self != .defaultSort || !filters.isEmpty
+    }
+}
+
+struct LibraryActiveFilter: Identifiable {
+    let id: String
+    let title: String
+    let onRemove: () -> Void
+}
+
+struct LibraryFilterAttribute: Identifiable {
+    let id: String
+    let title: String
+    let isOn: Binding<Bool>
+}
+
+/// Reusable horizontal sort, active-filter, and reset pill bar shared by Films and Series.
+struct LibraryFilterBar<Sort: LibrarySortOption>: View {
+    @Binding var sort: Sort
+    let activeFilters: [LibraryActiveFilter]
+    let onReset: () -> Void
+
+    private var isSortActive: Bool { sort != Sort.defaultSort }
+    private var hasActiveSelection: Bool { isSortActive || !activeFilters.isEmpty }
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            pillsContent
+                .padding(.horizontal)
+                .padding(.top, 4)
+        }
+    }
+
+    @ViewBuilder
+    var pillsContent: some View {
+        filterChipRow {
+            Menu {
+                Picker("Sort", selection: $sort) {
+                    ForEach(Sort.allCases) { Text($0.rawValue).tag($0) }
+                }
+            } label: {
+                Label(sort.rawValue, systemImage: "arrow.up.arrow.down")
+                    .plyControlPill(highlighted: isSortActive)
+            }
+            .buttonStyle(.plain)
+
+            ForEach(activeFilters) { filter in
+                ActiveFilterChip(title: filter.title, onRemove: filter.onRemove)
+            }
+
+            if hasActiveSelection {
+                Button(action: onReset) {
+                    Image(systemName: "arrow.counterclockwise")
+                        .plyControlPill(iconOnly: true)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Reset Filters")
+            }
+        }
+    }
+}
+
+private struct LibraryFilterToolbarModifier<Sort: LibrarySortOption>: ViewModifier {
+    @Binding var sort: Sort
+    let availableGenres: [String]
+    let selectedGenre: Binding<String?>?
+    @Binding var selectedDecade: DecadeFilter
+    let attributes: [LibraryFilterAttribute]
+    let hasActiveSelection: Bool
+    let onReset: () -> Void
+
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        content.toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Section("Sort By") {
+                        Picker("Sort", selection: $sort) {
+                            ForEach(Sort.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                    }
+
+                    if !availableGenres.isEmpty, let selectedGenre {
+                        Section("Genre") {
+                            Picker("Genre", selection: selectedGenre) {
+                                Text("All Genres").tag(String?.none)
+                                ForEach(availableGenres, id: \.self) { genre in
+                                    Text(genre).tag(Optional(genre))
+                                }
+                            }
+                        }
+                    }
+
+                    Section("Release Era") {
+                        Picker("Era", selection: $selectedDecade) {
+                            ForEach(DecadeFilter.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                    }
+
+                    if !attributes.isEmpty {
+                        Section("Attributes") {
+                            ForEach(attributes) { attr in
+                                Toggle(attr.title, isOn: attr.isOn)
+                            }
+                        }
+                    }
+
+                    if hasActiveSelection {
+                        Section {
+                            Button(role: .destructive, action: onReset) {
+                                Label("Reset Filters", systemImage: "arrow.counterclockwise")
+                            }
+                        }
+                    }
+                } label: {
+                    FilterButtonLabel(hasActive: hasActiveSelection)
+                }
+                .tint(hasActiveSelection ? Color.plyAccent : .primary)
+            }
+        }
+        #else
+        content
+        #endif
+    }
+}
+
+extension View {
+    /// Attaches the shared top-right iOS Filter menu across library screens.
+    func plyLibraryFilterToolbar<Sort: LibrarySortOption>(
+        sort: Binding<Sort>,
+        availableGenres: [String] = [],
+        selectedGenre: Binding<String?>? = nil,
+        selectedDecade: Binding<DecadeFilter>,
+        attributes: [LibraryFilterAttribute],
+        hasActiveSelection: Bool,
+        onReset: @escaping () -> Void
+    ) -> some View {
+        modifier(LibraryFilterToolbarModifier(
+            sort: sort,
+            availableGenres: availableGenres,
+            selectedGenre: selectedGenre,
+            selectedDecade: selectedDecade,
+            attributes: attributes,
+            hasActiveSelection: hasActiveSelection,
+            onReset: onReset
+        ))
     }
 }
 
@@ -983,7 +1061,7 @@ struct SettingsView: View {
         }
     }
 }
-enum DecadeFilter: String, CaseIterable, Identifiable {
+nonisolated enum DecadeFilter: String, CaseIterable, Identifiable, Sendable {
     case all = "All Eras"
     case twenties = "2020s"
     case tens = "2010s"
@@ -1008,7 +1086,7 @@ enum DecadeFilter: String, CaseIterable, Identifiable {
     }
 }
 
-/// An active filter indicator chip with a quick dismissal '✕' button.
+/// An active filter indicator chip with a quick dismissal '✕' button using the shared pill style.
 struct ActiveFilterChip: View {
     let title: String
     let onRemove: () -> Void
@@ -1020,18 +1098,7 @@ struct ActiveFilterChip: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .bold))
             }
-            .font(.footnote.weight(.medium))
-            #if os(iOS)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .foregroundStyle(.white)
-            .plyInteractiveGlassCapsule(tint: .plyAccent)
-            #else
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(Color.plyAccent.opacity(0.3), in: .capsule)
-            .foregroundStyle(Color.white)
-            #endif
+            .plyControlPill(highlighted: true)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Remove \(title) filter")
@@ -1047,33 +1114,6 @@ struct FilterButtonLabel: View {
             .font(.system(size: 15, weight: .semibold))
             .foregroundStyle(hasActive ? Color.plyAccent : Color.primary)
             .accessibilityLabel("Filter")
-    }
-}
-
-struct FilterChip: View {
-    let title: String
-    @Binding var isOn: Bool
-
-    var body: some View {
-        Button {
-            isOn.toggle()
-        } label: {
-            Text(title)
-                .font(.footnote.weight(isOn ? .semibold : .regular))
-                #if os(iOS)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .foregroundStyle(isOn ? .white : .primary)
-                .plyInteractiveGlassCapsule(tint: isOn ? .plyAccent : nil)
-                #else
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(isOn ? Color.white.opacity(0.3) : Color.white.opacity(0.1), in: .capsule)
-                #endif
-        }
-        .buttonStyle(.plain)
-        // A filter is a toggle, and VoiceOver should say whether it is on.
-        .accessibilityAddTraits(isOn ? [.isSelected] : [])
     }
 }
 

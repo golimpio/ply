@@ -10,6 +10,21 @@ nonisolated extension Color {
 
 nonisolated enum PlyPreferences {
     static let showTabLabelsKey = "ply.showTabLabels"
+
+    enum Movies {
+        static let sortKey = "ply.movies.sort"
+        static let genreKey = "ply.movies.genre"
+        static let decadeKey = "ply.movies.decade"
+        static let only4KKey = "ply.movies.only4K"
+        static let onlyHDRKey = "ply.movies.onlyHDR"
+        static let onlyUnwatchedKey = "ply.movies.onlyUnwatched"
+    }
+
+    enum Shows {
+        static let sortKey = "ply.shows.sort"
+        static let decadeKey = "ply.shows.decade"
+        static let onlyUnwatchedKey = "ply.shows.onlyUnwatched"
+    }
 }
 
 nonisolated extension LinearGradient {
@@ -1571,6 +1586,13 @@ nonisolated enum PlyDesign {
     static let overlayButtonSpacing: CGFloat = 10
     static let capsuleHorizontalPadding: CGFloat = 12
     static let capsuleVerticalPadding: CGFloat = 6
+    static let filterPillHeight: CGFloat = {
+        #if os(tvOS)
+        40
+        #else
+        32
+        #endif
+    }()
     static let contentHorizontalPadding: CGFloat = 16
     static let panelCornerRadius: CGFloat = 14
     static let heroCardCornerRadius: CGFloat = 32
@@ -1633,5 +1655,24 @@ extension View {
         #else
         contentMargins(.bottom, PlyDesign.standardBottomClearance, for: .scrollContent)
         #endif
+    }
+
+    /// Unified height, typography, and Liquid Glass capsule styling shared across every sort,
+    /// active filter, and reset control in library filter bars.
+    @ViewBuilder func plyControlPill(highlighted: Bool = false, iconOnly: Bool = false) -> some View {
+        self
+            .font(.footnote.weight(.medium))
+            .foregroundStyle(highlighted ? .white : .primary)
+            .padding(.horizontal, iconOnly ? 0 : PlyDesign.capsuleHorizontalPadding)
+            .frame(minWidth: PlyDesign.filterPillHeight, minHeight: PlyDesign.filterPillHeight, maxHeight: PlyDesign.filterPillHeight)
+            #if os(iOS)
+            .plyInteractiveGlassCapsule(tint: highlighted ? .plyAccent : nil)
+            #else
+            .background(
+                highlighted ? Color.plyAccent.opacity(0.32) : Color.white.opacity(0.12),
+                in: .capsule
+            )
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 0.75))
+            #endif
     }
 }
