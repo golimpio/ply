@@ -267,7 +267,8 @@ the media (`poster.jpg`, `seasonNN-poster.jpg`, `<base>-thumb.jpg`, …) or impo
 artwork is first-wins and local beats TMDB, a migrated poster stays the picture ply shows and is never overwritten
 by a later TMDB refresh. Match Plex items to ply titles by IMDb/TMDB id (Plex agents carry them) or title+year;
 watch state/progress migrate separately. The sidecar names above are already the Kodi/Jellyfin/Plex local-asset
-conventions, so a Plex library that used Local Media Assets needs no art import at all.
+conventions, so a Plex library that used Local Media Assets needs no art import at all. The full
+implementation spec for the next agent is `docs/PLEX-MIGRATION.md`.
 
 ## HTTP API additions
 All image URLs are relative and carry `?token=` like other media URLs.
