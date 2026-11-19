@@ -132,6 +132,17 @@ nonisolated final class ModernUITests: XCTestCase {
         XCTAssertTrue(FastScrollMetrics.shouldRevealOnScroll(oldOffsetY: 0, newMetrics: scrollable, itemCount: 50, isDragging: false))
     }
 
+    /// The detail action label's one height holds the subheadline's line on both platforms: Apple TV's
+    /// subheadline is far larger than iPhone's, and a height sized for the phone would leave the text
+    /// spilling out of the button there.
+    func testDetailActionLabelHoldsTheSubheadlineLine() {
+        let large = UITraitCollection(preferredContentSizeCategory: .large)
+        let line = UIFont.preferredFont(forTextStyle: .subheadline, compatibleWith: large).lineHeight
+        XCTAssertGreaterThan(line, 0, "Precondition: the subheadline has a line")
+        XCTAssertGreaterThanOrEqual(PlyDesign.detailActionLabelHeight, line,
+                                    "The label (\(PlyDesign.detailActionLabelHeight)) holds the subheadline's line (\(line))")
+    }
+
     #if os(iOS)
     @MainActor
     func testMainTabsHostsNativeUITabBarControllerInDarkMode() async throws {
@@ -1614,10 +1625,10 @@ nonisolated final class ModernUITests: XCTestCase {
                        "A film in progress ends its facts with what is left, after the rating")
     }
 
-    /// A film in progress offers Restart beside Mark as watched, and no progress bar or "Resume from" line
-    /// under the buttons.
+    /// A film in progress offers Play from start beside Mark as watched, the two the same height and
+    /// `detailActionSpacing` apart, and no progress bar or "Resume from" line under the buttons.
     @MainActor
-    func testFilmInProgressOffersRestartAndNoProgressBar() async throws {
+    func testFilmInProgressOffersPlayFromStartAndNoProgressBar() async throws {
         let itemJSON = Data(#"""
         {
           "id": 202, "kind": "movie", "title": "You Hurt My Feelings", "year": 2023, "durationSec": 5580,
@@ -1660,13 +1671,20 @@ nonisolated final class ModernUITests: XCTestCase {
         )
         window.rootViewController = host
         window.makeKeyAndVisible()
-        let needs = ["heroFacts", "actionRow", "restartButton", "detailRow.Video"]
+        let needs = ["heroFacts", "actionRow", "watchedButton", "restartButton", "detailRow.Video"]
         for _ in 0..<100 where !needs.allSatisfy({ frames[$0] != nil }) {
             window.layoutIfNeeded()
             try await Task.sleep(for: .milliseconds(25))
         }
 
-        XCTAssertNotNil(frames["restartButton"], "A film in progress offers Restart")
+        let watched = try XCTUnwrap(frames["watchedButton"], "Expected Mark as watched")
+        let restart = try XCTUnwrap(frames["restartButton"], "A film in progress offers Play from start")
+        // Buttons of one row are one height, whatever their symbol (`arrow.counterclockwise` is taller).
+        XCTAssertEqual(restart.height, watched.height, accuracy: 0.5,
+                       "Play from start (\(restart.height)) and Mark as watched (\(watched.height)) differ")
+        XCTAssertEqual(restart.minY, watched.minY, accuracy: 0.5, "The two sit on one line")
+        XCTAssertEqual(restart.minX - watched.maxX, PlyDesign.detailActionSpacing, accuracy: 0.5,
+                       "The buttons are detailActionSpacing apart (got \(restart.minX - watched.maxX))")
         let facts = try XCTUnwrap(frames["heroFacts"])
         let actions = try XCTUnwrap(frames["actionRow"])
         let video = try XCTUnwrap(frames["detailRow.Video"])

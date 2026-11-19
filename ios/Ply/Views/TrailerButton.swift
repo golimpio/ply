@@ -24,19 +24,16 @@ struct TrailerButton: View {
                         Button(t.name) { play(t) }
                     }
                 } label: {
-                    Label("Trailer", systemImage: "film").font(.subheadline.weight(.semibold))
+                    DetailActionLabel("Trailer", systemImage: "film")
                 }
-                .plyGlassButtonStyle()
-                .buttonBorderShape(.capsule)
+                .plyDetailActionStyle()
             case .play(let list):
                 DetailActionButton(title: "Trailer", systemImage: "film") { play(list[0]) }
             case .downloading:
                 Button {} label: {
-                    Label { Text("Trailer") } icon: { ProgressView() }
-                        .font(.subheadline.weight(.semibold))
+                    DetailActionLabel(title: "Trailer") { ProgressView() }
                 }
-                .plyGlassButtonStyle()
-                .buttonBorderShape(.capsule)
+                .plyDetailActionStyle()
                 .disabled(true)
                 .accessibilityLabel("Downloading trailer")
             case .none:

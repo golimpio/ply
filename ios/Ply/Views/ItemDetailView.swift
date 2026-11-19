@@ -169,11 +169,12 @@ struct ItemDetailView: View {
             ) {
                 setWatched(!item.isWatched)
             }
+            .detailFrameReporter("watchedButton")
 
             // A play in progress can start over; carrying on is the hero's play button, and what is left is in
             // the facts line.
             if item.resumeSec > 0 {
-                DetailActionButton(title: "Restart", systemImage: "arrow.counterclockwise") {
+                DetailActionButton(title: "Play from start", systemImage: "arrow.counterclockwise") {
                     play(from: 0)
                 }
                 .detailFrameReporter("restartButton")

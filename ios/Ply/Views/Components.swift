@@ -1360,7 +1360,7 @@ struct PlyGlassPillBadge: View {
     }
 }
 
-/// Reusable Liquid Glass detail action button (`Trailer`, `Mark as watched`, `Restart`, etc.).
+/// Reusable Liquid Glass detail action button (`Trailer`, `Mark as watched`, `Play from start`, etc.).
 struct DetailActionButton: View {
     let title: String
     let systemImage: String
@@ -1370,12 +1370,38 @@ struct DetailActionButton: View {
 
     var body: some View {
         Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .font(.subheadline.weight(.semibold))
+            DetailActionLabel(title, systemImage: systemImage)
         }
-        .plyGlassButtonStyle(prominent: prominent)
-        .buttonBorderShape(.capsule)
+        .plyDetailActionStyle(prominent: prominent)
         .tint(tint)
+    }
+}
+
+/// The label of every detail action: one font and one height, so buttons side by side match whatever their
+/// symbol's own height (`arrow.counterclockwise` stands taller than `checkmark.circle`).
+struct DetailActionLabel<Icon: View>: View {
+    let title: String
+    @ViewBuilder let icon: () -> Icon
+    @ScaledMetric(relativeTo: .subheadline) private var height = PlyDesign.detailActionLabelHeight
+
+    var body: some View {
+        Label { Text(title) } icon: { icon() }
+            .font(.subheadline.weight(.semibold))
+            .frame(height: height)
+    }
+}
+
+extension DetailActionLabel where Icon == Image {
+    init(_ title: String, systemImage: String) {
+        self.init(title: title) { Image(systemName: systemImage) }
+    }
+}
+
+extension View {
+    /// The glass capsule every detail action button wears, around a `DetailActionLabel`.
+    func plyDetailActionStyle(prominent: Bool = false) -> some View {
+        plyGlassButtonStyle(prominent: prominent)
+            .buttonBorderShape(.capsule)
     }
 }
 
@@ -1405,7 +1431,7 @@ struct DetailActionRow<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        let spacing: CGFloat = 12
+        let spacing = PlyDesign.detailActionSpacing
         let row = WrappingFlowLayout(spacing: spacing, lineSpacing: spacing) {
             content()
         }
@@ -1692,6 +1718,24 @@ nonisolated enum PlyDesign {
     static let detailSectionSpacing: CGFloat = 18
     static let detailRowVerticalPadding: CGFloat = 10
     static let detailHeroBottomPadding: CGFloat = 10
+    /// Height of a detail action button's label (`DetailActionLabel`), scaled with Dynamic Type, so every
+    /// button in the row comes out the same height whatever its symbol: the box an SF Symbol fills at the
+    /// subheadline's size (4/3 of its point size), 20 pt on iPhone and taller on Apple TV, whose
+    /// subheadline is larger.
+    static let detailActionLabelHeight: CGFloat = {
+        let large = UITraitCollection(preferredContentSizeCategory: .large)
+        let subheadline = UIFont.preferredFont(forTextStyle: .subheadline, compatibleWith: large)
+        return (subheadline.pointSize * 4 / 3).rounded(.up)
+    }()
+    /// Gap between the detail action buttons, across and between wrapped lines. Apple TV keeps the
+    /// wider gap its focus growth needs.
+    static let detailActionSpacing: CGFloat = {
+        #if os(tvOS)
+        12
+        #else
+        6
+        #endif
+    }()
     static let deckMetadataSpacing: CGFloat = 12
     /// Larger breathing gap shared between page dots -> specs and deck telemetry pills -> Continue Watching.
     static let deckSectionGap: CGFloat = 34
