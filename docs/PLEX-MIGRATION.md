@@ -1,7 +1,8 @@
 # Plex → ply migration — implementation spec
 
-**Audience:** the agent that implements this. It is a design, not yet code. Read it fully before
-writing anything; it assumes the pinned-artwork contract landed in commit `0d9a8dc`
+**Audience:** the agent working on this. It is implemented as the standalone tool
+`tools/plex-migrate/` (see its README); this doc remains the design and mapping reference. Read it
+fully before changing anything; it assumes the pinned-artwork contract landed in commit `0d9a8dc`
 (`docs/M6-METADATA.md`, "## Images"). Where a Plex detail is version-dependent, this doc says
 *verify* — introspect the live server/DB rather than hardcoding an assumption.
 
@@ -267,10 +268,10 @@ or a historical `watched_at`. To import Plex `view_count` (>1) and `last_viewed_
 
 ## 7. Procedure (phased)
 
-Implement as a `ply migrate-plex` subcommand (or `internal/migrate` + a thin cmd), with flags:
-`-plex-url`/`-plex-token` (API mode) **or** `-plex-db`/`-plex-data` (DB mode), `-data` (ply),
-`-dry-run`, `-force` (overwrite existing sidecars), `-account` (Plex account id), `-kinds movie,show`.
-Log a plan; never touch Plex data read-write.
+Implemented as the standalone `tools/plex-migrate` command (`make build-migrate`). Flags:
+`-plex-url`/`-plex-token` (API mode) **or** `-plex-data` (DB mode), `-ply-data` (the path join),
+`-ply-url`/`-ply-token` (matching/watch writes), `-path-map old=new`, `-account`, `-force`.
+**Dry-run by default**; `-apply` writes. It logs a plan and never touches Plex data read-write.
 
 **Phase 0 — prepare.** Verify ply scanned the roots (join coverage report: how many Plex files found a
 ply item). Ensure TMDB key. Copy the Plex DB if DB mode. Build a path→ply-item index from `GET /api/items`
@@ -389,17 +390,23 @@ unmatched/missing-art items. `GET /api/metadata/review` for the unmatched.
 
 ---
 
-## 12. Suggested implementation shape
+## 12. Implementation (as built)
 
-- `internal/migrate/plex/` — pure logic: guid parsing, type/field mapping, sidecar naming, watch-state
-  conversion, the path join. Table-driven tests, no I/O.
-- `internal/migrate/plex/source.go` — two readers behind one interface: `APISource` (HTTP+token) and
-  `DBSource` (read-only SQLite copy + bundle art). Both yield a normalised `[]PlexItem` (ids, paths,
-  selected art URLs/bytes, watch state).
-- `internal/migrate/plex/apply.go` — writes sidecars + calls ply store/API; idempotent; dry-run.
-- `cmd/ply/migrate.go` — the `migrate-plex` subcommand and flags; wires source→apply; prints the report.
-- Keep it stdlib-first (`net/http`, `database/sql` with the existing `modernc.org/sqlite` driver,
-  `encoding/xml`+`encoding/json`); reuse `internal/metadata` sidecar helpers and `internal/store`.
+The tool lives in `tools/plex-migrate/` (a standalone command, `make build-migrate`), cross-platform
+(`CGO_ENABLED=0`, pure-Go `modernc.org/sqlite`):
+
+- `plex/` — read Plex behind one `Source` interface: `APISource` (HTTP + token, exact selected art) and
+  `DBSource` (a read-only copy of the SQLite DB + `Metadata` bundles). Models, guid parsing (legacy +
+  new agents), normalised `[]Item`. Table-tested with a fixture DB and a fake API server.
+- `migrate/` — `ReadPlyItems` (reads `ply.db` read-only for the path join), `PathMap` (mount-prefix
+  rewriting + NFC normalisation), `BuildPlan`/`Render` (the dry-run plan), sidecar naming that reuses
+  `internal/metadata/localart.go`, and `Apply` (atomic sidecar writes + ply API match/progress/watched;
+  idempotent). Tested against a fake Plex source and a fake ply API.
+- `main.go` — flags, wiring, the report; dry-run by default, `-apply` to write.
+
+Stdlib-first; the only ply import is `internal/metadata` (sidecar conventions). Watch state currently
+goes through the ply API (position + watched flag); full `play_count`/`last_viewed_at` fidelity would
+need a direct-store write mode (future).
 
 ---
 
