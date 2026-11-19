@@ -57,17 +57,12 @@ func TestReachableURLs(t *testing.T) {
 	}
 }
 
-// The banner is a blank line (it stands apart from the command typed), the logo,
-// the name and version, the server's name and every URL, one per line, then the
-// log file and the hint, with no box and no indent.
+// The banner stands below the logo: the program and version, the server's name and
+// every URL, one per line, then the log file and the hint, with no box and no indent.
 func TestFormatBannerLayout(t *testing.T) {
 	urls := []string{"http://192.168.1.10:8420", "http://127.0.0.1:8420"}
 	got := formatBanner("TestServer", "0.1.0", "/path/to/ply.log", urls, false)
-	want := `
-█▀█ █   █ █
-█▀▀ █▄▄ ▀█▀
-
-Local Media Server (v0.1.0)
+	want := `Local Media Server (v0.1.0)
 
 TestServer
 http://192.168.1.10:8420
@@ -79,6 +74,44 @@ Press Ctrl-C to stop (twice to quit at once)
 `
 	if got != want {
 		t.Fatalf("banner:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// The logo opens every command-line run: a blank line (it stands apart from the
+// command typed), the two lines of the mark, and a blank line before whatever follows.
+func TestLogo(t *testing.T) {
+	want := "\n█▀█ █   █ █\n█▀▀ █▄▄ ▀█▀\n\n"
+	got := logo(false)
+	if got != want {
+		t.Fatalf("logo = %q, want %q", got, want)
+	}
+	if strings.Contains(got, "\033[") {
+		t.Errorf("uncolored logo has ANSI codes: %q", got)
+	}
+
+	colored := logo(true)
+	if !strings.Contains(colored, ansiBoldCyan) || !strings.Contains(colored, ansiReset) {
+		t.Errorf("colored logo lacks its styles: %q", colored)
+	}
+	if stripANSI(colored) != want {
+		t.Errorf("stripped colored logo = %q, want %q", stripANSI(colored), want)
+	}
+}
+
+// The logo and the banner compose with no gap: a blank line, the mark, a blank line,
+// then the server's details.
+func TestLogoOpensTheBanner(t *testing.T) {
+	got := logo(false) + formatBanner("S", "0.1.0", "/l", []string{"http://127.0.0.1:8420"}, false)
+	if !strings.HasPrefix(got, "\n█▀█ █   █ █\n█▀▀ █▄▄ ▀█▀\n\nLocal Media Server (v0.1.0)\n") {
+		t.Errorf("the logo must open the output, then the banner:\n%s", got)
+	}
+}
+
+// -version prints the version alone: a script that reads it is given no logo and no
+// colors.
+func TestVersionText(t *testing.T) {
+	if got := versionText("3637ad5-dirty"); got != "ply v3637ad5-dirty\n" {
+		t.Errorf("versionText = %q", got)
 	}
 }
 
@@ -116,7 +149,7 @@ func TestFormatBannerColor(t *testing.T) {
 		t.Fatalf("positive control: colored banner MUST contain ANSI escape codes:\n%s", colored)
 	}
 	for _, code := range []string{
-		"\033[1;36m", // bold cyan (logo, URLs)
+		"\033[1;36m", // bold cyan (URLs)
 		"\033[1m",    // bold (labels)
 		"\033[2m",    // dim (version, hint)
 		"\033[0m",    // reset

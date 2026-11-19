@@ -396,7 +396,7 @@ func TestUsageHidesTheTestFlags(t *testing.T) {
 		t.Fatalf("-h: %v", err)
 	}
 	usage := out.String()
-	for _, want := range []string{"-media", "-tmdb-key", "-metadata", "-metadata-language", "-metadata-refresh", "-hwaccel", "-token", "-log-dir"} {
+	for _, want := range []string{"-media", "-tmdb-key", "-metadata", "-metadata-language", "-metadata-refresh", "-hwaccel", "-token", "-log-dir", "-version"} {
 		if !strings.Contains(usage, want) {
 			t.Errorf("usage lacks %s:\n%s", want, usage)
 		}
@@ -409,6 +409,40 @@ func TestUsageHidesTheTestFlags(t *testing.T) {
 	// Hidden is not unknown.
 	if _, err := Parse([]string{"-data", t.TempDir(), "-tmdb-url", "http://x/3"}, &bytes.Buffer{}); err != nil {
 		t.Errorf("hidden flag rejected: %v", err)
+	}
+}
+
+// -version and --version are one flag (the flag package takes either dash), and
+// neither starts a server.
+func TestVersionFlag(t *testing.T) {
+	if c, err := Parse(nil, &bytes.Buffer{}); err != nil || c.Version {
+		t.Fatalf("no flags: Version = %v, %v", c.Version, err)
+	}
+	for _, arg := range []string{"-version", "--version", "-version=true", "-version=false"} {
+		c, err := Parse([]string{arg}, &bytes.Buffer{})
+		if err != nil {
+			t.Fatalf("%s: %v", arg, err)
+		}
+		if want := !strings.HasSuffix(arg, "=false"); c.Version != want {
+			t.Errorf("%s: Version = %v, want %v", arg, c.Version, want)
+		}
+	}
+}
+
+// A flag the package does not know is reported once, with the usage, by the flag
+// package itself: the error says so, so that main does not print it again.
+func TestBadFlagIsMarkedReported(t *testing.T) {
+	var out bytes.Buffer
+	_, err := Parse([]string{"-nope"}, &out)
+	var usage UsageError
+	if !errors.As(err, &usage) {
+		t.Fatalf("err = %v, want a UsageError", err)
+	}
+	if !strings.Contains(out.String(), "flag provided but not defined: -nope") {
+		t.Errorf("the flag package should have written the error, got:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "Usage of ply:") {
+		t.Errorf("a bad flag should come with the usage, got:\n%s", out.String())
 	}
 }
 

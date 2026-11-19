@@ -55,19 +55,37 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == watch.HelperArg {
 		os.Exit(watch.HelperMain(os.Stdin, os.Stdout))
 	}
-	if err := run(); err != nil {
+	if err := run(isTerminal(os.Stderr)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return
+		}
+		var usage config.UsageError
+		if errors.As(err, &usage) {
+			// The flag package has already written it, and the usage.
+			os.Exit(2)
 		}
 		fmt.Fprintln(os.Stderr, "ply:", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
+// run does a command line's work. terminal says whether stderr is a terminal, which
+// decides the logo; main works it out, so that a test can too. The colors are the
+// terminal's own (colorTerminal), so a dumb terminal gets the logo plain.
+func run(terminal bool) error {
+	// The logo opens every run, before the flags are read, so that even a usage error
+	// reads after it. The banner below therefore starts at the program name, and
+	// -version prints the version alone.
+	if terminal {
+		fmt.Fprint(os.Stderr, logo(colorTerminal(os.Stderr)))
+	}
 	cfg, err := config.Parse(os.Args[1:], os.Stderr)
 	if err != nil {
 		return err
+	}
+	if cfg.Version {
+		fmt.Fprint(os.Stdout, versionText(version))
+		return nil
 	}
 	if cfg.Stop {
 		return stopRunning(context.Background(), cfg, os.Stderr)

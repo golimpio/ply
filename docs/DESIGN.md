@@ -41,10 +41,15 @@ deploy/                    launchd plist + systemd unit
 CGO_ENABLED=0 must build for darwin/linux × amd64/arm64.
 
 ## Config
-Flags: `-stop` and `-force` (stop a running ply; "Stopping", below), `-media` (repeatable roots), `-addr` (default
-`:8420`, `:0` allowed), `-data`, `-token`, `-name` (default hostname), `-scan-interval` (accepted and ignored since
-M12: the full scan runs on its schedule in Settings → Schedules, and giving the flag at all logs where to set it),
-`-ffprobe`, `-ffmpeg` (default from PATH).
+Flags: `-version` (print the version and exit; `--version` too), `-stop` and `-force` (stop a running ply;
+"Stopping", below), `-media` (repeatable roots), `-addr` (default `:8420`, `:0` allowed), `-data`, `-token`,
+`-name` (default hostname), `-scan-interval` (accepted and ignored since M12: the full scan runs on its schedule
+in Settings → Schedules, and giving the flag at all logs where to set it), `-ffprobe`, `-ffmpeg` (default from PATH).
+Every run from a terminal opens with the logo, before the flags are read, so that `-h` and a usage error read after
+it; the banner that follows it when the server starts has the name, URLs and log file. The logo goes to stderr and
+only to a terminal (a pipe, launchd and the systemd unit get none), `NO_COLOR` and a dumb terminal leave it plain,
+and `-version` writes the version alone to stdout, for scripts. A flag the flag package rejects exits 2 (it has
+written the error and the usage); a value ply itself rejects exits 1 as `ply: ...`.
 M6 (metadata, live library):
 - `-watch` (default true): watch the media folders and pick up changes within seconds (`internal/watch`).
 - `-allow-host <name>` (repeatable; env `PLY_ALLOW_HOSTS`, comma-separated; `.example.org` allows every name under it):

@@ -32,6 +32,9 @@ type Config struct {
 	// its API, and waits for it to exit; Force (-force) gives that stop 5 s before the server quits
 	// at once, as a second Ctrl-C does (docs/DESIGN.md, "Stopping").
 	Stop, Force bool
+	// Version (-version) starts no server: it prints the version and exits, so that
+	// a script can ask without opening a port.
+	Version bool
 	// Roots are the folders given with -media, -movies and -shows: absolute,
 	// cleaned, de-duplicated, in the order given.
 	Roots []RootFlag
@@ -245,6 +248,14 @@ func resolveRoots(given []RootFlag) ([]RootFlag, error) {
 	return out, nil
 }
 
+// UsageError is a command-line error: the flag package has already written it, with
+// the usage, to the writer Parse was given, so the caller adds nothing more.
+type UsageError struct{ Err error }
+
+func (e UsageError) Error() string { return e.Err.Error() }
+
+func (e UsageError) Unwrap() error { return e.Err }
+
 // Parse parses args (without the program name). Usage and flag errors are
 // written to out; flag.ErrHelp is returned for -h.
 func Parse(args []string, out io.Writer) (Config, error) {
@@ -266,6 +277,7 @@ func Parse(args []string, out io.Writer) (Config, error) {
 	fs.Var(rootList{library.KindShows, &given}, "shows", "folder of TV shows (repeatable); its type cannot be changed in Settings")
 	fs.BoolVar(&c.Stop, "stop", false, "stop the ply running with this data directory (-data) nicely, and wait for it to exit")
 	fs.BoolVar(&c.Force, "force", false, "with -stop: give the nice stop 5 s, then quit at once (as a second Ctrl-C does)")
+	fs.BoolVar(&c.Version, "version", false, "print the version and exit")
 	fs.StringVar(&c.Addr, "addr", ":8420", "listen address (:0 picks a free port)")
 	fs.StringVar(&data, "data", "", "data directory (default: per-user application data dir)")
 	fs.StringVar(&logDir, "log-dir", "", "log directory (default: per-user application log dir)")
@@ -319,7 +331,10 @@ func Parse(args []string, out io.Writer) (Config, error) {
 	fs.StringVar(&c.IMDbEpisodesURL, "imdb-episodes-url", envString(IMDbEpisodesURLEnv, ""), "")
 	fs.Usage = func() { usage(fs, out) }
 	if err := fs.Parse(args); err != nil {
-		return Config{}, err
+		if errors.Is(err, flag.ErrHelp) {
+			return Config{}, err
+		}
+		return Config{}, UsageError{Err: err}
 	}
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "scan-interval" {
