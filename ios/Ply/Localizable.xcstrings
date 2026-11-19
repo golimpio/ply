@@ -4,8 +4,21 @@
     "" : {
 
     },
+    "-%@" : {
+
+    },
     "%@ Collections" : {
 
+    },
+    "%@ of %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ of %2$@"
+          }
+        }
+      }
     },
     "%@, %@" : {
       "localizations" : {
@@ -51,6 +64,9 @@
     "Address" : {
 
     },
+    "AirPlay" : {
+
+    },
     "All %lld" : {
 
     },
@@ -67,6 +83,12 @@
 
     },
     "Audio" : {
+
+    },
+    "Audio and Subtitles" : {
+
+    },
+    "Back 10 seconds" : {
 
     },
     "Cancel" : {
@@ -159,6 +181,9 @@
     "Forgetting the server removes this device's token; the owner can also revoke it in Settings › Devices." : {
 
     },
+    "Forward 10 seconds" : {
+
+    },
     "Genre" : {
 
     },
@@ -189,13 +214,13 @@
     "More details couldn’t be loaded right now." : {
 
     },
+    "Mute" : {
+
+    },
     "Name" : {
 
     },
     "No %@ collections" : {
-
-    },
-    "No Subtitles Available" : {
 
     },
     "No title in this genre is in the library." : {
@@ -237,16 +262,28 @@
     "Paired" : {
 
     },
+    "Pause" : {
+
+    },
     "People" : {
 
     },
     "People search failed: %@" : {
 
     },
+    "Picture in Picture" : {
+
+    },
     "Play" : {
 
     },
     "Play on Apple TV" : {
+
+    },
+    "Playing on %@" : {
+
+    },
+    "Playing on TV" : {
 
     },
     "ply" : {
@@ -315,6 +352,9 @@
     "Show tab labels" : {
 
     },
+    "Shows the remote" : {
+
+    },
     "Some of the browse lists could not be loaded" : {
 
     },
@@ -322,6 +362,9 @@
 
     },
     "Sort By" : {
+
+    },
+    "Speed" : {
 
     },
     "Subtitles" : {
@@ -339,6 +382,9 @@
     "This removes the pairing token stored on this device. You will need a new pairing code to reconnect if authentication is required." : {
 
     },
+    "Timeline" : {
+
+    },
     "Titles, series, episodes, people" : {
 
     },
@@ -346,6 +392,9 @@
 
     },
     "Try again" : {
+
+    },
+    "Unmute" : {
 
     },
     "Unwatched" : {
