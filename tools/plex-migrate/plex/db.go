@@ -26,6 +26,7 @@ type DBSource struct {
 	dataDir string
 	account int64
 	scratch string
+	typeCol string // metadata_items' type column: "metadata_type" (Plex DB) or "type"
 }
 
 // OpenDB copies the Plex database under dataDir to a scratch directory and opens
@@ -61,7 +62,13 @@ func OpenDB(ctx context.Context, dataDir string, account int64) (*DBSource, erro
 		os.RemoveAll(scratch)
 		return nil, fmt.Errorf("open plex database copy: %w", err)
 	}
-	return &DBSource{db: db, dataDir: dataDir, account: account, scratch: scratch}, nil
+	typeCol, err := detectTypeCol(ctx, db)
+	if err != nil {
+		db.Close()
+		os.RemoveAll(scratch)
+		return nil, err
+	}
+	return &DBSource{db: db, dataDir: dataDir, account: account, scratch: scratch, typeCol: typeCol}, nil
 }
 
 func copyFile(src, dst string) error {
@@ -131,6 +138,42 @@ func (s *DBSource) hasTable(ctx context.Context, name string) bool {
 	return err == nil
 }
 
+// detectTypeCol finds metadata_items' type column. The Plex database calls it
+// "metadata_type"; the HTTP API (and some fixtures) call it "type". Introspecting
+// it keeps the reader working across Plex versions instead of hardcoding a name.
+func detectTypeCol(ctx context.Context, db *sql.DB) (string, error) {
+	rows, err := db.QueryContext(ctx, `PRAGMA table_info(metadata_items)`)
+	if err != nil {
+		return "", fmt.Errorf("metadata_items schema: %w", err)
+	}
+	defer rows.Close()
+	var hasType, hasMetaType bool
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, typ string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			return "", err
+		}
+		switch name {
+		case "metadata_type":
+			hasMetaType = true
+		case "type":
+			hasType = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	switch {
+	case hasMetaType:
+		return "metadata_type", nil
+	case hasType:
+		return "type", nil
+	}
+	return "", fmt.Errorf("metadata_items has no type column (metadata_type or type)")
+}
+
 func atoi(s string) int {
 	n, _ := strconv.Atoi(strings.TrimSpace(s))
 	return n
@@ -159,7 +202,7 @@ func (s *DBSource) Libraries(ctx context.Context) ([]Library, error) {
 		id := sec["id"]
 		var typ string
 		_ = s.db.QueryRowContext(ctx,
-			`SELECT type FROM metadata_items WHERE library_section_id=? AND type IN (1,2) LIMIT 1`, id).Scan(&typ)
+			fmt.Sprintf(`SELECT %s FROM metadata_items WHERE library_section_id=? AND %s IN (1,2) LIMIT 1`, s.typeCol, s.typeCol), id).Scan(&typ)
 		kind, ok := KindOfType(atoi(typ))
 		if !ok {
 			continue // music, photos, …: out of scope
@@ -183,7 +226,7 @@ func (s *DBSource) Libraries(ctx context.Context) ([]Library, error) {
 // Items returns the movies, shows, seasons and episodes flattened, with their
 // files, external ids, selected artwork references and watch state.
 func (s *DBSource) Items(ctx context.Context) ([]Item, error) {
-	mi, err := s.rowsAsMaps(ctx, `SELECT * FROM metadata_items WHERE type IN (1,2,3,4)`)
+	mi, err := s.rowsAsMaps(ctx, fmt.Sprintf(`SELECT * FROM metadata_items WHERE %s IN (1,2,3,4)`, s.typeCol))
 	if err != nil {
 		return nil, fmt.Errorf("metadata_items: %w", err)
 	}
@@ -193,11 +236,11 @@ func (s *DBSource) Items(ctx context.Context) ([]Item, error) {
 	}
 
 	files := map[string][]string{}
-	fr, err := s.rowsAsMaps(ctx, `SELECT mi.id AS id, mp.file AS file
+	fr, err := s.rowsAsMaps(ctx, fmt.Sprintf(`SELECT mi.id AS id, mp.file AS file
 		FROM metadata_items mi
 		JOIN media_items m ON m.metadata_item_id = mi.id
 		JOIN media_parts mp ON mp.media_item_id = m.id
-		WHERE mi.type IN (1,4)`)
+		WHERE mi.%s IN (1,4)`, s.typeCol))
 	if err != nil {
 		return nil, fmt.Errorf("media_parts: %w", err)
 	}
@@ -234,7 +277,7 @@ func (s *DBSource) Items(ctx context.Context) ([]Item, error) {
 
 	var out []Item
 	for _, m := range mi {
-		kind, ok := KindOfType(atoi(m["type"]))
+		kind, ok := KindOfType(atoi(m[s.typeCol]))
 		if !ok {
 			continue
 		}

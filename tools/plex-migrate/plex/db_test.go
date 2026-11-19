@@ -189,3 +189,56 @@ func TestDBOpenMissing(t *testing.T) {
 		t.Error("OpenDB on a dir with no database should fail")
 	}
 }
+
+// The real Plex database names the type column "metadata_type", not the API's
+// "type". The reader must introspect it (this failed on a live server before).
+func TestDBItemsMetadataTypeColumn(t *testing.T) {
+	dir := t.TempDir()
+	dbDir := filepath.Join(dir, "Plug-in Support", "Databases")
+	if err := os.MkdirAll(dbDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", filepath.Join(dbDir, "com.plexapp.plugins.library.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, q := range []string{
+		`CREATE TABLE library_sections (id INTEGER PRIMARY KEY, name TEXT)`,
+		`CREATE TABLE metadata_items (id INTEGER PRIMARY KEY, library_section_id INTEGER, parent_id INTEGER,
+			"index" INTEGER, metadata_type INTEGER, guid TEXT, hash TEXT, title TEXT, year INTEGER, thumb_url TEXT, user_thumb_url TEXT)`,
+		`CREATE TABLE media_items (id INTEGER PRIMARY KEY, metadata_item_id INTEGER)`,
+		`CREATE TABLE media_parts (id INTEGER PRIMARY KEY, media_item_id INTEGER, file TEXT)`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, q := range []string{
+		`INSERT INTO library_sections VALUES (1,'Movies')`,
+		`INSERT INTO metadata_items (id,library_section_id,metadata_type,guid,title,year)
+			VALUES (10,1,1,'com.plexapp.agents.imdb://tt0107302?lang=en','Kalifornia',1993)`,
+		`INSERT INTO media_items VALUES (100,10)`,
+		`INSERT INTO media_parts VALUES (1000,100,'/media/Movies/Kalifornia (1993).mkv')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s, err := OpenDB(context.Background(), dir, 1)
+	if err != nil {
+		t.Fatalf("OpenDB with a metadata_type column: %v", err)
+	}
+	defer s.Close()
+	items, err := s.Items(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, ok := itemByKey(items, "10")
+	if !ok || m.Kind != Movie || m.Title != "Kalifornia" || m.IDs.IMDb != "tt0107302" {
+		t.Fatalf("movie = %+v (ok=%v)", m, ok)
+	}
+	if len(m.Files) != 1 || m.Files[0] != "/media/Movies/Kalifornia (1993).mkv" {
+		t.Errorf("files = %v", m.Files)
+	}
+}
