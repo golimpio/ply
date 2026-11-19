@@ -268,7 +268,7 @@ or a historical `watched_at`. To import Plex `view_count` (>1) and `last_viewed_
 
 ## 7. Procedure (phased)
 
-Implemented as the standalone `tools/plex-migrate` command (`make build-migrate`). Flags:
+Implemented as the standalone `tools/plex-migrate` command (`make build-tools`). Flags:
 `-plex-url`/`-plex-token` (API mode) **or** `-plex-data` (DB mode), `-ply-data` (the path join),
 `-ply-url`/`-ply-token` (matching/watch writes), `-path-map old=new`, `-account`, `-force`.
 **Dry-run by default**; `-apply` writes. It logs a plan and never touches Plex data read-write.
@@ -392,7 +392,7 @@ unmatched/missing-art items. `GET /api/metadata/review` for the unmatched.
 
 ## 12. Implementation (as built)
 
-The tool lives in `tools/plex-migrate/` (a standalone command, `make build-migrate`), cross-platform
+The tool lives in `tools/plex-migrate/` (a standalone command, `make build-tools`), cross-platform
 (`CGO_ENABLED=0`, pure-Go `modernc.org/sqlite`):
 
 - `plex/` — read Plex behind one `Source` interface: `APISource` (HTTP + token, exact selected art) and

@@ -5,7 +5,9 @@ points**, and correct **title matches** — without re-fixing anything by hand. 
 exactly as Plex organised them; only metadata/artwork/watch-state move.
 
 It is a standalone, cross-platform Go tool (darwin/linux/windows × amd64/arm64, `CGO_ENABLED=0`).
-Build it with `make build-migrate` (→ `bin/plex-migrate`) or `go build ./tools/plex-migrate`.
+Build it with `make build-tools` (→ `bin/plex-migrate`), `make build-all` (web UI + server + tools),
+or `go build ./tools/plex-migrate`. Intel Mac builds: `make build-tools-intel` / `make build-all-intel`
+(→ `bin/plex-migrate-intel`).
 
 ## How it works
 
