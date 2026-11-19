@@ -363,6 +363,39 @@ nonisolated final class SearchHeaderLayoutTests: XCTestCase {
                         "\(RecentSearchRemoveButton.systemImage) must be an available SF Symbol")
     }
 
+    /// The search field has no cancel button, the round X at the bar's trailing end: the previous tab's button
+    /// at the leading end already leaves search, so the X only repeated it.
+    @MainActor
+    func testSearchFieldHasNoCancelButton() throws {
+        let window = try window(try searchTab(recent: []))
+        defer {
+            window.isHidden = true
+            UserDefaults.standard.removeObject(forKey: SearchHistory.defaultKey)
+            URLProtocol.unregisterClass(EmptyListURLProtocol.self)
+        }
+        var search: UISearchController?
+        settle(window) {
+            search = Self.searchControllers(in: window.rootViewController).first
+            return search != nil
+        }
+        let controller = try XCTUnwrap(search, "The Search tab installs the system search controller")
+
+        // Searching is when the X would show: an inactive search bar never has one.
+        controller.searchBar.searchTextField.becomeFirstResponder()
+        settle(window) { controller.isActive }
+        XCTAssertTrue(controller.isActive, "Precondition: search is open")
+        XCTAssertFalse(controller.automaticallyShowsCancelButton, "The search field must not show its cancel X")
+        XCTAssertFalse(controller.searchBar.showsCancelButton, "The open search bar must not show its cancel X")
+    }
+
+    /// Every search controller in the navigation items under `controller`.
+    @MainActor
+    private static func searchControllers(in controller: UIViewController?) -> [UISearchController] {
+        guard let controller else { return [] }
+        return [controller.navigationItem.searchController].compactMap { $0 }
+            + controller.children.flatMap { searchControllers(in: $0) }
+    }
+
     /// The width of the screen the hosted windows fill.
     @MainActor
     private func screenWidth() throws -> CGFloat {

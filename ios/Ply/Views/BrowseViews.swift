@@ -152,6 +152,7 @@ struct SearchResultsContent: View {
 /// the field is empty and the ranked results as you type.
 struct SearchTabView: View {
     @Environment(Connection.self) private var connection
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     @State private var query: String
     @State private var scope: SearchScope = .all
@@ -190,6 +191,7 @@ struct SearchTabView: View {
                 .padding(.top, 4)
             }
             .scrollDismissesKeyboard(.interactively)
+            .background(SearchCancelButtonHider(isActive: sizeClass == .compact))
             // Not `plyTabBarBottomClearance()`: results scroll under the logo and the scope picker, so the
             // page keeps the scroll-edge blur that helper hides on the other main pages.
             .safeAreaPadding(.bottom, PlyDesign.standardBottomClearance)
@@ -217,6 +219,49 @@ struct SearchTabView: View {
         }
         .task(id: query) {
             await browse.searchPeople(trimmed)
+        }
+    }
+
+    /// While active (compact width: the iPhone's bottom bar), turns off the search field's cancel button, the
+    /// round X at the bar's trailing end: the previous tab's button at its leading end already leaves search.
+    /// On iPad the field sits in the top bar with no such button, so the X stays. SwiftUI has no modifier for
+    /// it, so this sets UIKit's own switch (`automaticallyShowsCancelButton`) on the search controller
+    /// `.searchable` installs in the navigation item of the controller hosting this page, found walking up.
+    private struct SearchCancelButtonHider: UIViewControllerRepresentable {
+        let isActive: Bool
+
+        func makeUIViewController(context: Context) -> Controller { Controller() }
+
+        func updateUIViewController(_ controller: Controller, context: Context) {
+            controller.hidesCancelButton = isActive
+            controller.apply()
+        }
+
+        final class Controller: UIViewController {
+            var hidesCancelButton = false
+
+            override func viewWillAppear(_ animated: Bool) {
+                super.viewWillAppear(animated)
+                apply()
+            }
+
+            override func viewDidLayoutSubviews() {
+                super.viewDidLayoutSubviews()
+                apply()
+            }
+
+            func apply() {
+                guard let search = Self.searchController(above: self) else { return }
+                search.automaticallyShowsCancelButton = !hidesCancelButton
+                if hidesCancelButton, search.searchBar.showsCancelButton {
+                    search.searchBar.setShowsCancelButton(false, animated: false)
+                }
+            }
+
+            /// The nearest search controller in the navigation items from `controller` up its parents.
+            static func searchController(above controller: UIViewController) -> UISearchController? {
+                sequence(first: controller, next: \.parent).lazy.compactMap(\.navigationItem.searchController).first
+            }
         }
     }
 

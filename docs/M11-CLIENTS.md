@@ -413,12 +413,15 @@ started the test host suspended and never resumed it, so a run hung until it tim
   top-right Collections shortcut; a whole season or show can be marked watched), and the iOS `Search` tab: the
   system search tab (`Tab(role: .search)` with `.tabViewSearchActivation(.searchTabSelection)`), so the running iOS
   decides how it is drawn (a detached glass circle or a tab in the bar), keeps it on screen while the bar is
-  minimized, focuses the field when the tab is selected and returns to the previous tab when search is dismissed.
-  Its page (`SearchTabView`) uses the system's own field (`.searchable`) and keeps the `PlyLogo` in the main pages'
-  `plyMainPageLogo` slot, in the bar even while searching; with a query, a row of 44pt glass circles, one per
-  `SearchScope`, sits right of the logo (All `list.dash`, Films and Series their tabs' symbols, People `person`,
-  Collections `square.grid.2x2`), the chosen one filled in the accent, Control Center style; result groups sit on
-  Home's shelf rhythm (`PlyDesign.sectionSpacing`, `sectionHeaderSpacing`), and it shows
+  minimized, focuses the field when the tab is selected and returns to the previous tab when search is dismissed
+  with the bar's leading circle (that tab's button). On iPhone the field's own cancel X at the trailing end would do
+  the same, so it is turned off there (`SearchCancelButtonHider` sets UIKit's `automaticallyShowsCancelButton`,
+  which SwiftUI has no modifier for); iPad keeps it. Its page (`SearchTabView`) uses the system's own field
+  (`.searchable`) and keeps the `PlyLogo` in the main pages' `plyMainPageLogo` slot, in the bar even while
+  searching; with a query, a row of 44pt glass circles, one per `SearchScope`, sits right of the logo (All
+  `list.dash`, Films and Series their tabs' symbols, People `person`, Collections `square.grid.2x2`), the chosen
+  one filled in the accent, Control Center style;
+  result groups sit on Home's shelf rhythm (`PlyDesign.sectionSpacing`, `sectionHeaderSpacing`), and it shows
   only recent searches while the field is empty (no Genres / People / Collections buttons); those rows keep one
   vertical rhythm — the ink under "Recent Searches" matches the ink between the results — with `Clear` and each
   row's `delete.left` ending on the trailing content edge; poster search rows top-align titles by the `6pt` poster
