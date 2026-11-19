@@ -46,6 +46,15 @@ nonisolated struct WebVTT: Sendable {
         return showing.isEmpty ? nil : showing.map(\.text).joined(separator: "\n")
     }
 
+    /// Whether a player should say the track is still downloading at t: it is still arriving, and no
+    /// cue read so far starts at or after t, so a line for t may yet come. A pause between lines the
+    /// track has already passed is only a pause.
+    func isPending(at t: Double, arriving: Bool) -> Bool {
+        guard arriving else { return false }
+        guard t.isFinite, let last = cues.last else { return true }
+        return last.start < t
+    }
+
     /// "00:01:02.500 --> 00:01:04.000 line:90%" as seconds.
     private static func timing(_ line: String) -> (Double, Double)? {
         let parts = line.components(separatedBy: "-->")

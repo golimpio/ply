@@ -1692,7 +1692,7 @@ nonisolated enum PlyDesign {
     /// Height of the player's scrim gradients, top and bottom.
     static let playerScrimHeight: CGFloat = 200
     /// How far a text subtitle sits above the picture's foot, and how far while the controls show.
-    static let playerSubtitleLift: CGFloat = 32
+    static let playerSubtitleLift: CGFloat = 16
     static let playerSubtitleLiftWithControls: CGFloat = 132
     /// How far down a swipe goes before it closes the player.
     static let playerSwipeToClose: CGFloat = 120

@@ -515,7 +515,7 @@ struct SubtitleOverlay: View {
                     .background(.black.opacity(0.45), in: .rect(cornerRadius: 6))
                     .padding(.horizontal, 24)
                     .padding(.bottom, lift)
-            } else if playback.subtitleLoading {
+            } else if playback.subtitlePending {
                 HStack(spacing: 8) {
                     ProgressView().tint(.white)
                     Text("Downloading subtitles…")

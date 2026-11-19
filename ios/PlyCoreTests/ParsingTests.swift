@@ -75,6 +75,18 @@ private func events(_ stream: String) -> [SSEEvent] {
         #expect(track.text(at: 10) == nil)
         #expect(track.text(at: 63) == "Two\nlines")
     }
+
+    /// "Downloading subtitles" is for a play ahead of the track still arriving, not for every pause
+    /// between two lines while it arrives (it flashed between lines through a whole film).
+    @Test func aTrackStillArrivingIsPendingOnlyPastItsLastLine() {
+        #expect(WebVTT().isPending(at: 0, arriving: true), "nothing read yet: a line may come")
+        #expect(track.text(at: 10) == nil)
+        #expect(track.isPending(at: 10, arriving: true) == false, "a pause the track has passed is a pause")
+        #expect(track.isPending(at: 62.25, arriving: true) == false)
+        #expect(track.isPending(at: 70, arriving: true), "past the last line read: the next may not be here yet")
+        #expect(track.isPending(at: 70, arriving: false) == false, "a whole track is never pending")
+        #expect(track.isPending(at: .nan, arriving: true), "no time yet: still waiting")
+    }
 }
 
 @Suite struct RFC3339Tests {

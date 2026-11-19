@@ -24,8 +24,13 @@ enum PlaybackEnd {
     /// The text subtitle showing now, drawn over the video.
     private(set) var subtitleText: String?
     /// Whether that text subtitle is still downloading, and why it could not be.
-    private(set) var subtitleLoading = false
+    private(set) var subtitleLoading = false {
+        didSet { if !subtitleLoading { subtitlePending = false } }
+    }
     private(set) var subtitleError: String?
+    /// Whether the play has got ahead of the subtitle still downloading: a line for now may yet come.
+    /// (Not merely no line showing: that is most of a film, between lines.)
+    private(set) var subtitlePending = false
     var onEnd: ((PlaybackEnd) -> Void)?
     /// Called once: nil when the play is ready and playing, or why it did not start. A remote
     /// `play` command is answered with this, not before it is known.
@@ -456,6 +461,7 @@ enum PlaybackEnd {
     /// them, which over a slow share takes minutes. Each cue shows as soon as its block is complete.
     private func loadSubtitles(_ url: String) async {
         subtitleLoading = true
+        subtitlePending = true
         subtitleError = nil
         do {
             try await Self.readSubtitles(try await api.stream(at: url)) { [weak self] block in
@@ -503,6 +509,8 @@ enum PlaybackEnd {
     private func showSubtitle(at t: Double) {
         let text = t.isFinite ? subtitles.text(at: t) : nil
         if text != subtitleText { subtitleText = text }
+        let pending = subtitles.isPending(at: t, arriving: subtitleLoading)
+        if pending != subtitlePending { subtitlePending = pending }
     }
 
     // MARK: ending
