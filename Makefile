@@ -6,6 +6,8 @@
 #
 # Examples:
 #   make build                         web UI + server -> bin/ply
+#   make build-intel                   the same server for an Intel Mac -> bin/ply-intel
+#   make build-all                     web UI + server + tools -> bin/
 #   make run MEDIA=~/Movies            build, then serve that folder on :8420
 #   make run ARGS="-token s3cret"      extra flags for ply
 #   make dev                           server + live-reloading web UI on :5173
@@ -15,6 +17,10 @@
 GO     ?= go
 NPM    ?= npm
 BIN    := bin/ply
+# The Intel-Mac build, kept beside the native one so neither clobbers the other.
+INTEL_BIN := bin/ply-intel
+# The standalone tools under tools/ (each a main package), built into bin/<name>.
+TOOLS  := plex-migrate
 PREFIX ?= /usr/local
 
 # The version ply reports: the nearest tag, else the commit (-dirty when the
@@ -24,6 +30,10 @@ LDFLAGS := -s -w
 ifneq ($(VERSION),)
 LDFLAGS += -X main.version=$(VERSION)
 endif
+
+# The server build `build`, `build-go` and `build-intel` share: `$(call go-build,<output>)`.
+# The cross-compiles turn CGO off, so they need no C toolchain.
+go-build = $(GO) build -ldflags '$(LDFLAGS)' -o $(1) ./cmd/ply
 
 # What `make run` and `make dev` serve: MEDIA is one folder (a leading ~ is
 # expanded), more go in ARGS as further -media flags.
@@ -72,12 +82,40 @@ $(WEB_DIST): $(WEB_DEPS) $(WEB_SRC)
 
 .PHONY: build
 build: web ## Build the web UI and the server into bin/ply
-	$(GO) build -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/ply
+	$(call go-build,$(BIN))
 	@echo "built $(BIN) $(VERSION)"
 
 .PHONY: build-go
 build-go: ## Build only the server (keeps whatever web/dist holds)
-	$(GO) build -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/ply
+	$(call go-build,$(BIN))
+
+# For an Intel Mac (or a Rosetta run on Apple Silicon). The web UI is embedded, so it
+# needs the same `web` dependency `build` has; the native bin/ply is left untouched.
+# GOOS is fixed to darwin, so this also cross-compiles from a Linux host.
+.PHONY: build-intel
+build-intel: web ## Server for Intel Macs (darwin/amd64) into bin/ply-intel
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 $(call go-build,$(INTEL_BIN))
+	@echo "built $(INTEL_BIN) darwin/amd64 $(VERSION)"
+
+.PHONY: build-tools
+build-tools: ## Build the tools (tools/*) into bin/<tool>
+	@set -e; for t in $(TOOLS); do \
+		echo "bin/$$t"; \
+		$(GO) build -ldflags '$(LDFLAGS)' -o bin/$$t ./tools/$$t; \
+	done
+
+.PHONY: build-tools-intel
+build-tools-intel: ## Tools for Intel Macs (darwin/amd64) into bin/<tool>-intel
+	@set -e; for t in $(TOOLS); do \
+		echo "bin/$$t-intel"; \
+		CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 $(GO) build -ldflags '$(LDFLAGS)' -o bin/$$t-intel ./tools/$$t; \
+	done
+
+.PHONY: build-all
+build-all: build build-tools ## Web UI + server + tools (native)
+
+.PHONY: build-all-intel
+build-all-intel: build-intel build-tools-intel ## Server + tools for Intel Macs (darwin/amd64)
 
 .PHONY: dist
 dist: web ## Cross-compile release binaries into bin/ (PLATFORMS="os/arch ...")
@@ -157,7 +195,7 @@ cross: ## Vet every package, tests included, for each of CROSS ("os/arch ...")
 
 .PHONY: fmt-check
 fmt-check:
-	@out=$$(gofmt -l cmd internal web/embed.go); \
+	@out=$$(gofmt -l cmd internal tools web/embed.go); \
 		if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
 
 .PHONY: check-web
@@ -166,7 +204,7 @@ check-web: $(WEB_DEPS)
 
 .PHONY: fmt
 fmt: ## Format the Go code
-	gofmt -w cmd internal web/embed.go
+	gofmt -w cmd internal tools web/embed.go
 
 .PHONY: lint
 lint: ## golangci-lint, when it is installed
@@ -204,4 +242,5 @@ uninstall: ## Remove the installed ply
 .PHONY: clean
 clean: ## Remove bin/ and the web build (keeps node_modules)
 	rm -f bin/ply bin/ply-*
+	@set -e; for t in $(TOOLS); do rm -f bin/$$t bin/$$t-intel; done
 	find web/dist -mindepth 1 ! -name .gitkeep -delete
